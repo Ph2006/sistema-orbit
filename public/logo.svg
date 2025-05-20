@@ -1,0 +1,8 @@
+<svg width="180" height="180" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(10,10)">
+    <circle cx="80" cy="80" r="60" fill="none" stroke="#000" stroke-width="2" />
+    <path d="M20,80 C20,80 80,20 140,80 C140,80 80,140 20,80" fill="none" stroke="#0066cc" stroke-width="4" />
+    <text x="45" y="140" font-family="Arial" font-size="24" font-weight="bold">ORBIT</text>
+    <text x="45" y="160" font-family="Arial" font-size="12">SISTEMAS</text>
+  </g>
+</svg>
