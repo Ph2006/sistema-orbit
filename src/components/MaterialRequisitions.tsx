@@ -15,9 +15,10 @@ import {
   ClipboardList, 
   Briefcase, 
   FileText, 
-  Download
+  Download,
+  X
 } from 'lucide-react';
-import { collection, getDocs, query, where, orderBy, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useOrderStore } from '../store/orderStore';
 import { useSupplierStore } from '../store/supplierStore';
@@ -93,33 +94,43 @@ const MaterialRequisitions: React.FC = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Fetch requisitions
+        // Configurar listener em tempo real para requisições
         const requisitionsQuery = query(
           collection(db, 'materialRequisitions'),
           orderBy('requestDate', 'desc')
         );
-        const requisitionSnapshot = await getDocs(requisitionsQuery);
-        const requisitionsData = requisitionSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as MaterialRequisition[];
-        setRequisitions(requisitionsData);
         
-        // Fetch quotation requests
+        const unsubscribeRequisitions = onSnapshot(requisitionsQuery, (snapshot) => {
+          const requisitionsData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as MaterialRequisition[];
+          setRequisitions(requisitionsData);
+        });
+        
+        // Configurar listener em tempo real para cotações
         const quotationsQuery = query(
           collection(db, 'quotationRequests'),
           orderBy('requestDate', 'desc')
         );
-        const quotationSnapshot = await getDocs(quotationsQuery);
-        const quotationsData = quotationSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as QuotationRequest[];
-        setQuotations(quotationsData);
+        
+        const unsubscribeQuotations = onSnapshot(quotationsQuery, (snapshot) => {
+          const quotationsData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as QuotationRequest[];
+          setQuotations(quotationsData);
+        });
         
         setLoading(false);
+        
+        // Retornar função de limpeza
+        return () => {
+          unsubscribeRequisitions();
+          unsubscribeQuotations();
+        };
       } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error('Error setting up listeners:', error);
         setLoading(false);
       }
     };
@@ -148,11 +159,31 @@ const MaterialRequisitions: React.FC = () => {
 
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
     try {
+      // Verificar se é uma nova requisição ou atualização
       if (requisition.id === 'new') {
+        // Verificar se já existe uma requisição similar
+        const existingRequisitionsQuery = query(
+          collection(db, 'materialRequisitions'),
+          where('orderId', '==', requisition.orderId),
+          where('requestDate', '==', requisition.requestDate)
+        );
+        
+        const existingRequisitions = await getDocs(existingRequisitionsQuery);
+        
+        if (!existingRequisitions.empty) {
+          alert('Já existe uma requisição para este pedido na mesma data. Por favor, verifique.');
+          return;
+        }
+
         // Create new requisition
         const { id, ...requisitionData } = requisition;
         // Sanitize data for Firestore before saving
         const sanitizedData = sanitizeForFirestore(requisitionData);
+        
+        // Adicionar timestamps
+        sanitizedData.createdAt = new Date().toISOString();
+        sanitizedData.updatedAt = new Date().toISOString();
+        
         const docRef = await addDoc(collection(db, 'materialRequisitions'), sanitizedData);
         
         // Update local state with the new requisition
@@ -164,11 +195,15 @@ const MaterialRequisitions: React.FC = () => {
         const { id, ...requisitionData } = requisition;
         // Sanitize data for Firestore before saving
         const sanitizedData = sanitizeForFirestore(requisitionData);
+        
+        // Atualizar timestamp
+        sanitizedData.updatedAt = new Date().toISOString();
+        
         await updateDoc(doc(db, 'materialRequisitions', id), sanitizedData);
         
         // Update local state
         setRequisitions(requisitions.map(r => 
-          r.id === requisition.id ? requisition : r
+          r.id === requisition.id ? { ...requisition, updatedAt: sanitizedData.updatedAt } : r
         ));
         
         alert('Requisição atualizada com sucesso!');

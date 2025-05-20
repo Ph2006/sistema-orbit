@@ -355,6 +355,23 @@ const CuttingPlanCalculator: React.FC = () => {
     if (!cuttingPlan) return;
 
     try {
+      // Verificar se já existe um plano similar
+      const existingPlansQuery = query(
+        collection(db, 'cuttingPlans'),
+        where('orderId', '==', cuttingPlan.orderId),
+        where('materialName', '==', cuttingPlan.materialName),
+        where('deleted', '==', false)
+      );
+      
+      const existingPlans = await getDocs(existingPlansQuery);
+      
+      if (!existingPlans.empty) {
+        const confirm = window.confirm(
+          'Já existe um plano de corte para este pedido e material. Deseja criar um novo mesmo assim?'
+        );
+        if (!confirm) return;
+      }
+
       const docRef = await addDoc(collection(db, 'cuttingPlans'), cuttingPlan);
       alert(`Plano de corte salvo com ID: ${docRef.id}`);
       
