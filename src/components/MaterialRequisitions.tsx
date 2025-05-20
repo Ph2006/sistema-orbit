@@ -47,6 +47,12 @@ const sanitizeForFirestore = (data: any): any => {
   
   const sanitizedData: Record<string, any> = {};
   for (const [key, value] of Object.entries(data)) {
+    // Não remover campos importantes
+    if (key === 'id' || key === 'orderId' || key === 'requestDate' || 
+        key === 'items' || key === 'status' || key === 'totalCost') {
+      sanitizedData[key] = value;
+      continue;
+    }
     sanitizedData[key] = sanitizeForFirestore(value);
   }
   
@@ -186,9 +192,6 @@ const MaterialRequisitions: React.FC = () => {
         
         const docRef = await addDoc(collection(db, 'materialRequisitions'), sanitizedData);
         
-        // Update local state with the new requisition
-        setRequisitions([...requisitions, { ...requisition, id: docRef.id }]);
-        
         alert('Requisição criada com sucesso!');
       } else {
         // Update existing requisition
@@ -200,11 +203,6 @@ const MaterialRequisitions: React.FC = () => {
         sanitizedData.updatedAt = new Date().toISOString();
         
         await updateDoc(doc(db, 'materialRequisitions', id), sanitizedData);
-        
-        // Update local state
-        setRequisitions(requisitions.map(r => 
-          r.id === requisition.id ? { ...requisition, updatedAt: sanitizedData.updatedAt } : r
-        ));
         
         alert('Requisição atualizada com sucesso!');
       }

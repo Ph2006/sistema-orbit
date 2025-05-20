@@ -3,7 +3,7 @@ import { useOrderStore } from '../store/orderStore';
 import { Order, OrderItem } from '../types/kanban';
 import { CuttingPlan, Bar, CutItem } from '../types/cutting-plan';
 import { ArrowRight, BarChart3, Download, Info, Grape as Tape, Trash2, RefreshCw, AlertTriangle, Search } from 'lucide-react';
-import { collection, addDoc, getDocs, getDoc, query, orderBy, where, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, query, orderBy, where, deleteDoc, doc, updateDoc, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -41,7 +41,45 @@ const CuttingPlanCalculator: React.FC = () => {
 
   // Load existing cutting plans on component mount
   useEffect(() => {
-    loadExistingPlans();
+    const loadPlans = async () => {
+      try {
+        // Configurar listener em tempo real para planos de corte
+        const plansQuery = query(
+          collection(db, 'cuttingPlans'),
+          where('deleted', '==', false),
+          orderBy('createdAt', 'desc')
+        );
+        
+        const unsubscribe = onSnapshot(plansQuery, (snapshot) => {
+          const plans = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as CuttingPlan[];
+          
+          setLoadedPlans(plans);
+          
+          // Set plan counter to the highest existing number + 1
+          if (plans.length > 0) {
+            const maxNumber = plans.reduce((max, plan) => {
+              const match = plan.traceabilityCode?.match(/PC-(\d+)/);
+              if (match && match[1]) {
+                const num = parseInt(match[1], 10);
+                return isNaN(num) ? max : Math.max(max, num);
+              }
+              return max;
+            }, 0);
+            
+            setPlanCounter(maxNumber + 1);
+          }
+        });
+        
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('Error loading cutting plans:', error);
+      }
+    };
+    
+    loadPlans();
   }, []);
 
   useEffect(() => {
@@ -65,40 +103,6 @@ const CuttingPlanCalculator: React.FC = () => {
     }
   }, [formData.orderId, orders]);
   
-  const loadExistingPlans = async () => {
-    try {
-      const plansRef = collection(db, 'cuttingPlans');
-      const plansQuery = query(plansRef, orderBy('createdAt', 'desc'));
-      const plansSnapshot = await getDocs(plansQuery);
-      const plans = plansSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as CuttingPlan[];
-      
-      // Filter out any deleted plans by checking if they have a deleted field set to true
-      const filteredPlans = plans.filter(plan => !plan.deleted);
-      setLoadedPlans(filteredPlans);
-      
-      // Set plan counter to the highest existing number + 1
-      if (filteredPlans.length > 0) {
-        // Try to parse existing plan numbers from any plans with "PC-" prefix
-        const maxNumber = filteredPlans.reduce((max, plan) => {
-          // Try to parse number from the plan code (e.g., "PC-001")
-          const match = plan.traceabilityCode?.match(/PC-(\d+)/);
-          if (match && match[1]) {
-            const num = parseInt(match[1], 10);
-            return isNaN(num) ? max : Math.max(max, num);
-          }
-          return max;
-        }, 0);
-        
-        setPlanCounter(maxNumber + 1);
-      }
-    } catch (error) {
-      console.error('Error loading cutting plans:', error);
-    }
-  };
-
   // Calculate weight per meter based on material properties
   useEffect(() => {
     // This is a simplified calculation and should be replaced with proper formula
@@ -372,11 +376,15 @@ const CuttingPlanCalculator: React.FC = () => {
         if (!confirm) return;
       }
 
-      const docRef = await addDoc(collection(db, 'cuttingPlans'), cuttingPlan);
+      // Adicionar timestamps
+      const planToSave = {
+        ...cuttingPlan,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const docRef = await addDoc(collection(db, 'cuttingPlans'), planToSave);
       alert(`Plano de corte salvo com ID: ${docRef.id}`);
-      
-      // Add to loaded plans
-      setLoadedPlans([{...cuttingPlan, id: docRef.id}, ...loadedPlans]);
       
       // Increment plan counter for next plan
       setPlanCounter(prev => prev + 1);
@@ -513,7 +521,7 @@ const CuttingPlanCalculator: React.FC = () => {
     
     // Add title
     doc.setFontSize(18);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('PLANO DE CORTE', pageWidth / 2, 20, { align: 'center' });
     
     // Add subtitle with plan number
@@ -536,18 +544,18 @@ const CuttingPlanCalculator: React.FC = () => {
     
     // Add date
     doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 15, y);
     y += 10;
     
     // Add summary
     doc.setFontSize(12);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('Resumo', 15, y);
     y += 10;
     
     doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     doc.text(`Comprimento da Barra: ${plan.barLength} mm`, 15, y);
     y += 8;
     doc.text(`Espessura do Corte: ${plan.cuttingThickness} mm`, 15, y);
@@ -565,7 +573,7 @@ const CuttingPlanCalculator: React.FC = () => {
     
     // Add cutting details
     doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('Detalhes do Corte', 15, y);
     y += 10;
     
