@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Link, Trash2, Edit, Download, BarChart, FileText, CheckSquare, Square, Briefcase, ClipboardCheck } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { Order, OrderItem, OrderStatus, ClientProject } from '../types/kanban';
 import { Customer } from '../types/customer';
 import { jsPDF } from 'jspdf';

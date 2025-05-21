@@ -17,7 +17,7 @@ import {
   ShoppingBag
 } from 'lucide-react';
 import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { Quotation } from '../types/quotation';
 import { Customer } from '../types/customer';
 import { useQuotationStore } from '../store/quotationStore';
@@ -106,11 +106,19 @@ const Quotations: React.FC = () => {
     // Load customers
     const loadCustomers = async () => {
       try {
-        const customersSnapshot = await getDocs(collection(db, getCompanyCollection('customers')));
+        // Log the collection path being accessed
+        const collectionPath = getCompanyCollection('customers');
+        console.log(`Attempting to load customers from: ${collectionPath}`);
+        
+        const customersSnapshot = await getDocs(collection(db, collectionPath));
         const customersData = customersSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as Customer[];
+        
+        // Log the number of customers loaded
+        console.log(`Loaded ${customersData.length} customers`);
+        
         setCustomers(customersData);
       } catch (error) {
         console.error('Error loading customers:', error);
