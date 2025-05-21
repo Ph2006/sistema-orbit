@@ -16,11 +16,14 @@ import {
   Users
 } from 'lucide-react';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useCustomerStore } from '../store/customerStore';
 import { useSupplierStore } from '../store/supplierStore';
+import { Procedure, Comment, DocumentType, DocumentAuthorType, ProcedureDocument } from '../types/procedures';
+import { Supplier } from '../types/materials';
+import { TeamMember } from '../types/team';
 
 interface InternalDocument {
   id: string;
@@ -64,9 +67,13 @@ const InternalProcedures: React.FC = () => {
     order: 0
   });
 
+  const [procedures, setProcedures] = useState<Procedure[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+
   // Get customers and suppliers for author selection
   const { customers } = useCustomerStore();
-  const { suppliers } = useSupplierStore();
+  const { suppliers: supplierStoreSuppliers } = useSupplierStore();
 
   useEffect(() => {
     const loadData = async () => {
@@ -74,7 +81,7 @@ const InternalProcedures: React.FC = () => {
       try {
         // Load categories
         const categoriesSnapshot = await getDocs(
-          query(collection(db, 'documentCategories'), orderBy('order'))
+          query(collection(db, getCompanyCollection('documentCategories')), orderBy('order'))
         );
         
         const categoriesData = categoriesSnapshot.docs.map(doc => ({
@@ -89,7 +96,7 @@ const InternalProcedures: React.FC = () => {
         
         // Load documents
         const documentsSnapshot = await getDocs(
-          query(collection(db, 'internalDocuments'), orderBy('createdAt', 'desc'))
+          query(collection(db, getCompanyCollection('internalDocuments')), orderBy('createdAt', 'desc'))
         );
         
         const documentsData = documentsSnapshot.docs.map(doc => ({
@@ -98,6 +105,34 @@ const InternalProcedures: React.FC = () => {
         })) as InternalDocument[];
         
         setDocuments(documentsData);
+
+        // Load procedures
+        const proceduresQuery = query(collection(db, getCompanyCollection('procedures')), orderBy('createdAt', 'desc'));
+        const proceduresSnapshot = await getDocs(proceduresQuery);
+        const proceduresData = proceduresSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as Procedure
+        }));
+        setProcedures(proceduresData);
+
+        // Load suppliers
+        const suppliersQuery = query(collection(db, getCompanyCollection('suppliers')), orderBy('name', 'asc'));
+        const suppliersSnapshot = await getDocs(suppliersQuery);
+        const suppliersData = suppliersSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as Supplier
+        }));
+        setSuppliers(suppliersData);
+
+        // Load team members
+        const teamMembersQuery = query(collection(db, getCompanyCollection('teamMembers')), orderBy('name', 'asc'));
+        const teamMembersSnapshot = await getDocs(teamMembersQuery);
+        const teamMembersData = teamMembersSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as TeamMember
+        }));
+        setTeamMembers(teamMembersData);
+
         setLoading(false);
       } catch (error) {
         console.error('Error loading documents:', error);
@@ -140,7 +175,7 @@ const InternalProcedures: React.FC = () => {
       // Set order to max order + 1 if not specified
       const order = newCategory.order || Math.max(0, ...categories.map(c => c.order)) + 1;
       
-      const docRef = await addDoc(collection(db, 'documentCategories'), {
+      const docRef = await addDoc(collection(db, getCompanyCollection('documentCategories')), {
         name: newCategory.name,
         order
       });
@@ -171,7 +206,7 @@ const InternalProcedures: React.FC = () => {
   const handleDeleteDocument = async (documentId: string) => {
     if (window.confirm('Tem certeza que deseja excluir este documento?')) {
       try {
-        await deleteDoc(doc(db, 'internalDocuments', documentId));
+        await deleteDoc(doc(db, getCompanyCollection('internalDocuments'), documentId));
         setDocuments(documents.filter(d => d.id !== documentId));
         alert('Documento excluído com sucesso!');
       } catch (error) {
@@ -184,7 +219,7 @@ const InternalProcedures: React.FC = () => {
   const handleDeleteCategory = async (categoryId: string) => {
     if (window.confirm('Tem certeza que deseja excluir esta categoria? Os documentos associados serão movidos para a categoria padrão.')) {
       try {
-        await deleteDoc(doc(db, 'documentCategories', categoryId));
+        await deleteDoc(doc(db, getCompanyCollection('documentCategories'), categoryId));
         
         // Update state
         setCategories(categories.filter(c => c.id !== categoryId));
@@ -198,7 +233,7 @@ const InternalProcedures: React.FC = () => {
           const docsToUpdate = documents.filter(d => d.category === categoryId);
           
           for (const document of docsToUpdate) {
-            await updateDoc(doc(db, 'internalDocuments', document.id), {
+            await updateDoc(doc(db, getCompanyCollection('internalDocuments'), document.id), {
               category: defaultCategory.id,
               updatedAt: new Date().toISOString()
             });
@@ -226,13 +261,13 @@ const InternalProcedures: React.FC = () => {
         // Create
         const { id, ...docData } = document;
         
-        const docRef = await addDoc(collection(db, 'internalDocuments'), docData);
+        const docRef = await addDoc(collection(db, getCompanyCollection('internalDocuments')), docData);
         
         // Update local state
         setDocuments([...documents, { ...document, id: docRef.id }]);
       } else {
         // Update
-        await updateDoc(doc(db, 'internalDocuments', document.id), {
+        await updateDoc(doc(db, getCompanyCollection('internalDocuments'), document.id), {
           title: document.title,
           code: document.code,
           description: document.description,

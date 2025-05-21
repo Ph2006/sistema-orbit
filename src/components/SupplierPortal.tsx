@@ -19,7 +19,7 @@ import {
   Award
 } from 'lucide-react';
 import { collection, getDocs, query, where, addDoc, updateDoc, deleteDoc, doc, onSnapshot, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { Supplier, MaterialRequisition, MaterialRequisitionItem, QuotationRequest } from '../types/materials';
 import { format, isAfter } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -28,81 +28,75 @@ import QuotationRequestModal from './QuotationRequestModal';
 import SupplierClassification from './SupplierClassification';
 
 const SupplierPortal: React.FC = () => {
+  const [activeTab, setActiveTab] = useState('suppliers');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [requisitions, setRequisitions] = useState<MaterialRequisition[]>([]);
   const [quotations, setQuotations] = useState<QuotationRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterOpen, setFilterOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+  const [selectedRequisition, setSelectedRequisition] = useState<MaterialRequisition | null>(null);
+  const [isQuotationModalOpen, setIsQuotationModalOpen] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
-  
-  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
-  const [isQuotationModalOpen, setIsQuotationModalOpen] = useState(false);
-  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
-  const [selectedRequisition, setSelectedRequisition] = useState<MaterialRequisition | null>(null);
-  const [activeTab, setActiveTab] = useState<'suppliers' | 'quotations' | 'requisitions' | 'classification'>('suppliers');
 
+  const loadData = async () => {
+    try {
+      setLoading(true);
+
+      // Load suppliers
+      const suppliersQuery = query(collection(db, getCompanyCollection('suppliers')), orderBy('name', 'asc'));
+      const suppliersSnapshot = await getDocs(suppliersQuery);
+      const suppliersData = suppliersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data() as Supplier
+      }));
+      setSuppliers(suppliersData);
+
+      // Setup real-time listeners for requisitions and quotations
+      // Requisitions
+      const requisitionsQuery = query(collection(db, getCompanyCollection('materialRequisitions')), orderBy('requestDate', 'desc'));
+      const unsubscribeRequisitions = onSnapshot(requisitionsQuery, (snapshot) => {
+        const requisitionsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as MaterialRequisition
+        }));
+        setRequisitions(requisitionsData);
+      });
+
+      // Quotations
+      const quotationsQuery = query(collection(db, getCompanyCollection('quotationRequests')), orderBy('requestDate', 'desc'));
+      const unsubscribeQuotations = onSnapshot(quotationsQuery, (snapshot) => {
+        const quotationsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as QuotationRequest
+        }));
+        setQuotations(quotationsData);
+      });
+      
+      setLoading(false);
+
+      // Return unsubscribe functions to clean up listeners later
+      return () => {
+        unsubscribeRequisitions();
+        unsubscribeQuotations();
+      };
+
+    } catch (error) {
+      console.error('Error loading data:', error);
+      setLoading(false);
+      // Return a dummy unsubscribe function to avoid errors
+      return () => {};
+    }
+  };
+  
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        
-        // Load suppliers
-        const suppliersRef = collection(db, 'suppliers');
-        const suppliersQuery = query(suppliersRef, orderBy('name', 'asc'));
-        const supplierUnsubscribe = onSnapshot(suppliersQuery, (snapshot) => {
-          const suppliersData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Supplier[];
-          setSuppliers(suppliersData);
-          
-          // Extract all unique categories
-          const allCategories = Array.from(
-            new Set(suppliersData.flatMap(supplier => supplier.category))
-          ).filter(Boolean).sort();
-          setAvailableCategories(allCategories);
-        });
-        
-        // Load material requisitions
-        const requisitionsRef = collection(db, 'materialRequisitions');
-        const requisitionsQuery = query(requisitionsRef, orderBy('requestDate', 'desc'));
-        const requisitionsUnsubscribe = onSnapshot(requisitionsQuery, (snapshot) => {
-          const requisitionsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as MaterialRequisition[];
-          setRequisitions(requisitionsData);
-        });
-        
-        // Load quotation requests
-        const quotationsRef = collection(db, 'quotationRequests');
-        const quotationsQuery = query(quotationsRef, orderBy('requestDate', 'desc'));
-        const quotationsUnsubscribe = onSnapshot(quotationsQuery, (snapshot) => {
-          const quotationsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as QuotationRequest[];
-          setQuotations(quotationsData);
-        });
-        
-        setLoading(false);
-        
-        return () => {
-          supplierUnsubscribe();
-          requisitionsUnsubscribe();
-          quotationsUnsubscribe();
-        };
-      } catch (error) {
-        console.error('Error loading data:', error);
-        setLoading(false);
-      }
-    };
-    
-    loadData();
+    const unsubscribe = loadData();
+    return () => unsubscribe(); // Cleanup listeners on unmount
   }, []);
 
   const handleAddSupplier = () => {
@@ -121,7 +115,9 @@ const SupplierPortal: React.FC = () => {
     }
     
     try {
-      await deleteDoc(doc(db, 'suppliers', id));
+      await deleteDoc(doc(db, getCompanyCollection('suppliers'), id));
+      // Update local state after deletion
+      setSuppliers(prev => prev.filter(supplier => supplier.id !== id));
       alert('Fornecedor excluído com sucesso!');
     } catch (error) {
       console.error('Error deleting supplier:', error);
@@ -148,7 +144,7 @@ const SupplierPortal: React.FC = () => {
     try {
       if (supplier.id && supplier.id !== 'new') {
         // Update
-        const supplierRef = doc(db, 'suppliers', supplier.id);
+        const supplierRef = doc(db, getCompanyCollection('suppliers'), supplier.id);
         await updateDoc(supplierRef, {
           name: supplier.name,
           cnpj: supplier.cnpj,
@@ -162,7 +158,8 @@ const SupplierPortal: React.FC = () => {
           notes: supplier.notes,
           status: supplier.status
         });
-        
+        // Update local state after update
+        setSuppliers(prev => prev.map(s => s.id === supplier.id ? supplier : s));
         alert('Fornecedor atualizado com sucesso!');
       } else {
         // Create
@@ -172,7 +169,9 @@ const SupplierPortal: React.FC = () => {
           createdAt: new Date().toISOString()
         };
         
-        await addDoc(collection(db, 'suppliers'), newSupplier);
+        const docRef = await addDoc(collection(db, getCompanyCollection('suppliers')), newSupplier);
+        // Add to local state
+        setSuppliers(prev => [...prev, { ...newSupplier, id: docRef.id }]);
         alert('Fornecedor criado com sucesso!');
       }
       
@@ -193,17 +192,17 @@ const SupplierPortal: React.FC = () => {
     try {
       if (quotation.id && quotation.id !== 'new') {
         // Update existing quotation
-        const quotationRef = doc(db, 'quotationRequests', quotation.id);
+        const quotationRef = doc(db, getCompanyCollection('quotationRequests'), quotation.id);
         await updateDoc(quotationRef, quotation);
       } else {
         // Create new quotation
         const { id, ...quotationData } = quotation;
-        await addDoc(collection(db, 'quotationRequests'), quotationData);
+        await addDoc(collection(db, getCompanyCollection('quotationRequests')), quotationData);
       }
       
       // Mark requisition items as sent for quotation
       if (selectedRequisition && itemIds.length > 0) {
-        const requisitionRef = doc(db, 'materialRequisitions', selectedRequisition.id);
+        const requisitionRef = doc(db, getCompanyCollection('materialRequisitions'), selectedRequisition.id);
         const updatedItems = selectedRequisition.items.map(item => {
           if (itemIds.includes(item.id)) {
             return {

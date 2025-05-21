@@ -8,7 +8,7 @@ import { useCostCenterStore } from '../store/costCenterStore';
 import { useAuthStore } from '../store/authStore';
 import { useSupplierStore } from '../store/supplierStore';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 
 interface CostEntryModalProps {
   cost: CostEntry | null;

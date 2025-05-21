@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Send, Calendar, Plus, Trash2, AlertTriangle, FileText } from 'lucide-react';
+import { collection, getDocs, query, where, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { MaterialRequisition, MaterialRequisitionItem, Supplier, QuotationRequest, QuotationRequestItem } from '../types/materials';
 import { addDays, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -17,11 +19,6 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
   onClose,
   onSave
 }) => {
-  // Get pending items that haven't been sent for quotation yet
-  const pendingItems = requisition.items.filter(item => 
-    item.status === 'pending' && !item.sentForQuotation
-  );
-
   const [selectedSupplier, setSelectedSupplier] = useState<string>('');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [expirationDate, setExpirationDate] = useState<string>(
@@ -33,7 +30,7 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
 
   const handleToggleAllItems = (checked: boolean) => {
     if (checked) {
-      setSelectedItems(new Set(pendingItems.map(item => item.id)));
+      setSelectedItems(new Set(requisition.items.map(item => item.id)));
     } else {
       setSelectedItems(new Set());
     }
@@ -75,7 +72,7 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!validateForm()) {
@@ -86,7 +83,7 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
     if (!supplier) return;
     
     const quotationItems: QuotationRequestItem[] = Array.from(selectedItems).map(itemId => {
-      const item = pendingItems.find(i => i.id === itemId);
+      const item = requisition.items.find(i => i.id === itemId);
       if (!item) throw new Error('Item not found');
       
       return {
@@ -113,7 +110,33 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
       notes: notes
     };
     
-    onSave(quotation, Array.from(selectedItems));
+    try {
+      // Add the new quotation request to the 'quotationRequests' collection
+      await addDoc(collection(db, getCompanyCollection('quotationRequests')), {
+        ...quotation,
+        requestDate: new Date().toISOString(), // Add timestamp
+      });
+
+      // Update the status of the selected items in the original material requisition
+      const requisitionRef = doc(db, getCompanyCollection('materialRequisitions'), requisition.id); // Use getCompanyCollection
+      const updatedRequisitionItems = requisition.items.map(item => {
+        if (selectedItems.has(item.id)) {
+          return { ...item, sentForQuotation: true }; // Mark as sent for quotation
+        }
+        return item;
+      });
+
+      await updateDoc(requisitionRef, { items: updatedRequisitionItems });
+
+      // Notify parent component and close modal
+      onSave(quotation, Array.from(selectedItems));
+      onClose();
+      alert('Solicitação de cotação enviada com sucesso!');
+
+    } catch (error) {
+      console.error('Error sending quotation request:', error);
+      alert('Erro ao enviar solicitação de cotação.');
+    }
   };
   
   return (
@@ -131,7 +154,7 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
           </button>
         </div>
         
-        {pendingItems.length === 0 ? (
+        {requisition.items.length === 0 ? (
           <div className="p-8 text-center bg-yellow-50 rounded-lg">
             <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-yellow-800 mb-2">Nenhum Item Disponível</h3>
@@ -211,7 +234,7 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
                 <label className="flex items-center">
                   <input
                     type="checkbox"
-                    checked={selectedItems.size === pendingItems.length}
+                    checked={selectedItems.size === requisition.items.length}
                     onChange={(e) => handleToggleAllItems(e.target.checked)}
                     className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
                   />
@@ -252,7 +275,7 @@ const QuotationRequestModal: React.FC<QuotationRequestModalProps> = ({
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {pendingItems.map(item => (
+                    {requisition.items.map(item => (
                       <tr key={item.id} className={selectedItems.has(item.id) ? 'bg-blue-50' : ''}>
                         <td className="px-3 py-2 whitespace-nowrap">
                           <input

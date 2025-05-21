@@ -25,9 +25,9 @@ import {
   Download,
   FileUp
 } from 'lucide-react';
-import { collection, getDocs, query, where, updateDoc, doc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { Supplier } from '../types/materials';
+import { collection, getDocs, query, where, updateDoc, doc, orderBy } from 'firebase/firestore';
+import { db, getCompanyCollection } from '../lib/firebase';
+import { Supplier, SupplierRating } from '../types/materials';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { format } from 'date-fns';
@@ -47,7 +47,7 @@ interface SupplierRating {
 
 const SupplierClassification: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierRatings, setSupplierRatings] = useState<SupplierRating[]>([]);
+  const [ratings, setRatings] = useState<SupplierRating[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
@@ -59,60 +59,52 @@ const SupplierClassification: React.FC = () => {
     priceScore: 3,
     paymentScore: 3
   });
+  const [categories, setCategories] = useState<string[]>([]);
 
-  // Load suppliers and generate ratings
   useEffect(() => {
-    const loadSuppliers = async () => {
+    const loadData = async () => {
       try {
         setLoading(true);
-        const suppliersRef = collection(db, 'suppliers');
-        const suppliersSnapshot = await getDocs(query(suppliersRef, where('status', '==', 'active')));
         
-        const loadedSuppliers = suppliersSnapshot.docs.map(doc => ({
+        // Load suppliers
+        const suppliersQuery = query(collection(db, getCompanyCollection('suppliers')), orderBy('name', 'asc'));
+        const suppliersSnapshot = await getDocs(suppliersQuery);
+        const suppliersData = suppliersSnapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data()
-        })) as Supplier[];
+          ...doc.data() as Supplier
+        }));
+        setSuppliers(suppliersData);
+
+        // Extract all unique categories from loaded suppliers
+        const allCategories = Array.from(
+          new Set(suppliersData.flatMap(supplier => supplier.category))
+        ).filter(Boolean).sort();
+        setCategories(allCategories);
         
-        setSuppliers(loadedSuppliers);
+        // Load ratings (assuming ratings are stored in a subcollection or linked by supplierId)
+        // For simplicity, let's assume ratings are in a top-level collection for now.
+        // In a real app, they might be in a subcollection per supplier.
+        // Let's adjust this query to use getCompanyCollection as well
+        const ratingsQuery = query(collection(db, getCompanyCollection('supplierRatings'))); // Assuming 'supplierRatings' collection
+        const ratingsSnapshot = await getDocs(ratingsQuery);
+        const ratingsData = ratingsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as SupplierRating
+        }));
+        setRatings(ratingsData);
         
-        // Generate ratings (in a real app, these would be stored in a separate collection)
-        const ratings = loadedSuppliers.map(supplier => {
-          // For this example, we'll generate pseudo-random scores
-          // In a real app, these would be calculated based on historical data
-          const deliveryScore = supplier.evaluationScore || Math.floor(Math.random() * 5) + 1;
-          const qualityScore = Math.floor(Math.random() * 5) + 1;
-          const priceScore = Math.floor(Math.random() * 5) + 1;
-          const paymentScore = Math.floor(Math.random() * 5) + 1;
-          const totalScore = ((deliveryScore + qualityScore + priceScore + paymentScore) / 4);
-          
-          return {
-            id: supplier.id,
-            name: supplier.name,
-            deliveryScore,
-            qualityScore,
-            priceScore,
-            paymentScore,
-            totalScore,
-            category: supplier.category,
-            lastEvaluation: supplier.lastOrderDate || new Date().toISOString()
-          };
-        });
-        
-        // Sort by total score (highest first)
-        ratings.sort((a, b) => b.totalScore - a.totalScore);
-        setSupplierRatings(ratings);
         setLoading(false);
       } catch (error) {
-        console.error('Error loading suppliers:', error);
+        console.error('Error loading classification data:', error);
         setLoading(false);
       }
     };
     
-    loadSuppliers();
+    loadData();
   }, []);
 
   // Filter ratings by search term and category
-  const filteredRatings = supplierRatings.filter(rating => {
+  const filteredRatings = ratings.filter(rating => {
     const matchesSearch = !searchTerm || 
       rating.name.toLowerCase().includes(searchTerm.toLowerCase());
     
@@ -121,11 +113,6 @@ const SupplierClassification: React.FC = () => {
     
     return matchesSearch && matchesCategory;
   });
-
-  // Get all unique categories
-  const categories = Array.from(
-    new Set(supplierRatings.flatMap(rating => rating.category))
-  ).sort();
 
   // Get classification based on total score
   const getClassification = (score: number) => {
@@ -160,14 +147,14 @@ const SupplierClassification: React.FC = () => {
       ) / 4;
       
       // Update in Firestore
-      const supplierRef = doc(db, 'suppliers', selectedSupplier.id);
+      const supplierRef = doc(db, getCompanyCollection('suppliers'), selectedSupplier.id);
       await updateDoc(supplierRef, {
         evaluationScore: editRatings.deliveryScore, // Store delivery score as the main evaluation score
         lastEvaluationDate: new Date().toISOString()
       });
       
       // Update local state
-      const updatedRatings = supplierRatings.map(rating => {
+      const updatedRatings = ratings.map(rating => {
         if (rating.id === selectedSupplier.id) {
           return {
             ...rating,
@@ -185,7 +172,7 @@ const SupplierClassification: React.FC = () => {
       // Sort by total score (highest first)
       updatedRatings.sort((a, b) => b.totalScore - a.totalScore);
       
-      setSupplierRatings(updatedRatings);
+      setRatings(updatedRatings);
       setSelectedSupplier({
         ...selectedSupplier,
         deliveryScore: editRatings.deliveryScore,
@@ -409,15 +396,15 @@ const SupplierClassification: React.FC = () => {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={[
-                  { name: 'A+', count: supplierRatings.filter(r => r.totalScore >= 4.5).length },
-                  { name: 'A', count: supplierRatings.filter(r => r.totalScore >= 4 && r.totalScore < 4.5).length },
-                  { name: 'B+', count: supplierRatings.filter(r => r.totalScore >= 3.5 && r.totalScore < 4).length },
-                  { name: 'B', count: supplierRatings.filter(r => r.totalScore >= 3 && r.totalScore < 3.5).length },
-                  { name: 'C+', count: supplierRatings.filter(r => r.totalScore >= 2.5 && r.totalScore < 3).length },
-                  { name: 'C', count: supplierRatings.filter(r => r.totalScore >= 2 && r.totalScore < 2.5).length },
-                  { name: 'D+', count: supplierRatings.filter(r => r.totalScore >= 1.5 && r.totalScore < 2).length },
-                  { name: 'D', count: supplierRatings.filter(r => r.totalScore >= 1 && r.totalScore < 1.5).length },
-                  { name: 'F', count: supplierRatings.filter(r => r.totalScore < 1).length }
+                  { name: 'A+', count: ratings.filter(r => r.totalScore >= 4.5).length },
+                  { name: 'A', count: ratings.filter(r => r.totalScore >= 4 && r.totalScore < 4.5).length },
+                  { name: 'B+', count: ratings.filter(r => r.totalScore >= 3.5 && r.totalScore < 4).length },
+                  { name: 'B', count: ratings.filter(r => r.totalScore >= 3 && r.totalScore < 3.5).length },
+                  { name: 'C+', count: ratings.filter(r => r.totalScore >= 2.5 && r.totalScore < 3).length },
+                  { name: 'C', count: ratings.filter(r => r.totalScore >= 2 && r.totalScore < 2.5).length },
+                  { name: 'D+', count: ratings.filter(r => r.totalScore >= 1.5 && r.totalScore < 2).length },
+                  { name: 'D', count: ratings.filter(r => r.totalScore >= 1 && r.totalScore < 1.5).length },
+                  { name: 'F', count: ratings.filter(r => r.totalScore < 1).length }
                 ]}
                 layout="vertical"
                 margin={{ top: 20, right: 30, left: 40, bottom: 5 }}

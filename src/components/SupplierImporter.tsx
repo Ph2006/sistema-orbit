@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, FileUp, Check, FileText, Download, AlertTriangle } from 'lucide-react';
 import { collection, addDoc, writeBatch, doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { Supplier } from '../types/materials';
 
 const SupplierImporter: React.FC<{ onClose: () => void }> = ({ onClose }) => {
@@ -126,48 +126,45 @@ const SupplierImporter: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     reader.readAsText(file);
   };
 
-  // Import suppliers into Firestore
-  const importSuppliers = async () => {
+  const handleImport = async () => {
     if (suppliers.length === 0) {
-      setErrorMessage('Nenhum fornecedor para importar.');
-      setStep('error');
+      setErrorMessage('Nenhum fornecedor válido encontrado no arquivo.');
       return;
     }
-    
+
     setProcessing(true);
-    
-    try {
-      // Use batched writes for performance
-      const batch = writeBatch(db);
-      let added = 0;
-      let failed = 0;
-      
-      for (const supplier of suppliers) {
-        try {
-          // Create a new document with auto-generated ID
-          const newSupplierRef = doc(collection(db, 'suppliers'));
-          
-          // Remove ID from the data object as it will be the document ID
-          const { id, ...supplierData } = supplier;
-          
-          // Add to batch
-          batch.set(newSupplierRef, supplierData);
-          added++;
-        } catch (error) {
-          console.error('Error adding supplier:', error);
-          failed++;
-        }
+    setErrorMessage('');
+    setStats({ added: 0, failed: 0 });
+
+    const batch = writeBatch(db);
+    const suppliersCollectionRef = collection(db, getCompanyCollection('suppliers')); // Use getCompanyCollection
+    let addedCount = 0;
+    let failedCount = 0;
+
+    for (const supplier of suppliers) {
+      try {
+        // Add a new document with a generated ID
+        const docRef = doc(suppliersCollectionRef);
+        batch.set(docRef, {
+          ...supplier,
+          createdAt: new Date().toISOString() // Add creation timestamp
+        });
+        addedCount++;
+      } catch (error) {
+        console.error('Error preparing supplier for batch:', supplier, error);
+        failedCount++;
       }
-      
-      // Commit all the batch operations
+    }
+
+    try {
       await batch.commit();
-      
-      setStats({ added, failed });
+      setStats({ added: addedCount, failed: failedCount });
       setStep('success');
     } catch (error) {
-      console.error('Error during batch commit:', error);
-      setErrorMessage('Erro ao importar fornecedores. Tente novamente.');
+      console.error('Error committing batch import:', error);
+      setErrorMessage('Erro ao importar fornecedores. Verifique o console para detalhes.');
       setStep('error');
+      setStats({ added: addedCount, failed: failedCount });
     } finally {
       setProcessing(false);
     }
@@ -301,7 +298,7 @@ const SupplierImporter: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 Voltar
               </button>
               <button
-                onClick={importSuppliers}
+                onClick={handleImport}
                 disabled={processing}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center disabled:opacity-50"
               >
