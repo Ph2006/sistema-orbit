@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { CompanyCalendar } from '../types/gantt';
+import { useAuthStore } from './authStore'; // Import authStore
 
 interface SettingsState {
   backgroundImage: string | null;
@@ -75,7 +76,8 @@ export const useSettingsStore = create<SettingsState>()(
       setCalendar: (calendar) => set({ calendar }),
     }),
     {
-      name: 'settings-storage',
+      // Include companyId in the storage name
+      name: `settings-storage-${useAuthStore.getState().companyId || 'default'}`,
       version: 2, // Increased version to ensure clean migration
       storage: {
         getItem: (name) => {
@@ -93,7 +95,7 @@ export const useSettingsStore = create<SettingsState>()(
             // Ensure we're storing a valid JSON string
             const jsonValue = JSON.stringify(value);
             localStorage.setItem(name, jsonValue);
-            console.log(`Settings saved successfully: ${name}`);
+            console.log(`Settings saved successfully for ${name}`);
           } catch (e) {
             console.error("Error storing settings to localStorage:", e);
           }

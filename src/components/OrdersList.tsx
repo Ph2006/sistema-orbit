@@ -129,9 +129,11 @@ const OrdersList: React.FC<OrdersListProps> = ({ orders, onSelectOrders }) => {
     // Create the table
     autoTable(doc, {
       startY: y,
-      head: [['Pedido', 'Item', 'Código', 'Descrição', 'Qtd', 'Peso (kg)']],
+      head: [['Pedido', 'Cliente', 'Projeto', 'Item', 'Código', 'Descrição', 'Qtd', 'Peso (kg)']],
       body: allItems.map(item => [
         `#${item.orderNumber}`,
+        item.customer,
+        selectedOrderObjects.find(order => order.orderNumber === item.orderNumber)?.projectName || '',
         item.itemNumber.toString(),
         item.code,
         item.description,
@@ -144,7 +146,7 @@ const OrdersList: React.FC<OrdersListProps> = ({ orders, onSelectOrders }) => {
         textColor: [255, 255, 255],
         fontStyle: 'bold'
       },
-      foot: [['', '', '', '', 'Peso Total:', totalWeight.toLocaleString('pt-BR') + ' kg']],
+      foot: [['', '', '', '', '', '', 'Peso Total:', totalWeight.toLocaleString('pt-BR') + ' kg']],
       footStyles: {
         fillColor: [240, 240, 240],
         textColor: [0, 0, 0],
