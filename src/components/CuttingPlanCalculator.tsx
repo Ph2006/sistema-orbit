@@ -45,7 +45,7 @@ const CuttingPlanCalculator: React.FC = () => {
       try {
         // Configurar listener em tempo real para planos de corte
         const plansQuery = query(
-          collection(db, 'cuttingPlans'),
+          collection(db, getCompanyCollection('cuttingPlans')),
           where('deleted', '==', false),
           orderBy('createdAt', 'desc')
         );
@@ -361,7 +361,7 @@ const CuttingPlanCalculator: React.FC = () => {
     try {
       // Verificar se já existe um plano similar
       const existingPlansQuery = query(
-        collection(db, 'cuttingPlans'),
+        collection(db, getCompanyCollection('cuttingPlans')),
         where('orderId', '==', cuttingPlan.orderId),
         where('materialName', '==', cuttingPlan.materialName),
         where('deleted', '==', false)
@@ -383,7 +383,7 @@ const CuttingPlanCalculator: React.FC = () => {
         updatedAt: new Date().toISOString()
       };
 
-      const docRef = await addDoc(collection(db, 'cuttingPlans'), planToSave);
+      const docRef = await addDoc(collection(db, getCompanyCollection('cuttingPlans')), planToSave);
       alert(`Plano de corte salvo com ID: ${docRef.id}`);
       
       // Increment plan counter for next plan
@@ -428,7 +428,7 @@ const CuttingPlanCalculator: React.FC = () => {
 
     try {
       setIsDeleting(true);
-      const planRef = doc(db, 'cuttingPlans', planId);
+      const planRef = doc(db, getCompanyCollection('cuttingPlans'), planId);
       
       // Check if the document exists before attempting to update it
       const docSnap = await getDoc(planRef);
@@ -464,7 +464,7 @@ const CuttingPlanCalculator: React.FC = () => {
       setIsDeletingAll(true);
       
       // Get all cutting plans
-      const plansRef = collection(db, 'cuttingPlans');
+      const plansRef = collection(db, getCompanyCollection('cuttingPlans'));
       const plansSnapshot = await getDocs(plansRef);
       
       if (plansSnapshot.empty) {
@@ -1023,8 +1023,8 @@ const CuttingPlanCalculator: React.FC = () => {
         ) : (
           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
             {filteredPlans.map(plan => {
-              // Get the corresponding order for this plan
-              const planOrder = orders.find(o => o.id === plan.orderId);
+              // Find the associated order to display its number and customer
+              const associatedOrder = orders.find(order => order.id === plan.orderId);
               
               return (
                 <div 
@@ -1034,19 +1034,10 @@ const CuttingPlanCalculator: React.FC = () => {
                 >
                   <div className="flex justify-between items-start">
                     <div>
-                      <h4 className="font-medium">{plan.materialName}</h4>
-                      {plan.materialDescription && (
-                        <p className="text-sm text-gray-600">
-                          {plan.materialDescription}
-                        </p>
-                      )}
-                      <p className="text-sm text-gray-500">
-                        <span className="font-semibold mr-1">OS Interna: {planOrder?.internalOrderNumber}</span> | 
-                        Plano Nº: {plan.traceabilityCode} | Pedido #{plan.orderNumber} | {format(new Date(plan.createdAt), 'dd/MM/yyyy', { locale: ptBR })}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        Barras: {plan.totalBarsNeeded} | Aproveitamento: {plan.utilizationPercentage.toFixed(2)}%
-                      </p>
+                      <h4 className="font-medium">
+                        {associatedOrder ? `OS #${associatedOrder.internalOrderNumber} - ${associatedOrder.customer}` : plan.traceabilityCode}
+                      </h4>
+                      <p className="text-sm text-gray-600">Plano: {plan.traceabilityCode}</p>
                     </div>
                     <div className="flex space-x-2">
                       <button
@@ -1224,14 +1215,6 @@ const CuttingPlanCalculator: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* System info footer */}
-      <div className="text-left text-sm text-gray-500 mt-10">
-        <p>Sistema Orbit</p>
-        <p>Versão 1.0</p>
-        <p>Desenvolvido por Paulo Henrique Nascimento Ribeiro</p>
-        <p>© 2025 - Todos os direitos reservados</p>
-      </div>
     </div>
   );
 };

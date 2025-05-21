@@ -106,7 +106,7 @@ const Quotations: React.FC = () => {
     // Load customers
     const loadCustomers = async () => {
       try {
-        const customersSnapshot = await getDocs(collection(db, 'customers'));
+        const customersSnapshot = await getDocs(collection(db, getCompanyCollection('customers')));
         const customersData = customersSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()

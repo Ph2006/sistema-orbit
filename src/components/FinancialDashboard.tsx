@@ -470,7 +470,7 @@ const FinancialDashboard: React.FC = () => {
   useEffect(() => {
     const loadCustomers = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'customers'));
+        const querySnapshot = await getDocs(collection(db, getCompanyCollection('customers')));
         const customersData = querySnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()

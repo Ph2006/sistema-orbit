@@ -29,6 +29,7 @@ import DataMigration from './components/DataMigration';
 import BrasmoldCleanup from './components/BrasmoldCleanup';
 import MecaldDataRestore from './components/MecaldDataRestore';
 import CostCenter from './components/CostCenter';
+import AboutSystem from './components/AboutSystem';
 
 function App() {
   const { setUser, setLoading } = useAuthStore();
@@ -154,6 +155,11 @@ function App() {
                         </PrivateRoute>
                       }
                     />
+                    <Route path="/about-system" element={
+                      <PrivateRoute requiredPermission="dashboard">
+                        <AboutSystem />
+                      </PrivateRoute>
+                    } />
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />
                   </Routes>
                 </div>

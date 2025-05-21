@@ -6,5 +6,12 @@ export default defineConfig({
   build: {
     sourcemap: true,
     chunkSizeWarningLimit: 3000,
+    outDir: 'dist',
+    assetsDir: 'assets',
+    emptyOutDir: true,
+  },
+  server: {
+    port: 3000,
+    open: true,
   },
 });

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Trello, Users, LogOut, ClipboardCheck, DollarSign, Package, UserCog, BarChart, ShoppingBag, Building, FileText, Settings, CircleDollarSign, Trash2, RefreshCw } from 'lucide-react';
+import { LayoutDashboard, Trello, Users, LogOut, ClipboardCheck, DollarSign, Package, UserCog, BarChart, ShoppingBag, Building, FileText, Settings, CircleDollarSign, Trash2, RefreshCw, Info } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useNavigate } from 'react-router-dom';
@@ -55,10 +55,10 @@ const Sidebar: React.FC = () => {
     { path: '/cost-center', icon: CircleDollarSign, label: 'Centro de Custos', permission: 'financial', company: 'all' },
     { path: '/kanban', icon: Trello, label: 'Kanban', permission: 'kanban', company: 'all' },
     { path: '/occupation', icon: BarChart, label: 'Taxa de Ocupação', permission: 'occupation', company: 'all' },
-    { path: '/material-requisitions', icon: ShoppingBag, label: 'Req. de Materiais', permission: 'material-requisitions', company: 'mecald' },
-    { path: '/supplier-portal', icon: Building, label: 'Portal do Fornecedor', permission: 'supplier-portal', company: 'mecald' },
+    { path: '/material-requisitions', icon: ShoppingBag, label: 'Req. de Materiais', permission: 'material-requisitions', company: 'all' },
+    { path: '/supplier-portal', icon: Building, label: 'Portal do Fornecedor', permission: 'supplier-portal', company: 'all' },
     { path: '/customers', icon: Users, label: 'Clientes', permission: 'customers', company: 'all' },
-    { path: '/team', icon: UserCog, label: 'Equipe', permission: 'team', company: 'mecald' },
+    { path: '/team', icon: UserCog, label: 'Equipe', permission: 'team', company: 'all' },
     { path: '/quality', icon: ClipboardCheck, label: 'Controle de Qualidade', permission: 'quality', company: 'all' },
     { path: '/financial', icon: DollarSign, label: 'Controle Financeiro', permission: 'financial', company: 'all' },
     { path: '/settings', icon: Settings, label: 'Configurações', permission: 'dashboard', company: 'all' },
@@ -66,28 +66,24 @@ const Sidebar: React.FC = () => {
 
   // Special admin menu items
   const adminItems = [
-    { 
-      path: '/restore-mecald', 
-      icon: RefreshCw, 
-      label: 'Restaurar Mecald', 
-      permission: 'dashboard', 
+    {
+      path: '/about-system',
+      icon: Info,
+      label: 'Sobre o Sistema',
+      permission: 'dashboard',
       company: 'all'
     }
   ];
 
-  // Only add Brasmold cleanup for Brasmold
+  // Add specific admin items based on company
   if (companyId === 'brasmold') {
-    adminItems.push({ 
-      path: '/clean-brasmold', 
-      icon: Trash2, 
-      label: 'Limpar Brasmold', 
-      permission: 'dashboard', 
-      company: 'all'
-    });
+    // No specific admin items for Brasmold yet, removed old ones
+  } else if (companyId === 'mecald') {
+    // Add Mecald specific admin items if needed in the future
   }
 
   return (
-    <div className="w-64 min-h-screen bg-gray-800 text-white p-4">
+    <div className="w-64 min-h-screen bg-gray-800 text-white p-4 flex flex-col">
       <div className="mb-8">
         <h1 className="text-xl font-bold">Sistema Orbit</h1>
         {teamMember && (
@@ -155,10 +151,12 @@ const Sidebar: React.FC = () => {
               </Link>
             );
           })}
+
         </div>
       </nav>
 
-      <div className="absolute bottom-4 w-52">
+      {/* Logout button at the bottom */}
+      <div className="mt-auto pt-4 border-t border-gray-700">
         <button
           onClick={handleLogout}
           className="flex items-center space-x-3 px-4 py-3 w-full text-gray-300 hover:bg-gray-700 rounded-lg transition-colors"
@@ -166,6 +164,14 @@ const Sidebar: React.FC = () => {
           <LogOut className="h-5 w-5" />
           <span>Sair</span>
         </button>
+      </div>
+
+      {/* System info footer */}
+      <div className="text-left text-sm text-gray-500 mt-10">
+        <p>Sistema Orbit</p>
+        <p>Versão 1.0</p>
+        <p>Desenvolvido por Paulo Henrique Nascimento Ribeiro</p>
+        <p>© 2025 - Todos os direitos reservados</p>
       </div>
     </div>
   );
