@@ -34,7 +34,7 @@ export const useSupplierStore = create<SupplierState>((set, get) => ({
   loadSuppliers: async () => {
     try {
       set({ loading: true, error: null });
-      const querySnapshot = await getDocs(collection(db, 'suppliers'));
+      const querySnapshot = await getDocs(collection(db, getCompanyCollection('suppliers')));
       const suppliersData = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -54,7 +54,7 @@ export const useSupplierStore = create<SupplierState>((set, get) => ({
       if (supplier) return supplier;
       
       // If not found in state, fetch from Firestore
-      const supplierDoc = await getDoc(doc(db, 'suppliers', supplierId));
+      const supplierDoc = await getDoc(doc(db, getCompanyCollection('suppliers'), supplierId));
       if (!supplierDoc.exists()) return null;
       
       return { id: supplierDoc.id, ...supplierDoc.data() } as Supplier;
@@ -66,7 +66,7 @@ export const useSupplierStore = create<SupplierState>((set, get) => ({
 
   addSupplier: async (supplier: Omit<Supplier, 'id'>) => {
     try {
-      const docRef = await addDoc(collection(db, 'suppliers'), {
+      const docRef = await addDoc(collection(db, getCompanyCollection('suppliers')), {
         ...supplier,
         createdAt: new Date().toISOString()
       });
@@ -86,7 +86,7 @@ export const useSupplierStore = create<SupplierState>((set, get) => ({
 
   updateSupplier: async (supplier: Supplier) => {
     try {
-      await updateDoc(doc(db, 'suppliers', supplier.id), supplier);
+      await updateDoc(doc(db, getCompanyCollection('suppliers'), supplier.id), supplier);
       
       // Update local state
       set(state => ({
@@ -103,7 +103,7 @@ export const useSupplierStore = create<SupplierState>((set, get) => ({
 
   deleteSupplier: async (supplierId: string) => {
     try {
-      await deleteDoc(doc(db, 'suppliers', supplierId));
+      await deleteDoc(doc(db, getCompanyCollection('suppliers'), supplierId));
       
       // Update local state
       set(state => ({
@@ -118,7 +118,7 @@ export const useSupplierStore = create<SupplierState>((set, get) => ({
 
   subscribeToSuppliers: () => {
     try {
-      const suppliersRef = collection(db, 'suppliers');
+      const suppliersRef = collection(db, getCompanyCollection('suppliers'));
       const suppliersQuery = query(suppliersRef, orderBy('name', 'asc'));
       
       const unsubscribe = onSnapshot(suppliersQuery, (snapshot) => {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Search, Users, Mail, Phone, Briefcase, ShieldCheck, ShieldAlert, ChevronDown } from 'lucide-react';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, getDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { TeamMember, AVAILABLE_PERMISSIONS, Permission } from '../types/team';
 
 interface TeamMemberModalProps {
@@ -304,8 +304,8 @@ const TeamManagement: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState<string>('');
 
@@ -316,18 +316,19 @@ const TeamManagement: React.FC = () => {
   const loadTeamMembers = async () => {
     try {
       setLoading(true);
-      const querySnapshot = await getDocs(
-        query(collection(db, 'teamMembers'), orderBy('name', 'asc'))
-      );
-      const membersData = querySnapshot.docs.map(doc => ({
+      const teamMembersRef = collection(db, getCompanyCollection('teamMembers'));
+      const teamMembersQuery = query(teamMembersRef, orderBy('name', 'asc'));
+      const snapshot = await getDocs(teamMembersQuery);
+      
+      const membersData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as TeamMember[];
       
       setMembers(membersData);
+      setLoading(false);
     } catch (error) {
       console.error('Error loading team members:', error);
-    } finally {
       setLoading(false);
     }
   };
@@ -350,22 +351,9 @@ const TeamManagement: React.FC = () => {
       try {
         setIsDeleting(true);
         
-        // Check if the document exists before attempting to delete
-        const memberRef = doc(db, 'teamMembers', memberId);
-        const memberDoc = await getDoc(memberRef);
-        
-        if (!memberDoc.exists()) {
-          // Handle the case where the document doesn't exist more gracefully
-          setMembers(prev => prev.filter(member => member.id !== memberId));
-          alert('Membro não encontrado ou já foi excluído. A lista foi atualizada.');
-          setIsDeleting(false);
-          return;
-        }
-        
-        // Perform the deletion
-        await deleteDoc(memberRef);
+        await deleteDoc(doc(db, getCompanyCollection('teamMembers'), memberId));
+        setMembers(prev => prev.filter(m => m.id !== memberId));
         alert('Membro excluído com sucesso!');
-        await loadTeamMembers();
       } catch (error) {
         console.error('Error deleting team member:', error);
         alert('Erro ao excluir membro da equipe');
@@ -378,39 +366,18 @@ const TeamManagement: React.FC = () => {
   const handleSaveMember = async (member: TeamMember): Promise<void> => {
     try {
       if (member.id) {
-        // Check if the document exists before updating
-        const memberRef = doc(db, 'teamMembers', member.id);
-        const memberDoc = await getDoc(memberRef);
-        
-        if (!memberDoc.exists()) {
-          throw new Error('Membro não encontrado');
-        }
-        
-        await updateDoc(memberRef, {
-          name: member.name,
-          email: member.email,
-          phone: member.phone,
-          role: member.role,
-          department: member.department,
-          skills: member.skills,
-          isActive: member.isActive,
-          permissions: member.permissions || []
-        });
+        await updateDoc(doc(db, getCompanyCollection('teamMembers'), member.id), member);
+        setMembers(prev => prev.map(m => m.id === member.id ? member : m));
       } else {
-        await addDoc(collection(db, 'teamMembers'), {
-          name: member.name,
-          email: member.email,
-          phone: member.phone,
-          role: member.role,
-          department: member.department,
-          skills: member.skills,
-          isActive: member.isActive,
-          createdAt: new Date().toISOString(),
-          permissions: member.permissions || []
+        await addDoc(collection(db, getCompanyCollection('teamMembers')), {
+          ...member,
+          createdAt: new Date().toISOString()
         });
+        setMembers(prev => [...prev, member]);
       }
       
       await loadTeamMembers();
+      setIsModalOpen(false);
     } catch (error) {
       console.error('Error saving team member:', error);
       throw error;
