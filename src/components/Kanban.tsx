@@ -8,7 +8,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { Settings, ListX, Search, Filter, ChevronDown, Calendar, Users, Flag, LayoutGrid, LayoutList, Clipboard, LayoutList as StagedList, BarChart } from 'lucide-react';
+import { Settings, ListX, Search, Filter, ChevronDown, Calendar, Users, Flag, LayoutGrid, LayoutList, Clipboard, LayoutList as StagedList, BarChart, Download } from 'lucide-react';
 import { Column, Order, OrderStatus } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
@@ -23,6 +23,7 @@ import OccupationRateTab from './OccupationRateTab';
 import { format, isAfter, isBefore, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
+import { jsPDF } from 'jspdf';
 
 const statusLegend = [
   { status: 'in-progress', color: 'bg-orange-100/80', borderColor: 'border-orange-400', label: 'Em Processo' },
@@ -574,6 +575,138 @@ const Kanban: React.FC = () => {
   // Marca se existem filtros ativos
   const hasActiveFilters = activeFilters > 0;
 
+  const handleExportGanttPDF = () => {
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a3'
+    });
+
+    // Add logo if available
+    let y = 20;
+    if (companyLogo) {
+      doc.addImage(companyLogo, 'JPEG', 20, 10, 40, 20);
+      y = 40;
+    }
+
+    // Title
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text('Cronograma de Produção', 210, y, { align: 'center' });
+    y += 15;
+
+    // Date range header
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 30); // 30 days before
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + 60); // 60 days ahead
+
+    // Create date header
+    const dateHeader = [];
+    const currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      dateHeader.push(format(currentDate, 'dd/MM'));
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Calculate column width for dates
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    const dateColumnWidth = (pageWidth - 2 * margin) / dateHeader.length;
+
+    // Draw date header
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    let x = margin;
+    dateHeader.forEach((date, index) => {
+      doc.text(date, x + dateColumnWidth/2, y, { align: 'center' });
+      x += dateColumnWidth;
+    });
+    y += 5;
+
+    // Draw vertical lines for dates
+    x = margin;
+    for (let i = 0; i <= dateHeader.length; i++) {
+      doc.line(x, y, x, y + 200);
+      x += dateColumnWidth;
+    }
+
+    // Group orders by customer
+    const ordersByCustomer = orders.reduce((acc, order) => {
+      if (!acc[order.customer]) {
+        acc[order.customer] = [];
+      }
+      acc[order.customer].push(order);
+      return acc;
+    }, {} as Record<string, Order[]>);
+
+    // Draw Gantt bars
+    let rowY = y;
+    Object.entries(ordersByCustomer).forEach(([customer, customerOrders]) => {
+      // Customer header
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'bold');
+      doc.text(customer, margin - 5, rowY + 5);
+      rowY += 10;
+
+      // Orders for this customer
+      customerOrders.forEach(order => {
+        // Order info
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'normal');
+        const orderInfo = `#${order.orderNumber} - ${order.projectName || 'Sem projeto'}`;
+        doc.text(orderInfo, margin - 5, rowY + 5);
+
+        // Draw Gantt bars for each stage
+        Object.entries(order.stagePlanning).forEach(([stage, planning]) => {
+          if (planning.startDate && planning.endDate) {
+            const startX = margin + (new Date(planning.startDate).getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000) * dateColumnWidth;
+            const endX = margin + (new Date(planning.endDate).getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000) * dateColumnWidth;
+            const width = endX - startX;
+
+            // Draw bar
+            doc.setFillColor(59, 130, 246); // Blue color
+            doc.rect(startX, rowY, width, 8, 'F');
+
+            // Add stage name
+            doc.setTextColor(255, 255, 255);
+            doc.text(stage, startX + 2, rowY + 5);
+            doc.setTextColor(0, 0, 0);
+          }
+        });
+
+        rowY += 15;
+      });
+
+      rowY += 10; // Space between customers
+    });
+
+    // Add legend
+    const legendY = doc.internal.pageSize.getHeight() - 20;
+    doc.setFontSize(8);
+    doc.text('Legenda:', margin, legendY);
+    doc.setFillColor(59, 130, 246);
+    doc.rect(margin + 30, legendY - 3, 10, 5, 'F');
+    doc.text('Etapa de Produção', margin + 45, legendY);
+
+    // Add pagination
+    const totalPages = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(
+        `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })} - Página ${i} de ${totalPages}`,
+        210,
+        doc.internal.pageSize.getHeight() - 10,
+        { align: 'center' }
+      );
+    }
+
+    doc.save('cronograma-producao.pdf');
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -919,6 +1052,16 @@ const Kanban: React.FC = () => {
           )}
         </>
       )}
+
+      <div className="mt-6">
+        <button
+          onClick={handleExportGanttPDF}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        >
+          <Download className="h-5 w-5 mr-2" />
+          Exportar Cronograma
+        </button>
+      </div>
     </div>
   );
 };

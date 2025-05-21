@@ -7,6 +7,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
 import LogoUploadModal from './LogoUploadModal';
+import { db, getCompanyCollection, updateDoc } from '../firebase/firebaseConfig';
 
 interface OrdersListProps {
   orders: Order[];
@@ -93,6 +94,15 @@ const OrdersList: React.FC<OrdersListProps> = ({ orders, onSelectOrders }) => {
     // Get selected orders - use orders instead of filteredOrders to get the latest data
     const selectedOrderObjects = orders.filter(order => selectedOrders.has(order.id));
     
+    // Update lastExportDate for selected orders
+    const now = new Date().toISOString();
+    selectedOrderObjects.forEach(order => {
+      const orderRef = doc(db, getCompanyCollection('orders'), order.id);
+      updateDoc(orderRef, {
+        lastExportDate: now
+      });
+    });
+    
     // Add a summary line
     doc.setFontSize(12);
     doc.setFont(undefined, 'normal');
@@ -119,6 +129,7 @@ const OrdersList: React.FC<OrdersListProps> = ({ orders, onSelectOrders }) => {
       order.items.map(item => ({
         orderNumber: order.orderNumber,
         customer: order.customer,
+        projectName: order.projectName,
         ...item
       }))
     );
@@ -133,7 +144,7 @@ const OrdersList: React.FC<OrdersListProps> = ({ orders, onSelectOrders }) => {
       body: allItems.map(item => [
         `#${item.orderNumber}`,
         item.customer,
-        selectedOrderObjects.find(order => order.orderNumber === item.orderNumber)?.projectName || '',
+        item.projectName || '',
         item.itemNumber.toString(),
         item.code,
         item.description,
