@@ -90,8 +90,8 @@ const OrdersList: React.FC<OrdersListProps> = ({ orders, onSelectOrders }) => {
     doc.text(`Lista de Itens Selecionados`, 105, y, { align: 'center' });
     y += 15;
     
-    // Get selected orders
-    const selectedOrderObjects = filteredOrders.filter(order => selectedOrders.has(order.id));
+    // Get selected orders - use orders instead of filteredOrders to get the latest data
+    const selectedOrderObjects = orders.filter(order => selectedOrders.has(order.id));
     
     // Add a summary line
     doc.setFontSize(12);
