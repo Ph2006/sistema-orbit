@@ -4,7 +4,7 @@ import { Order, OrderItem } from '../types/kanban';
 import { CuttingPlan, Bar, CutItem } from '../types/cutting-plan';
 import { ArrowRight, BarChart3, Download, Info, Grape as Tape, Trash2, RefreshCw, AlertTriangle, Search } from 'lucide-react';
 import { collection, addDoc, getDocs, getDoc, query, orderBy, where, deleteDoc, doc, updateDoc, writeBatch, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { format } from 'date-fns';
