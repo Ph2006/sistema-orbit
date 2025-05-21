@@ -90,6 +90,8 @@ const QualityReportsForm: React.FC<QualityReportsFormProps> = ({ report, order, 
         return renderVisualWeldingForm();
       case 'ultrasonic':
         return renderUltrasonicForm();
+      case 'painting':
+        return renderPaintingForm();
       default:
         return null;
     }
@@ -868,6 +870,86 @@ const QualityReportsForm: React.FC<QualityReportsFormProps> = ({ report, order, 
     );
   };
 
+  const renderPaintingForm = () => (
+    <div className="space-y-4">
+      {/* 1. Identificação do Projeto */}
+      <h3 className="text-lg font-bold mt-4">1. Identificação do Projeto</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Nome do cliente" className="input" />
+        <input type="text" placeholder="Nome do projeto ou obra" className="input" />
+        <input type="text" placeholder="Local da aplicação" className="input" />
+        <input type="text" placeholder="Nº do contrato ou ordem de serviço" className="input" />
+        <input type="date" placeholder="Data(s) da aplicação" className="input" />
+        <input type="text" placeholder="Responsável pela aplicação" className="input" />
+        <input type="text" placeholder="Responsável pela inspeção" className="input" />
+      </div>
+      {/* 2. Especificação Técnica da Pintura */}
+      <h3 className="text-lg font-bold mt-4">2. Especificação Técnica da Pintura</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Tipo de sistema de pintura" className="input" />
+        <input type="text" placeholder="Número de demãos e produtos usados" className="input" />
+        <input type="text" placeholder="Espessura requerida por demão e total (DFT)" className="input" />
+        <input type="text" placeholder="Cor (RAL ou Munsell)" className="input" />
+        <input type="text" placeholder="Condições ambientais permitidas" className="input" />
+      </div>
+      {/* 3. Condições Ambientais na Aplicação */}
+      <h3 className="text-lg font-bold mt-4">3. Condições Ambientais na Aplicação</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Temperatura ambiente e da superfície" className="input" />
+        <input type="text" placeholder="Umidade relativa do ar" className="input" />
+        <input type="text" placeholder="Ponto de orvalho (com cálculo)" className="input" />
+        <input type="text" placeholder="Condição do clima" className="input" />
+      </div>
+      {/* 4. Preparação da Superfície */}
+      <h3 className="text-lg font-bold mt-4">4. Preparação da Superfície</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Tipo de preparação" className="input" />
+        <input type="text" placeholder="Padrão de limpeza" className="input" />
+        <input type="text" placeholder="Perfil de rugosidade" className="input" />
+        <input type="datetime-local" placeholder="Data/hora da preparação" className="input" />
+        <input type="text" placeholder="Equipamento e abrasivo utilizado" className="input" />
+      </div>
+      {/* 5. Aplicação da Tinta */}
+      <h3 className="text-lg font-bold mt-4">5. Aplicação da Tinta</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Produto aplicado e fabricante" className="input" />
+        <input type="text" placeholder="Nº do lote da tinta e validade" className="input" />
+        <input type="text" placeholder="Ferramenta usada" className="input" />
+        <input type="text" placeholder="Mistura, catalisador e diluente usados" className="input" />
+        <input type="text" placeholder="Tempo de indução e pot-life" className="input" />
+        <input type="text" placeholder="Intervalo entre demãos" className="input" />
+        <input type="text" placeholder="Espessura aplicada (DFT)" className="input" />
+      </div>
+      {/* 6. Ensaios e Inspeções Realizadas */}
+      <h3 className="text-lg font-bold mt-4">6. Ensaios e Inspeções Realizadas</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Medição de espessura (por área)" className="input" />
+        <input type="text" placeholder="Teste de aderência" className="input" />
+        <input type="text" placeholder="Teste de cura" className="input" />
+        <input type="text" placeholder="Teste de continuidade" className="input" />
+        <input type="text" placeholder="Observação de falhas" className="input" />
+      </div>
+      {/* 7. Registros Fotográficos */}
+      <h3 className="text-lg font-bold mt-4">7. Registros Fotográficos</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Fotos da preparação de superfície" className="input" />
+        <input type="text" placeholder="Fotos da aplicação" className="input" />
+        <input type="text" placeholder="Fotos dos instrumentos utilizados" className="input" />
+        <input type="text" placeholder="Fotos da condição final" className="input" />
+      </div>
+      {/* 8. Observações Adicionais */}
+      <h3 className="text-lg font-bold mt-4">8. Observações Adicionais</h3>
+      <textarea className="input" placeholder="Não conformidades, correções, restrições, interferências..."></textarea>
+      {/* 9. Assinaturas */}
+      <h3 className="text-lg font-bold mt-4">9. Assinaturas</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input type="text" placeholder="Pintor ou equipe de aplicação" className="input" />
+        <input type="text" placeholder="Inspetor de pintura" className="input" />
+        <input type="text" placeholder="Cliente (opcional)" className="input" />
+      </div>
+    </div>
+  );
+
   // Function to handle form submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -918,6 +1000,9 @@ const QualityReportsForm: React.FC<QualityReportsFormProps> = ({ report, order, 
         break;
       case 'ultrasonic':
         title = 'RELATÓRIO DE ENSAIO ULTRASÔNICO';
+        break;
+      case 'painting':
+        title = 'RELATÓRIO DE INSPEÇÃO DE PINTURA';
         break;
     }
     
@@ -1213,6 +1298,10 @@ const QualityReportsForm: React.FC<QualityReportsFormProps> = ({ report, order, 
         y = (doc as any).lastAutoTable.finalY + 15;
       }
     }
+    else if (formData.reportType === 'painting') {
+      // Add painting specific details
+      renderPaintingForm();
+    }
 
     // Add photos section if there are photos
     if (photos.length > 0) {
@@ -1321,7 +1410,7 @@ const QualityReportsForm: React.FC<QualityReportsFormProps> = ({ report, order, 
           {report.reportType === 'dimensional' ? 'Dimensional' :
            report.reportType === 'liquid-penetrant' ? 'de Líquido Penetrante' :
            report.reportType === 'visual-welding' ? 'de Inspeção Visual de Solda' :
-           'de Ultrassom'}
+           report.reportType === 'ultrasonic' ? 'de Ultrassom' : 'de Pintura'}
         </h2>
         <div className="flex space-x-3">
           {report.id !== 'new' && (

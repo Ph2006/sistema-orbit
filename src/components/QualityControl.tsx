@@ -68,7 +68,7 @@ const QualityControl: React.FC = () => {
   // Reports state
   const [reports, setReports] = useState<QualityReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<QualityReport | null>(null);
-  const [reportType, setReportType] = useState<'dimensional' | 'liquid-penetrant' | 'visual-welding' | 'ultrasonic'>('dimensional');
+  const [reportType, setReportType] = useState<'dimensional' | 'liquid-penetrant' | 'visual-welding' | 'ultrasonic' | 'painting'>('dimensional');
   
   // Search state
   const [searchTerm, setSearchTerm] = useState('');
@@ -1182,6 +1182,12 @@ const QualityControl: React.FC = () => {
                 className={`px-3 py-1 rounded-md text-sm ${reportType === 'ultrasonic' ? 'bg-white shadow' : 'hover:bg-gray-200'}`}
               >
                 Ultrassom
+              </button>
+              <button
+                onClick={() => setReportType('painting')}
+                className={`px-3 py-1 rounded-md text-sm ${reportType === 'painting' ? 'bg-white shadow' : 'hover:bg-gray-200'}`}
+              >
+                Pintura
               </button>
             </div>
           </div>
