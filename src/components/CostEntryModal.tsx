@@ -481,7 +481,6 @@ const CostEntryModal: React.FC<CostEntryModalProps> = ({ cost, orderId, onClose,
                 </div>
                 <input
                   type="number"
-                  min="0"
                   value={formData.amount}
                   onChange={(e) => setFormData(prev => ({ ...prev, amount: parseFloat(e.target.value) }))}
                   className={`pl-9 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 ${
