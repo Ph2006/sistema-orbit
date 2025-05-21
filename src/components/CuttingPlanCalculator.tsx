@@ -56,6 +56,7 @@ const CuttingPlanCalculator: React.FC = () => {
             ...doc.data()
           })) as CuttingPlan[];
           
+          // Update the local state with the latest plans from Firestore
           setLoadedPlans(plans);
           
           // Set plan counter to the highest existing number + 1

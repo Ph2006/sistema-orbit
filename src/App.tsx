@@ -32,17 +32,18 @@ import CostCenter from './components/CostCenter';
 import AboutSystem from './components/AboutSystem';
 
 function App() {
-  const { setUser, setLoading } = useAuthStore();
+  const { setUser, setLoading, companyId } = useAuthStore();
 
   useEffect(() => {
     setLoading(true);
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
+      console.log(`Company ID after auth state change: ${companyId}`);
     });
 
     return () => unsubscribe();
-  }, [setUser, setLoading]);
+  }, [setUser, setLoading, companyId]);
 
   return (
     <Router>
