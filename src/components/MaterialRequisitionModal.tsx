@@ -54,6 +54,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     status: 'pending',
     sentForQuotation: false
   });
+  const [isQuotationMode, setIsQuotationMode] = useState(false);
 
   // Load suppliers
   useEffect(() => {
