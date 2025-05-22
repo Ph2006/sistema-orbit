@@ -119,6 +119,8 @@ const MaterialRequisitions: React.FC = () => {
           orderBy('requestDate', 'desc')
         );
         
+        console.log("Setting up requisition listener for companyId:", companyId);
+        
         const unsubscribeRequisitions = onSnapshot(requisitionsQuery, (snapshot) => {
           const requisitionsData = snapshot.docs.map(doc => ({
             id: doc.id,
@@ -132,6 +134,8 @@ const MaterialRequisitions: React.FC = () => {
           collection(db, getCompanyCollection('quotationRequests', companyId)),
           orderBy('requestDate', 'desc')
         );
+        
+        console.log("Setting up quotation listener for companyId:", companyId);
         
         const unsubscribeQuotations = onSnapshot(quotationsQuery, (snapshot) => {
           const quotationsData = snapshot.docs.map(doc => ({
@@ -154,8 +158,13 @@ const MaterialRequisitions: React.FC = () => {
       }
     };
     
-    fetchData();
-  }, []);
+    // Fetch data only when companyId is available
+    if (companyId) {
+      fetchData();
+    } else {
+      setLoading(false); // Stop loading if companyId is not available
+    }
+  }, [companyId]);
 
   const handleAddRequisition = () => {
     setSelectedRequisition(null);
