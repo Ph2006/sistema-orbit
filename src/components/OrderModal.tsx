@@ -376,269 +376,217 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   };
 
   const handleExportPDF = () => {
-    const doc = new jsPDF();
-    
-    // Set document properties for A4 page
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a3'
+    });
+
+    // Get page dimensions
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 15; // default margin in mm
-    const contentWidth = pageWidth - (margin * 2);
-    
-    // Add logo and title to first page
-    let y = margin;
+    const margin = 15;
+    const infoColumnWidth = 120; // Increased width for task information
+    const ganttWidth = pageWidth - margin * 2 - infoColumnWidth;
+
+    // Add logo and Title
+    let y = 15;
     if (companyLogo) {
-      // Calculate logo size to maintain aspect ratio, max height 25mm
-      const logoHeight = 20;
-      const logoWidth = 40;
-      
-      doc.addImage(companyLogo, 'JPEG', margin, y, logoWidth, logoHeight);
-      
-      // Center the title text
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text('Detalhes do Pedido', pageWidth / 2, y + 10, { align: 'center' });
-      
-      y += logoHeight + 5; // Move down past the logo
+      doc.addImage(companyLogo, 'JPEG', margin, y, 30, 15);
+      doc.setFontSize(18);
+      doc.setFont(undefined, 'bold');
+      doc.text(`CRONOGRAMA PEDIDO #${formData.orderNumber}`, pageWidth / 2, y + 7.5, { align: 'center' });
+      y += 20;
     } else {
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text('Detalhes do Pedido', pageWidth / 2, y + 10, { align: 'center' });
+      doc.setFontSize(18);
+      doc.setFont(undefined, 'bold');
+      doc.text(`CRONOGRAMA PEDIDO #${formData.orderNumber}`, pageWidth / 2, y, { align: 'center' });
       y += 15;
     }
 
-    // Order header section - use light blue background
-    doc.setFillColor(240, 245, 255);
-    doc.setDrawColor(210, 225, 240);
-    doc.roundedRect(margin, y, contentWidth, 35, 2, 2, 'FD');
-    
-    // Order details
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Pedido #${formData.orderNumber}`, margin + 5, y + 8);
-    
+    // Project Name below title (if available)
+    if (formData.projectName) {
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'normal');
+      doc.text(`PROJETO ${formData.projectName}`, pageWidth / 2, y, { align: 'center' });
+      y += 10;
+    }
+
+    // Order info
     doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Cliente: ${formData.customer}`, margin + 5, y + 16);
-    doc.text(`OS: ${formData.internalOrderNumber}`, margin + 5, y + 24);
-    doc.text(`Início: ${format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 5, y + 32);
-    doc.text(`Entrega: ${format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 80, y + 32);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Cliente: ${formData.customer}`, margin, y);
+    doc.text(`OS: ${formData.internalOrderNumber}`, margin + 60, y);
+    doc.text(`Data de Início: ${format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 120, y);
+    doc.text(`Data de Entrega: ${format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 180, y);
+    y += 10;
+
+    // Calculate date range for the Gantt chart
+    const allDates = formData.items.flatMap(item => {
+       const itemProgressEntries = Object.entries(item.stagePlanning || {});
+       return itemProgressEntries.flatMap(([stageName, stageDates]) => [
+         new Date(stageDates.startDate),
+         new Date(stageDates.endDate)
+       ]);
+    }).filter(date => !isNaN(date.getTime())); // Filter out invalid dates
+
+    if (allDates.length === 0) {
+      alert('Não há dados de planejamento de etapas para gerar o cronograma.');
+      return;
+    }
+
+    const minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
+    const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())));
     
-    y += 40;
+    // Add padding days
+    minDate.setDate(minDate.getDate() - 7); // 1 week before first task
+    maxDate.setDate(maxDate.getDate() + 14); // 2 weeks after last task
 
-    // Process items
+    // Create date header (Daily columns)
+    const dateHeader = [];
+    const currentDate = new Date(minDate);
+    while (currentDate <= maxDate) {
+      dateHeader.push(new Date(currentDate));
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    // Calculate column width for dates
+    const totalDays = dateHeader.length;
+    const dateColumnWidth = ganttWidth / totalDays;
+    const rowHeight = 8; // Height for each task row
+
+    // Draw date header (Days of the week and Day number)
+    let headerY = y + 5;
+    let currentHeaderX = margin + infoColumnWidth;
+
+    doc.setFontSize(6);
+    doc.setFont(undefined, 'bold');
+    dateHeader.forEach((date, index) => {
+      // Draw day of the week (Initial letter)
+      doc.text(format(date, 'EEE', { locale: ptBR }).substring(0,1).toUpperCase(), currentHeaderX + dateColumnWidth/2, headerY, { align: 'center' });
+      // Draw day number
+      doc.text(format(date, 'dd'), currentHeaderX + dateColumnWidth/2, headerY + 4, { align: 'center' });
+
+      currentHeaderX += dateColumnWidth;
+    });
+    headerY += 8;
+
+    // Draw horizontal line below date header
+    doc.line(margin + infoColumnWidth, headerY, pageWidth - margin, headerY);
+
+    let currentContentY = headerY + 2;
+
+    // Draw vertical grid lines for dates
+    let gridX = margin + infoColumnWidth;
+    doc.setDrawColor(220, 220, 220); // Light gray for grid lines
+    for (let i = 0; i <= totalDays; i++) {
+      doc.line(gridX, headerY, gridX, pageHeight - 40); // Extend lines down until near footer
+      gridX += dateColumnWidth;
+    }
+    doc.setDrawColor(0, 0, 0); // Reset draw color
+
+    // Process each item and its stages
     formData.items.forEach(item => {
-      // Add a new page if we're running out of space
-      if (y > pageHeight - 60) {
-        doc.addPage();
-        y = margin;
-      }
+      // Item header (on the left)
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'bold');
+      doc.text(`Item ${item.itemNumber}: ${item.code}`, margin, currentContentY + 3);
+      doc.setFont(undefined, 'normal');
+      doc.text(item.description, margin + 3, currentContentY + 7);
 
-      // Item header with green background for completed items
-      const itemFullyCompleted = isItemCompleted(item);
-      
-      if (itemFullyCompleted) {
-        doc.setFillColor(230, 245, 230); // Light green for completed items
-      } else {
-        doc.setFillColor(240, 240, 240); // Light gray for in-progress items
-      }
-      doc.roundedRect(margin, y, contentWidth, 42, 2, 2, 'FD');
+      let itemContentY = currentContentY + 12; // Starting Y for stages within this item
 
-      // Item details
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text(`Item ${item.itemNumber}: ${item.code}`, margin + 5, y + 8);
-      
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.text(`Descrição: ${item.description}`, margin + 5, y + 16);
-      doc.text(`Quantidade: ${item.quantity}`, margin + 5, y + 24);
-      doc.text(`Peso Unitário: ${item.unitWeight.toLocaleString('pt-BR')} kg`, margin + 75, y + 24);
-      doc.text(`Peso Total: ${item.totalWeight.toLocaleString('pt-BR')} kg`, margin + 135, y + 24);
-      
-      // Add NF and LE info for completed items with a nice green background
-      if (itemFullyCompleted) {
-        // Subtle green background for NF/LE section
-        doc.setFillColor(220, 240, 220);
-        doc.roundedRect(margin, y + 28, contentWidth, 12, 1, 1, 'F');
-        
-        doc.setFont("helvetica", "bold");
-        const hasNF = item.invoiceNumber && item.invoiceNumber.trim() !== '';
-        const hasLE = item.expeditionLE && item.expeditionLE.trim() !== '';
-        const hasDate = item.expeditionDate && item.expeditionDate.trim() !== '';
+      // Get and sort stages for this item based on planning start dates
+      const sortedStages = Object.entries(item.stagePlanning || {})
+        .sort(([, a]: any, [, b]: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
-        if (hasNF) {
-          doc.text(`NF: ${item.invoiceNumber}`, margin + 5, y + 36);
+      // Draw stages as Gantt bars and info on the left
+      sortedStages.forEach(([stageName, stageDates]: any) => {
+        const progress = item.progress?.[stageName] || 0;
+
+        // Stage info on the left
+        doc.setFontSize(7);
+        doc.setFont(undefined, 'normal');
+        doc.text(`${stageName}`, margin + 5, itemContentY + rowHeight / 2 + 2);
+        doc.text(`${progress}%`, infoColumnWidth - 10, itemContentY + rowHeight / 2 + 2, { align: 'right' });
+
+        // Calculate stage bar position
+        const stageStartX = margin + infoColumnWidth + 
+          (new Date(stageDates.startDate).getTime() - minDate.getTime()) / (24 * 60 * 60 * 1000) * dateColumnWidth;
+        const stageEndX = margin + infoColumnWidth + 
+          (new Date(stageDates.endDate).getTime() - minDate.getTime()) / (24 * 60 * 60 * 1000) * dateColumnWidth;
+        const stageWidth = Math.max(dateColumnWidth / 2, stageEndX - stageStartX); // Ensure minimum width
+
+        // Stage status color based on progress
+        const statusColor = progress === 100 ? [34, 197, 94] : // Green (Concluído)
+                          progress >= 70 ? [59, 130, 246] : // Blue (Em Andamento)
+                          progress >= 30 ? [234, 179, 8] : // Yellow (Em Progresso)
+                          [239, 68, 68]; // Red (Atrasado)
+
+        // Draw stage bar
+        doc.setFillColor(...statusColor);
+        doc.rect(stageStartX, itemContentY, stageWidth, rowHeight, 'F');
+
+        // Add progress percentage text on bar
+        if (progress > 0) { // Only show progress if > 0
+           doc.setTextColor(255, 255, 255);
+           doc.setFontSize(6);
+           doc.text(`${progress}%`, stageStartX + stageWidth / 2, itemContentY + rowHeight / 2 + 1, { align: 'center' });
+           doc.setTextColor(0, 0, 0); // Reset text color
         }
-        
-        if (hasLE) {
-          doc.text(`LE: ${item.expeditionLE}`, hasNF ? margin + 75 : margin + 5, y + 36);
-        }
-        
-        if (hasDate) {
-          const datePosition = hasNF && hasLE ? margin + 135 : 
-                            (hasNF || hasLE) ? margin + 75 : margin + 5;
-          doc.text(`Data: ${format(new Date(item.expeditionDate), 'dd/MM/yyyy', { locale: ptBR })}`, datePosition, y + 36);
-        }
-        
-        doc.setFont("helvetica", "normal");
-      }
-      
-      // Increase y for completed items with NF/LE info
-      y += 46;
-      
-      // Progress bar section
-      const itemProgress = calculateItemProgress(item.progress);
-      
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text(`Progresso: ${itemProgress}%`, margin, y + 4);
-      
-      // Progress bar background
-      doc.setFillColor(230, 230, 230);
-      doc.roundedRect(margin + 45, y, contentWidth - 45, 8, 2, 2, 'F');
-      
-      // Progress bar fill - color based on completion level
-      if (itemProgress === 100) {
-        doc.setFillColor(60, 180, 75); // Green for 100%
-      } else if (itemProgress >= 70) {
-        doc.setFillColor(65, 105, 225); // Blue for ≥ 70%
-      } else if (itemProgress >= 30) {
-        doc.setFillColor(255, 165, 0); // Orange for ≥ 30%
-      } else {
-        doc.setFillColor(220, 20, 60); // Crimson for < 30%
-      }
-      
-      if (itemProgress > 0) {
-        const fillWidth = (itemProgress / 100) * (contentWidth - 45);
-        doc.roundedRect(margin + 45, y, fillWidth, 8, 2, 2, 'F');
-      }
-      
-      y += 14;
 
-      // Only add stage details if there's progress data
-      if (item.progress && Object.keys(item.progress).length > 0) {
-        // Add table header
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.text("Etapas de Produção", margin, y);
-        y += 8;
-        
-        // Table headers with auto-table for better layout handling
-        const stagePlanning = item.stagePlanning || {};
-        
-        // Sort stages by execution order (planning start dates)
-        const sortedStages = sortStagesByExecutionOrder(item.progress, stagePlanning);
-        
-        // Define columns for the auto-table
-        const columns = [
-          {header: 'Etapa', dataKey: 'stage'},
-          {header: 'Progresso', dataKey: 'progress'},
-          {header: 'Datas', dataKey: 'dates'}
-        ];
-        
-        // Prepare data rows
-        const data = sortedStages.map(([stageName, stageProgress]) => {
-          const planning = stagePlanning[stageName] || {};
-          let dates = '';
-          
-          if (planning.startDate && planning.endDate) {
-            dates = `${format(new Date(planning.startDate), 'dd/MM/yy', { locale: ptBR })} - ${format(new Date(planning.endDate), 'dd/MM/yy', { locale: ptBR })}`;
-          }
-          
-          return {
-            stage: stageName,
-            progress: `${stageProgress}%`,
-            dates: dates
-          };
-        });
-        
-        if (data.length > 0) {
-          (doc as any).autoTable({
-            startY: y,
-            columns: columns,
-            body: data,
-            theme: 'grid',
-            headStyles: { 
-              fillColor: [240, 240, 240], 
-              textColor: [0, 0, 0], 
-              fontStyle: 'bold'
-            },
-            columnStyles: {
-              stage: { cellWidth: 80 },
-              progress: { cellWidth: 25, halign: 'center' },
-              dates: { cellWidth: 50 }
-            },
-            styles: {
-              fontSize: 8,
-              cellPadding: 3,
-              overflow: 'linebreak'
-            },
-            willDrawCell: function(data: any) {
-              if (data.section === 'body') {
-                // Get progress value from the progress column (remove the '%' character)
-                const progressText = data.row.cells.progress.text;
-                const progress = parseInt(progressText);
-                
-                // Color the row background for completed stages (100%)
-                if (progress === 100) {
-                  doc.setFillColor(230, 250, 230); // Light green for completed
-                  doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-                }
-              }
-            }
-          });
-          
-          // Update y position after table
-          y = (doc as any).lastAutoTable.finalY + 15;
-          
-          // Summary of completed stages
-          const completedStages = sortedStages.filter(([_, progress]) => progress === 100).map(([stage]) => stage);
-          const totalStages = sortedStages.length;
-          
-          doc.setFont("helvetica", "bold");
-          doc.text(`Etapas Concluídas: ${completedStages.length} de ${totalStages}`, margin, y);
-          y += 6;
-          
-          // List of completed stages
-          if (completedStages.length > 0) {
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(9);
-            
-            const completedText = `Etapas concluídas: ${completedStages.join(', ')}`;
-            const textLines = doc.splitTextToSize(completedText, contentWidth);
-            
-            doc.text(textLines, margin, y);
-          }
-        } else {
-          doc.setFont("helvetica", "normal");
-          doc.text("Não há dados de progresso registrados para este item.", margin, y);
-        }
-      } else {
-        doc.setFont("helvetica", "normal");
-        doc.text("Não há dados de progresso registrados para este item.", margin, y);
-      }
+        // Dependencies are not explicitly modeled between stages in the current data structure,
+        // so we cannot draw dependency lines like in the Gantt component.
+        // If dependency data becomes available for stages, this can be added.
 
-      // Add some space before the next item
-      y += 20;
+        itemContentY += rowHeight + 5; // Space between stage bars
+      });
+
+      currentContentY = itemContentY + 5; // Update overall Y position after item's stages
     });
 
-    // Add pagination
+     // Add legend
+    const legendY = pageHeight - 30;
+    doc.setFontSize(8);
+    doc.setTextColor(0, 0, 0);
+    doc.text('Legenda:', margin, legendY);
+    
+    // Status colors legend
+    const legendItems = [
+      { color: [34, 197, 94], label: 'Concluído' },
+      { color: [59, 130, 246], label: 'Em Andamento' },
+      { color: [234, 179, 8], label: 'Em Progresso' },
+      { color: [239, 68, 68], label: 'Atrasado' }
+    ];
+
+    let legendX = margin + 25;
+    legendItems.forEach(item => {
+      doc.setFillColor(...item.color);
+      doc.rect(legendX, legendY - 3, 8, 4, 'F');
+      doc.text(item.label, legendX + 10, legendY);
+      legendX += 40; // Adjust spacing based on label length
+    });
+
+    // Add footer with page number and date
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       doc.text(
-        `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })} - Página ${i} de ${totalPages}`,
-        pageWidth / 2, 
-        pageHeight - 10, 
-        { align: 'center' }
+        `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
+        margin,
+        pageHeight - 10
       );
-      // Reset text color for next page
-      doc.setTextColor(0, 0, 0);
+      doc.text(
+        `Página ${i} de ${totalPages}`,
+        pageWidth - margin,
+        pageHeight - 10,
+        { align: 'right' }
+      );
     }
-    
-    doc.save(`relatorio-${formData.orderNumber}-item${formData.items.length}.pdf`);
+
+    doc.save(`cronograma-pedido-${formData.orderNumber}.pdf`);
   };
 
   // New function for exporting selected items as a simple list
@@ -667,24 +615,17 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     // Get selected items
     const selectedOrderObjects = formData.items.filter(item => selectedItems.has(item.id));
     
-    // Add a summary line
+    // Add order information (always show for context)
     doc.setFontSize(12);
     doc.setFont(undefined, 'normal');
-    if (selectedOrderObjects.length === 1) {
-      const item = selectedOrderObjects[0];
-      doc.text(`Pedido #${formData.orderNumber} - ${formData.customer}`, 20, y);
-      y += 8;
-      doc.text(`OS Interna: ${formData.internalOrderNumber}`, 20, y);
-      y += 8;
-      if (formData.projectName) {
-        doc.text(`Projeto: ${formData.projectName}`, 20, y);
-        y += 8;
-      }
-    } else {
-      doc.text(`${selectedOrderObjects.length} itens selecionados`, 20, y);
+    doc.text(`Pedido #${formData.orderNumber} - ${formData.customer}`, 20, y);
+    y += 8;
+    doc.text(`OS Interna: ${formData.internalOrderNumber}`, 20, y);
+    y += 8;
+    if (formData.projectName) {
+      doc.text(`Projeto: ${formData.projectName}`, 20, y);
       y += 8;
     }
-
     doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, y);
     y += 15;
     

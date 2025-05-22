@@ -14,7 +14,9 @@ import {
   LiquidPenetrantReport,
   VisualWeldingReport,
   UltrasonicReport,
-  EngineeringCall
+  EngineeringCall,
+  WeldingMachine,
+  WeldingMachineCalibrationRecord
 } from '../types/quality';
 import { Order } from '../types/kanban';
 import { Link, Check, X, Mail, Download, FileCheck, Plus, Settings, ExternalLink, Clock, Trash2, ChevronLeft, FileBarChart2, AlertCircle, ClipboardCheck, Layers, BookOpen, FileText, Search, Edit } from 'lucide-react';
@@ -33,9 +35,10 @@ import InternalProcedures from './InternalProcedures';
 import QualityReportsForm from './QualityReportsForm';
 import EngineeringCallsTab from './EngineeringCallsTab';
 import { useLocation } from 'react-router-dom';
+import QualityCalibration from './QualityCalibration';
 
 // Tab definitions
-type TabType = 'documents' | 'metrics' | 'nonconformities' | 'checklists' | 'lessons' | 'procedures' | 'reports' | 'engineering';
+type TabType = 'documents' | 'metrics' | 'nonconformities' | 'checklists' | 'lessons' | 'procedures' | 'reports' | 'engineering' | 'calibration';
 
 const QualityControl: React.FC = () => {
   // General state
@@ -538,6 +541,13 @@ const QualityControl: React.FC = () => {
         <FileText className="h-5 w-5 inline-block mr-1" />
         Procedimentos
       </button>
+      <button
+        onClick={() => setActiveTab('calibration')}
+        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'calibration' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+      >
+        <Settings className="h-5 w-5 inline-block mr-1" />
+        Calibração
+      </button>
     </div>
   );
 
@@ -705,6 +715,48 @@ const QualityControl: React.FC = () => {
     );
   }
 
+  // Render content based on active tab and selected order
+  // The Procedures and Calibration tabs should always be accessible
+  if (!selectedOrder && activeTab !== 'procedures' && activeTab !== 'calibration') {
+    return (
+      <div className="bg-white rounded-lg shadow-lg p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold">Controle de Qualidade</h3>
+          <div className="flex space-x-4">
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+            >
+              <Settings className="h-5 w-5 mr-2" />
+              Configurar Documentos
+            </button>
+            {/* Add other general QC buttons if needed */}
+          </div>
+        </div>
+        {renderTabs()}
+        <InternalProcedures />
+      </div>
+    );
+  }
+
+  // If no order is selected, and the active tab is procedures or calibration, render only that tab
+  if (!selectedOrder && (activeTab === 'procedures' || activeTab === 'calibration')) {
+    return (
+      <div className="bg-white rounded-lg shadow-lg p-6">
+        <div className="flex justify-between items-center mb-6">
+           <h3 className="text-xl font-bold">Controle de Qualidade - {activeTab === 'procedures' ? 'Procedimentos' : 'Calibração'}</h3>
+           <div className="flex space-x-4">
+             {/* Add general QC buttons if needed */}
+           </div>
+        </div>
+        {renderTabs()}
+        {activeTab === 'procedures' && <InternalProcedures />}
+        {activeTab === 'calibration' && <QualityCalibration />}
+      </div>
+    );
+  }
+
+  // If an order is selected, render the full QC view with all tabs accessible
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
       <div className="flex justify-between items-center mb-6">
@@ -1300,6 +1352,10 @@ const QualityControl: React.FC = () => {
 
       {activeTab === 'procedures' && (
         <InternalProcedures />
+      )}
+      
+      {activeTab === 'calibration' && (
+        <QualityCalibration />
       )}
     </div>
   );

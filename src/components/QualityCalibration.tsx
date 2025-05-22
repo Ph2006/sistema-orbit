@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import WeldingMachineList from './WeldingMachineList';
 import WeldingMachineCalibration from './WeldingMachineCalibration';
-import { Settings, Calendar, Info, Plus, FileText, Upload, Trash2, Edit, FileCheck, FileBarChart2 } from 'lucide-react';
+import { Settings, Calendar, Info, Plus, FileText, Upload, Trash2, Edit, FileCheck, FileBarChart2, XCircle } from 'lucide-react';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { format, addYears } from 'date-fns';
@@ -105,65 +105,54 @@ const QualityCalibration: React.FC = () => {
 
   // Handle adding/updating machines
   const handleSaveMachine = async () => {
-    if (!newMachine.name || !newMachine.identification || !newMachine.type) {
+    if (!newMachine.name || !newMachine.type || !newMachine.identification || !newMachine.calibrationInterval) {
       alert('Por favor, preencha todos os campos obrigatórios da máquina.');
       return;
     }
-    
+
     try {
-      if (newMachine.id) {
+      if (editingMachine) {
         // Update existing machine
-        const { id, ...updateData } = newMachine;
-        await updateDoc(doc(db, 'machines', id), { ...updateData, updatedAt: new Date().toISOString() });
+        const machineRef = doc(db, 'machines', editingMachine.id);
+        await updateDoc(machineRef, newMachine);
+        setEditingMachine(null);
       } else {
         // Add new machine
-        await addDoc(collection(db, 'machines'), { 
-          ...newMachine, 
-          createdAt: new Date().toISOString(), 
-          updatedAt: new Date().toISOString(),
-          calibrationInterval: newMachine.calibrationInterval || 12, // Default to 1 year if not specified
-        });
+        await addDoc(collection(db, 'machines'), { ...newMachine, status: 'active', createdAt: new Date().toISOString() });
       }
+
       setShowMachineForm(false);
       setNewMachine({});
-      setEditingMachine(null);
     } catch (error) {
       console.error('Error saving machine:', error);
       alert('Erro ao salvar máquina.');
     }
   };
 
-  // Handle deleting machines
+  // Handle deleting machine
   const handleDeleteMachine = async (machineId: string) => {
-    if (!confirm('Tem certeza que deseja excluir esta máquina e todos os seus registros de calibração?')) return;
-
-    try {
-      // Delete calibration records associated with the machine
-      const recordsQuery = query(collection(db, 'calibrationRecords'), where('machineId', '==', machineId));
-      const recordsSnapshot = await getDocs(recordsQuery);
-      const deleteRecordPromises = recordsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(deleteRecordPromises);
-
-      // Delete the machine
-      await deleteDoc(doc(db, 'machines', machineId));
-
-    } catch (error) {
-      console.error('Error deleting machine:', error);
-      alert('Erro ao excluir máquina.');
+    if (window.confirm('Tem certeza que deseja excluir esta máquina? Esta ação não pode ser desfeita.')) {
+      try {
+        await deleteDoc(doc(db, 'machines', machineId));
+      } catch (error) {
+        console.error('Error deleting machine:', error);
+        alert('Erro ao excluir máquina.');
+      }
     }
   };
 
   // Handle adding calibration records
   const handleSaveCalibrationRecord = async () => {
-    if (!newCalibrationRecord.machineId || !newCalibrationRecord.calibrationDate || !newCalibrationRecord.calibrationData) {
-       alert('Por favor, preencha todos os campos obrigatórios da calibração.');
+    if (!selectedMachineForCalibration || !newCalibrationRecord.calibrationDate || !newCalibrationRecord.calibrationData) {
+       alert('Por favor, selecione uma máquina e preencha todos os campos obrigatórios da calibração.');
        return;
     }
-    
+
     try {
        // Add new calibration record
-       await addDoc(collection(db, 'calibrationRecords'), { 
-         ...newCalibrationRecord, 
+       await addDoc(collection(db, 'calibrationRecords'), {
+         ...newCalibrationRecord,
+         machineId: selectedMachineForCalibration.id, // Link record to the selected machine
          createdAt: new Date().toISOString(),
          calibrationDate: new Date(newCalibrationRecord.calibrationDate).toISOString(), // Ensure ISO string
        });
@@ -195,7 +184,8 @@ const QualityCalibration: React.FC = () => {
     if (!lastCalibrationDate) return null;
     
     const lastDate = new Date(lastCalibrationDate);
-    const nextDate = addYears(lastDate, 1); // Assuming 1 year interval
+    // Use the calibrationInterval from the machine data
+    const nextDate = addYears(lastDate, machine.calibrationInterval / 12); // Assuming calibrationInterval is in months
     return nextDate.toISOString().split('T')[0]; // Return in YYYY-MM-DD format for display
   };
 
@@ -396,7 +386,7 @@ const QualityCalibration: React.FC = () => {
           className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           <Plus className="h-5 w-5 mr-2" />
-          Nova Máquina
+          Adicionar Máquina
         </button>
       </div>
 
@@ -408,7 +398,7 @@ const QualityCalibration: React.FC = () => {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Identificação</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intervalo (meses)</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intervalo Calibração (Meses)</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Última Calibração</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Próxima Calibração</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -444,18 +434,16 @@ const QualityCalibration: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <button
-                      onClick={() => {
-                        setEditingMachine(machine);
-                        setNewMachine(machine);
-                        setShowMachineForm(true);
-                      }}
-                      className="text-blue-600 hover:text-blue-900 mr-3"
+                      onClick={() => { setEditingMachine(machine); setShowMachineForm(true); }}
+                      className="text-indigo-600 hover:text-indigo-900 mr-4"
+                      title="Editar"
                     >
                       <Edit className="h-5 w-5" />
                     </button>
                     <button
                       onClick={() => handleDeleteMachine(machine.id)}
                       className="text-red-600 hover:text-red-900"
+                      title="Excluir"
                     >
                       <Trash2 className="h-5 w-5" />
                     </button>
@@ -469,71 +457,79 @@ const QualityCalibration: React.FC = () => {
 
       {/* Machine Form Modal */}
       {showMachineForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold mb-4">{editingMachine ? 'Editar Máquina' : 'Nova Máquina'}</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Nome</label>
-                <input
-                  type="text"
-                  value={newMachine.name || ''}
-                  onChange={(e) => setNewMachine({...newMachine, name: e.target.value})}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Tipo</label>
-                <select
-                   value={newMachine.type || ''}
-                   onChange={(e) => setNewMachine({...newMachine, type: e.target.value as Machine['type']})}
-                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
-                >
-                   <option value="">Selecione o tipo</option>
-                   <option value="welding">Máquina de Solda</option>
-                   <option value="cnc">Centro de Usinagem CNC</option>
-                   <option value="other">Outro</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Identificação</label>
-                <input
-                  type="text"
-                  value={newMachine.identification || ''}
-                  onChange={(e) => setNewMachine({...newMachine, identification: e.target.value})}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Intervalo de Calibração (meses)</label>
-                <input
-                  type="number"
-                  value={newMachine.calibrationInterval || ''}
-                  onChange={(e) => setNewMachine({...newMachine, calibrationInterval: parseInt(e.target.value) || 0})}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
-                  min="1"
-                />
-              </div>
-              {/* Add specific fields based on machine type here */}
-
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => {
-                    setShowMachineForm(false);
-                    setNewMachine({});
-                    setEditingMachine(null);
-                  }}
-                  className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleSaveMachine}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  Salvar
-                </button>
-              </div>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-bold">{editingMachine ? 'Editar Máquina' : 'Adicionar Nova Máquina'}</h3>
+              <button onClick={() => { setShowMachineForm(false); setEditingMachine(null); setNewMachine({}); }}>
+                <XCircle className="h-6 w-6 text-gray-500" />
+              </button>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Nome da Máquina</label>
+              <input
+                type="text"
+                value={newMachine.name || ''}
+                onChange={(e) => setNewMachine({ ...newMachine, name: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Tipo de Máquina</label>
+              <select
+                value={newMachine.type || ''}
+                onChange={(e) => setNewMachine({ ...newMachine, type: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                required
+              >
+                <option value="">Selecione o tipo</option>
+                <option value="welding">Máquina de Solda</option>
+                <option value="cnc">Centro de Usinagem CNC</option>
+                <option value="other">Outro</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Identificação (Número de Série/Tag)</label>
+              <input
+                type="text"
+                value={newMachine.identification || ''}
+                onChange={(e) => setNewMachine({ ...newMachine, identification: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                required
+              />
+            </div>
+             <div>
+              <label className="block text-sm font-medium text-gray-700">Intervalo de Calibração (Meses)</label>
+              <input
+                type="number"
+                value={newMachine.calibrationInterval || ''}
+                onChange={(e) => setNewMachine({ ...newMachine, calibrationInterval: parseInt(e.target.value) || 0 })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                required
+              />
+            </div>
+             <div>
+              <label className="block text-sm font-medium text-gray-700">Notas</label>
+              <textarea
+                value={newMachine.notes || ''}
+                onChange={(e) => setNewMachine({ ...newMachine, notes: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+              />
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => { setShowMachineForm(false); setEditingMachine(null); setNewMachine({}); }}
+                className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveMachine}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                {editingMachine ? 'Salvar Alterações' : 'Adicionar Máquina'}
+              </button>
             </div>
           </div>
         </div>
@@ -654,7 +650,7 @@ const QualityCalibration: React.FC = () => {
       <div className="flex justify-between items-center">
         <h3 className="text-xl font-bold">Registros de Calibração</h3>
         <button
-          onClick={() => setShowCalibrationForm(true)}
+          onClick={() => { setShowCalibrationForm(true); setSelectedMachineForCalibration(null); setNewCalibrationRecord({}); }}
           className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           <Plus className="h-5 w-5 mr-2" />
@@ -782,7 +778,7 @@ const QualityCalibration: React.FC = () => {
 
       {/* Batch Export Modal */}
       {showBatchExportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h3 className="text-xl font-bold mb-4">Exportar Relatórios</h3>
             <p className="text-gray-600 mb-4">
@@ -812,33 +808,43 @@ const QualityCalibration: React.FC = () => {
 
       {/* Calibration Record Form Modal */}
       {showCalibrationForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold mb-4">Novo Registro de Calibração</h3>
-            <div className="space-y-4">
-              <div>
-                 <label className="block text-sm font-medium text-gray-700">Máquina</label>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-bold">Novo Registro de Calibração</h3>
+              <button onClick={() => { setShowCalibrationForm(false); setSelectedMachineForCalibration(null); setNewCalibrationRecord({}); }}>
+                 <XCircle className="h-6 w-6 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Step 1: Select Machine */}
+            {!selectedMachineForCalibration && (
+               <div>
+                 <label className="block text-sm font-medium text-gray-700">Selecione a Máquina</label>
                  <select
-                    value={newCalibrationRecord.machineId || ''}
-                    onChange={(e) => {
-                       const machine = machines.find(m => m.id === e.target.value);
-                       setSelectedMachineForCalibration(machine || null);
-                       setNewCalibrationRecord(prev => ({
-                         ...prev,
-                         machineId: e.target.value,
-                         calibrationData: {} // Reset calibration data when machine changes
-                       }));
-                    }}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                   value={newCalibrationRecord.machineId || ''}
+                   onChange={(e) => {
+                      const machine = machines.find(m => m.id === e.target.value);
+                      setSelectedMachineForCalibration(machine || null);
+                      setNewCalibrationRecord(prev => ({ ...prev, machineId: e.target.value, calibrationData: {} }));
+                   }}
+                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                   required
                  >
-                    <option value="">Selecione a máquina</option>
-                    {machines.map(machine => (
-                       <option key={machine.id} value={machine.id}>{machine.name} ({machine.identification})</option>
-                    ))}
+                   <option value="">Selecione uma máquina</option>
+                   {machines.map(machine => (
+                      <option key={machine.id} value={machine.id}>{machine.name} ({machine.identification})</option>
+                   ))}
                  </select>
-              </div>
-              {selectedMachineForCalibration && (
+               </div>
+            )}
+
+            {/* Step 2: Fill Calibration Data (Shown after machine is selected) */}
+            {selectedMachineForCalibration && (
                 <div className="space-y-4">
+                  <div>
+                     <h4 className="text-lg font-medium text-gray-800">Calibração para: {selectedMachineForCalibration.name} ({selectedMachineForCalibration.identification})</h4>
+                  </div>
                   <div>
                      <label className="block text-sm font-medium text-gray-700">Data da Calibração</label>
                      <input
@@ -846,13 +852,24 @@ const QualityCalibration: React.FC = () => {
                        value={newCalibrationRecord.calibrationDate?.split('T')[0] || ''}
                        onChange={(e) => setNewCalibrationRecord({...newCalibrationRecord, calibrationDate: e.target.value})}
                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                       required
+                     />
+                  </div>
+                   <div>
+                     <label className="block text-sm font-medium text-gray-700">Inspetor</label>
+                     <input
+                       type="text"
+                       value={(newCalibrationRecord.calibrationData as any)?.inspector || ''}
+                       onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), inspector: e.target.value } }))}
+                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                       required
                      />
                   </div>
 
                   {/* Dynamic fields based on machine type */}
                   {selectedMachineForCalibration.type === 'welding' && (
                     <div className="space-y-4">
-                      <h4>Dados de Calibração (Máquina de Solda)</h4>
+                      <h4 className="text-md font-medium text-gray-700">Dados Específicos (Máquina de Solda)</h4>
                       <div>
                          <label className="block text-sm font-medium text-gray-700">Amperagem Eletrodo Negativo</label>
                          <input type="number" onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), electrodeNegative: parseFloat(e.target.value) || 0 } }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
@@ -878,75 +895,73 @@ const QualityCalibration: React.FC = () => {
 
                    {selectedMachineForCalibration.type === 'cnc' && (
                     <div className="space-y-4">
-                      <h4>Dados de Calibração (Centro de Usinagem CNC)</h4>
+                      <h4 className="text-md font-medium text-gray-700">Dados Específicos (Centro de Usinagem CNC)</h4>
                        <div>
                          <label className="block text-sm font-medium text-gray-700">Precisão Eixo X</label>
                          <input type="number" onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), axisX: parseFloat(e.target.value) || 0 } }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
-                      </div>
+                       </div>
                        <div>
                          <label className="block text-sm font-medium text-gray-700">Precisão Eixo Y</label>
                          <input type="number" onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), axisY: parseFloat(e.target.value) || 0 } }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
-                      </div>
+                       </div>
                        <div>
                          <label className="block text-sm font-medium text-gray-700">Precisão Eixo Z</label>
                          <input type="number" onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), axisZ: parseFloat(e.target.value) || 0 } }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
-                      </div>
+                       </div>
                        <div>
                          <label className="block text-sm font-medium text-gray-700">Precisão do Spindle</label>
                          <input type="number" onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), spindleAccuracy: parseFloat(e.target.value) || 0 } }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
-                      </div>
+                       </div>
                     </div>
                   )}
-                   {selectedMachineForCalibration.type === 'other' && (
-                    <div className="space-y-4">
-                       <h4>Dados de Calibração (Outro)</h4>
-                        <div>
-                         <label className="block text-sm font-medium text-gray-700">Notas da Calibração</label>
-                         <textarea onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), notes: e.target.value } }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" rows={3}></textarea>
-                      </div>
-                    </div>
-                   )}
 
-                  <div>
-                     <label className="block text-sm font-medium text-gray-700">Inspetor</label>
-                     <input
-                       type="text"
-                       onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), inspector: e.target.value } }))}
+                  {selectedMachineForCalibration.type === 'other' && (
+                     <div className="space-y-4">
+                        <h4 className="text-md font-medium text-gray-700">Dados Específicos (Outro Tipo de Máquina)</h4>
+                        {/* Add generic fields or a way to add custom fields here if needed */}
+                        <div>
+                           <label className="block text-sm font-medium text-gray-700">Notas de Calibração</label>
+                           <textarea
+                             value={(newCalibrationRecord.calibrationData as any)?.notes || ''}
+                             onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), notes: e.target.value } }))}
+                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
+                           />
+                        </div>
+                     </div>
+                  )}
+
+                  {/* Common fields for all machine types */}
+                   <div>
+                     <label className="block text-sm font-medium text-gray-700">Notas Gerais (Opcional)</label>
+                     <textarea
+                       value={(newCalibrationRecord.calibrationData as any)?.notes || ''}
+                       onChange={(e) => setNewCalibrationRecord(prev => ({ ...prev, calibrationData: { ...(prev.calibrationData as any), notes: e.target.value } }))}
                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
                      />
                   </div>
 
-                  {/* Photo Upload (placeholder) */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Fotos da Calibração (Em Breve)</label>
-                    <div className="mt-1 p-3 border rounded-md text-center text-gray-500 bg-gray-100">
-                       Funcionalidade de upload de fotos em desenvolvimento.
-                    </div>
-                    {/* Implement actual file upload here */}
+                  {/* Add fields for photos/attachments if needed */}
+                   {/* <div>
+                     <label className="block text-sm font-medium text-gray-700">Anexar Fotos</label>
+                     <input type="file" multiple onChange={(e) => { // Handle file uploads }} className="mt-1 block w-full" />
+                   </div> */}
+
+                  <div className="flex justify-end space-x-3 mt-6">
+                    <button
+                      onClick={() => { setShowCalibrationForm(false); setSelectedMachineForCalibration(null); setNewCalibrationRecord({}); }}
+                      className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSaveCalibrationRecord}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    >
+                      Salvar Registro
+                    </button>
                   </div>
-
                 </div>
-              )}
-
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => {
-                    setShowCalibrationForm(false);
-                    setNewCalibrationRecord({});
-                    setSelectedMachineForCalibration(null);
-                  }}
-                  className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleSaveCalibrationRecord}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  Salvar Calibração
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
