@@ -4,7 +4,7 @@ import { Lock, Mail, Orbit, Building, AlertCircle, UserPlus, RefreshCw } from 'l
 import { signInWithEmailAndPassword, AuthError, sendPasswordResetEmail, createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
-import { collection, getDocs, setDoc, doc, query, where } from 'firebase/firestore';
+import { collection, getDocs, setDoc, doc, query, where, getDoc } from 'firebase/firestore';
 
 const LoginForm: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -155,7 +155,52 @@ const LoginForm: React.FC = () => {
         setSuccess('Conta criada com sucesso! Você será redirecionado em instantes.');
       } else {
         // Logging in an existing user
-        await signInWithEmailAndPassword(auth, email.trim(), password);
+        const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+        const user = userCredential.user;
+
+        // *** NOVO: Obter companyId do documento do usuário no Firestore ***
+        if (user) {
+          try {
+            const userDocRef = doc(db, 'users', user.uid);
+            const userDocSnap = await getDoc(userDocRef);
+
+            if (userDocSnap.exists()) {
+              const userData = userDocSnap.data();
+              const userCompanyId = userData?.companyId;
+
+              if (userCompanyId) {
+                // Definir o companyId no estado global e localStorage
+                setCompanyId(userCompanyId);
+                localStorage.setItem('companyId', userCompanyId);
+                console.log(`Company ID fetched from user doc: ${userCompanyId}`);
+              } else {
+                // Lidar com o caso em que o companyId não está no documento do usuário
+                setError('Company ID not found in user profile. Contact support.');
+                // Opcional: forçar logout ou impedir acesso
+                await auth.signOut();
+                setCompanyId(null);
+                localStorage.removeItem('companyId');
+                return; // Interrompe o login
+              }
+            } else {
+              // Lidar com o caso em que o documento do usuário não existe na coleção 'users'
+              setError('User profile not found. Contact support.');
+              // Opcional: forçar logout ou impedir acesso
+              await auth.signOut();
+              setCompanyId(null);
+              localStorage.removeItem('companyId');
+              return; // Interrompe o login
+            }
+          } catch (firestoreError) {
+            console.error('Error fetching user company ID from Firestore:', firestoreError);
+            setError('Failed to load user profile data. Contact support.');
+            // Opcional: forçar logout ou impedir acesso
+            await auth.signOut();
+            setCompanyId(null);
+            localStorage.removeItem('companyId');
+            return; // Interrompe o login
+          }
+        }
       }
     } catch (err) {
       console.error('Erro de autenticação:', err);

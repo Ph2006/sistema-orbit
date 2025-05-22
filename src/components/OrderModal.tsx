@@ -377,7 +377,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 
   const handleExportPDF = () => {
     const doc = new jsPDF({
-      orientation: 'portrait',
+      orientation: 'landscape', // Use landscape for wider table
       unit: 'mm',
       format: 'a4'
     });
@@ -385,16 +385,16 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     // Get page dimensions
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 15;
+    const margin = 10; // Reduced margin for more space
 
     // Add logo and Title
-    let y = 15;
+    let y = margin;
     if (companyLogo) {
       doc.addImage(companyLogo, 'JPEG', margin, y, 30, 15);
       doc.setFontSize(18);
       doc.setFont(undefined, 'bold');
       doc.text(`CRONOGRAMA PEDIDO #${formData.orderNumber}`, pageWidth / 2, y + 7.5, { align: 'center' });
-      y += 20;
+      y += 20; // Adjusted vertical space after title/logo
     } else {
       doc.setFontSize(18);
       doc.setFont(undefined, 'bold');
@@ -407,100 +407,127 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       doc.setFontSize(14);
       doc.setFont(undefined, 'normal');
       doc.text(`PROJETO ${formData.projectName}`, pageWidth / 2, y, { align: 'center' });
-      y += 10;
+      y += 10; // Adjusted vertical space
     }
 
-    // Order info
+    // Order info and Overall Progress
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
     doc.text(`Cliente: ${formData.customer}`, margin, y);
     doc.text(`OS: ${formData.internalOrderNumber}`, margin + 60, y);
-    doc.text(`Data de Início: ${format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 120, y);
-    doc.text(`Data de Entrega: ${format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 180, y);
-    y += 15;
+    doc.text(`Data de Início: ${formData.startDate ? format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}`, margin + 120, y);
+    doc.text(`Data de Entrega: ${formData.deliveryDate ? format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}`, margin + 180, y);
+    y += 8; // Space after basic info
+    
+    // Calculate and display Overall Order Progress (Assuming total progress is average of item progress)
+    const totalItems = formData.items.length;
+    const overallProgress = totalItems > 0 ? Math.round(formData.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems) : 0;
+    const overallStatus = overallProgress === 100 ? 'Concluído' : (overallProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
 
-    // Process each item and its stages
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Progresso Geral do Pedido: ${overallProgress}%`, margin, y);
+    doc.text(`Status: ${overallStatus}`, margin + 60, y);
+    y += 10; // Space after overall progress
+
+    // Add table for Items with Progress and Status
+    const tableColumnStyles: any = {
+      0: { cellWidth: 15 }, // Item
+      1: { cellWidth: 25 }, // Código
+      2: { cellWidth: 60 }, // Descrição
+      3: { cellWidth: 15, halign: 'center' }, // Qtd
+      4: { cellWidth: 20, halign: 'right' }, // Peso (kg)
+      5: { cellWidth: 20, halign: 'center' }, // Progresso (%)
+      6: { cellWidth: 30, halign: 'center' }, // Status
+      // Optional: Add columns for planned/real dates if needed and they fit
+    };
+
+    const tableData: any = [];
+
     formData.items.forEach(item => {
-      // Item header
-      doc.setFontSize(12);
-      doc.setFont(undefined, 'bold');
-      doc.text(`Item ${item.itemNumber}: ${item.code}`, margin, y);
-      doc.setFont(undefined, 'normal');
-      doc.text(item.description, margin + 3, y + 5);
-      y += 15;
-
-      // Get and sort stages for this item based on planning start dates
-      const sortedStages = Object.entries(item.stagePlanning || {})
-        .sort(([, a]: any, [, b]: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-
-      // Create table for stages
-      const tableData = sortedStages.map(([stageName, stageDates]: any) => {
-        const progress = item.progress?.[stageName] || 0;
-        const status = progress === 100 ? 'Concluído' :
-                      progress >= 70 ? 'Em Andamento' :
-                      progress >= 30 ? 'Em Progresso' :
-                      'Atrasado';
+        // Determine item progress and status
+        const itemProgress = item.overallProgress || 0;
+        const itemStatus = itemProgress === 100 ? 'Concluído' : (itemProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
         
-        return [
-          stageName,
-          status,
-          `${progress}%`,
-          format(new Date(stageDates.startDate), 'dd/MM/yyyy', { locale: ptBR }),
-          format(new Date(stageDates.endDate), 'dd/MM/yyyy', { locale: ptBR })
-        ];
-      });
+        // Determine status color (simplified example)
+        let statusColor = [0, 0, 0]; // Black default
+        if (itemProgress === 100) statusColor = [40, 167, 69]; // Green
+        else if (itemProgress > 0) statusColor = [255, 193, 7]; // Yellow
+        // Could add logic for 'Atrasado' based on dates if available
 
-      // Add table
-      (doc as any).autoTable({
-        startY: y,
-        head: [['Etapa', 'Status', 'Progresso', 'Data Início', 'Data Término']],
-        body: tableData,
-        theme: 'striped',
-        headStyles: {
-          fillColor: [59, 130, 246],
-          textColor: [255, 255, 255],
-          fontStyle: 'bold'
-        },
-        styles: {
-          fontSize: 9,
-          cellPadding: 3
-        },
-        columnStyles: {
-          0: { cellWidth: 'auto' },
-          1: { cellWidth: 30 },
-          2: { cellWidth: 25, halign: 'center' },
-          3: { cellWidth: 30, halign: 'center' },
-          4: { cellWidth: 30, halign: 'center' }
-        }
-      });
+        tableData.push({
+            content: [
+                item.itemNumber.toString(),
+                item.code,
+                item.description,
+                item.quantity.toString(),
+                item.totalWeight.toLocaleString('pt-BR', { maximumFractionDigits: 2 }),
+                `${itemProgress}%`,
+                itemStatus,
+            ],
+            styles: {
+                textColor: statusColor,
+            },
+        });
+        
+        // Optional: Add simplified stage details below the item if space allows
+        // This might make the table too complex/wide. Let's omit for now for better overview.
+        // If needed, could add a sub-row with key stage dates or a simplified timeline.
 
-      y = (doc as any).lastAutoTable.finalY + 10;
+    });
 
-      // Add new page if needed
-      if (y > pageHeight - 40) {
-        doc.addPage();
-        y = 20;
+    (doc as any).autoTable({
+      startY: y,
+      head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso (kg)', 'Progresso', 'Status']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: {
+        fillColor: [59, 130, 246],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold'
+      },
+      styles: {
+        fontSize: 8, // Smaller font size for landscape
+        cellPadding: 2 // Smaller padding
+      },
+      columnStyles: tableColumnStyles,
+      didDrawPage: function (data: any) {
+          // Footer (re-add if autoTable overwrites)
+          doc.setFontSize(8);
+          doc.setTextColor(100, 100, 100);
+          doc.text(
+              `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
+              margin,
+              pageHeight - margin
+          );
+          doc.text(
+              `Página ${data.pageNumber} de ${data.settings.pageNumber}`,
+              pageWidth - margin,
+              pageHeight - margin,
+              { align: 'right' }
+          );
       }
     });
 
-    // Add footer with page number and date
-    const totalPages = doc.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(
-        `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
-        margin,
-        pageHeight - 10
-      );
-      doc.text(
-        `Página ${i} de ${totalPages}`,
-        pageWidth - margin,
-        pageHeight - 10,
-        { align: 'right' }
-      );
-    }
+    // Manual footer if autoTable did not use didDrawPage
+     const finalY = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY : y;
+     if (finalY < pageHeight - margin - 5) { // Only add if space is available and not already added by didDrawPage
+       doc.setFontSize(8);
+       doc.setTextColor(100, 100, 100);
+       doc.text(
+           `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
+           margin,
+           pageHeight - margin
+       );
+        // Simple page number if not using didDrawPage pagination
+       // doc.text(
+       //     `Página 1 de 1`,
+       //      pageWidth - margin,
+       //     pageHeight - margin,
+       //     { align: 'right' }
+       // );
+     }
+     // If autoTable uses didDrawPage, pagination is handled there.
 
     doc.save(`cronograma-pedido-${formData.orderNumber}.pdf`);
   };
