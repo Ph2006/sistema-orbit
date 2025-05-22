@@ -5,6 +5,7 @@ import CalendarSettingsModal from './CalendarSettingsModal';
 import { format, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import LogoUploadModal from './LogoUploadModal';
+import { useAuthStore } from '../store/authStore';
 
 const CompanySettings: React.FC = () => {
   const { 
@@ -13,11 +14,10 @@ const CompanySettings: React.FC = () => {
     companyResponsible,
     companyLogo,
     calendar,
-    setCompanyName,
-    setCompanyCNPJ,
-    setCompanyResponsible,
-    setCalendar
   } = useSettingsStore();
+  
+  const { loadSettingsFromFirestore, saveSettingsToFirestore } = useSettingsStore();
+  const { companyId } = useAuthStore();
 
   const [formData, setFormData] = useState({
     name: companyName || '',
@@ -31,7 +31,6 @@ const CompanySettings: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   
   useEffect(() => {
-    // Update form data if store values change
     setFormData({
       name: companyName || '',
       cnpj: companyCNPJ || '',
@@ -39,49 +38,39 @@ const CompanySettings: React.FC = () => {
     });
   }, [companyName, companyCNPJ, companyResponsible]);
 
-  const handleSave = () => {
+  useEffect(() => {
+    if (companyId) {
+      loadSettingsFromFirestore(companyId);
+    }
+  }, [companyId, loadSettingsFromFirestore]);
+
+  const handleSave = async () => {
+    if (!companyId) {
+      setSaveError("ID da empresa não disponível. Não foi possível salvar.");
+      return;
+    }
+    
     try {
-      setCompanyName(formData.name);
-      setCompanyCNPJ(formData.cnpj);
-      setCompanyResponsible(formData.responsible);
+      await saveSettingsToFirestore(companyId, {
+        companyName: formData.name,
+        companyCNPJ: formData.cnpj,
+        companyResponsible: formData.responsible,
+      });
+
+      setSaveSuccess(true);
+      setSaveError(null);
       
-      // Verify the data was saved correctly
       setTimeout(() => {
-        const savedName = useSettingsStore.getState().companyName;
-        const savedCNPJ = useSettingsStore.getState().companyCNPJ;
-        const savedResponsible = useSettingsStore.getState().companyResponsible;
-        
-        if (savedName !== formData.name || 
-            savedCNPJ !== formData.cnpj || 
-            savedResponsible !== formData.responsible) {
-          console.error("Settings not saved correctly", {
-            expected: formData,
-            actual: {
-              name: savedName,
-              cnpj: savedCNPJ,
-              responsible: savedResponsible
-            }
-          });
-          setSaveError("Erro ao salvar configurações. Tente novamente.");
-          return;
-        }
-        
-        setSaveSuccess(true);
-        setSaveError(null);
-        
-        // Clear success message after 3 seconds
-        setTimeout(() => {
-          setSaveSuccess(false);
-        }, 3000);
-      }, 100);
+        setSaveSuccess(false);
+      }, 3000);
     } catch (error) {
       console.error("Error saving settings:", error);
-      setSaveError("Erro ao salvar configurações. Tente novamente.");
+      setSaveError("Erro ao salvar configurações. Por favor, tente novamente.");
     }
   };
 
   const formatWorkingHours = (day: string) => {
-    if (!calendar[day].enabled) {
+    if (!calendar || !calendar[day] || !calendar[day].enabled) {
       return 'Fechado';
     }
 
@@ -264,7 +253,6 @@ const CompanySettings: React.FC = () => {
         </div>
       </div>
 
-      {/* Logo upload section */}
       <div className="mt-8 border-t pt-6">
         <h3 className="text-lg font-medium flex items-center mb-4">
           <FileText className="h-5 w-5 mr-2 text-blue-600" />
