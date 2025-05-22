@@ -58,10 +58,8 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ customer, onBack 
     try {
       setLoading(true);
       
-      // Simple query that doesn't require a composite index
-      // We'll perform sorting client-side instead
       const ordersQuery = query(
-        collection(db, 'orders'),
+        collection(db, getCompanyCollection('orders')),
         where('customer', '==', customer.name)
       );
 

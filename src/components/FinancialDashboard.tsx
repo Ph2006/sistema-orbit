@@ -506,9 +506,10 @@ const FinancialDashboard: React.FC = () => {
       
       const loadCustomerById = async () => {
         try {
-          const docRef = doc(db, 'customers', customerId);
+          // Use getCompanyCollection for customer lookup
+          const docRef = doc(db, getCompanyCollection('customers'), customerId);
           const docSnap = await getDoc(docRef);
-          
+      
           if (docSnap.exists()) {
             const customerData = { id: docSnap.id, ...docSnap.data() } as Customer;
             setSelectedCustomer(customerData);
@@ -526,9 +527,9 @@ const FinancialDashboard: React.FC = () => {
   // Calculate customer lifetime value
   const calculateCustomerLifetimeValue = async (customerName: string): Promise<number> => {
     try {
-      // Query orders for this customer
+      // Query orders for this customer using getCompanyCollection
       const ordersQuery = query(
-        collection(db, 'orders'), 
+        collection(db, getCompanyCollection('orders')),
         where('customer', '==', customerName)
       );
       
@@ -555,9 +556,10 @@ const FinancialDashboard: React.FC = () => {
   // Load customer orders
   const loadCustomerOrders = async (customerName: string) => {
     try {
+      setLoading(true); // Set loading true before fetching orders
       // Simple query that doesn't require a composite index
       const ordersQuery = query(
-        collection(db, 'orders'),
+        collection(db, getCompanyCollection('orders')),
         where('customer', '==', customerName)
       );
 
@@ -574,6 +576,8 @@ const FinancialDashboard: React.FC = () => {
       processCustomerOrderData(orders);
     } catch (error) {
       console.error('Error loading customer orders:', error);
+    } finally {
+      setLoading(false); // Set loading false after fetching orders
     }
   };
 
