@@ -489,20 +489,6 @@ const QualityControl: React.FC = () => {
   // Render tabs
   const renderTabs = () => (
     <div className="flex border-b mb-6 overflow-x-auto">
-      <button
-        onClick={() => setActiveTab('procedures')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'procedures' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <FileText className="h-5 w-5 inline-block mr-1" />
-        Procedimentos
-      </button>
-      <button
-        onClick={() => setActiveTab('calibration')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'calibration' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <Settings className="h-5 w-5 inline-block mr-1" />
-        Calibração
-      </button>
       {selectedOrder && (
         <>
           <button
