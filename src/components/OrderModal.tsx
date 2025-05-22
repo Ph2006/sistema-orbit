@@ -377,17 +377,15 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 
   const handleExportPDF = () => {
     const doc = new jsPDF({
-      orientation: 'landscape',
+      orientation: 'portrait',
       unit: 'mm',
-      format: 'a3'
+      format: 'a4'
     });
 
     // Get page dimensions
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 15;
-    const infoColumnWidth = 120; // Increased width for task information
-    const ganttWidth = pageWidth - margin * 2 - infoColumnWidth;
 
     // Add logo and Title
     let y = 15;
@@ -419,152 +417,70 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     doc.text(`OS: ${formData.internalOrderNumber}`, margin + 60, y);
     doc.text(`Data de Início: ${format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 120, y);
     doc.text(`Data de Entrega: ${format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 180, y);
-    y += 10;
-
-    // Calculate date range for the Gantt chart
-    const allDates = formData.items.flatMap(item => {
-       const itemProgressEntries = Object.entries(item.stagePlanning || {});
-       return itemProgressEntries.flatMap(([stageName, stageDates]) => [
-         new Date(stageDates.startDate),
-         new Date(stageDates.endDate)
-       ]);
-    }).filter(date => !isNaN(date.getTime())); // Filter out invalid dates
-
-    if (allDates.length === 0) {
-      alert('Não há dados de planejamento de etapas para gerar o cronograma.');
-      return;
-    }
-
-    const minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
-    const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())));
-    
-    // Add padding days
-    minDate.setDate(minDate.getDate() - 7); // 1 week before first task
-    maxDate.setDate(maxDate.getDate() + 14); // 2 weeks after last task
-
-    // Create date header (Daily columns)
-    const dateHeader = [];
-    const currentDate = new Date(minDate);
-    while (currentDate <= maxDate) {
-      dateHeader.push(new Date(currentDate));
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    // Calculate column width for dates
-    const totalDays = dateHeader.length;
-    const dateColumnWidth = ganttWidth / totalDays;
-    const rowHeight = 8; // Height for each task row
-
-    // Draw date header (Days of the week and Day number)
-    let headerY = y + 5;
-    let currentHeaderX = margin + infoColumnWidth;
-
-    doc.setFontSize(6);
-    doc.setFont(undefined, 'bold');
-    dateHeader.forEach((date, index) => {
-      // Draw day of the week (Initial letter)
-      doc.text(format(date, 'EEE', { locale: ptBR }).substring(0,1).toUpperCase(), currentHeaderX + dateColumnWidth/2, headerY, { align: 'center' });
-      // Draw day number
-      doc.text(format(date, 'dd'), currentHeaderX + dateColumnWidth/2, headerY + 4, { align: 'center' });
-
-      currentHeaderX += dateColumnWidth;
-    });
-    headerY += 8;
-
-    // Draw horizontal line below date header
-    doc.line(margin + infoColumnWidth, headerY, pageWidth - margin, headerY);
-
-    let currentContentY = headerY + 2;
-
-    // Draw vertical grid lines for dates
-    let gridX = margin + infoColumnWidth;
-    doc.setDrawColor(220, 220, 220); // Light gray for grid lines
-    for (let i = 0; i <= totalDays; i++) {
-      doc.line(gridX, headerY, gridX, pageHeight - 40); // Extend lines down until near footer
-      gridX += dateColumnWidth;
-    }
-    doc.setDrawColor(0, 0, 0); // Reset draw color
+    y += 15;
 
     // Process each item and its stages
     formData.items.forEach(item => {
-      // Item header (on the left)
-      doc.setFontSize(8);
+      // Item header
+      doc.setFontSize(12);
       doc.setFont(undefined, 'bold');
-      doc.text(`Item ${item.itemNumber}: ${item.code}`, margin, currentContentY + 3);
+      doc.text(`Item ${item.itemNumber}: ${item.code}`, margin, y);
       doc.setFont(undefined, 'normal');
-      doc.text(item.description, margin + 3, currentContentY + 7);
-
-      let itemContentY = currentContentY + 12; // Starting Y for stages within this item
+      doc.text(item.description, margin + 3, y + 5);
+      y += 15;
 
       // Get and sort stages for this item based on planning start dates
       const sortedStages = Object.entries(item.stagePlanning || {})
         .sort(([, a]: any, [, b]: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
-      // Draw stages as Gantt bars and info on the left
-      sortedStages.forEach(([stageName, stageDates]: any) => {
+      // Create table for stages
+      const tableData = sortedStages.map(([stageName, stageDates]: any) => {
         const progress = item.progress?.[stageName] || 0;
-
-        // Stage info on the left
-        doc.setFontSize(7);
-        doc.setFont(undefined, 'normal');
-        doc.text(`${stageName}`, margin + 5, itemContentY + rowHeight / 2 + 2);
-        doc.text(`${progress}%`, infoColumnWidth - 10, itemContentY + rowHeight / 2 + 2, { align: 'right' });
-
-        // Calculate stage bar position
-        const stageStartX = margin + infoColumnWidth + 
-          (new Date(stageDates.startDate).getTime() - minDate.getTime()) / (24 * 60 * 60 * 1000) * dateColumnWidth;
-        const stageEndX = margin + infoColumnWidth + 
-          (new Date(stageDates.endDate).getTime() - minDate.getTime()) / (24 * 60 * 60 * 1000) * dateColumnWidth;
-        const stageWidth = Math.max(dateColumnWidth / 2, stageEndX - stageStartX); // Ensure minimum width
-
-        // Stage status color based on progress
-        const statusColor = progress === 100 ? [34, 197, 94] : // Green (Concluído)
-                          progress >= 70 ? [59, 130, 246] : // Blue (Em Andamento)
-                          progress >= 30 ? [234, 179, 8] : // Yellow (Em Progresso)
-                          [239, 68, 68]; // Red (Atrasado)
-
-        // Draw stage bar
-        doc.setFillColor(...statusColor);
-        doc.rect(stageStartX, itemContentY, stageWidth, rowHeight, 'F');
-
-        // Add progress percentage text on bar
-        if (progress > 0) { // Only show progress if > 0
-           doc.setTextColor(255, 255, 255);
-           doc.setFontSize(6);
-           doc.text(`${progress}%`, stageStartX + stageWidth / 2, itemContentY + rowHeight / 2 + 1, { align: 'center' });
-           doc.setTextColor(0, 0, 0); // Reset text color
-        }
-
-        // Dependencies are not explicitly modeled between stages in the current data structure,
-        // so we cannot draw dependency lines like in the Gantt component.
-        // If dependency data becomes available for stages, this can be added.
-
-        itemContentY += rowHeight + 5; // Space between stage bars
+        const status = progress === 100 ? 'Concluído' :
+                      progress >= 70 ? 'Em Andamento' :
+                      progress >= 30 ? 'Em Progresso' :
+                      'Atrasado';
+        
+        return [
+          stageName,
+          status,
+          `${progress}%`,
+          format(new Date(stageDates.startDate), 'dd/MM/yyyy', { locale: ptBR }),
+          format(new Date(stageDates.endDate), 'dd/MM/yyyy', { locale: ptBR })
+        ];
       });
 
-      currentContentY = itemContentY + 5; // Update overall Y position after item's stages
-    });
+      // Add table
+      (doc as any).autoTable({
+        startY: y,
+        head: [['Etapa', 'Status', 'Progresso', 'Data Início', 'Data Término']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: [59, 130, 246],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold'
+        },
+        styles: {
+          fontSize: 9,
+          cellPadding: 3
+        },
+        columnStyles: {
+          0: { cellWidth: 'auto' },
+          1: { cellWidth: 30 },
+          2: { cellWidth: 25, halign: 'center' },
+          3: { cellWidth: 30, halign: 'center' },
+          4: { cellWidth: 30, halign: 'center' }
+        }
+      });
 
-     // Add legend
-    const legendY = pageHeight - 30;
-    doc.setFontSize(8);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Legenda:', margin, legendY);
-    
-    // Status colors legend
-    const legendItems = [
-      { color: [34, 197, 94], label: 'Concluído' },
-      { color: [59, 130, 246], label: 'Em Andamento' },
-      { color: [234, 179, 8], label: 'Em Progresso' },
-      { color: [239, 68, 68], label: 'Atrasado' }
-    ];
+      y = (doc as any).lastAutoTable.finalY + 10;
 
-    let legendX = margin + 25;
-    legendItems.forEach(item => {
-      doc.setFillColor(...item.color);
-      doc.rect(legendX, legendY - 3, 8, 4, 'F');
-      doc.text(item.label, legendX + 10, legendY);
-      legendX += 40; // Adjust spacing based on label length
+      // Add new page if needed
+      if (y > pageHeight - 40) {
+        doc.addPage();
+        y = 20;
+      }
     });
 
     // Add footer with page number and date

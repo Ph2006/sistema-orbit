@@ -214,37 +214,53 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.orderId || formData.items.length === 0) {
-      alert('Por favor, selecione um pedido e adicione pelo menos um item.');
-      return;
+  const handleSave = async () => {
+    try {
+      // Validar campos obrigatórios
+      if (!formData.orderId) {
+        alert('Por favor, selecione um pedido.');
+        return;
+      }
+
+      if (!formData.requestDate) {
+        alert('Por favor, selecione a data da requisição.');
+        return;
+      }
+
+      if (!formData.items || formData.items.length === 0) {
+        alert('Por favor, adicione pelo menos um item à requisição.');
+        return;
+      }
+
+      // Validar cada item
+      for (const item of formData.items) {
+        if (!item.description || !item.quantity || !item.unit) {
+          alert('Por favor, preencha todos os campos obrigatórios dos itens (descrição, quantidade e unidade).');
+          return;
+        }
+      }
+
+      // Validar fornecedor se estiver em modo de cotação
+      if (isQuotationMode && !formData.supplierId) {
+        alert('Por favor, selecione um fornecedor para a cotação.');
+        return;
+      }
+
+      // Preparar dados para salvar
+      const requisitionData: MaterialRequisition = {
+        ...formData,
+        id: requisition?.id || 'new',
+        status: isQuotationMode ? 'quotation' : 'pending',
+        createdAt: requisition?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      await onSave(requisitionData);
+      onClose();
+    } catch (error) {
+      console.error('Error saving requisition:', error);
+      alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
-    
-    // Validate each item has all required fields
-    const invalidItems = formData.items.filter(item => 
-      !item.description || !item.material || !item.dimensions || item.quantity <= 0
-    );
-    
-    if (invalidItems.length > 0) {
-      alert('Alguns itens possuem informações incompletas ou inválidas.');
-      return;
-    }
-    
-    // Update status based on item statuses
-    let status: 'pending' | 'partial' | 'complete' | 'cancelled' = 'pending';
-    
-    if (formData.items.every(item => item.status === 'received' || item.status === 'stock')) {
-      status = 'complete';
-    } else if (formData.items.some(item => item.status === 'received' || item.status === 'stock')) {
-      status = 'partial';
-    }
-    
-    onSave({
-      ...formData,
-      status
-    });
   };
 
   // Format currency
@@ -281,7 +297,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSave} className="space-y-6">
           {/* Order Selection */}
           <div className="border-b pb-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

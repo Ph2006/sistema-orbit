@@ -31,6 +31,13 @@ import CuttingPlanCalculator from './CuttingPlanCalculator';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+// Função para obter a coleção correta baseada na empresa
+const getCompanyCollection = (collectionName: string): string => {
+  // Por enquanto, retorna a coleção padrão
+  // TODO: Implementar lógica de múltiplas empresas se necessário
+  return collectionName;
+};
+
 // Helper function to sanitize data for Firestore
 const sanitizeForFirestore = (data: any): any => {
   if (data === undefined) {
@@ -165,6 +172,12 @@ const MaterialRequisitions: React.FC = () => {
 
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
     try {
+      // Validar dados obrigatórios
+      if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
+        alert('Por favor, preencha todos os campos obrigatórios e adicione pelo menos um item.');
+        return;
+      }
+
       // Verificar se é uma nova requisição ou atualização
       if (requisition.id === 'new') {
         // Verificar se já existe uma requisição similar
@@ -191,6 +204,7 @@ const MaterialRequisitions: React.FC = () => {
         sanitizedData.updatedAt = new Date().toISOString();
         
         const docRef = await addDoc(collection(db, getCompanyCollection('materialRequisitions')), sanitizedData);
+        console.log('Nova requisição criada com ID:', docRef.id);
         
         alert('Requisição criada com sucesso!');
       } else {
@@ -203,6 +217,7 @@ const MaterialRequisitions: React.FC = () => {
         sanitizedData.updatedAt = new Date().toISOString();
         
         await updateDoc(doc(db, getCompanyCollection('materialRequisitions'), id), sanitizedData);
+        console.log('Requisição atualizada com sucesso');
         
         alert('Requisição atualizada com sucesso!');
       }
@@ -211,7 +226,7 @@ const MaterialRequisitions: React.FC = () => {
       setSelectedRequisition(null);
     } catch (error) {
       console.error('Error saving requisition:', error);
-      alert('Erro ao salvar requisição. Por favor, tente novamente.');
+      alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
 

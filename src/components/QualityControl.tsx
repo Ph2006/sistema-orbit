@@ -42,7 +42,7 @@ type TabType = 'documents' | 'metrics' | 'nonconformities' | 'checklists' | 'les
 
 const QualityControl: React.FC = () => {
   // General state
-  const [activeTab, setActiveTab] = useState<TabType>('calibration');
+  const [activeTab, setActiveTab] = useState<TabType>('procedures');
   const [showTemplates, setShowTemplates] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   
@@ -490,55 +490,6 @@ const QualityControl: React.FC = () => {
   const renderTabs = () => (
     <div className="flex border-b mb-6 overflow-x-auto">
       <button
-        onClick={() => setActiveTab('documents')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'documents' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <FileCheck className="h-5 w-5 inline-block mr-1" />
-        Documentos
-      </button>
-      <button
-        onClick={() => setActiveTab('metrics')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'metrics' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <FileBarChart2 className="h-5 w-5 inline-block mr-1" />
-        Métricas e Indicadores
-      </button>
-      <button
-        onClick={() => setActiveTab('nonconformities')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'nonconformities' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <AlertCircle className="h-5 w-5 inline-block mr-1" />
-        Não Conformidades
-      </button>
-      <button
-        onClick={() => setActiveTab('checklists')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'checklists' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <ClipboardCheck className="h-5 w-5 inline-block mr-1" />
-        Checklists
-      </button>
-      <button
-        onClick={() => setActiveTab('reports')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'reports' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <FileText className="h-5 w-5 inline-block mr-1" />
-        Relatórios
-      </button>
-      <button
-        onClick={() => setActiveTab('engineering')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'engineering' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <Mail className="h-5 w-5 inline-block mr-1" />
-        Chamados para Engenharia
-      </button>
-      <button
-        onClick={() => setActiveTab('lessons')}
-        className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'lessons' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-      >
-        <BookOpen className="h-5 w-5 inline-block mr-1" />
-        Lições Aprendidas
-      </button>
-      <button
         onClick={() => setActiveTab('procedures')}
         className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'procedures' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
       >
@@ -552,6 +503,59 @@ const QualityControl: React.FC = () => {
         <Settings className="h-5 w-5 inline-block mr-1" />
         Calibração
       </button>
+      {selectedOrder && (
+        <>
+          <button
+            onClick={() => setActiveTab('documents')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'documents' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <FileCheck className="h-5 w-5 inline-block mr-1" />
+            Documentos
+          </button>
+          <button
+            onClick={() => setActiveTab('metrics')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'metrics' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <FileBarChart2 className="h-5 w-5 inline-block mr-1" />
+            Métricas e Indicadores
+          </button>
+          <button
+            onClick={() => setActiveTab('nonconformities')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'nonconformities' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <AlertCircle className="h-5 w-5 inline-block mr-1" />
+            Não Conformidades
+          </button>
+          <button
+            onClick={() => setActiveTab('checklists')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'checklists' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <ClipboardCheck className="h-5 w-5 inline-block mr-1" />
+            Checklists
+          </button>
+          <button
+            onClick={() => setActiveTab('reports')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'reports' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <FileText className="h-5 w-5 inline-block mr-1" />
+            Relatórios
+          </button>
+          <button
+            onClick={() => setActiveTab('engineering')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'engineering' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Settings className="h-5 w-5 inline-block mr-1" />
+            Chamados de Engenharia
+          </button>
+          <button
+            onClick={() => setActiveTab('lessons')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'lessons' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <BookOpen className="h-5 w-5 inline-block mr-1" />
+            Lições Aprendidas
+          </button>
+        </>
+      )}
     </div>
   );
 
@@ -719,39 +723,12 @@ const QualityControl: React.FC = () => {
     );
   }
 
-  // Render content based on active tab and selected order
-  // The Procedures and Calibration tabs should always be accessible
-  if (!selectedOrder && activeTab !== 'procedures' && activeTab !== 'calibration') {
+  // If no order is selected, render only procedures or calibration tab
+  if (!selectedOrder) {
     return (
       <div className="bg-white rounded-lg shadow-lg p-6">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold">Controle de Qualidade</h3>
-          <div className="flex space-x-4">
-            <button
-              onClick={() => setShowTemplates(true)}
-              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-            >
-              <Settings className="h-5 w-5 mr-2" />
-              Configurar Documentos
-            </button>
-            {/* Add other general QC buttons if needed */}
-          </div>
-        </div>
-        {renderTabs()}
-        <InternalProcedures />
-      </div>
-    );
-  }
-
-  // If no order is selected, and the active tab is procedures or calibration, render only that tab
-  if (!selectedOrder && (activeTab === 'procedures' || activeTab === 'calibration')) {
-    return (
-      <div className="bg-white rounded-lg shadow-lg p-6">
-        <div className="flex justify-between items-center mb-6">
-           <h3 className="text-xl font-bold">Controle de Qualidade - {activeTab === 'procedures' ? 'Procedimentos' : 'Calibração'}</h3>
-           <div className="flex space-x-4">
-             {/* Add general QC buttons if needed */}
-           </div>
+          <h3 className="text-xl font-bold">Controle de Qualidade - {activeTab === 'procedures' ? 'Procedimentos' : 'Calibração'}</h3>
         </div>
         {renderTabs()}
         {activeTab === 'procedures' && <InternalProcedures />}

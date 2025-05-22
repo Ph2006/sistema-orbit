@@ -60,6 +60,8 @@ const Sidebar: React.FC = () => {
     { path: '/customers', icon: Users, label: 'Clientes', permission: 'customers', company: 'all' },
     { path: '/team', icon: UserCog, label: 'Equipe', permission: 'team', company: 'all' },
     { path: '/quality', icon: ClipboardCheck, label: 'Controle de Qualidade', permission: 'quality', company: 'all' },
+    { path: '/procedures', icon: FileText, label: 'Procedimentos', permission: 'quality', company: 'all' },
+    { path: '/calibration', icon: Settings, label: 'Calibração', permission: 'quality', company: 'all' },
     { path: '/financial', icon: DollarSign, label: 'Controle Financeiro', permission: 'financial', company: 'all' },
     { path: '/settings', icon: Settings, label: 'Configurações', permission: 'dashboard', company: 'all' },
   ];

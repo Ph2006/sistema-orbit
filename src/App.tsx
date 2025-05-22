@@ -30,6 +30,8 @@ import BrasmoldCleanup from './components/BrasmoldCleanup';
 import MecaldDataRestore from './components/MecaldDataRestore';
 import CostCenter from './components/CostCenter';
 import AboutSystem from './components/AboutSystem';
+import InternalProcedures from './components/InternalProcedures';
+import QualityCalibration from './components/QualityCalibration';
 
 function App() {
   const { setUser, setLoading, companyId } = useAuthStore();
@@ -119,6 +121,16 @@ function App() {
                     <Route path="/quality" element={
                       <PrivateRoute requiredPermission="quality">
                         <QualityControl />
+                      </PrivateRoute>
+                    } />
+                    <Route path="/procedures" element={
+                      <PrivateRoute requiredPermission="quality">
+                        <InternalProcedures />
+                      </PrivateRoute>
+                    } />
+                    <Route path="/calibration" element={
+                      <PrivateRoute requiredPermission="quality">
+                        <QualityCalibration />
                       </PrivateRoute>
                     } />
                     <Route path="/production-orders" element={
