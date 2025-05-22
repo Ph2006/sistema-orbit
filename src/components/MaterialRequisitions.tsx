@@ -30,12 +30,17 @@ import QuotationRequestModal from './QuotationRequestModal';
 import CuttingPlanCalculator from './CuttingPlanCalculator';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useAuthStore } from '../store/authStore';
 
 // Função para obter a coleção correta baseada na empresa
-const getCompanyCollection = (collectionName: string): string => {
-  // Por enquanto, retorna a coleção padrão
+const getCompanyCollection = (collectionName: string, companyId: string | null): string => {
   // TODO: Implementar lógica de múltiplas empresas se necessário
-  return collectionName;
+  // Se não houver companyId (ex: usuário não logado), retornar uma coleção inválida ou vazia
+  if (!companyId) {
+    console.error("Company ID is not available.");
+    return 'invalidCollection'; // Use a placeholder or throw an error based on desired behavior
+  }
+  return `companies/${companyId}/${collectionName}`;
 };
 
 // Helper function to sanitize data for Firestore
@@ -85,6 +90,7 @@ const MaterialRequisitions: React.FC = () => {
   
   const { orders } = useOrderStore();
   const { suppliers, loadSuppliers, subscribeToSuppliers } = useSupplierStore();
+  const { companyId } = useAuthStore();
 
   useEffect(() => {
     // Subscribe to order updates
@@ -109,7 +115,7 @@ const MaterialRequisitions: React.FC = () => {
       try {
         // Configurar listener em tempo real para requisições
         const requisitionsQuery = query(
-          collection(db, getCompanyCollection('materialRequisitions')),
+          collection(db, getCompanyCollection('materialRequisitions', companyId)),
           orderBy('requestDate', 'desc')
         );
         
@@ -123,7 +129,7 @@ const MaterialRequisitions: React.FC = () => {
         
         // Configurar listener em tempo real para cotações
         const quotationsQuery = query(
-          collection(db, getCompanyCollection('quotationRequests')),
+          collection(db, getCompanyCollection('quotationRequests', companyId)),
           orderBy('requestDate', 'desc')
         );
         
@@ -182,7 +188,7 @@ const MaterialRequisitions: React.FC = () => {
       if (requisition.id === 'new') {
         // Verificar se já existe uma requisição similar
         const existingRequisitionsQuery = query(
-          collection(db, getCompanyCollection('materialRequisitions')),
+          collection(db, getCompanyCollection('materialRequisitions', companyId)),
           where('orderId', '==', requisition.orderId),
           where('requestDate', '==', requisition.requestDate)
         );
@@ -203,7 +209,9 @@ const MaterialRequisitions: React.FC = () => {
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.updatedAt = new Date().toISOString();
         
-        const docRef = await addDoc(collection(db, getCompanyCollection('materialRequisitions')), sanitizedData);
+        console.log("Saving new requisition data:", sanitizedData);
+        
+        const docRef = await addDoc(collection(db, getCompanyCollection('materialRequisitions', companyId)), sanitizedData);
         console.log('Nova requisição criada com ID:', docRef.id);
         
         alert('Requisição criada com sucesso!');
@@ -216,7 +224,7 @@ const MaterialRequisitions: React.FC = () => {
         // Atualizar timestamp
         sanitizedData.updatedAt = new Date().toISOString();
         
-        await updateDoc(doc(db, getCompanyCollection('materialRequisitions'), id), sanitizedData);
+        await updateDoc(doc(db, getCompanyCollection('materialRequisitions', companyId), id), sanitizedData);
         console.log('Requisição atualizada com sucesso');
         
         alert('Requisição atualizada com sucesso!');
@@ -240,7 +248,7 @@ const MaterialRequisitions: React.FC = () => {
       // Sanitize data for Firestore before saving
       const sanitizedQuotation = sanitizeForFirestore(quotation);
       // Add the quotation request
-      const docRef = await addDoc(collection(db, getCompanyCollection('quotationRequests')), sanitizedQuotation);
+      const docRef = await addDoc(collection(db, getCompanyCollection('quotationRequests', companyId)), sanitizedQuotation);
       
       // Update the requisition items to mark them as sent for quotation
       if (selectedRequisition) {
@@ -259,7 +267,7 @@ const MaterialRequisitions: React.FC = () => {
           lastUpdated: new Date().toISOString()
         });
         
-        await updateDoc(doc(db, getCompanyCollection('materialRequisitions'), selectedRequisition.id), updateData);
+        await updateDoc(doc(db, getCompanyCollection('materialRequisitions', companyId), selectedRequisition.id), updateData);
         
         // Update local state
         setRequisitions(requisitions.map(r => 
