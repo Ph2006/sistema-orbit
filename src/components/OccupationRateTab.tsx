@@ -12,13 +12,14 @@ import {
   Cell
 } from 'recharts';
 import { Calendar, Sliders, AlertTriangle, ChevronDown, Info, TrendingUp, TrendingDown, ArrowRight } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, eachMonthOfInterval, addMonths, isSameMonth, isWithinInterval } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachMonthOfInterval, addMonths, isSameMonth, isWithinInterval, differenceInBusinessDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useOrderStore } from '../store/orderStore';
 import { Order, OrderItem } from '../types/kanban';
+import { useSettingsStore } from '../store/settingsStore';
 
-// Factory capacity in tons per month (per stage)
-const MONTHLY_CAPACITY_TONS = 80;
+// Factory capacity in kg per month (per stage - assuming total capacity is sum of stage capacities)
+const MONTHLY_CAPACITY_KG = 80000; // 80 tons converted to kg
 
 interface StageCapacity {
   stage: string;
@@ -43,13 +44,21 @@ interface MonthlyCapacity {
 
 const OccupationRateTab: React.FC = () => {
   const { orders } = useOrderStore();
+  const { calendar } = useSettingsStore();
+
   const [monthlyData, setMonthlyData] = useState<MonthlyCapacity[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'MM/yyyy'));
   const [stageList, setStageList] = useState<string[]>([]);
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
-  const [capacityThreshold, setCapacityThreshold] = useState(MONTHLY_CAPACITY_TONS);
+  const [capacityThreshold, setCapacityThreshold] = useState(MONTHLY_CAPACITY_KG / 1000); // Keep internal calculation in tons for chart/display compatibility
   const [warningThreshold, setWarningThreshold] = useState(70);
+  
+  // State for Deadline Calculator
+  const [newOrderWeightKg, setNewOrderWeightKg] = useState<number | ''>('');
+  const [newOrderDeliveryDate, setNewOrderDeliveryDate] = useState<string | ''>('');
+  const [calculationResult, setCalculationResult] = useState<string | null>(null);
+  const [calculationError, setCalculationError] = useState<string | null>(null);
 
   useEffect(() => {
     // Extract all unique stages from orders
@@ -189,6 +198,86 @@ const OccupationRateTab: React.FC = () => {
   // Helper function to check if two date ranges overlap
   const isOverlapping = (start1: Date, end1: Date, start2: Date, end2: Date): boolean => {
     return start1 <= end2 && start2 <= end1;
+  };
+  
+  // Helper function to calculate business days between two dates
+  const calculateBusinessDays = (startDate: Date, endDate: Date): number => {
+    // This is a simplified calculation. For a precise calculation,
+    // we need to use the company calendar (days and hours). For now,
+    // we'll just use date-fns differenceInBusinessDays as a placeholder.
+    // TODO: Implement accurate business days calculation using company calendar
+    return differenceInBusinessDays(endDate, startDate);
+  };
+
+  // Deadline Calculator Logic
+  const calculateFeasibleDeadline = () => {
+    setCalculationResult(null);
+    setCalculationError(null);
+
+    if (newOrderWeightKg === '' || newOrderDeliveryDate === '') {
+      setCalculationError('Por favor, insira o peso e a data de entrega desejada.');
+      return;
+    }
+
+    const weightKg = typeof newOrderWeightKg === 'number' ? newOrderWeightKg : parseFloat(newOrderWeightKg);
+    const deliveryDate = new Date(newOrderDeliveryDate);
+    const today = new Date();
+    
+    if (isNaN(weightKg) || weightKg <= 0) {
+      setCalculationError('Por favor, insira um peso válido em kg.');
+      return;
+    }
+
+    if (isNaN(deliveryDate.getTime()) || deliveryDate < today) {
+      setCalculationError('Por favor, insira uma data de entrega futura válida.');
+      return;
+    }
+
+    // Simple estimation logic:
+    // 1. Calculate total current workload in kg for the period until the desired delivery date.
+    // 2. Estimate available capacity in kg until the desired delivery date based on monthly capacity and business days.
+    // 3. Check if (current workload + new order weight) fits within available capacity.
+
+    let totalCurrentWorkloadKg = 0;
+    
+    // Sum workload from existing orders within the timeframe
+    orders.forEach(order => {
+      if (order.deleted) return; // Ignore deleted orders
+
+      order.items.forEach(item => {
+        if (!item.stagePlanning) return; // Ignore items without planning
+        
+        Object.values(item.stagePlanning).forEach(planning => {
+          const stageStartDate = new Date(planning.startDate);
+          const stageEndDate = new Date(planning.endDate);
+
+          // Consider stages that overlap with the period from today to desired delivery date
+          if (isOverlapping(stageStartDate, stageEndDate, today, deliveryDate)) {
+            // For simplicity, distribute item weight evenly across its planned duration
+            // A more accurate model would consider workload per stage
+            const plannedDurationDays = Math.max(1, calculateBusinessDays(stageStartDate, stageEndDate));
+            const overlapDays = calculateOverlapDays(stageStartDate, stageEndDate, today, deliveryDate);
+            const workloadContributionKg = (item.totalWeight * overlapDays) / plannedDurationDays;
+            totalCurrentWorkloadKg += workloadContributionKg;
+          }
+        });
+      });
+    });
+
+    // Estimate total available capacity in kg until desired delivery date
+    const totalPeriodDays = calculateBusinessDays(today, deliveryDate);
+    const estimatedDailyCapacityKg = MONTHLY_CAPACITY_KG / 20; // Assuming 20 business days per month
+    const estimatedAvailableCapacityKg = estimatedDailyCapacityKg * totalPeriodDays;
+
+    const totalLoadWithNewOrderKg = totalCurrentWorkloadKg + weightKg;
+
+    if (totalLoadWithNewOrderKg <= estimatedAvailableCapacityKg) {
+      setCalculationResult('Prazo parece plausível dentro da capacidade estimada.');
+    } else {
+      const overloadKg = totalLoadWithNewOrderKg - estimatedAvailableCapacityKg;
+      setCalculationResult(`Prazo apertado ou inviável. Sobrecarga estimada de ${formatWeight(overloadKg)} no período.`);
+      // TODO: Suggest an alternative date based on overload
+    }
   };
   
   const toggleStageExpansion = (stage: string) => {
@@ -343,6 +432,62 @@ const OccupationRateTab: React.FC = () => {
           </div>
         </div>
       )}
+      
+      {/* Deadline Calculator Section */}
+      <div className="mb-8 p-6 border rounded-lg bg-gray-50">
+        <h3 className="text-xl font-bold mb-4 flex items-center">
+          <Calendar className="h-6 w-6 mr-2" />
+          Calculadora de Prazos
+        </h3>
+        <p className="text-gray-600 text-sm mb-4">
+          Estime a viabilidade de um prazo de entrega para um novo pedido com base na carga de trabalho atual.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Peso do Novo Pedido (kg)</label>
+            <input
+              type="number"
+              value={newOrderWeightKg}
+              onChange={(e) => setNewOrderWeightKg(parseFloat(e.target.value) || '')}
+              className="w-full rounded-md border-gray-300 shadow-sm"
+              placeholder="Ex: 1500"
+              min="0"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Data de Entrega Desejada</label>
+            <input
+              type="date"
+              value={newOrderDeliveryDate}
+              onChange={(e) => setNewOrderDeliveryDate(e.target.value)}
+              className="w-full rounded-md border-gray-300 shadow-sm"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={calculateFeasibleDeadline}
+              className="w-full flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+            >
+              <ArrowRight className="h-5 w-5 mr-2" />
+              Calcular Prazo
+            </button>
+          </div>
+        </div>
+        
+        {calculationResult && (
+          <div className={`mt-4 p-3 rounded-lg ${calculationError ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+            <p className="font-medium">Resultado:</p>
+            <p>{calculationResult}</p>
+          </div>
+        )}
+        
+        {calculationError && (
+          <div className="mt-4 p-3 rounded-lg bg-red-100 text-red-800">
+            <p className="font-medium">Erro:</p>
+            <p>{calculationError}</p>
+          </div>
+        )}
+      </div>
       
       {/* Chart */}
       <div className="bg-white p-6 rounded-lg shadow border">

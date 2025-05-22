@@ -46,6 +46,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     description: '',
     material: '',
     quantity: 1,
+    unit: '',
     dimensions: '',
     weight: 0,
     surplusWeight: 0,
@@ -130,7 +131,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   };
 
   const handleAddItem = () => {
-    if (!formData.orderId || !newItem.orderItemId || !newItem.description || !newItem.material) {
+    if (!formData.orderId || !newItem.orderItemId || !newItem.description || !newItem.material || !newItem.unit) {
       alert('Por favor, preencha todos os campos obrigatórios.');
       return;
     }
@@ -146,6 +147,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
       description: newItem.description || '',
       material: newItem.material || '',
       quantity: newItem.quantity || 1,
+      unit: newItem.unit || '',
       dimensions: newItem.dimensions || '',
       weight: newItem.weight || 0,
       surplusWeight: newItem.surplusWeight || 0,
@@ -164,6 +166,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
       description: '',
       material: '',
       quantity: 1,
+      unit: '',
       dimensions: '',
       weight: 0,
       surplusWeight: 0,
@@ -459,6 +462,19 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                   
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unidade
+                    </label>
+                    <input
+                      type="text"
+                      value={newItem.unit || ''}
+                      onChange={(e) => handleNewItemChange('unit', e.target.value)}
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                      placeholder="Ex: kg, m, cm"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Dimensões
                     </label>
                     <input
@@ -506,7 +522,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                     type="button"
                     onClick={handleAddItem}
                     className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                    disabled={!newItem.orderItemId || !newItem.description || !newItem.material}
+                    disabled={!newItem.orderItemId || !newItem.description || !newItem.material || !newItem.unit}
                   >
                     <Plus className="h-5 w-5 inline-block mr-1" />
                     Adicionar Item
