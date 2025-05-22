@@ -42,7 +42,7 @@ type TabType = 'documents' | 'metrics' | 'nonconformities' | 'checklists' | 'les
 
 const QualityControl: React.FC = () => {
   // General state
-  const [activeTab, setActiveTab] = useState<TabType>('documents');
+  const [activeTab, setActiveTab] = useState<TabType>('calibration');
   const [showTemplates, setShowTemplates] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   
@@ -91,6 +91,10 @@ const QualityControl: React.FC = () => {
       if (order) {
         setSelectedOrder(order);
       }
+    }
+
+    if (!selectedOrder) {
+      setActiveTab('procedures');
     }
   }, [showTemplates, location, orders]);
 
