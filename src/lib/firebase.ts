@@ -72,10 +72,10 @@ export const getCompanyCollection = (collectionName: string) => {
   const companyId = localStorage.getItem('companyId') || 'mecald';
   
   // Log which collection we're accessing
-  console.log(`Accessing collection: empresa/${companyId}/${collectionName}`);
+  console.log(`Accessing collection: companies/${companyId}/${collectionName}`);
   
   // Return the company-specific path structure
-  return `empresa/${companyId}/${collectionName}`;
+  return `companies/${companyId}/${collectionName}`;
 };
 
 // Export initialized services
