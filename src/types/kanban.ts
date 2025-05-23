@@ -46,6 +46,14 @@ export interface OrderHistoryEntry {
   user: string;
 }
 
+export interface ClientAccessLink {
+  id: string;
+  url: string;
+  createdAt: string;
+  expiresAt: string;
+  isActive: boolean;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -74,6 +82,7 @@ export interface Order {
   selected?: boolean;
   completedDate?: string;
   lastExportDate?: string; // Date when the order was last exported
+  clientAccessLinks?: ClientAccessLink[];
 }
 
 export interface Column {

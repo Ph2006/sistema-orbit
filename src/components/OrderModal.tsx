@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Link, Trash2, Edit, Download, BarChart, FileText, CheckSquare, Square, Briefcase, ClipboardCheck, Copy, ExternalLink, Share } from 'lucide-react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
 import { Order, OrderItem, OrderStatus, ClientProject } from '../types/kanban';
 import { Customer } from '../types/customer';
@@ -12,6 +12,14 @@ import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
 import ItemProgressModal from './ItemProgressModal';
 import { calculateItemProgress } from '../utils/progress';
+
+interface ClientAccessLink {
+  id: string;
+  url: string;
+  createdAt: string;
+  expiresAt: string;
+  isActive: boolean;
+}
 
 interface OrderModalProps {
   order: Order | null;
@@ -185,7 +193,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     // Caixa 3 - Progresso
     const progressColor = overallProgress >= 80 ? [46, 204, 113] : 
                          overallProgress >= 50 ? [241, 196, 15] : [231, 76, 60];
-    doc.setFillColor(...progressColor);
+    doc.setFillColor(progressColor[0], progressColor[1], progressColor[2]);
     doc.rect(margin + 2 * (boxWidth + 7.5), currentY, boxWidth, boxHeight, 'F');
     doc.setFontSize(10);
     doc.text('PROGRESSO', margin + 2 * (boxWidth + 7.5) + 2, currentY + 3);
@@ -195,13 +203,12 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     // Caixa 4 - Prazo
     const deadlineColor = isDelayed ? [231, 76, 60] : 
                          daysRemaining <= 7 ? [241, 196, 15] : [46, 204, 113];
-    doc.setFillColor(...deadlineColor);
+    doc.setFillColor(deadlineColor[0], deadlineColor[1], deadlineColor[2]);
     doc.rect(margin + 3 * (boxWidth + 7.5), currentY, boxWidth, boxHeight, 'F');
     doc.setFontSize(10);
     doc.text('PRAZO', margin + 3 * (boxWidth + 7.5) + 2, currentY + 3);
     doc.setFontSize(12);
-    const deadlineText = isDelayed ? `${Math.abs(daysRemaining)}d atraso` : `${daysRemaining}d restantes`;
-    doc.text(deadlineText, margin + 3 * (boxWidth + 7.5) + 2, currentY + 6);
+    doc.text(`${daysRemaining} dias`, margin + 3 * (boxWidth + 7.5) + 2, currentY + 6);
 
     currentY += 15;
 
@@ -337,7 +344,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
         textColor: [255, 255, 255],
         fontStyle: 'bold'
       },
-      foot: [['', '', '', 'Peso Total:', totalWeight.toLocaleString('pt-BR') + ' kg']],
+      foot: [['', '', '', 'Peso Total:', formData.totalWeight.toLocaleString('pt-BR') + ' kg']],
       footStyles: {
         fillColor: [240, 240, 240],
         textColor: [0, 0, 0],
@@ -989,416 +996,3 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 };
 
 export default OrderModal;
-        fillColor: [44, 62, 80],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        fontSize: 9
-      },
-      styles: {
-        fontSize: 8,
-        cellPadding: 3,
-        overflow: 'linebreak'
-      },
-      columnStyles: {
-        0: { cellWidth: 12, halign: 'center' },
-        1: { cellWidth: 20, halign: 'center' },
-        2: { cellWidth: 50 },
-        3: { cellWidth: 12, halign: 'center' },
-        4: { cellWidth: 18, halign: 'center' },
-        5: { cellWidth: 22, halign: 'center' },
-        6: { cellWidth: 40 },
-        7: { cellWidth: 40 }
-      },
-      didParseCell: function(data) {
-        if (data.row.index >= 0) {
-          const rowData = tableData[data.row.index];
-          if (rowData && rowData.styles && rowData.styles[data.column.index]) {
-            Object.assign(data.cell.styles, rowData.styles[data.column.index]);
-          }
-        }
-      },
-      didDrawPage: function(data) {
-        // Rodapé
-        doc.setFontSize(8);
-        doc.setTextColor(100, 100, 100);
-        doc.text(
-          `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
-          margin,
-          pageHeight - 10
-        );
-        doc.text(
-          `Página ${data.pageNumber}`,
-          pageWidth - margin,
-          pageHeight - 10,
-          { align: 'right' }
-        );
-      }
-    });
-
-    // Se houver espaço, adicionar gráfico de progresso simples
-    const finalY = (doc as any).lastAutoTable?.finalY || currentY + 100;
-    if (finalY < pageHeight - 60) {
-      // Adicionar resumo estatístico
-      const completedItems = formData.items.filter(item => calculateItemProgress(item.progress) === 100).length;
-      const inProgressItems = formData.items.filter(item => {
-        const progress = calculateItemProgress(item.progress);
-        return progress > 0 && progress < 100;
-      }).length;
-      const notStartedItems = formData.items.filter(item => calculateItemProgress(item.progress) === 0).length;
-
-      doc.setFontSize(12);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(44, 62, 80);
-      doc.text('Resumo Estatístico:', margin, finalY + 15);
-
-      doc.setFontSize(10);
-      doc.setFont(undefined, 'normal');
-      doc.text(`• Itens Concluídos: ${completedItems}/${totalItems} (${Math.round((completedItems/totalItems)*100)}%)`, margin, finalY + 25);
-      doc.text(`• Itens em Andamento: ${inProgressItems}`, margin, finalY + 32);
-      doc.text(`• Itens Não Iniciados: ${notStartedItems}`, margin, finalY + 39);
-      doc.text(`• Peso Total: ${formData.totalWeight.toLocaleString('pt-BR')} kg`, margin, finalY + 46);
-    }
-
-    // Salvar PDF
-    doc.save(`cronograma-${formData.orderNumber}-${format(new Date(), 'ddMMyyyy')}.pdf`);
-  };
-
-  // Função para gerar link de acesso ao cliente
-  const generateClientAccessLink = async () => {
-    const linkId = crypto.randomUUID();
-    const expirationDate = addDays(new Date(), linkExpiration);
-    
-    const accessLink = {
-      id: linkId,
-      orderId: formData.id,
-      customerName: formData.customer,
-      createdAt: new Date().toISOString(),
-      expiresAt: expirationDate.toISOString(),
-      accessCount: 0,
-      isActive: true
-    };
-
-    // Em produção, você salvaria isso no Firebase
-    // await addDoc(collection(db, 'clientAccessLinks'), accessLink);
-
-    const baseUrl = window.location.origin;
-    const generatedUrl = `${baseUrl}/cronograma-publico/${linkId}`;
-    
-    setGeneratedLink(generatedUrl);
-    
-    // Atualizar o pedido com o novo link
-    const updatedLinks = [...(formData.clientAccessLinks || []), accessLink];
-    setFormData(prev => ({
-      ...prev,
-      clientAccessLinks: updatedLinks
-    }));
-
-    setShowLinkModal(true);
-  };
-
-  const copyLinkToClipboard = () => {
-    navigator.clipboard.writeText(generatedLink);
-    alert('Link copiado para a área de transferência!');
-  };
-
-  // Resto do código permanece igual...
-  const calculateTotals = (item: OrderItem) => {
-    const totalWeight = Number((item.quantity * item.unitWeight).toFixed(2));
-    const totalPrice = Number((item.quantity * item.unitPrice).toFixed(2));
-    return { totalWeight, totalPrice };
-  };
-
-  const handleAddItem = () => {
-    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
-      alert('Por favor, preencha todos os campos obrigatórios do item.');
-      return;
-    }
-    
-    const { totalWeight, totalPrice } = calculateTotals(newItem);
-
-    const item = {
-      ...newItem,
-      id: crypto.randomUUID(),
-      totalWeight,
-      totalPrice,
-    };
-
-    setFormData(prev => ({
-      ...prev,
-      items: [...prev.items, item],
-      totalWeight: Number((prev.totalWeight + totalWeight).toFixed(2)),
-    }));
-
-    setNewItem({
-      id: '',
-      itemNumber: formData.items.length + 2,
-      code: '',
-      description: '',
-      quantity: 0,
-      unitWeight: 0,
-      totalWeight: 0,
-      unitPrice: 0,
-      totalPrice: 0,
-      progress: {},
-      stagePlanning: {},
-      invoiceNumber: '',
-      expeditionLE: ''
-    });
-  };
-
-  const handleEditItem = (item: OrderItem) => {
-    setEditingItem(item);
-    setNewItem({...item});
-  };
-
-  const handleUpdateItem = () => {
-    if (!editingItem) return;
-    
-    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
-      alert('Por favor, preencha todos os campos obrigatórios do item.');
-      return;
-    }
-
-    const { totalWeight: newTotalWeight, totalPrice } = calculateTotals(newItem);
-    const oldTotalWeight = editingItem.totalWeight;
-
-    setFormData(prev => {
-      const updatedItems = prev.items.map(item =>
-        item.id === editingItem.id ? { 
-          ...newItem,
-          totalWeight: newTotalWeight, 
-          totalPrice 
-        } : item
-      );
-
-      return {
-        ...prev,
-        items: updatedItems,
-        totalWeight: Number((prev.totalWeight - oldTotalWeight + newTotalWeight).toFixed(2)),
-      };
-    });
-
-    setEditingItem(null);
-    setNewItem({
-      id: '',
-      itemNumber: formData.items.length + 1,
-      code: '',
-      description: '',
-      quantity: 0,
-      unitWeight: 0,
-      totalWeight: 0,
-      unitPrice: 0,
-      totalPrice: 0,
-      progress: {},
-      stagePlanning: {},
-      invoiceNumber: '',
-      expeditionLE: ''
-    });
-  };
-
-  const handleRemoveItem = (itemId: string) => {
-    const item = formData.items.find(i => i.id === itemId);
-    if (!item) return;
-
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.filter(i => i.id !== itemId),
-      totalWeight: Number((prev.totalWeight - item.totalWeight).toFixed(2)),
-    }));
-
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.map((item, index) => ({
-        ...item,
-        itemNumber: index + 1
-      }))
-    }));
-
-    if (selectedItems.has(itemId)) {
-      const newSelectedItems = new Set(selectedItems);
-      newSelectedItems.delete(itemId);
-      setSelectedItems(newSelectedItems);
-    }
-  };
-
-  const handleAddLink = () => {
-    if (newLink) {
-      setFormData(prev => ({
-        ...prev,
-        driveLinks: [...prev.driveLinks, newLink],
-      }));
-      setNewLink('');
-    }
-  };
-
-  const handleRemoveLink = (link: string) => {
-    setFormData(prev => ({
-      ...prev,
-      driveLinks: prev.driveLinks.filter(l => l !== link),
-    }));
-  };
-
-  const handleToggleChecklist = (item: 'drawings' | 'inspectionTestPlan' | 'paintPlan') => {
-    setFormData(prev => {
-      const checklist = prev.checklist || {
-        drawings: false,
-        inspectionTestPlan: false,
-        paintPlan: false
-      };
-
-      const newChecklist = {
-        drawings: !!checklist.drawings,
-        inspectionTestPlan: !!checklist.inspectionTestPlan,
-        paintPlan: !!checklist.paintPlan
-      };
-
-      newChecklist[item] = !newChecklist[item];
-
-      return {
-        ...prev,
-        checklist: newChecklist
-      };
-    });
-  };
-
-  const handleStatusChange = (newStatus: OrderStatus) => {
-    setFormData(prev => {
-      let completedDate = prev.completedDate;
-      
-      if (newStatus === 'completed' && !completedDate) {
-        completedDate = new Date().toISOString().split('T')[0];
-      } else if (newStatus !== 'completed') {
-        completedDate = '';
-      }
-      
-      return {
-        ...prev,
-        status: newStatus,
-        completedDate
-      };
-    });
-  };
-
-  const safeISODate = (dateStr: string): string => {
-    try {
-      if (!dateStr || dateStr.trim() === '') {
-        return new Date().toISOString();
-      }
-      
-      const date = new Date(`${dateStr}T00:00:00`);
-      
-      if (isNaN(date.getTime())) {
-        console.error("Invalid date:", dateStr);
-        return new Date().toISOString();
-      }
-      
-      return date.toISOString();
-    } catch (error) {
-      console.error("Error parsing date:", dateStr, error);
-      return new Date().toISOString();
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.orderNumber || !formData.customer || !formData.internalOrderNumber || 
-        !formData.startDate || !formData.deliveryDate) {
-      alert('Por favor, preencha todos os campos obrigatórios do pedido.');
-      return;
-    }
-    
-    if (formData.items.length === 0) {
-      alert('Por favor, adicione pelo menos um item ao pedido.');
-      return;
-    }
-    
-    try {
-      const formattedData = {
-        ...formData,
-        startDate: safeISODate(formData.startDate),
-        deliveryDate: safeISODate(formData.deliveryDate),
-        completedDate: formData.completedDate ? safeISODate(formData.completedDate) : '',
-        deleted: false,
-        checklist: {
-          drawings: !!formData.checklist?.drawings,
-          inspectionTestPlan: !!formData.checklist?.inspectionTestPlan,
-          paintPlan: !!formData.checklist?.paintPlan
-        }
-      };
-      
-      onSave(formattedData);
-    } catch (error) {
-      console.error("Error formatting date:", error);
-      alert("Erro ao processar as datas do pedido. Por favor, verifique os valores informados.");
-    }
-  };
-
-  const handleSaveItemProgress = (updatedItem: OrderItem) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.map(item => 
-        item.id === updatedItem.id ? updatedItem : item
-      )
-    }));
-    setSelectedItem(null);
-  };
-
-  const handleUpdateItemField = (itemId: string, field: keyof OrderItem, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.map(item => 
-        item.id === itemId ? { ...item, [field]: value } : item
-      )
-    }));
-  };
-
-  const handleExportItemsListPDF = () => {
-    if (selectedItems.size === 0) {
-      alert('Por favor, selecione pelo menos um item para exportar.');
-      return;
-    }
-
-    const doc = new jsPDF();
-    
-    let y = 20;
-    if (companyLogo) {
-      doc.addImage(companyLogo, 'JPEG', 20, 10, 40, 20);
-      y = 40;
-    }
-    
-    doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
-    doc.text(`Lista de Itens Selecionados`, 105, y, { align: 'center' });
-    y += 15;
-    
-    const selectedOrderObjects = formData.items.filter(item => selectedItems.has(item.id));
-    
-    doc.setFontSize(12);
-    doc.setFont(undefined, 'normal');
-    doc.text(`Pedido #${formData.orderNumber} - ${formData.customer}`, 20, y);
-    y += 8;
-    doc.text(`OS Interna: ${formData.internalOrderNumber}`, 20, y);
-    y += 8;
-    if (formData.projectName) {
-      doc.text(`Projeto: ${formData.projectName}`, 20, y);
-      y += 8;
-    }
-    doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, y);
-    y += 15;
-    
-    const allItems = selectedOrderObjects;
-    const totalWeight = allItems.reduce((sum, item) => sum + item.totalWeight, 0);
-    
-    autoTable(doc, {
-      startY: y,
-      head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso (kg)']],
-      body: allItems.map(item => [
-        item.itemNumber.toString(),
-        item.code,
-        item.description,
-        item.quantity.toString(),
-        item.totalWeight.toLocaleString('pt-BR')
-      ]),
-      theme: 'striped',
-      headStyles: {
