@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Plus, Link, Trash2, Edit, Download, BarChart, FileText, CheckSquare, Square, Briefcase, ClipboardCheck, Globe, Copy } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
@@ -52,6 +52,18 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     completedDate: order?.completedDate || '',
     lastExportDate: order?.lastExportDate || '',
   });
+
+  // Calcular o peso total quando os itens mudam
+  const totalWeight = useMemo(() => {
+    return formData.items.reduce((total, item) => total + (item.quantity * item.weight), 0);
+  }, [formData.items]);
+
+  // Calcular o peso total dos itens selecionados
+  const selectedItemsWeight = useMemo(() => {
+    return formData.items
+      .filter(item => selectedItems.has(item.id))
+      .reduce((total, item) => total + (item.quantity * item.weight), 0);
+  }, [formData.items, selectedItems]);
 
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -121,6 +133,13 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       ...formData,
       items: formData.items.filter(item => item.id !== itemId)
     });
+    
+    // Também remover o item da seleção, se estiver selecionado
+    if (selectedItems.has(itemId)) {
+      const newSelectedItems = new Set(selectedItems);
+      newSelectedItems.delete(itemId);
+      setSelectedItems(newSelectedItems);
+    }
   };
 
   const handleItemChange = (itemId: string, field: keyof OrderItem, value: any) => {
@@ -163,14 +182,9 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   };
 
   const handleSave = () => {
-    // Calcular o peso total somando o peso de todos os itens
-    const calculatedTotalWeight = formData.items.reduce((total, item) => {
-      return total + (item.weight * item.quantity);
-    }, 0);
-
     const updatedOrder = {
       ...formData,
-      totalWeight: calculatedTotalWeight
+      totalWeight // Usar o valor calculado com useMemo
     };
 
     onSave(updatedOrder);
@@ -212,7 +226,90 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     setIsItemProgressModalOpen(false);
   };
 
-  // Gerar PDF com os detalhes da ordem
+  // Gerar PDF com romaneio dos itens selecionados
+  const generateSelectedItemsPdf = () => {
+    if (selectedItems.size === 0) {
+      alert('Selecione pelo menos um item para exportar o romaneio.');
+      return;
+    }
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const centerX = pageWidth / 2;
+    
+    // Adicionar logo se disponível
+    if (companyLogo) {
+      try {
+        doc.addImage(companyLogo, 'JPEG', 10, 10, 50, 20);
+      } catch (error) {
+        console.error("Erro ao adicionar logo:", error);
+      }
+    }
+    
+    // Cabeçalho do documento
+    doc.setFontSize(20);
+    doc.text("Romaneio de Entrega", centerX, 20, { align: 'center' });
+    
+    doc.setFontSize(12);
+    doc.text(`Ordem: ${formData.orderNumber}`, 10, 40);
+    doc.text(`Cliente: ${customers.find(c => c.id === formData.customer)?.name || formData.customer}`, 10, 50);
+    doc.text(`Data de emissão: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 60);
+    
+    // Filtrar apenas os itens selecionados
+    const selectedItemsList = formData.items.filter(item => selectedItems.has(item.id));
+    
+    // Tabela de itens selecionados
+    const tableColumn = [
+      "Item", 
+      "Descrição", 
+      "Quantidade", 
+      "Peso unitário (kg)", 
+      "Peso total (kg)"
+    ];
+    
+    const tableRows = selectedItemsList.map(item => [
+      item.name,
+      item.description,
+      item.quantity.toString(),
+      item.weight.toFixed(2),
+      (item.quantity * item.weight).toFixed(2)
+    ]);
+    
+    let finalY = 0;
+    
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 70,
+      headStyles: { fillColor: [41, 128, 185] },
+      columnStyles: {
+        0: { cellWidth: 40 }, // Nome do item
+        1: { cellWidth: 60 }, // Descrição
+      },
+      styles: { 
+        overflow: 'linebreak',
+        cellPadding: 3,
+        fontSize: 10
+      },
+      didDrawPage: (data) => {
+        finalY = data.cursor.y;
+      }
+    });
+    
+    // Adicionar peso total dos itens selecionados
+    doc.text(`Peso total dos itens: ${selectedItemsWeight.toFixed(2)} kg`, 10, finalY + 10);
+    
+    // Adicionar rodapé com campos para assinaturas
+    doc.text('____________________', 40, finalY + 30);
+    doc.text('____________________', pageWidth - 40, finalY + 30);
+    doc.text('Entregue por', 40, finalY + 35);
+    doc.text('Recebido por', pageWidth - 40, finalY + 35);
+    
+    // Salvar o PDF
+    doc.save(`Romaneio_${formData.orderNumber}.pdf`);
+  };
+
+  // Gerar PDF com os detalhes da ordem e cronograma
   const generatePdf = () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -229,7 +326,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     
     // Cabeçalho do documento
     doc.setFontSize(20);
-    doc.text("Ordem de Serviço", centerX, 20, { align: 'center' });
+    doc.text("Ordem de Serviço - Cronograma", centerX, 20, { align: 'center' });
     
     doc.setFontSize(12);
     doc.text(`Número: ${formData.orderNumber}`, 10, 40);
@@ -237,29 +334,72 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     doc.text(`Data de início: ${format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 60);
     doc.text(`Data de entrega: ${format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 70);
     
-    // Tabela de itens
-    const tableColumn = ["Item", "Descrição", "Qtd", "Peso (kg)", "Peso Total (kg)", "Status", "Progresso"];
-    const tableRows = formData.items.map(item => [
-      item.name,
-      item.description,
-      item.quantity.toString(),
-      item.weight.toString(),
-      (item.quantity * item.weight).toFixed(2),
-      item.status,
-      `${item.progress}%`
-    ]);
+    // Calcular duração total do projeto em dias
+    const projectDuration = differenceInDays(new Date(formData.deliveryDate), new Date(formData.startDate)) || 1;
+    
+    // Tabela de itens com cronograma
+    const tableColumn = [
+      "Item", 
+      "Descrição", 
+      "Qtd", 
+      "Peso (kg)", 
+      "Total (kg)",
+      "Início Previsto",
+      "Entrega Prevista", 
+      "Progresso",
+      "Status"
+    ];
+    
+    const tableRows = formData.items.map((item, index) => {
+      // Distribuir itens ao longo do período do projeto (simplificação)
+      const itemStartOffset = Math.floor((index / formData.items.length) * projectDuration);
+      const itemDuration = Math.max(1, Math.floor(projectDuration / formData.items.length));
+      
+      const itemStartDate = addDays(new Date(formData.startDate), itemStartOffset);
+      const itemEndDate = addDays(itemStartDate, itemDuration);
+      
+      return [
+        item.name,
+        item.description,
+        item.quantity.toString(),
+        item.weight.toFixed(2),
+        (item.quantity * item.weight).toFixed(2),
+        format(itemStartDate, 'dd/MM/yyyy', { locale: ptBR }),
+        format(itemEndDate, 'dd/MM/yyyy', { locale: ptBR }),
+        `${calculateItemProgress(item)}%`,
+        item.status === 'pending' ? 'Pendente' : 
+          item.status === 'in-progress' ? 'Em Andamento' : 'Concluído'
+      ];
+    });
+    
+    // Variável para armazenar a posição Y final
+    let finalY = 0;
     
     autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
       startY: 80,
-      headStyles: { fillColor: [41, 128, 185] }
+      headStyles: { fillColor: [41, 128, 185] },
+      columnStyles: {
+        0: { cellWidth: 25 }, // Item
+        1: { cellWidth: 30 }, // Descrição
+      },
+      styles: {
+        overflow: 'linebreak',
+        cellPadding: 2,
+        fontSize: 9
+      },
+      didDrawPage: (data) => {
+        finalY = data.cursor.y;
+      }
     });
     
-    doc.text(`Peso total: ${formData.totalWeight.toFixed(2)} kg`, 10, doc.lastAutoTable.finalY + 10);
+    // Adicionar peso total e data de exportação
+    doc.text(`Peso total: ${totalWeight.toFixed(2)} kg`, 10, finalY + 10);
+    doc.text(`Data de exportação: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 10, finalY + 20);
     
     // Salvar o PDF
-    doc.save(`Ordem_${formData.orderNumber}.pdf`);
+    doc.save(`Cronograma_${formData.orderNumber}.pdf`);
     
     // Atualizar a data da última exportação
     setFormData({
@@ -614,12 +754,18 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
                         Peso Total:
                       </td>
                       <td className="px-4 py-2 font-semibold">
-                        {formData.items.reduce((total, item) => total + (item.quantity * item.weight), 0).toFixed(2)} kg
+                        {totalWeight.toFixed(2)} kg
                       </td>
                       <td colSpan={3}></td>
                     </tr>
                   </tfoot>
                 </table>
+              </div>
+            )}
+            {selectedItems.size > 0 && (
+              <div className="mt-2 text-right text-sm text-gray-600">
+                {selectedItems.size} {selectedItems.size === 1 ? 'item selecionado' : 'itens selecionados'} 
+                ({selectedItemsWeight.toFixed(2)} kg)
               </div>
             )}
           </div>
@@ -630,9 +776,17 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
               <button
                 onClick={generatePdf}
                 className="px-3 py-2 bg-indigo-600 text-white rounded-md flex items-center text-sm"
-                title="Exportar PDF"
+                title="Exportar Cronograma (PDF)"
               >
-                <Download size={18} className="mr-1" /> Exportar
+                <Download size={18} className="mr-1" /> Exportar Cronograma
+              </button>
+              <button
+                onClick={generateSelectedItemsPdf}
+                disabled={selectedItems.size === 0}
+                className={`px-3 py-2 ${selectedItems.size === 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'} text-white rounded-md flex items-center text-sm`}
+                title="Exportar Romaneio dos Itens Selecionados"
+              >
+                <FileText size={18} className="mr-1" /> Exportar Selecionados {selectedItems.size > 0 && `(${selectedItems.size})`}
               </button>
               <button
                 onClick={() => setShowPublicLink(!showPublicLink)}
