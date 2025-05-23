@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, writeBatch, getDoc } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
 import { Column } from '../types/kanban';
+import { useAuthStore } from './authStore';
 
 const defaultColumns: Omit<Column, 'id' | 'orders'>[] = [
   { title: 'Pedidos em processo', order: 1 },
@@ -30,6 +31,13 @@ export const useColumnStore = create<ColumnState>((set, get) => ({
 
   addColumn: async (column) => {
     try {
+      const companyId = useAuthStore.getState().companyId;
+      if (!companyId) {
+        console.error('Cannot add column: companyId is not available');
+        set({ error: 'Company ID is not available' });
+        return;
+      }
+
       const { id, orders, ...columnData } = column;
       await addDoc(collection(db, getCompanyCollection('columns')), columnData);
     } catch (error) {
@@ -41,6 +49,13 @@ export const useColumnStore = create<ColumnState>((set, get) => ({
 
   updateColumn: async (column) => {
     try {
+      const companyId = useAuthStore.getState().companyId;
+      if (!companyId) {
+        console.error('Cannot update column: companyId is not available');
+        set({ error: 'Company ID is not available' });
+        return;
+      }
+
       const { id, orders, ...columnData } = column;
       
       // Check if the column exists before updating
@@ -61,6 +76,13 @@ export const useColumnStore = create<ColumnState>((set, get) => ({
 
   deleteColumn: async (columnId) => {
     try {
+      const companyId = useAuthStore.getState().companyId;
+      if (!companyId) {
+        console.error('Cannot delete column: companyId is not available');
+        set({ error: 'Company ID is not available' });
+        return;
+      }
+
       await deleteDoc(doc(db, getCompanyCollection('columns'), columnId));
     } catch (error) {
       console.error('Error deleting column:', error);
@@ -71,6 +93,13 @@ export const useColumnStore = create<ColumnState>((set, get) => ({
 
   subscribeToColumns: () => {
     try {
+      const companyId = useAuthStore.getState().companyId;
+      if (!companyId) {
+        console.error('Cannot subscribe to columns: companyId is not available');
+        set({ error: 'Company ID is not available' });
+        return () => {};
+      }
+
       const columnsRef = collection(db, getCompanyCollection('columns'));
       const columnsQuery = query(columnsRef, orderBy('order', 'asc'));
       const unsubscribe = onSnapshot(
@@ -98,6 +127,13 @@ export const useColumnStore = create<ColumnState>((set, get) => ({
 
   initializeDefaultColumns: async () => {
     try {
+      const companyId = useAuthStore.getState().companyId;
+      if (!companyId) {
+        console.error('Cannot initialize columns: companyId is not available');
+        set({ error: 'Company ID is not available', loading: false });
+        return;
+      }
+
       set({ loading: true, error: null });
       
       // Check if columns already exist
