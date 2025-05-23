@@ -86,7 +86,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
         startDate: order.startDate.split('T')[0],
         deliveryDate: order.deliveryDate.split('T')[0],
         completedDate: order.completedDate ? order.completedDate.split('T')[0] : '',
-        items: JSON.parse(JSON.stringify(order.items)),
+        items: order.items || [],
         driveLinks: [...order.driveLinks],
         checklist: {
           drawings: !!checklist.drawings,
@@ -96,6 +96,12 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
         projectId: order.projectId || '',
         projectName: order.projectName || ''
       });
+      
+      // Also reset newItem's itemNumber when order changes
+      setNewItem(prev => ({
+        ...prev,
+        itemNumber: (order.items?.length || 0) + 1,
+      }));
     }
   }, [order]);
 
