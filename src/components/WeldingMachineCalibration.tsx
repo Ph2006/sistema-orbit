@@ -700,6 +700,7 @@ const CalibrationReportForm: React.FC<{
 };
 
 const WeldingMachineCalibration: React.FC = () => {
+  const { companyId } = useAuthStore();
   const [calibrations, setCalibrations] = useState<CalibrationModel[]>([]);
   const [machines, setMachines] = useState<WeldingMachine[]>([]);
   const [filteredCalibrations, setFilteredCalibrations] = useState<CalibrationModel[]>([]);
@@ -712,47 +713,45 @@ const WeldingMachineCalibration: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const { companyLogo, companyName, companyResponsible } = useSettingsStore();
   
-  // Load calibrations and machines
+  // Load data from Firestore
   useEffect(() => {
+    if (!companyId) return;
+
     const loadData = async () => {
       try {
         setLoading(true);
         setError(null);
-        
-        // Load calibrations
-        const calibrationsRef = collection(db, getCompanyCollection('weldingMachineCalibrations'));
-        const calibrationsQuery = query(calibrationsRef, orderBy('calibrationDate', 'desc'));
-        const calibrationsSnapshot = await getDocs(calibrationsQuery);
-        
-        const calibrationsData = calibrationsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as CalibrationModel[];
-        
-        setCalibrations(calibrationsData);
-        setFilteredCalibrations(calibrationsData);
-        
+
         // Load machines
         const machinesRef = collection(db, getCompanyCollection('weldingMachines'));
-        const machinesQuery = query(machinesRef, where('status', '!=', 'retired'));
-        const machinesSnapshot = await getDocs(machinesQuery);
-        
+        const machinesSnapshot = await getDocs(machinesRef);
         const machinesData = machinesSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as WeldingMachine[];
-        
         setMachines(machinesData);
+
+        // Load calibrations
+        const calibrationsRef = collection(db, getCompanyCollection('weldingMachineCalibrations'));
+        const calibrationsQuery = query(calibrationsRef, orderBy('calibrationDate', 'desc'));
+        const calibrationsSnapshot = await getDocs(calibrationsQuery);
+        const calibrationsData = calibrationsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as CalibrationModel[];
+        setCalibrations(calibrationsData);
+        setFilteredCalibrations(calibrationsData);
+
       } catch (error) {
-        console.error("Error loading calibrations:", error);
-        setError("Erro ao carregar relatórios de calibração.");
+        console.error('Error loading data:', error);
+        setError('Erro ao carregar dados. Por favor, tente novamente.');
       } finally {
         setLoading(false);
       }
     };
-    
+
     loadData();
-  }, []);
+  }, [companyId]);
   
   // Apply filters when search term, status filter, or machine filter changes
   useEffect(() => {
@@ -782,6 +781,11 @@ const WeldingMachineCalibration: React.FC = () => {
   }, [calibrations, searchTerm, statusFilter, machineFilter]);
   
   const handleSaveCalibration = async (calibration: CalibrationModel) => {
+    if (!companyId) {
+      alert('ID da empresa não disponível. Não foi possível salvar.');
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -831,26 +835,20 @@ const WeldingMachineCalibration: React.FC = () => {
   };
   
   const handleDeleteCalibration = async (id: string) => {
-    try {
-      if (!window.confirm('Tem certeza que deseja excluir este relatório de calibração?')) {
-        return;
+    if (!companyId) {
+      alert('ID da empresa não disponível. Não foi possível excluir.');
+      return;
+    }
+
+    if (window.confirm('Tem certeza que deseja excluir esta calibração?')) {
+      try {
+        await deleteDoc(doc(db, getCompanyCollection('weldingMachineCalibrations'), id));
+        setCalibrations(prev => prev.filter(c => c.id !== id));
+        setFilteredCalibrations(prev => prev.filter(c => c.id !== id));
+      } catch (error) {
+        console.error("Error deleting calibration:", error);
+        setError("Erro ao excluir calibração. Por favor, tente novamente.");
       }
-      
-      setLoading(true);
-      
-      // Delete the calibration
-      const calibrationRef = doc(db, getCompanyCollection('weldingMachineCalibrations'), id);
-      await deleteDoc(calibrationRef);
-      
-      // Update state
-      setCalibrations(prev => prev.filter(c => c.id !== id));
-      setFilteredCalibrations(prev => prev.filter(c => c.id !== id));
-      
-      setLoading(false);
-    } catch (error) {
-      console.error("Error deleting calibration:", error);
-      setError("Erro ao excluir calibração. Por favor, tente novamente.");
-      setLoading(false);
     }
   };
   

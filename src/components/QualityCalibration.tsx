@@ -4,12 +4,13 @@ import WeldingMachineList from './WeldingMachineList';
 import WeldingMachineCalibration from './WeldingMachineCalibration';
 import { Settings, Calendar, Info, Plus, FileText, Upload, Trash2, Edit, FileCheck, FileBarChart2, XCircle } from 'lucide-react';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 import { format, addYears } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import JSZip from 'jszip';
+import { useAuthStore } from '../store/authStore';
 
 // Define types for different machine calibration data
 interface BaseCalibrationData {
@@ -72,6 +73,7 @@ interface CalibrationRecord {
 }
 
 const QualityCalibration: React.FC = () => {
+  const { companyId } = useAuthStore();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [machines, setMachines] = useState<Machine[]>([]);
   const [calibrationRecords, setCalibrationRecords] = useState<CalibrationRecord[]>([]);
@@ -88,23 +90,30 @@ const QualityCalibration: React.FC = () => {
 
   // Load machines and calibration records
   useEffect(() => {
-    const machinesRef = collection(db, 'machines');
+    if (!companyId) return;
+
+    const machinesRef = collection(db, getCompanyCollection('machines'));
     const unsubscribeMachines = onSnapshot(machinesRef, (snapshot) => {
       const machinesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Machine[];
       setMachines(machinesData);
     });
 
-    const calibrationRecordsRef = collection(db, 'calibrationRecords');
+    const calibrationRecordsRef = collection(db, getCompanyCollection('calibrationRecords'));
     const unsubscribeCalibrations = onSnapshot(calibrationRecordsRef, (snapshot) => {
       const recordsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as CalibrationRecord[];
       setCalibrationRecords(recordsData);
     });
 
     return () => { unsubscribeMachines(); unsubscribeCalibrations(); };
-  }, []);
+  }, [companyId]);
 
   // Handle adding/updating machines
   const handleSaveMachine = async () => {
+    if (!companyId) {
+      alert('ID da empresa não disponível. Não foi possível salvar.');
+      return;
+    }
+
     if (!newMachine.name || !newMachine.type || !newMachine.identification || !newMachine.calibrationInterval) {
       alert('Por favor, preencha todos os campos obrigatórios da máquina.');
       return;
@@ -113,12 +122,16 @@ const QualityCalibration: React.FC = () => {
     try {
       if (editingMachine) {
         // Update existing machine
-        const machineRef = doc(db, 'machines', editingMachine.id);
+        const machineRef = doc(db, getCompanyCollection('machines'), editingMachine.id);
         await updateDoc(machineRef, newMachine);
         setEditingMachine(null);
       } else {
         // Add new machine
-        await addDoc(collection(db, 'machines'), { ...newMachine, status: 'active', createdAt: new Date().toISOString() });
+        await addDoc(collection(db, getCompanyCollection('machines')), { 
+          ...newMachine, 
+          status: 'active', 
+          createdAt: new Date().toISOString() 
+        });
       }
 
       setShowMachineForm(false);
@@ -131,9 +144,14 @@ const QualityCalibration: React.FC = () => {
 
   // Handle deleting machine
   const handleDeleteMachine = async (machineId: string) => {
+    if (!companyId) {
+      alert('ID da empresa não disponível. Não foi possível excluir.');
+      return;
+    }
+
     if (window.confirm('Tem certeza que deseja excluir esta máquina? Esta ação não pode ser desfeita.')) {
       try {
-        await deleteDoc(doc(db, 'machines', machineId));
+        await deleteDoc(doc(db, getCompanyCollection('machines'), machineId));
       } catch (error) {
         console.error('Error deleting machine:', error);
         alert('Erro ao excluir máquina.');
@@ -143,26 +161,31 @@ const QualityCalibration: React.FC = () => {
 
   // Handle adding calibration records
   const handleSaveCalibrationRecord = async () => {
+    if (!companyId) {
+      alert('ID da empresa não disponível. Não foi possível salvar.');
+      return;
+    }
+
     if (!selectedMachineForCalibration || !newCalibrationRecord.calibrationDate || !newCalibrationRecord.calibrationData) {
-       alert('Por favor, selecione uma máquina e preencha todos os campos obrigatórios da calibração.');
-       return;
+      alert('Por favor, selecione uma máquina e preencha todos os campos obrigatórios da calibração.');
+      return;
     }
 
     try {
-       // Add new calibration record
-       await addDoc(collection(db, 'calibrationRecords'), {
-         ...newCalibrationRecord,
-         machineId: selectedMachineForCalibration.id, // Link record to the selected machine
-         createdAt: new Date().toISOString(),
-         calibrationDate: new Date(newCalibrationRecord.calibrationDate).toISOString(), // Ensure ISO string
-       });
+      // Add new calibration record
+      await addDoc(collection(db, getCompanyCollection('calibrationRecords')), {
+        ...newCalibrationRecord,
+        machineId: selectedMachineForCalibration.id,
+        createdAt: new Date().toISOString(),
+        calibrationDate: new Date(newCalibrationRecord.calibrationDate).toISOString(),
+      });
 
-       setShowCalibrationForm(false);
-       setNewCalibrationRecord({});
-       setSelectedMachineForCalibration(null);
+      setShowCalibrationForm(false);
+      setNewCalibrationRecord({});
+      setSelectedMachineForCalibration(null);
     } catch (error) {
-       console.error('Error saving calibration record:', error);
-       alert('Erro ao salvar registro de calibração.');
+      console.error('Error saving calibration record:', error);
+      alert('Erro ao salvar registro de calibração.');
     }
   };
 
