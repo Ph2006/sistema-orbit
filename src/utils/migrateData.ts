@@ -7,7 +7,7 @@ import {
   query,
   limit 
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, getCompanyCollection } from '../lib/firebase';
 
 // List of collections to migrate
 const COLLECTIONS_TO_MIGRATE = [
@@ -38,19 +38,20 @@ export const migrateCollection = async (
   batchSize = 100
 ): Promise<number> => {
   try {
-    console.log(`Migrating collection ${collectionName} for company ${companyId}...`);
+    console.log(`🔄 Migrating collection ${collectionName} for company ${companyId}...`);
     
     // Get source collection reference
     const sourceRef = collection(db, collectionName);
     
-    // Get target collection reference
-    const targetPath = `empresa/${companyId}/${collectionName}`;
+    // CORREÇÃO: Usar a estrutura correta companies/{companyId}/{collection}
+    const targetPath = `companies/${companyId}/${collectionName}`;
+    console.log(`📍 Target path: ${targetPath}`);
     
     // Get documents from the source collection
     const snapshot = await getDocs(sourceRef);
     
     if (snapshot.empty) {
-      console.log(`Collection ${collectionName} is empty, skipping migration.`);
+      console.log(`📭 Collection ${collectionName} is empty, skipping migration.`);
       return 0;
     }
     
@@ -70,7 +71,7 @@ export const migrateCollection = async (
       // If batch is full, commit it
       if (batchCount >= batchSize) {
         await currentBatch.commit();
-        console.log(`Committed batch of ${batchCount} documents for ${collectionName}`);
+        console.log(`✅ Committed batch of ${batchCount} documents for ${collectionName}`);
         currentBatch = writeBatch(db);
         batchCount = 0;
       }
@@ -79,13 +80,15 @@ export const migrateCollection = async (
     // Commit any remaining documents
     if (batchCount > 0) {
       await currentBatch.commit();
-      console.log(`Committed final batch of ${batchCount} documents for ${collectionName}`);
+      console.log(`✅ Committed final batch of ${batchCount} documents for ${collectionName}`);
     }
     
-    console.log(`Successfully migrated ${processedCount} documents from ${collectionName} to ${targetPath}`);
+    console.log(`🎉 Successfully migrated ${processedCount} documents from ${collectionName} to ${targetPath}`);
     return processedCount;
-  } catch (error) {
-    console.error(`Error migrating collection ${collectionName}:`, error);
+  } catch (error: any) {
+    console.error(`❌ Error migrating collection ${collectionName}:`, error);
+    console.error('❌ Error code:', error?.code);
+    console.error('❌ Error message:', error?.message);
     throw error;
   }
 };
@@ -95,15 +98,31 @@ export const migrateDataForCompany = async (companyId: string): Promise<Record<s
   const results: Record<string, number> = {};
   
   try {
+    console.log(`🚀 Starting migration for company: ${companyId}`);
+    
     for (const collectionName of COLLECTIONS_TO_MIGRATE) {
-      const count = await migrateCollection(collectionName, companyId);
-      results[collectionName] = count;
+      try {
+        const count = await migrateCollection(collectionName, companyId);
+        results[collectionName] = count;
+      } catch (collectionError: any) {
+        console.error(`❌ Failed to migrate ${collectionName} for ${companyId}:`, collectionError);
+        results[collectionName] = -1; // Mark as failed
+        
+        // Continue with other collections instead of stopping completely
+        if (collectionError?.code === 'permission-denied') {
+          console.warn(`⚠️ Permission denied for ${collectionName}, continuing with next collection...`);
+          continue;
+        }
+        
+        // For other critical errors, you might want to stop
+        // throw collectionError;
+      }
     }
     
-    console.log(`Migration completed for company ${companyId}`, results);
+    console.log(`🎯 Migration completed for company ${companyId}`, results);
     return results;
-  } catch (error) {
-    console.error(`Error in migration for company ${companyId}:`, error);
+  } catch (error: any) {
+    console.error(`❌ Critical error in migration for company ${companyId}:`, error);
     throw error;
   }
 };
@@ -113,36 +132,100 @@ export const migrateAllData = async (): Promise<Record<string, Record<string, nu
   const companyIds = ['mecald', 'brasmold'];
   const allResults: Record<string, Record<string, number>> = {};
   
+  console.log('🌟 Starting full data migration...');
+  
   for (const companyId of companyIds) {
-    allResults[companyId] = await migrateDataForCompany(companyId);
+    try {
+      allResults[companyId] = await migrateDataForCompany(companyId);
+    } catch (companyError) {
+      console.error(`❌ Failed to migrate data for company ${companyId}:`, companyError);
+      allResults[companyId] = {}; // Empty result for failed company
+    }
   }
   
+  console.log('🏁 Full migration completed:', allResults);
   return allResults;
 };
 
-// Check if data already exists in the new structure
+// CORREÇÃO: Função mais robusta para verificar dados migrados
 export const checkMigratedData = async (companyId: string): Promise<boolean> => {
   try {
-    // Check for any migrated data in a common collection like customers
-    const targetPath = `empresa/${companyId}/customers`;
+    console.log(`🔍 Checking migrated data for company: ${companyId}`);
+    
+    // CORREÇÃO: Usar a estrutura correta
+    const targetPath = `companies/${companyId}/customers`;
+    console.log(`📍 Checking path: ${targetPath}`);
+    
     const testQuery = query(collection(db, targetPath), limit(1));
     const snapshot = await getDocs(testQuery);
     
-    return !snapshot.empty;
-  } catch (error) {
-    // More specific error logging
-    console.error('Error checking migrated data:', error);
+    const hasData = !snapshot.empty;
+    console.log(`📊 Migration check result for ${companyId}: ${hasData ? 'Data exists' : 'No data found'}`);
     
-    // Improved permission error detection
-    if (error instanceof Error && 
-        (error.message.includes('permission') || 
-         error.message.includes('permissions') || 
-         error.message.includes('Missing or insufficient permissions'))) {
-      console.log('Permission error when checking migration status - assuming data is already migrated');
-      return true; // Return true to indicate migration is not needed
+    return hasData;
+  } catch (error: any) {
+    console.error('❌ Error checking migrated data:', error);
+    console.error('❌ Error code:', error?.code);
+    console.error('❌ Error message:', error?.message);
+    
+    // CORREÇÃO: Melhor tratamento de erro de permissão
+    if (error?.code === 'permission-denied') {
+      console.warn('⚠️ Permission denied when checking migration status');
+      console.warn('⚠️ This might be due to Firestore rules or missing authentication');
+      
+      // DECISÃO: Retornar true para evitar tentativas de migração desnecessárias
+      // quando há problemas de permissão
+      return true;
     }
     
-    // For other errors, continue to return false
+    // Para outros erros, assumir que não há dados migrados
+    console.warn('⚠️ Assuming no migrated data due to error');
+    return false;
+  }
+};
+
+// NOVA: Função para verificar se a migração é necessária de forma mais segura
+export const isMigrationNeeded = async (companyId: string): Promise<boolean> => {
+  try {
+    // Verificar apenas se conseguimos acessar a estrutura companies
+    const companiesRef = collection(db, 'companies');
+    const testQuery = query(companiesRef, limit(1));
+    await getDocs(testQuery);
+    
+    // Se conseguir acessar, verificar se há dados para a empresa específica
+    return !(await checkMigratedData(companyId));
+  } catch (error: any) {
+    console.error('❌ Error checking if migration is needed:', error);
+    
+    if (error?.code === 'permission-denied') {
+      console.warn('⚠️ Cannot check migration status due to permissions');
+      return false; // Não tentar migrar se não conseguir verificar
+    }
+    
+    return false;
+  }
+};
+
+// NOVA: Função para executar migração de forma segura
+export const safeMigrateData = async (companyId: string): Promise<boolean> => {
+  try {
+    console.log(`🔒 Safe migration check for company: ${companyId}`);
+    
+    // Verificar se a migração é necessária
+    const needsMigration = await isMigrationNeeded(companyId);
+    
+    if (!needsMigration) {
+      console.log(`✅ No migration needed for company: ${companyId}`);
+      return true;
+    }
+    
+    console.log(`🔄 Starting safe migration for company: ${companyId}`);
+    await migrateDataForCompany(companyId);
+    
+    console.log(`✅ Safe migration completed for company: ${companyId}`);
+    return true;
+  } catch (error: any) {
+    console.error(`❌ Safe migration failed for company ${companyId}:`, error);
     return false;
   }
 };
