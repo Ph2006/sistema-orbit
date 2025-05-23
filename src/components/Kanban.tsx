@@ -103,21 +103,43 @@ const Kanban: React.FC = () => {
       setError(null);
       
       try {
-        // Inicializar colunas padrão apenas se não existirem
-        await initializeDefaultColumns();
+        console.log('🔍 Kanban: Starting initialization...');
         
-        // Subscrições em tempo real para colunas e pedidos
+        // Tentar inicializar colunas com tratamento específico de erro
+        try {
+          console.log('🔍 Kanban: Calling initializeDefaultColumns...');
+          await initializeDefaultColumns();
+          console.log('✅ Kanban: Default columns initialized successfully');
+        } catch (columnError: any) {
+          console.error('❌ Kanban: Error initializing columns:', columnError);
+          console.error('❌ Column error code:', columnError?.code);
+          console.error('❌ Column error message:', columnError?.message);
+          
+          // Se for erro de permissão, não falhar completamente
+          if (columnError?.code === 'permission-denied') {
+            console.warn('⚠️ Permission denied for columns, continuing anyway...');
+          } else {
+            throw columnError; // Re-throw se não for erro de permissão
+          }
+        }
+        
+        // Subscrições em tempo real
+        console.log('🔍 Kanban: Setting up subscriptions...');
         const unsubscribeColumns = subscribeToColumns();
         const unsubscribeOrders = subscribeToOrders();
         const unsubscribeProjects = subscribeToProjects();
         
+        console.log('✅ Kanban: All subscriptions set up successfully');
+        
         return () => {
+          console.log('🔍 Kanban: Cleaning up subscriptions...');
           unsubscribeColumns();
           unsubscribeOrders();
           unsubscribeProjects();
         };
-      } catch (error) {
-        console.error('Error initializing Kanban:', error);
+      } catch (error: any) {
+        console.error('❌ Kanban: Critical error during initialization:', error);
+        console.error('❌ Error details:', JSON.stringify(error, null, 2));
         setError('Erro ao carregar o quadro Kanban. Por favor, recarregue a página.');
       } finally {
         setIsLoading(false);
@@ -155,11 +177,15 @@ const Kanban: React.FC = () => {
         
         if (ordersWithoutColumn.length > 0) {
           console.log(`Corrigindo ${ordersWithoutColumn.length} pedidos sem coluna válida`);
-          for (const order of ordersWithoutColumn) {
-            await updateOrder({
-              ...order,
-              columnId: defaultColumn.id
-            });
+          try {
+            for (const order of ordersWithoutColumn) {
+              await updateOrder({
+                ...order,
+                columnId: defaultColumn.id
+              });
+            }
+          } catch (updateError: any) {
+            console.error('Error updating orders with column:', updateError);
           }
         }
       }
@@ -441,18 +467,23 @@ const Kanban: React.FC = () => {
       // Make sure we have columns available
       if (columns.length === 0) {
         console.log("No columns available, initializing default columns...");
-        await initializeDefaultColumns();
-        
-        // Get fresh columns from the store after initialization
-        const freshColumns = useColumnStore.getState().columns;
-        
-        // If still no columns after initialization, show error
-        if (freshColumns.length === 0) {
-          throw new Error('No columns available');
+        try {
+          await initializeDefaultColumns();
+          
+          // Get fresh columns from the store after initialization
+          const freshColumns = useColumnStore.getState().columns;
+          
+          // If still no columns after initialization, show error
+          if (freshColumns.length === 0) {
+            throw new Error('No columns available');
+          }
+          
+          // Use the first column as default
+          order.columnId = freshColumns[0].id;
+        } catch (initError) {
+          console.error('Error initializing columns:', initError);
+          throw new Error('Unable to initialize columns');
         }
-        
-        // Use the first column as default
-        order.columnId = freshColumns[0].id;
       } else if (!order.columnId || !columns.some(c => c.id === order.columnId)) {
         // If order doesn't have a valid columnId, assign the first available column
         order.columnId = columns[0].id;

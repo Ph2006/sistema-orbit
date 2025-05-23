@@ -13,21 +13,21 @@ const DataMigration: React.FC = () => {
   
   // Check if migration has already been done
   useEffect(() => {
-    const checkMigration = async () => {
-      try {
-        const mecaldMigrated = await checkMigratedData('mecald');
-        const brasmoldMigrated = await checkMigratedData('brasmold');
-        
-        setMigrationComplete({
-          mecald: mecaldMigrated,
-          brasmold: brasmoldMigrated
-        });
-      } catch (error) {
-        console.error('Error checking migration status:', error);
-      }
-    };
-    
-    checkMigration();
+    // const checkMigration = async () => {
+    //   try {
+    //     const mecaldMigrated = await checkMigratedData('mecald');
+    //     const brasmoldMigrated = await checkMigratedData('brasmold');
+    //     
+    //     setMigrationComplete({
+    //       mecald: mecaldMigrated,
+    //       brasmold: brasmoldMigrated
+    //     });
+    //   } catch (error) {
+    //     console.error('Error checking migration status:', error);
+    //   }
+    // };
+    // 
+    // checkMigration();
   }, []);
   
   const handleMigrateAll = async () => {
@@ -35,7 +35,7 @@ const DataMigration: React.FC = () => {
       setIsMigrating(true);
       setError(null);
       
-      const results = await migrateAllData();
+      // const results = await migrateAllData();
       setMigrationResults(results);
       
       setMigrationComplete({
