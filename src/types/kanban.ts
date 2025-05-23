@@ -52,6 +52,7 @@ export interface ClientAccessLink {
   createdAt: string;
   expiresAt: string;
   isActive: boolean;
+  accessCount: number;
 }
 
 export interface Order {

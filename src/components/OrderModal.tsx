@@ -19,6 +19,7 @@ interface ClientAccessLink {
   createdAt: string;
   expiresAt: string;
   isActive: boolean;
+  accessCount: number;
 }
 
 interface OrderModalProps {
@@ -129,7 +130,6 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     }
   };
 
-  // Função melhorada para exportar PDF com cronograma completo e visual profissional
   const handleExportPDF = () => {
     const doc = new jsPDF({
       orientation: 'landscape',
@@ -418,6 +418,113 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       return;
     }
     handleExportItemsListPDF();
+  };
+
+  const handleExportItemsListPDF = () => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    let currentY = margin;
+
+    // Cabeçalho
+    if (companyLogo) {
+      doc.addImage(companyLogo, 'JPEG', margin, currentY, 40, 20);
+    }
+
+    doc.setFontSize(20);
+    doc.setFont(undefined, 'bold');
+    doc.text('LISTA DE ITENS', pageWidth / 2, currentY + 15, { align: 'center' });
+    
+    doc.setFontSize(12);
+    doc.text(`Pedido: #${formData.orderNumber}`, margin, currentY + 25);
+    doc.text(`Cliente: ${formData.customer}`, margin, currentY + 35);
+
+    currentY += 45;
+
+    // Tabela de itens
+    const tableData = formData.items.map(item => [
+      item.itemNumber.toString(),
+      item.code,
+      item.description,
+      item.quantity.toString(),
+      `${item.unitWeight} kg`,
+      `${item.totalWeight} kg`,
+      item.invoiceNumber || '-',
+      item.expeditionLE || '-'
+    ]);
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total', 'NF', 'LE']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [44, 62, 80],
+        textColor: 255
+      }
+    });
+
+    doc.save(`itens_${formData.orderNumber}.pdf`);
+  };
+
+  const generateClientAccessLink = async () => {
+    const linkId = crypto.randomUUID();
+    const expirationDate = addDays(new Date(), linkExpiration);
+    
+    const accessLink: ClientAccessLink = {
+      id: linkId,
+      url: `${window.location.origin}/cronograma-publico/${linkId}`,
+      createdAt: new Date().toISOString(),
+      expiresAt: expirationDate.toISOString(),
+      isActive: true,
+      accessCount: 0
+    };
+    
+    setGeneratedLink(accessLink.url);
+    
+    // Atualizar o pedido com o novo link
+    const updatedLinks = [...(formData.clientAccessLinks || []), accessLink];
+    setFormData(prev => ({
+      ...prev,
+      clientAccessLinks: updatedLinks
+    }));
+
+    setShowLinkModal(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.orderNumber || !formData.customer || !formData.internalOrderNumber || 
+        !formData.startDate || !formData.deliveryDate) {
+      alert('Por favor, preencha todos os campos obrigatórios do pedido.');
+      return;
+    }
+    
+    if (formData.items.length === 0) {
+      alert('Por favor, adicione pelo menos um item ao pedido.');
+      return;
+    }
+    
+    try {
+      const formattedData = {
+        ...formData,
+        startDate: safeISODate(formData.startDate),
+        deliveryDate: safeISODate(formData.deliveryDate),
+        completedDate: formData.completedDate ? safeISODate(formData.completedDate) : '',
+        deleted: false,
+        checklist: {
+          drawings: !!formData.checklist?.drawings,
+          inspectionTestPlan: !!formData.checklist?.inspectionTestPlan,
+          paintPlan: !!formData.checklist?.paintPlan
+        }
+      };
+      
+      onSave(formattedData);
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      alert("Erro ao processar as datas do pedido. Por favor, verifique os valores informados.");
+    }
   };
 
   return (
