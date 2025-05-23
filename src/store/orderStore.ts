@@ -11,7 +11,8 @@ import {
   orderBy, 
   where,
   getDoc,
-  setDoc
+  setDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
 import { Order, OrderItem } from '../types/kanban';
@@ -29,245 +30,341 @@ interface OrderState {
   deleteOrder: (orderId: string) => Promise<void>;
   subscribeToOrders: () => () => void;
   getOrder: (orderId: string) => Promise<Order | null>;
+  clearError: () => void;
 }
+
+// Helper function to validate and format dates
+const formatDate = (date: string | Date): string => {
+  try {
+    return new Date(date).toISOString();
+  } catch (error) {
+    console.error('Invalid date format:', date);
+    return new Date().toISOString();
+  }
+};
+
+// Helper function to calculate order progress
+const calculateOrderProgress = (items: OrderItem[]) => {
+  const totalItems = items.length;
+  if (totalItems === 0) {
+    return { overallProgress: 0, overallStatus: 'Não Iniciado' };
+  }
+  
+  const overallProgress = Math.round(
+    items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems
+  );
+  
+  let overallStatus: string;
+  if (overallProgress === 100) {
+    overallStatus = 'Concluído';
+  } else if (overallProgress > 0) {
+    overallStatus = 'Em Andamento';
+  } else {
+    overallStatus = 'Não Iniciado';
+  }
+  
+  return { overallProgress, overallStatus };
+};
+
+// Helper function to sanitize order data
+const sanitizeOrderData = (order: Order, isUpdate = false) => {
+  const sanitized = {
+    ...order,
+    startDate: formatDate(order.startDate),
+    deliveryDate: formatDate(order.deliveryDate),
+    deleted: Boolean(order.deleted),
+    checklist: {
+      drawings: Boolean(order.checklist?.drawings),
+      inspectionTestPlan: Boolean(order.checklist?.inspectionTestPlan),
+      paintPlan: Boolean(order.checklist?.paintPlan)
+    },
+    statusHistory: order.statusHistory || [],
+    items: [], // Items are handled separately as subcollection
+  };
+  
+  // Remove undefined values
+  Object.keys(sanitized).forEach(key => {
+    if (sanitized[key as keyof typeof sanitized] === undefined) {
+      delete sanitized[key as keyof typeof sanitized];
+    }
+  });
+  
+  return sanitized;
+};
 
 export const useOrderStore = create<OrderState>((set, get) => ({
   orders: [],
   loading: false,
   error: null,
 
+  clearError: () => set({ error: null }),
+
   loadOrders: async () => {
-    set({ loading: true, error: null });
     const companyId = useAuthStore.getState().companyId;
     if (!companyId) {
+      console.log("loadOrders: Company ID not available, skipping fetch.");
       set({ error: 'Company ID not available', loading: false });
       return;
     }
 
+    set({ loading: true, error: null });
+
     try {
       const ordersRef = collection(db, getCompanyCollection('orders'));
-      const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'));
+      const ordersQuery = query(
+        ordersRef, 
+        where('deleted', '!=', true),
+        orderBy('deleted'),
+        orderBy('createdAt', 'desc')
+      );
       const querySnapshot = await getDocs(ordersQuery);
       
-      const ordersPromises = querySnapshot.docs.map(async doc => {
-        const orderData = doc.data() as Order;
+      const ordersPromises = querySnapshot.docs.map(async (docSnapshot) => {
+        const orderData = docSnapshot.data() as Order;
         
-        // Fetch items subcollection
-        const itemsSnapshot = await getDocs(collection(doc.ref, 'items'));
-        const items = itemsSnapshot.docs.map(itemDoc => ({
-          ...itemDoc.data() as OrderItem,
-          id: itemDoc.id,
-        })) as OrderItem[];
+        try {
+          // Fetch items subcollection
+          const itemsSnapshot = await getDocs(collection(docSnapshot.ref, 'items'));
+          const items = itemsSnapshot.docs.map(itemDoc => ({
+            ...itemDoc.data() as OrderItem,
+            id: itemDoc.id,
+          })) as OrderItem[];
 
-        // Calculate overallProgress and overallStatus for the order
-        const totalItems = items.length;
-        const overallProgress = totalItems > 0 ? Math.round(items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems) : 0;
-        const overallStatus = overallProgress === 100 ? 'Concluído' : (overallProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
+          // Calculate progress
+          const { overallProgress, overallStatus } = calculateOrderProgress(items);
 
-        return {
-          id: doc.id,
-          ...orderData,
-          startDate: new Date(orderData.startDate).toISOString(),
-          deliveryDate: new Date(orderData.deliveryDate).toISOString(),
-          columnId: orderData.columnId || null,
-          items: items,
-          overallProgress,
-          overallStatus,
-        } as Order;
+          return {
+            id: docSnapshot.id,
+            ...orderData,
+            startDate: formatDate(orderData.startDate),
+            deliveryDate: formatDate(orderData.deliveryDate),
+            columnId: orderData.columnId || null,
+            items,
+            overallProgress,
+            overallStatus,
+          } as Order;
+        } catch (itemError) {
+          console.error(`Error loading items for order ${docSnapshot.id}:`, itemError);
+          // Return order without items if there's an error
+          const { overallProgress, overallStatus } = calculateOrderProgress([]);
+          return {
+            id: docSnapshot.id,
+            ...orderData,
+            startDate: formatDate(orderData.startDate),
+            deliveryDate: formatDate(orderData.deliveryDate),
+            columnId: orderData.columnId || null,
+            items: [],
+            overallProgress,
+            overallStatus,
+          } as Order;
+        }
       });
 
       const orders = await Promise.all(ordersPromises);
       set({ orders, loading: false });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading orders:', error);
-      set({ error: 'Failed to load orders', loading: false });
+      set({ 
+        error: `Failed to load orders: ${error.message}`, 
+        loading: false 
+      });
     }
   },
 
   getOrder: async (orderId: string) => {
     const companyId = useAuthStore.getState().companyId;
     if (!companyId) {
-      console.error('Company ID not available');
+      console.error('getOrder: Company ID not available');
       return null;
     }
 
     try {
       const orderRef = doc(db, getCompanyCollection('orders'), orderId);
       const orderDoc = await getDoc(orderRef);
-      if (!orderDoc.exists()) return null;
+      
+      if (!orderDoc.exists()) {
+        console.log(`Order ${orderId} not found`);
+        return null;
+      }
       
       const data = orderDoc.data() as Order;
 
-      // Fetch items subcollection for this single order
+      // Fetch items subcollection
       const itemsSnapshot = await getDocs(collection(orderRef, 'items'));
       const items = itemsSnapshot.docs.map(itemDoc => ({
         ...itemDoc.data() as OrderItem,
         id: itemDoc.id,
       })) as OrderItem[];
       
-      // Calculate overallProgress and overallStatus for the order
-      const totalItems = items.length;
-      const overallProgress = totalItems > 0 ? Math.round(items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems) : 0;
-      const overallStatus = overallProgress === 100 ? 'Concluído' : (overallProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
+      // Calculate progress
+      const { overallProgress, overallStatus } = calculateOrderProgress(items);
 
       return {
         id: orderDoc.id,
         ...data,
-        startDate: new Date(data.startDate).toISOString(),
-        deliveryDate: new Date(data.deliveryDate).toISOString(),
+        startDate: formatDate(data.startDate),
+        deliveryDate: formatDate(data.deliveryDate),
         columnId: data.columnId || null,
-        items: items,
+        items,
         overallProgress,
         overallStatus,
       } as Order;
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error getting order:', error);
       return null;
     }
   },
 
   addOrder: async (order: Order) => {
+    const companyId = useAuthStore.getState().companyId;
+    if (!companyId) {
+      const errorMsg = 'Company ID not available';
+      console.error('addOrder:', errorMsg);
+      set({ error: errorMsg });
+      throw new Error(errorMsg);
+    }
+
     try {
-      // Get column data needed for initializing an order
+      // Ensure columns are loaded
       const { columns } = useColumnStore.getState();
       
-      // Find the "Pedidos em processo" column
-      const processColumn = columns.find(col => col.title === 'Pedidos em processo');
-      
-      // If no columns exist, try to initialize them
       if (columns.length === 0) {
         console.log("No columns found, initializing default columns...");
         await useColumnStore.getState().initializeDefaultColumns();
         
-        // Try to get columns again after initialization
         const freshColumns = useColumnStore.getState().columns;
-        console.log(`After initialization, found ${freshColumns.length} columns`);
-        
-        // If still no columns, throw an error
         if (freshColumns.length === 0) {
-          throw new Error('No columns available even after initialization. Please set up Kanban board first.');
+          throw new Error('No columns available. Please set up Kanban board first.');
         }
       }
       
-      // Find default column again (in case we just initialized them)
-      const defaultColumn = processColumn || 
-                           useColumnStore.getState().columns.find(col => col.title === 'Pedidos em processo') ||
-                           useColumnStore.getState().columns[0]; // Fallback to first available column
-                           
-      console.log("Using column for new order:", defaultColumn?.title || "No column found");
+      // Find appropriate column
+      const processColumn = useColumnStore.getState().columns.find(col => 
+        col.title === 'Pedidos em processo'
+      );
+      const defaultColumn = processColumn || useColumnStore.getState().columns[0];
+      
+      console.log("Using column for new order:", defaultColumn?.title);
 
-      // Ensure checklist is properly defined
-      const checklist = order.checklist || {
-        drawings: false,
-        inspectionTestPlan: false,
-        paintPlan: false
-      };
+      // Calculate progress for new order
+      const { overallProgress, overallStatus } = calculateOrderProgress(order.items || []);
 
-      // All orders start in the listing column
+      // Prepare order data
       const orderData = {
         ...order,
-        columnId: order.columnId || (defaultColumn?.id || null),
+        columnId: order.columnId || defaultColumn?.id || null,
         createdAt: new Date().toISOString(),
-        startDate: new Date(order.startDate).toISOString(),
-        deliveryDate: new Date(order.deliveryDate).toISOString(),
-        deleted: false,
-        checklist: {
-          drawings: !!checklist.drawings,
-          inspectionTestPlan: !!checklist.inspectionTestPlan,
-          paintPlan: !!checklist.paintPlan
-        },
-        statusHistory: order.statusHistory || [],
-        items: [],
-        overallProgress: 0, 
-        overallStatus: 'Não Iniciado',
+        overallProgress,
+        overallStatus,
       };
 
-      // Remove nulls and undefineds for clean Firestore document
-      const sanitizedData = JSON.parse(JSON.stringify(orderData));
-      console.log("Adding order with data:", JSON.stringify(sanitizedData, null, 2));
-
-      // Remove id to avoid document ID conflict
-      const { id, ...orderWithoutId } = sanitizedData;
+      // Sanitize data
+      const sanitizedData = sanitizeOrderData(orderData);
+      const { id, items, ...orderWithoutIdAndItems } = sanitizedData;
       
-      // Use orderId if provided, otherwise let Firestore generate one
+      // Create order document
       let docRef;
-      if (order.id && order.id !== 'new' && order.id !== crypto.randomUUID()) {
-        docRef = doc(db, getCompanyCollection('orders'), order.id);
-        await setDoc(docRef, orderWithoutId);
+      const ordersCollectionPath = getCompanyCollection('orders');
+      
+      if (order.id && order.id !== 'new' && !order.id.includes('temp-')) {
+        docRef = doc(db, ordersCollectionPath, order.id);
+        await setDoc(docRef, orderWithoutIdAndItems);
       } else {
-        docRef = await addDoc(collection(db, getCompanyCollection('orders')), orderWithoutId);
+        docRef = await addDoc(collection(db, ordersCollectionPath), orderWithoutIdAndItems);
       }
       
-      // Add to history collection
-      await addDoc(collection(db, getCompanyCollection('orderHistory')), {
-        orderId: docRef.id,
-        timestamp: new Date().toISOString(),
-        user: useAuthStore.getState().user?.email || 'sistema',
-        action: 'create',
-        changes: []
-      });
+      // Add items as subcollection using batch for better performance
+      if (order.items && order.items.length > 0) {
+        console.log(`Adding ${order.items.length} items to order ${docRef.id}`);
+        
+        const batch = writeBatch(db);
+        const itemsCollectionRef = collection(docRef, 'items');
+        
+        order.items.forEach((item) => {
+          const itemDocRef = doc(itemsCollectionRef);
+          const itemData = {
+            ...item,
+            id: itemDocRef.id,
+            itemNumber: item.itemNumber || 0,
+            quantity: item.quantity || 0,
+            unitWeight: item.unitWeight || 0,
+            totalWeight: item.totalWeight || 0,
+            unitPrice: item.unitPrice || 0,
+            totalPrice: item.totalPrice || 0,
+            unitCost: item.unitCost || 0,
+            totalCost: item.totalCost || 0,
+            margin: item.margin || 0,
+            overallProgress: item.overallProgress || 0,
+          };
+          batch.set(itemDocRef, itemData);
+        });
+        
+        await batch.commit();
+        console.log(`Successfully added ${order.items.length} items`);
+      }
+
+      // Add to history
+      try {
+        await addDoc(collection(db, getCompanyCollection('orderHistory')), {
+          orderId: docRef.id,
+          timestamp: new Date().toISOString(),
+          user: useAuthStore.getState().user?.email || 'sistema',
+          action: 'create',
+          changes: []
+        });
+      } catch (historyError) {
+        console.warn('Failed to add to history:', historyError);
+        // Don't fail the entire operation for history errors
+      }
       
-      // Update local state immediately so UI reflects the change
-      const newOrder = { ...sanitizedData, id: docRef.id, items: order.items || [] };
+      // Update local state
+      const newOrder = { 
+        ...sanitizedData, 
+        id: docRef.id, 
+        items: order.items || [],
+        overallProgress,
+        overallStatus
+      };
+      
       set(state => ({ 
-        orders: [...state.orders.filter(o => o.id !== docRef.id), newOrder] 
+        orders: [newOrder, ...state.orders.filter(o => o.id !== docRef.id)]
       }));
       
-      console.log("Order added with ID:", docRef.id);
-      
-      // Save items as a subcollection after creating the order document
-      if (order.items && order.items.length > 0) {
-        console.log(`Saving ${order.items.length} items to subcollection for order ${docRef.id}`);
-        const itemsCollectionRef = collection(docRef, 'items');
-        const addItemPromises = order.items.map(item => {
-           // Use setDoc with a generated ID to add each item
-           const itemDocRef = doc(itemsCollectionRef);
-           const itemDataToSave = {
-             ...item,
-             id: itemDocRef.id,
-             itemNumber: item.itemNumber || 0,
-             quantity: item.quantity || 0,
-             unitWeight: item.unitWeight || 0,
-             totalWeight: item.totalWeight || 0,
-             unitPrice: item.unitPrice || 0,
-             totalPrice: item.totalPrice || 0,
-             unitCost: item.unitCost || 0,
-             totalCost: item.totalCost || 0,
-             margin: item.margin || 0,
-             overallProgress: item.overallProgress || 0,
-           };
-           return setDoc(itemDocRef, itemDataToSave);
-        });
-        await Promise.all(addItemPromises);
-        console.log(`Added ${addItemPromises.length} new items.`);
-      }
-
+      console.log("Order added successfully with ID:", docRef.id);
       return docRef.id;
-    } catch (error) {
+
+    } catch (error: any) {
       console.error('Error adding order:', error);
-      set({ error: 'Failed to add order' });
-      throw error;
+      const errorMsg = `Failed to add order: ${error.message}`;
+      set({ error: errorMsg });
+      throw new Error(errorMsg);
     }
   },
 
   updateOrder: async (order: Order) => {
+    const companyId = useAuthStore.getState().companyId;
+    if (!companyId) {
+      const errorMsg = 'Company ID not available';
+      console.error('updateOrder:', errorMsg);
+      set({ error: errorMsg });
+      throw new Error(errorMsg);
+    }
+
     try {
       console.log('Updating order:', order.id);
       
-      // Verify the order exists
       const orderRef = doc(db, getCompanyCollection('orders'), order.id);
       const orderDoc = await getDoc(orderRef);
       
       if (!orderDoc.exists()) {
-        throw new Error('Order not found');
+        throw new Error(`Order ${order.id} not found`);
       }
 
-      // Get the original data to compare changes
       const originalData = orderDoc.data() as Order;
       
-      // Get column IDs from the store for automatic column assignment
+      // Handle column assignment
       const { columns } = useColumnStore.getState();
       const columnIds = {
         listing: columns.find(c => c.title === 'Listagem de materiais')?.id,
@@ -278,195 +375,239 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         shipping: columns.find(c => c.title === 'Expedição')?.id,
       };
       
-      // Only determine appropriate column if columnId is not explicitly set
       const appropriateColumn = order.columnId === undefined ? 
         determineOrderColumn(order, columnIds) : 
         order.columnId;
       
-      // Check if status has changed and add to history if needed
+      // Handle status history
       let statusHistory = order.statusHistory || originalData.statusHistory || [];
       if (order.status !== originalData.status && originalData.createdAt) {
-         const lastHistoryEntry = statusHistory.length > 0 ? statusHistory[statusHistory.length - 1] : null;
-         if (!lastHistoryEntry || lastHistoryEntry.status !== order.status) {
-            statusHistory = [
-              ...statusHistory,
-              {
-                status: order.status,
-                date: new Date().toISOString(),
-                user: useAuthStore.getState().user?.email || 'sistema'
-              }
-            ];
-         }
+        const lastHistoryEntry = statusHistory[statusHistory.length - 1];
+        if (!lastHistoryEntry || lastHistoryEntry.status !== order.status) {
+          statusHistory = [
+            ...statusHistory,
+            {
+              status: order.status,
+              date: new Date().toISOString(),
+              user: useAuthStore.getState().user?.email || 'sistema'
+            }
+          ];
+        }
       }
 
-      // Ensure checklist is fully defined
-      const checklist = order.checklist || originalData.checklist || {
-        drawings: false,
-        inspectionTestPlan: false,
-        paintPlan: false
-      };
+      // Calculate progress
+      const { overallProgress, overallStatus } = calculateOrderProgress(order.items || []);
 
-      // Calculate overallProgress and overallStatus based on updated items
-      const totalItems = order.items.length;
-      const overallProgress = totalItems > 0 ? Math.round(order.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems) : 0;
-      const overallStatus = overallProgress === 100 ? 'Concluído' : (overallProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
-
-
-      // Ensure dates are properly formatted and columnId is never undefined
-      const formattedData = {
+      // Prepare update data
+      const updateData = {
         ...order,
         columnId: appropriateColumn,
-        startDate: new Date(order.startDate).toISOString(),
-        deliveryDate: new Date(order.deliveryDate).toISOString(),
-        deleted: order.deleted === true ? true : false,
         statusHistory,
-        checklist: {
-          drawings: !!checklist.drawings,
-          inspectionTestPlan: !!checklist.inspectionTestPlan,
-          paintPlan: !!checklist.paintPlan
-        },
-        items: [],
         overallProgress,
         overallStatus,
       };
 
-      // Remove nulls and undefineds for clean Firestore document update
-      const sanitizedData = JSON.parse(JSON.stringify(formattedData));
-      
-      // Remove id from the update payload
-      const { id, ...updatePayload } = sanitizedData;
+      // Sanitize and remove items (handled separately)
+      const sanitizedData = sanitizeOrderData(updateData, true);
+      const { id, items, ...updatePayload } = sanitizedData;
 
+      // Update main document
       await updateDoc(orderRef, updatePayload);
 
-      // Handle items subcollection: delete existing items and add the new ones
-      console.log(`Deleting existing items for order ${order.id}`);
+      // Update items subcollection using batch
+      const batch = writeBatch(db);
+      
+      // Delete existing items
       const existingItemsSnapshot = await getDocs(collection(orderRef, 'items'));
-      const deleteItemPromises = existingItemsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(deleteItemPromises);
-      console.log(`Deleted ${deleteItemPromises.length} existing items.`);
+      existingItemsSnapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
 
+      // Add new items
       if (order.items && order.items.length > 0) {
-        console.log(`Adding ${order.items.length} new items for order ${order.id}`);
         const itemsCollectionRef = collection(orderRef, 'items');
-        const addItemPromises = order.items.map(item => {
-           // Use setDoc with a generated ID to add each item
-           const itemDocRef = doc(itemsCollectionRef);
-           const itemDataToSave = {
-             ...item,
-             id: itemDocRef.id,
-             itemNumber: item.itemNumber || 0,
-             quantity: item.quantity || 0,
-             unitWeight: item.unitWeight || 0,
-             totalWeight: item.totalWeight || 0,
-             unitPrice: item.unitPrice || 0,
-             totalPrice: item.totalPrice || 0,
-             unitCost: item.unitCost || 0,
-             totalCost: item.totalCost || 0,
-             margin: item.margin || 0,
-             overallProgress: item.overallProgress || 0,
-           };
-           return setDoc(itemDocRef, itemDataToSave);
+        order.items.forEach(item => {
+          const itemDocRef = doc(itemsCollectionRef);
+          const itemData = {
+            ...item,
+            id: itemDocRef.id,
+            itemNumber: item.itemNumber || 0,
+            quantity: item.quantity || 0,
+            unitWeight: item.unitWeight || 0,
+            totalWeight: item.totalWeight || 0,
+            unitPrice: item.unitPrice || 0,
+            totalPrice: item.totalPrice || 0,
+            unitCost: item.unitCost || 0,
+            totalCost: item.totalCost || 0,
+            margin: item.margin || 0,
+            overallProgress: item.overallProgress || 0,
+          };
+          batch.set(itemDocRef, itemData);
         });
-        await Promise.all(addItemPromises);
-        console.log(`Added ${addItemPromises.length} new items.`);
       }
+
+      await batch.commit();
 
       // Update local state
       set(state => ({
-        orders: state.orders.map(o => o.id === order.id ? order : o)
+        orders: state.orders.map(o => 
+          o.id === order.id ? { ...order, overallProgress, overallStatus } : o
+        )
       }));
 
-      console.log('Order updated successfully.');
+      console.log('Order updated successfully');
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating order:', error);
-      set({ error: 'Failed to update order' });
-      throw error;
+      const errorMsg = `Failed to update order: ${error.message}`;
+      set({ error: errorMsg });
+      throw new Error(errorMsg);
     }
   },
 
   deleteOrder: async (orderId: string) => {
-    try {
-      console.log('Deleting order:', orderId);
-      
-      // Instead of deleting the document, mark it as deleted
-      const orderRef = doc(db, getCompanyCollection('orders'), orderId);
-      await updateDoc(orderRef, { deleted: true });
+    const companyId = useAuthStore.getState().companyId;
+    if (!companyId) {
+      const errorMsg = 'Company ID not available';
+      console.error('deleteOrder:', errorMsg);
+      set({ error: errorMsg });
+      throw new Error(errorMsg);
+    }
 
-      // Add to history collection
-      await addDoc(collection(db, getCompanyCollection('orderHistory')), {
-        orderId: orderId,
-        timestamp: new Date().toISOString(),
-        user: useAuthStore.getState().user?.email || 'sistema',
-        action: 'delete',
-        changes: [{ field: 'deleted', oldValue: false, newValue: true }]
-      });
+    try {
+      console.log('Soft deleting order:', orderId);
       
-      // Update local state to reflect deletion
+      const orderRef = doc(db, getCompanyCollection('orders'), orderId);
+      await updateDoc(orderRef, { 
+        deleted: true,
+        deletedAt: new Date().toISOString()
+      });
+
+      // Add to history
+      try {
+        await addDoc(collection(db, getCompanyCollection('orderHistory')), {
+          orderId,
+          timestamp: new Date().toISOString(),
+          user: useAuthStore.getState().user?.email || 'sistema',
+          action: 'delete',
+          changes: [{ field: 'deleted', oldValue: false, newValue: true }]
+        });
+      } catch (historyError) {
+        console.warn('Failed to add to history:', historyError);
+      }
+      
+      // Update local state
       set(state => ({
-        orders: state.orders.map(order => 
-          order.id === orderId ? { ...order, deleted: true } : order
-        )
+        orders: state.orders.filter(order => order.id !== orderId)
       }));
 
-      console.log('Order marked as deleted successfully.');
+      console.log('Order soft deleted successfully');
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting order:', error);
-      set({ error: 'Failed to delete order' });
-      throw error;
+      const errorMsg = `Failed to delete order: ${error.message}`;
+      set({ error: errorMsg });
+      throw new Error(errorMsg);
     }
   },
 
   subscribeToOrders: () => {
     const companyId = useAuthStore.getState().companyId;
     if (!companyId) {
-      console.error('Company ID not available, cannot subscribe to orders');
+      console.log('subscribeToOrders: Company ID not available');
       return () => {};
     }
 
-    const ordersRef = collection(db, getCompanyCollection('orders'));
-    const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'));
+    try {
+      const ordersRef = collection(db, getCompanyCollection('orders'));
+      const ordersQuery = query(
+        ordersRef,
+        where('deleted', '!=', true),
+        orderBy('deleted'),
+        orderBy('createdAt', 'desc')
+      );
 
-    const unsubscribe = onSnapshot(ordersQuery, async (snapshot) => {
-      set({ loading: true, error: null });
-      try {
-        const ordersPromises = snapshot.docs.map(async doc => {
-          const orderData = doc.data() as Order;
+      let isInitialLoad = true;
+      
+      const unsubscribe = onSnapshot(
+        ordersQuery, 
+        async (snapshot) => {
+          if (isInitialLoad) {
+            set({ loading: true, error: null });
+            isInitialLoad = false;
+          }
+          
+          try {
+            const ordersPromises = snapshot.docs.map(async (docSnapshot) => {
+              const orderData = docSnapshot.data() as Order;
 
-          // Fetch items subcollection
-          const itemsSnapshot = await getDocs(collection(doc.ref, 'items'));
-          const items = itemsSnapshot.docs.map(itemDoc => ({
-            ...itemDoc.data() as OrderItem,
-            id: itemDoc.id,
-          })) as OrderItem[];
+              try {
+                // Fetch items subcollection
+                const itemsSnapshot = await getDocs(collection(docSnapshot.ref, 'items'));
+                const items = itemsSnapshot.docs.map(itemDoc => ({
+                  ...itemDoc.data() as OrderItem,
+                  id: itemDoc.id,
+                })) as OrderItem[];
 
-          // Calculate overallProgress and overallStatus
-          const totalItems = items.length;
-          const overallProgress = totalItems > 0 ? Math.round(items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems) : 0;
-          const overallStatus = overallProgress === 100 ? 'Concluído' : (overallProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
+                // Calculate progress
+                const { overallProgress, overallStatus } = calculateOrderProgress(items);
 
-          return {
-            id: doc.id,
-            ...orderData,
-            startDate: new Date(orderData.startDate).toISOString(),
-            deliveryDate: new Date(orderData.deliveryDate).toISOString(),
-            columnId: orderData.columnId || null,
-            items: items,
-            overallProgress,
-            overallStatus,
-          } as Order;
-        });
+                return {
+                  id: docSnapshot.id,
+                  ...orderData,
+                  startDate: formatDate(orderData.startDate),
+                  deliveryDate: formatDate(orderData.deliveryDate),
+                  columnId: orderData.columnId || null,
+                  items,
+                  overallProgress,
+                  overallStatus,
+                } as Order;
+              } catch (itemError) {
+                console.error(`Error loading items for order ${docSnapshot.id}:`, itemError);
+                const { overallProgress, overallStatus } = calculateOrderProgress([]);
+                return {
+                  id: docSnapshot.id,
+                  ...orderData,
+                  startDate: formatDate(orderData.startDate),
+                  deliveryDate: formatDate(orderData.deliveryDate),
+                  columnId: orderData.columnId || null,
+                  items: [],
+                  overallProgress,
+                  overallStatus,
+                } as Order;
+              }
+            });
 
-        const orders = await Promise.all(ordersPromises);
-        set({ orders, loading: false });
-      } catch (error) {
-        console.error('Error fetching orders in real-time:', error);
-        set({ error: 'Failed to fetch orders in real-time', loading: false });
-      }
-    });
+            const orders = await Promise.all(ordersPromises);
+            console.log(`Real-time update: ${orders.length} orders loaded`);
+            set({ orders, loading: false });
+            
+          } catch (error: any) {
+            console.error('Error in orders real-time update:', error);
+            set({ 
+              error: `Failed to get real-time updates: ${error.message}`, 
+              loading: false 
+            });
+          }
+        },
+        (error) => {
+          console.error('Orders subscription error:', error);
+          set({ 
+            error: `Subscription error: ${error.message}`, 
+            loading: false 
+          });
+        }
+      );
 
-    return unsubscribe;
+      return unsubscribe;
+      
+    } catch (error: any) {
+      console.error('Error setting up orders subscription:', error);
+      set({ 
+        error: `Failed to subscribe to orders: ${error.message}`, 
+        loading: false 
+      });
+      return () => {};
+    }
   },
-
 }));
