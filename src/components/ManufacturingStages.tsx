@@ -1,55 +1,102 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Save, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+import { db, getCompanyCollection } from '../lib/firebase';
+
+interface ManufacturingStage {
+  id: string;
+  name: string;
+  description: string;
+  order: number;
+  active: boolean;
+  createdAt: string;
+}
 
 // ManufacturingStages component for managing production stages
 const ManufacturingStages: React.FC = () => {
-  const [stages, setStages] = useState<any[]>([]);
+  const [stages, setStages] = useState<ManufacturingStage[]>([]);
   const [newStage, setNewStage] = useState({ name: '', description: '', order: 0 });
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editingStage, setEditingStage] = useState({ name: '', description: '', order: 0 });
   const [expandedStages, setExpandedStages] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load stages from localStorage on component mount
+  // Load stages from Firestore on component mount
   useEffect(() => {
-    const savedStages = localStorage.getItem('manufacturingStages');
-    if (savedStages) {
-      try {
-        setStages(JSON.parse(savedStages));
-      } catch (e) {
-        console.error('Error parsing saved stages:', e);
-        setStages([]);
-      }
-    }
+    loadStages();
   }, []);
 
-  // Save stages to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('manufacturingStages', JSON.stringify(stages));
-  }, [stages]);
-
-  const handleAddStage = () => {
-    if (!newStage.name.trim()) return;
-    
-    const stageToAdd = {
-      ...newStage,
-      id: Date.now().toString(),
-      order: stages.length + 1, // Set order based on current stages length
-      createdAt: new Date().toISOString()
-    };
-    
-    setStages([...stages, stageToAdd]);
-    setNewStage({ name: '', description: '', order: 0 });
+  const loadStages = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const stagesRef = collection(db, getCompanyCollection('manufacturingStages'));
+      const stagesQuery = query(stagesRef, orderBy('order', 'asc'));
+      const snapshot = await getDocs(stagesQuery);
+      
+      const stagesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as ManufacturingStage[];
+      
+      setStages(stagesData);
+    } catch (error) {
+      console.error('Error loading stages:', error);
+      setError('Erro ao carregar etapas de fabricação. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteStage = (id: string) => {
+  const handleAddStage = async () => {
+    if (!newStage.name.trim()) return;
+    
+    try {
+      const stageToAdd = {
+        ...newStage,
+        order: stages.length + 1,
+        active: true,
+        createdAt: new Date().toISOString()
+      };
+      
+      const docRef = await addDoc(collection(db, getCompanyCollection('manufacturingStages')), stageToAdd);
+      
+      setStages([...stages, { ...stageToAdd, id: docRef.id }]);
+      setNewStage({ name: '', description: '', order: 0 });
+    } catch (error) {
+      console.error('Error adding stage:', error);
+      setError('Erro ao adicionar etapa. Tente novamente.');
+    }
+  };
+
+  const handleDeleteStage = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir esta etapa?')) {
-      const updatedStages = stages.filter(stage => stage.id !== id);
-      // Reorder remaining stages
-      const reorderedStages = updatedStages.map((stage, index) => ({
-        ...stage,
-        order: index + 1
-      }));
-      setStages(reorderedStages);
+      try {
+        await deleteDoc(doc(db, getCompanyCollection('manufacturingStages'), id));
+        
+        const updatedStages = stages.filter(stage => stage.id !== id);
+        // Reorder remaining stages
+        const reorderedStages = updatedStages.map((stage, index) => ({
+          ...stage,
+          order: index + 1
+        }));
+        
+        // Update order numbers in Firestore
+        await Promise.all(
+          reorderedStages.map(stage =>
+            updateDoc(doc(db, getCompanyCollection('manufacturingStages'), stage.id), {
+              order: stage.order
+            })
+          )
+        );
+        
+        setStages(reorderedStages);
+      } catch (error) {
+        console.error('Error deleting stage:', error);
+        setError('Erro ao excluir etapa. Tente novamente.');
+      }
     }
   };
 
@@ -61,16 +108,28 @@ const ManufacturingStages: React.FC = () => {
     }
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!isEditing) return;
     
-    const updatedStages = stages.map(stage => 
-      stage.id === isEditing ? { ...stage, ...editingStage } : stage
-    );
-    
-    setStages(updatedStages);
-    setIsEditing(null);
-    setEditingStage({ name: '', description: '', order: 0 });
+    try {
+      const updatedStage = {
+        ...editingStage,
+        updatedAt: new Date().toISOString()
+      };
+      
+      await updateDoc(doc(db, getCompanyCollection('manufacturingStages'), isEditing), updatedStage);
+      
+      const updatedStages = stages.map(stage => 
+        stage.id === isEditing ? { ...stage, ...updatedStage } : stage
+      );
+      
+      setStages(updatedStages);
+      setIsEditing(null);
+      setEditingStage({ name: '', description: '', order: 0 });
+    } catch (error) {
+      console.error('Error updating stage:', error);
+      setError('Erro ao atualizar etapa. Tente novamente.');
+    }
   };
 
   const handleCancelEdit = () => {
@@ -78,7 +137,7 @@ const ManufacturingStages: React.FC = () => {
     setEditingStage({ name: '', description: '', order: 0 });
   };
 
-  const handleMoveStage = (id: string, direction: 'up' | 'down') => {
+  const handleMoveStage = async (id: string, direction: 'up' | 'down') => {
     const stageIndex = stages.findIndex(stage => stage.id === id);
     if (
       (direction === 'up' && stageIndex === 0) || 
@@ -87,19 +146,33 @@ const ManufacturingStages: React.FC = () => {
       return; // Can't move further in this direction
     }
     
-    const newStages = [...stages];
-    const targetIndex = direction === 'up' ? stageIndex - 1 : stageIndex + 1;
-    
-    // Swap the stages
-    [newStages[stageIndex], newStages[targetIndex]] = [newStages[targetIndex], newStages[stageIndex]];
-    
-    // Update order numbers
-    const reorderedStages = newStages.map((stage, index) => ({
-      ...stage,
-      order: index + 1
-    }));
-    
-    setStages(reorderedStages);
+    try {
+      const newStages = [...stages];
+      const targetIndex = direction === 'up' ? stageIndex - 1 : stageIndex + 1;
+      
+      // Swap the stages
+      [newStages[stageIndex], newStages[targetIndex]] = [newStages[targetIndex], newStages[stageIndex]];
+      
+      // Update order numbers
+      const reorderedStages = newStages.map((stage, index) => ({
+        ...stage,
+        order: index + 1
+      }));
+      
+      // Update order numbers in Firestore
+      await Promise.all(
+        reorderedStages.map(stage =>
+          updateDoc(doc(db, getCompanyCollection('manufacturingStages'), stage.id), {
+            order: stage.order
+          })
+        )
+      );
+      
+      setStages(reorderedStages);
+    } catch (error) {
+      console.error('Error moving stage:', error);
+      setError('Erro ao mover etapa. Tente novamente.');
+    }
   };
 
   const toggleStageExpansion = (id: string) => {
@@ -111,6 +184,32 @@ const ManufacturingStages: React.FC = () => {
 
   // Sort stages by order
   const sortedStages = [...stages].sort((a, b) => a.order - b.order);
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4">
+        <div className="text-center py-8">
+          <p className="text-gray-600">Carregando etapas de fabricação...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto px-4">
+        <div className="text-center py-8">
+          <p className="text-red-600">{error}</p>
+          <button
+            onClick={loadStages}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Tentar Novamente
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4">

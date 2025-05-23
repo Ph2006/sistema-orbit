@@ -11,6 +11,9 @@ import OrderCalendar from './OrderCalendar';
 import ProjectModal from './ProjectModal';
 import { format, isBefore, isToday, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { collection, query, orderBy, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { getCompanyCollection } from '../firebase/firebaseUtils';
 
 const Orders: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -246,24 +249,19 @@ const Orders: React.FC = () => {
     setIsGeneratingProductionOrders(true);
     
     try {
-      // Predefined manufacturing stages in correct order
-      const manufacturingStages = [
-        'Listagem de materiais',
-        'Compra e recebimento de materiais',
-        'Preparação',
-        'Montagem',
-        'Controle dimensional I',
-        'Solda',
-        'Ensaio visual / US',
-        'Desempeno',
-        'Acabamento',
-        'Ensaio de LP',
-        'Tratamento térmico',
-        'Usinagem',
-        'Jato e pintura',
-        'Inspeção final',
-        'Expedição'
-      ];
+      // Load manufacturing stages from Firestore
+      const stagesRef = collection(db, getCompanyCollection('manufacturingStages'));
+      const stagesQuery = query(stagesRef, orderBy('order', 'asc'));
+      const stagesSnapshot = await getDocs(stagesQuery);
+      
+      if (stagesSnapshot.empty) {
+        alert('Nenhuma etapa de fabricação encontrada. Configure as etapas primeiro.');
+        return;
+      }
+      
+      const manufacturingStages = stagesSnapshot.docs
+        .map(doc => doc.data().name as string)
+        .filter(Boolean);
       
       // Generate production orders for each item
       const results = await Promise.all(
