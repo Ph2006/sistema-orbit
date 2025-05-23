@@ -110,61 +110,85 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     set({ loading: true, error: null });
 
     try {
+      console.log('🔍 LoadOrders: Starting to load orders...');
+      
       const ordersRef = collection(db, getCompanyCollection('orders'));
-      const ordersQuery = query(
-        ordersRef, 
-        where('deleted', '!=', true),
-        orderBy('deleted'),
-        orderBy('createdAt', 'desc')
-      );
+      // Usar consulta simples para evitar problemas de índice
+      const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'));
       const querySnapshot = await getDocs(ordersQuery);
       
-      const ordersPromises = querySnapshot.docs.map(async (docSnapshot) => {
-        const orderData = docSnapshot.data() as Order;
-        
-        try {
-          // Fetch items subcollection
-          const itemsSnapshot = await getDocs(collection(docSnapshot.ref, 'items'));
-          const items = itemsSnapshot.docs.map(itemDoc => ({
-            ...itemDoc.data() as OrderItem,
-            id: itemDoc.id,
-          })) as OrderItem[];
+      console.log(`📊 Found ${querySnapshot.docs.length} total orders in Firestore`);
+      
+      const ordersPromises = querySnapshot.docs
+        .filter(docSnapshot => !docSnapshot.data().deleted) // Filtrar deletados no código
+        .map(async (docSnapshot) => {
+          const orderData = docSnapshot.data() as Order;
+          
+          try {
+            console.log(`🔍 Loading items for order ${docSnapshot.id} (${orderData.orderNumber})...`);
+            
+            // Fetch items subcollection
+            const itemsSnapshot = await getDocs(collection(docSnapshot.ref, 'items'));
+            const items = itemsSnapshot.docs.map(itemDoc => {
+              const itemData = itemDoc.data() as OrderItem;
+              return {
+                id: itemDoc.id,  // ✅ ID primeiro para evitar sobreposição
+                ...itemData,     // depois os dados do item
+              } as OrderItem;
+            });
 
-          // Calculate progress
-          const { overallProgress, overallStatus } = calculateOrderProgress(items);
+            console.log(`✅ Loaded ${items.length} items for order ${orderData.orderNumber}`);
+            if (items.length > 0) {
+              console.log(`📦 First item sample:`, {
+                id: items[0].id,
+                description: items[0].description || 'No description',
+                quantity: items[0].quantity || 0
+              });
+            }
 
-          return {
-            id: docSnapshot.id,
-            ...orderData,
-            startDate: formatDate(orderData.startDate),
-            deliveryDate: formatDate(orderData.deliveryDate),
-            columnId: orderData.columnId || null,
-            items,
-            overallProgress,
-            overallStatus,
-          } as Order;
-        } catch (itemError) {
-          console.error(`Error loading items for order ${docSnapshot.id}:`, itemError);
-          // Return order without items if there's an error
-          const { overallProgress, overallStatus } = calculateOrderProgress([]);
-          return {
-            id: docSnapshot.id,
-            ...orderData,
-            startDate: formatDate(orderData.startDate),
-            deliveryDate: formatDate(orderData.deliveryDate),
-            columnId: orderData.columnId || null,
-            items: [],
-            overallProgress,
-            overallStatus,
-          } as Order;
-        }
-      });
+            // Calculate progress
+            const { overallProgress, overallStatus } = calculateOrderProgress(items);
+
+            return {
+              id: docSnapshot.id,
+              ...orderData,
+              startDate: formatDate(orderData.startDate),
+              deliveryDate: formatDate(orderData.deliveryDate),
+              columnId: orderData.columnId || null,
+              items, // ✅ CRÍTICO: Incluir os items carregados
+              overallProgress,
+              overallStatus,
+            } as Order;
+          } catch (itemError) {
+            console.error(`❌ Error loading items for order ${docSnapshot.id}:`, itemError);
+            // Return order without items if there's an error
+            const { overallProgress, overallStatus } = calculateOrderProgress([]);
+            return {
+              id: docSnapshot.id,
+              ...orderData,
+              startDate: formatDate(orderData.startDate),
+              deliveryDate: formatDate(orderData.deliveryDate),
+              columnId: orderData.columnId || null,
+              items: [], // Array vazio em vez de undefined
+              overallProgress,
+              overallStatus,
+            } as Order;
+          }
+        });
 
       const orders = await Promise.all(ordersPromises);
+      
+      // Log final para verificar
+      console.log(`🎉 LoadOrders completed: ${orders.length} orders loaded`);
+      console.log('📋 Orders summary:', orders.map(order => ({
+        orderNumber: order.orderNumber,
+        itemsCount: order.items?.length || 0
+      })));
+      
       set({ orders, loading: false });
 
     } catch (error: any) {
-      console.error('Error loading orders:', error);
+      console.error('❌ Error loading orders:', error);
       set({ 
         error: `Failed to load orders: ${error.message}`, 
         loading: false 
@@ -180,22 +204,31 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }
 
     try {
+      console.log(`🔍 GetOrder: Loading single order ${orderId}...`);
+      
       const orderRef = doc(db, getCompanyCollection('orders'), orderId);
       const orderDoc = await getDoc(orderRef);
       
       if (!orderDoc.exists()) {
-        console.log(`Order ${orderId} not found`);
+        console.log(`❌ Order ${orderId} not found`);
         return null;
       }
       
       const data = orderDoc.data() as Order;
 
+      console.log(`🔍 Loading items for single order ${orderId}...`);
+      
       // Fetch items subcollection
       const itemsSnapshot = await getDocs(collection(orderRef, 'items'));
-      const items = itemsSnapshot.docs.map(itemDoc => ({
-        ...itemDoc.data() as OrderItem,
-        id: itemDoc.id,
-      })) as OrderItem[];
+      const items = itemsSnapshot.docs.map(itemDoc => {
+        const itemData = itemDoc.data() as OrderItem;
+        return {
+          id: itemDoc.id,  // ✅ ID primeiro
+          ...itemData,     // depois os dados
+        } as OrderItem;
+      });
+      
+      console.log(`✅ GetOrder: Loaded ${items.length} items for order ${orderId}`);
       
       // Calculate progress
       const { overallProgress, overallStatus } = calculateOrderProgress(items);
@@ -206,13 +239,13 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         startDate: formatDate(data.startDate),
         deliveryDate: formatDate(data.deliveryDate),
         columnId: data.columnId || null,
-        items,
+        items, // ✅ CRÍTICO: Incluir os items
         overallProgress,
         overallStatus,
       } as Order;
 
     } catch (error: any) {
-      console.error('Error getting order:', error);
+      console.error('❌ Error getting order:', error);
       return null;
     }
   },
@@ -285,8 +318,9 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         order.items.forEach((item) => {
           const itemDocRef = doc(itemsCollectionRef);
           const itemData = {
-            ...item,
-            id: itemDocRef.id,
+            id: itemDocRef.id,  // ✅ ID primeiro
+            ...item,            // depois os dados do item
+            // Garantir campos obrigatórios
             itemNumber: item.itemNumber || 0,
             quantity: item.quantity || 0,
             unitWeight: item.unitWeight || 0,
@@ -429,8 +463,9 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         order.items.forEach(item => {
           const itemDocRef = doc(itemsCollectionRef);
           const itemData = {
-            ...item,
-            id: itemDocRef.id,
+            id: itemDocRef.id,  // ✅ ID primeiro
+            ...item,            // depois os dados
+            // Garantir campos obrigatórios
             itemNumber: item.itemNumber || 0,
             quantity: item.quantity || 0,
             unitWeight: item.unitWeight || 0,
@@ -520,12 +555,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
 
     try {
       const ordersRef = collection(db, getCompanyCollection('orders'));
-      const ordersQuery = query(
-        ordersRef,
-        where('deleted', '!=', true),
-        orderBy('deleted'),
-        orderBy('createdAt', 'desc')
-      );
+      // Usar consulta simples para evitar problemas de índice
+      const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'));
 
       let isInitialLoad = true;
       
@@ -538,52 +569,69 @@ export const useOrderStore = create<OrderState>((set, get) => ({
           }
           
           try {
-            const ordersPromises = snapshot.docs.map(async (docSnapshot) => {
-              const orderData = docSnapshot.data() as Order;
+            console.log(`🔄 SubscribeToOrders: Processing ${snapshot.docs.length} orders...`);
+            
+            const ordersPromises = snapshot.docs
+              .filter(docSnapshot => !docSnapshot.data().deleted) // Filtrar deletados
+              .map(async (docSnapshot) => {
+                const orderData = docSnapshot.data() as Order;
 
-              try {
-                // Fetch items subcollection
-                const itemsSnapshot = await getDocs(collection(docSnapshot.ref, 'items'));
-                const items = itemsSnapshot.docs.map(itemDoc => ({
-                  ...itemDoc.data() as OrderItem,
-                  id: itemDoc.id,
-                })) as OrderItem[];
+                try {
+                  console.log(`🔍 Real-time: Loading items for order ${orderData.orderNumber}...`);
+                  
+                  // Fetch items subcollection
+                  const itemsSnapshot = await getDocs(collection(docSnapshot.ref, 'items'));
+                  const items = itemsSnapshot.docs.map(itemDoc => {
+                    const itemData = itemDoc.data() as OrderItem;
+                    return {
+                      id: itemDoc.id,  // ✅ ID primeiro
+                      ...itemData,     // depois os dados
+                    } as OrderItem;
+                  });
 
-                // Calculate progress
-                const { overallProgress, overallStatus } = calculateOrderProgress(items);
+                  console.log(`✅ Real-time: ${items.length} items loaded for ${orderData.orderNumber}`);
 
-                return {
-                  id: docSnapshot.id,
-                  ...orderData,
-                  startDate: formatDate(orderData.startDate),
-                  deliveryDate: formatDate(orderData.deliveryDate),
-                  columnId: orderData.columnId || null,
-                  items,
-                  overallProgress,
-                  overallStatus,
-                } as Order;
-              } catch (itemError) {
-                console.error(`Error loading items for order ${docSnapshot.id}:`, itemError);
-                const { overallProgress, overallStatus } = calculateOrderProgress([]);
-                return {
-                  id: docSnapshot.id,
-                  ...orderData,
-                  startDate: formatDate(orderData.startDate),
-                  deliveryDate: formatDate(orderData.deliveryDate),
-                  columnId: orderData.columnId || null,
-                  items: [],
-                  overallProgress,
-                  overallStatus,
-                } as Order;
-              }
-            });
+                  // Calculate progress
+                  const { overallProgress, overallStatus } = calculateOrderProgress(items);
+
+                  return {
+                    id: docSnapshot.id,
+                    ...orderData,
+                    startDate: formatDate(orderData.startDate),
+                    deliveryDate: formatDate(orderData.deliveryDate),
+                    columnId: orderData.columnId || null,
+                    items, // ✅ CRÍTICO: Incluir os items
+                    overallProgress,
+                    overallStatus,
+                  } as Order;
+                } catch (itemError) {
+                  console.error(`❌ Error loading items for order ${docSnapshot.id}:`, itemError);
+                  const { overallProgress, overallStatus } = calculateOrderProgress([]);
+                  return {
+                    id: docSnapshot.id,
+                    ...orderData,
+                    startDate: formatDate(orderData.startDate),
+                    deliveryDate: formatDate(orderData.deliveryDate),
+                    columnId: orderData.columnId || null,
+                    items: [], // Array vazio
+                    overallProgress,
+                    overallStatus,
+                  } as Order;
+                }
+              });
 
             const orders = await Promise.all(ordersPromises);
-            console.log(`Real-time update: ${orders.length} orders loaded`);
+            
+            console.log(`🎉 SubscribeToOrders: ${orders.length} orders loaded with real-time update`);
+            console.log('📋 Real-time summary:', orders.map(order => ({
+              orderNumber: order.orderNumber,
+              itemsCount: order.items?.length || 0
+            })));
+            
             set({ orders, loading: false });
             
           } catch (error: any) {
-            console.error('Error in orders real-time update:', error);
+            console.error('❌ Error in orders real-time update:', error);
             set({ 
               error: `Failed to get real-time updates: ${error.message}`, 
               loading: false 
@@ -591,7 +639,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
           }
         },
         (error) => {
-          console.error('Orders subscription error:', error);
+          console.error('❌ Orders subscription error:', error);
           set({ 
             error: `Subscription error: ${error.message}`, 
             loading: false 
@@ -602,7 +650,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       return unsubscribe;
       
     } catch (error: any) {
-      console.error('Error setting up orders subscription:', error);
+      console.error('❌ Error setting up orders subscription:', error);
       set({ 
         error: `Failed to subscribe to orders: ${error.message}`, 
         loading: false 

@@ -13,18 +13,7 @@ const MecaldDataRestore: React.FC = () => {
   const { setCompanyId } = useAuthStore();
   
   // Check if migration has already been done
-  useEffect(() => {
-    const checkMigration = async () => {
-      try {
-        const mecaldMigrated = await checkMigratedData('mecald');
-        setMigrationComplete(mecaldMigrated);
-      } catch (error) {
-        console.error('Error checking migration status:', error);
-      }
-    };
-    
-    checkMigration();
-  }, []);
+  // const mecaldMigrated = await checkMigratedData('mecald');
   
   const handleRestoreMecald = async () => {
     try {

@@ -21,8 +21,8 @@ const MigrationNotification: React.FC = () => {
     const checkMigration = async () => {
       try {
         // Check if the company's data has already been migrated
-        const isMigrated = await checkMigratedData(companyId || 'mecald');
-        setNeedsMigration(!isMigrated);
+        // const isMigrated = await checkMigratedData(companyId || 'mecald');
+        setNeedsMigration(true); // Assume migration is needed if check fails
       } catch (error) {
         console.error('Error checking migration status:', error);
         setNeedsMigration(true); // Assume migration is needed if check fails
