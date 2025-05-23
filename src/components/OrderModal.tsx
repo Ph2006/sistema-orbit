@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Link, Trash2, Edit, Download, BarChart, FileText, CheckSquare, Square, Briefcase, ClipboardCheck } from 'lucide-react';
+import { X, Plus, Link, Trash2, Edit, Download, BarChart, FileText, CheckSquare, Square, Briefcase, ClipboardCheck, Copy, ExternalLink, Share } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
 import { Order, OrderItem, OrderStatus, ClientProject } from '../types/kanban';
@@ -7,7 +7,7 @@ import { Customer } from '../types/customer';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import autoTable from 'jspdf-autotable';
-import { format } from 'date-fns';
+import { format, differenceInDays, parseISO, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
 import ItemProgressModal from './ItemProgressModal';
@@ -25,6 +25,9 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   const { companyLogo } = useSettingsStore();
   const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [generatedLink, setGeneratedLink] = useState('');
+  const [linkExpiration, setLinkExpiration] = useState(30); // days
   const [formData, setFormData] = useState<Order>({
     id: order?.id || 'new',
     orderNumber: order?.orderNumber || '',
@@ -47,6 +50,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     projectName: order?.projectName || '',
     completedDate: order?.completedDate || '',
     lastExportDate: order?.lastExportDate || '',
+    clientAccessLinks: order?.clientAccessLinks || []
   });
 
   const [newItem, setNewItem] = useState<OrderItem>({
@@ -74,7 +78,6 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 
   useEffect(() => {
     if (order) {
-      // Ensure the checklist exists and has all properties
       const checklist = order.checklist || {
         drawings: false,
         inspectionTestPlan: false,
@@ -94,10 +97,10 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
           paintPlan: !!checklist.paintPlan
         },
         projectId: order.projectId || '',
-        projectName: order.projectName || ''
+        projectName: order.projectName || '',
+        clientAccessLinks: order.clientAccessLinks || []
       });
       
-      // Also reset newItem's itemNumber when order changes
       setNewItem(prev => ({
         ...prev,
         itemNumber: (order.items?.length || 0) + 1,
@@ -118,485 +121,218 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     }
   };
 
-  const calculateTotals = (item: OrderItem) => {
-    const totalWeight = Number((item.quantity * item.unitWeight).toFixed(2));
-    const totalPrice = Number((item.quantity * item.unitPrice).toFixed(2));
-    return { totalWeight, totalPrice };
-  };
-
-  const handleAddItem = () => {
-    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
-      alert('Por favor, preencha todos os campos obrigatórios do item.');
-      return;
-    }
-    
-    const { totalWeight, totalPrice } = calculateTotals(newItem);
-
-    const item = {
-      ...newItem,
-      id: crypto.randomUUID(),
-      totalWeight,
-      totalPrice,
-    };
-
-    setFormData(prev => ({
-      ...prev,
-      items: [...prev.items, item],
-      totalWeight: Number((prev.totalWeight + totalWeight).toFixed(2)),
-    }));
-
-    setNewItem({
-      id: '',
-      itemNumber: formData.items.length + 2,
-      code: '',
-      description: '',
-      quantity: 0,
-      unitWeight: 0,
-      totalWeight: 0,
-      unitPrice: 0,
-      totalPrice: 0,
-      progress: {},
-      stagePlanning: {},
-      invoiceNumber: '',
-      expeditionLE: ''
-    });
-  };
-
-  const handleEditItem = (item: OrderItem) => {
-    setEditingItem(item);
-    setNewItem({...item});
-  };
-
-  const handleUpdateItem = () => {
-    if (!editingItem) return;
-    
-    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
-      alert('Por favor, preencha todos os campos obrigatórios do item.');
-      return;
-    }
-
-    const { totalWeight: newTotalWeight, totalPrice } = calculateTotals(newItem);
-    const oldTotalWeight = editingItem.totalWeight;
-
-    setFormData(prev => {
-      const updatedItems = prev.items.map(item =>
-        item.id === editingItem.id ? { 
-          ...newItem,
-          totalWeight: newTotalWeight, 
-          totalPrice 
-        } : item
-      );
-
-      return {
-        ...prev,
-        items: updatedItems,
-        totalWeight: Number((prev.totalWeight - oldTotalWeight + newTotalWeight).toFixed(2)),
-      };
-    });
-
-    setEditingItem(null);
-    setNewItem({
-      id: '',
-      itemNumber: formData.items.length + 1,
-      code: '',
-      description: '',
-      quantity: 0,
-      unitWeight: 0,
-      totalWeight: 0,
-      unitPrice: 0,
-      totalPrice: 0,
-      progress: {},
-      stagePlanning: {},
-      invoiceNumber: '',
-      expeditionLE: ''
-    });
-  };
-
-  const handleRemoveItem = (itemId: string) => {
-    const item = formData.items.find(i => i.id === itemId);
-    if (!item) return;
-
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.filter(i => i.id !== itemId),
-      totalWeight: Number((prev.totalWeight - item.totalWeight).toFixed(2)),
-    }));
-
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.map((item, index) => ({
-        ...item,
-        itemNumber: index + 1
-      }))
-    }));
-
-    // Remove from selected items if it was selected
-    if (selectedItems.has(itemId)) {
-      const newSelectedItems = new Set(selectedItems);
-      newSelectedItems.delete(itemId);
-      setSelectedItems(newSelectedItems);
-    }
-  };
-
-  const handleAddLink = () => {
-    if (newLink) {
-      setFormData(prev => ({
-        ...prev,
-        driveLinks: [...prev.driveLinks, newLink],
-      }));
-      setNewLink('');
-    }
-  };
-
-  const handleRemoveLink = (link: string) => {
-    setFormData(prev => ({
-      ...prev,
-      driveLinks: prev.driveLinks.filter(l => l !== link),
-    }));
-  };
-
-  const handleToggleChecklist = (item: 'drawings' | 'inspectionTestPlan' | 'paintPlan') => {
-    console.log('Toggling checklist item:', item);
-    
-    setFormData(prev => {
-      const checklist = prev.checklist || {
-        drawings: false,
-        inspectionTestPlan: false,
-        paintPlan: false
-      };
-
-      const newChecklist = {
-        drawings: !!checklist.drawings,
-        inspectionTestPlan: !!checklist.inspectionTestPlan,
-        paintPlan: !!checklist.paintPlan
-      };
-
-      newChecklist[item] = !newChecklist[item];
-      
-      console.log('Updated checklist:', newChecklist);
-
-      return {
-        ...prev,
-        checklist: newChecklist
-      };
-    });
-  };
-
-  const handleStatusChange = (newStatus: OrderStatus) => {
-    setFormData(prev => {
-      // If changing to "completed", set the completedDate to today
-      // unless it's already set
-      let completedDate = prev.completedDate;
-      
-      if (newStatus === 'completed' && !completedDate) {
-        completedDate = new Date().toISOString().split('T')[0];
-      } else if (newStatus !== 'completed') {
-        // If changing from completed to something else, clear the completed date
-        completedDate = '';
-      }
-      
-      return {
-        ...prev,
-        status: newStatus,
-        completedDate
-      };
-    });
-  };
-
-  const safeISODate = (dateStr: string): string => {
-    try {
-      if (!dateStr || dateStr.trim() === '') {
-        return new Date().toISOString();
-      }
-      
-      const date = new Date(`${dateStr}T00:00:00`);
-      
-      if (isNaN(date.getTime())) {
-        console.error("Invalid date:", dateStr);
-        return new Date().toISOString();
-      }
-      
-      return date.toISOString();
-    } catch (error) {
-      console.error("Error parsing date:", dateStr, error);
-      return new Date().toISOString();
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.orderNumber || !formData.customer || !formData.internalOrderNumber || 
-        !formData.startDate || !formData.deliveryDate) {
-      alert('Por favor, preencha todos os campos obrigatórios do pedido.');
-      return;
-    }
-    
-    if (formData.items.length === 0) {
-      alert('Por favor, adicione pelo menos um item ao pedido.');
-      return;
-    }
-    
-    try {
-      // Ensure all dates are proper ISO strings
-      const formattedData = {
-        ...formData,
-        startDate: safeISODate(formData.startDate),
-        deliveryDate: safeISODate(formData.deliveryDate),
-        completedDate: formData.completedDate ? safeISODate(formData.completedDate) : '',
-        deleted: false,
-        // Make sure checklist is always fully defined
-        checklist: {
-          drawings: !!formData.checklist?.drawings,
-          inspectionTestPlan: !!formData.checklist?.inspectionTestPlan,
-          paintPlan: !!formData.checklist?.paintPlan
-        }
-      };
-      
-      console.log("Submitting order:", formattedData);
-      onSave(formattedData);
-    } catch (error) {
-      console.error("Error formatting date:", error);
-      alert("Erro ao processar as datas do pedido. Por favor, verifique os valores informados.");
-    }
-  };
-
-  const handleSaveItemProgress = (updatedItem: OrderItem) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.map(item => 
-        item.id === updatedItem.id ? updatedItem : item
-      )
-    }));
-    setSelectedItem(null);
-  };
-
-  // Update item field
-  const handleUpdateItemField = (itemId: string, field: keyof OrderItem, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items.map(item => 
-        item.id === itemId ? { ...item, [field]: value } : item
-      )
-    }));
-  };
-
+  // Função melhorada para exportar PDF com cronograma completo e visual profissional
   const handleExportPDF = () => {
     const doc = new jsPDF({
-      orientation: 'landscape', // Use landscape for wider table
+      orientation: 'landscape',
       unit: 'mm',
       format: 'a4'
     });
 
-    // Get page dimensions
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 10; // Reduced margin for more space
+    const margin = 15;
+    
+    // Calcular progresso geral
+    const totalItems = formData.items.length;
+    const overallProgress = totalItems > 0 ? Math.round(
+      formData.items.reduce((sum, item) => sum + (calculateItemProgress(item.progress) || 0), 0) / totalItems
+    ) : 0;
 
-    // Add logo and Title
-    let y = margin;
+    // Calcular dias restantes
+    const today = new Date();
+    const deliveryDate = new Date(formData.deliveryDate);
+    const daysRemaining = differenceInDays(deliveryDate, today);
+    const isDelayed = daysRemaining < 0;
+
+    let currentY = margin;
+
+    // CABEÇALHO PROFISSIONAL
     if (companyLogo) {
-      doc.addImage(companyLogo, 'JPEG', margin, y, 30, 15);
-      doc.setFontSize(18);
-      doc.setFont(undefined, 'bold');
-      doc.text(`CRONOGRAMA PEDIDO #${formData.orderNumber}`, pageWidth / 2, y + 7.5, { align: 'center' });
-      y += 20; // Adjusted vertical space after title/logo
-    } else {
-      doc.setFontSize(18);
-      doc.setFont(undefined, 'bold');
-      doc.text(`CRONOGRAMA PEDIDO #${formData.orderNumber}`, pageWidth / 2, y, { align: 'center' });
-      y += 15;
+      doc.addImage(companyLogo, 'JPEG', margin, currentY, 40, 20);
     }
+    
+    // Título principal
+    doc.setFontSize(22);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(44, 62, 80);
+    doc.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, currentY + 12, { align: 'center' });
+    
+    currentY += 25;
 
-    // Project Name below title (if available)
-    if (formData.projectName) {
-      doc.setFontSize(14);
-      doc.setFont(undefined, 'normal');
-      doc.text(`PROJETO ${formData.projectName}`, pageWidth / 2, y, { align: 'center' });
-      y += 10; // Adjusted vertical space
-    }
+    // Informações do pedido em caixas
+    const boxHeight = 8;
+    const boxWidth = (pageWidth - 2 * margin - 30) / 4;
+    
+    // Caixa 1 - Pedido
+    doc.setFillColor(52, 152, 219);
+    doc.rect(margin, currentY, boxWidth, boxHeight, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text('PEDIDO', margin + 2, currentY + 3);
+    doc.setFontSize(12);
+    doc.text(`#${formData.orderNumber}`, margin + 2, currentY + 6);
 
-    // Order info and Overall Progress
+    // Caixa 2 - Cliente
+    doc.setFillColor(46, 204, 113);
+    doc.rect(margin + boxWidth + 7.5, currentY, boxWidth, boxHeight, 'F');
+    doc.setFontSize(10);
+    doc.text('CLIENTE', margin + boxWidth + 9.5, currentY + 3);
+    doc.setFontSize(12);
+    doc.text(formData.customer, margin + boxWidth + 9.5, currentY + 6);
+
+    // Caixa 3 - Progresso
+    const progressColor = overallProgress >= 80 ? [46, 204, 113] : 
+                         overallProgress >= 50 ? [241, 196, 15] : [231, 76, 60];
+    doc.setFillColor(...progressColor);
+    doc.rect(margin + 2 * (boxWidth + 7.5), currentY, boxWidth, boxHeight, 'F');
+    doc.setFontSize(10);
+    doc.text('PROGRESSO', margin + 2 * (boxWidth + 7.5) + 2, currentY + 3);
+    doc.setFontSize(12);
+    doc.text(`${overallProgress}%`, margin + 2 * (boxWidth + 7.5) + 2, currentY + 6);
+
+    // Caixa 4 - Prazo
+    const deadlineColor = isDelayed ? [231, 76, 60] : 
+                         daysRemaining <= 7 ? [241, 196, 15] : [46, 204, 113];
+    doc.setFillColor(...deadlineColor);
+    doc.rect(margin + 3 * (boxWidth + 7.5), currentY, boxWidth, boxHeight, 'F');
+    doc.setFontSize(10);
+    doc.text('PRAZO', margin + 3 * (boxWidth + 7.5) + 2, currentY + 3);
+    doc.setFontSize(12);
+    const deadlineText = isDelayed ? `${Math.abs(daysRemaining)}d atraso` : `${daysRemaining}d restantes`;
+    doc.text(deadlineText, margin + 3 * (boxWidth + 7.5) + 2, currentY + 6);
+
+    currentY += 15;
+
+    // Informações detalhadas
+    doc.setTextColor(44, 62, 80);
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
-    doc.text(`Cliente: ${formData.customer}`, margin, y);
-    doc.text(`OS: ${formData.internalOrderNumber}`, margin + 60, y);
-    doc.text(`Data de Início: ${formData.startDate ? format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}`, margin + 120, y);
-    doc.text(`Data de Entrega: ${formData.deliveryDate ? format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }) : 'N/A'}`, margin + 180, y);
-    y += 8; // Space after basic info
     
-    // Calculate and display Overall Order Progress (Assuming total progress is average of item progress)
-    const totalItems = formData.items.length;
-    const overallProgress = totalItems > 0 ? Math.round(formData.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems) : 0;
-    const overallStatus = overallProgress === 100 ? 'Concluído' : (overallProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
-
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.text(`Progresso Geral do Pedido: ${overallProgress}%`, margin, y);
-    doc.text(`Status: ${overallStatus}`, margin + 60, y);
-    y += 10; // Space after overall progress
-
-    // Add table for Items with Progress and Status
-    const tableColumnStyles: any = {
-      0: { cellWidth: 15 }, // Item
-      1: { cellWidth: 25 }, // Código
-      2: { cellWidth: 60 }, // Descrição
-      3: { cellWidth: 15, halign: 'center' }, // Qtd
-      4: { cellWidth: 20, halign: 'right' }, // Peso (kg)
-      5: { cellWidth: 20, halign: 'center' }, // Progresso (%)
-      6: { cellWidth: 30, halign: 'center' }, // Status
-      // Optional: Add columns for planned/real dates if needed and they fit
-    };
-
-    const tableData: any = [];
-
-    formData.items.forEach(item => {
-        // Determine item progress and status
-        const itemProgress = item.overallProgress || 0;
-        const itemStatus = itemProgress === 100 ? 'Concluído' : (itemProgress > 0 ? 'Em Andamento' : 'Não Iniciado');
-        
-        // Determine status color (simplified example)
-        let statusColor = [0, 0, 0]; // Black default
-        if (itemProgress === 100) statusColor = [40, 167, 69]; // Green
-        else if (itemProgress > 0) statusColor = [255, 193, 7]; // Yellow
-        // Could add logic for 'Atrasado' based on dates if available
-
-        tableData.push({
-            content: [
-                item.itemNumber.toString(),
-                item.code,
-                item.description,
-                item.quantity.toString(),
-                item.totalWeight.toLocaleString('pt-BR', { maximumFractionDigits: 2 }),
-                `${itemProgress}%`,
-                itemStatus,
-            ],
-            styles: {
-                textColor: statusColor,
-            },
-        });
-        
-        // Optional: Add simplified stage details below the item if space allows
-        // This might make the table too complex/wide. Let's omit for now for better overview.
-        // If needed, could add a sub-row with key stage dates or a simplified timeline.
-
-    });
-
-    (doc as any).autoTable({
-      startY: y,
-      head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso (kg)', 'Progresso', 'Status']],
-      body: tableData,
-      theme: 'striped',
-      headStyles: {
-        fillColor: [59, 130, 246],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold'
-      },
-      styles: {
-        fontSize: 8, // Smaller font size for landscape
-        cellPadding: 2 // Smaller padding
-      },
-      columnStyles: tableColumnStyles,
-      didDrawPage: function (data: any) {
-          // Footer (re-add if autoTable overwrites)
-          doc.setFontSize(8);
-          doc.setTextColor(100, 100, 100);
-          doc.text(
-              `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
-              margin,
-              pageHeight - margin
-          );
-          doc.text(
-              `Página ${data.pageNumber} de ${data.settings.pageNumber}`,
-              pageWidth - margin,
-              pageHeight - margin,
-              { align: 'right' }
-          );
-      }
-    });
-
-    // Manual footer if autoTable did not use didDrawPage
-     const finalY = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY : y;
-     if (finalY < pageHeight - margin - 5) { // Only add if space is available and not already added by didDrawPage
-       doc.setFontSize(8);
-       doc.setTextColor(100, 100, 100);
-       doc.text(
-           `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
-           margin,
-           pageHeight - margin
-       );
-        // Simple page number if not using didDrawPage pagination
-       // doc.text(
-       //     `Página 1 de 1`,
-       //      pageWidth - margin,
-       //     pageHeight - margin,
-       //     { align: 'right' }
-       // );
-     }
-     // If autoTable uses didDrawPage, pagination is handled there.
-
-    doc.save(`cronograma-pedido-${formData.orderNumber}.pdf`);
-  };
-
-  // New function for exporting selected items as a simple list
-  const handleExportItemsListPDF = () => {
-    if (selectedItems.size === 0) {
-      alert('Por favor, selecione pelo menos um item para exportar.');
-      return;
+    const infoY = currentY;
+    doc.text(`OS Interna: ${formData.internalOrderNumber}`, margin, infoY);
+    doc.text(`Projeto: ${formData.projectName || 'N/A'}`, margin + 70, infoY);
+    doc.text(`Início: ${format(parseISO(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 140, infoY);
+    doc.text(`Entrega: ${format(parseISO(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 200, infoY);
+    
+    if (formData.completedDate) {
+      doc.text(`Concluído: ${format(parseISO(formData.completedDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 260, infoY);
     }
 
-    const doc = new jsPDF();
-    
-    // Add logo if available
-    let y = 20;
-    if (companyLogo) {
-      // Logo in the top-left corner
-      doc.addImage(companyLogo, 'JPEG', 20, 10, 40, 20);
-      y = 40;
-    }
-    
-    // Title below the logo
-    doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
-    doc.text(`Lista de Itens Selecionados`, 105, y, { align: 'center' });
-    y += 15;
-    
-    // Get selected items
-    const selectedOrderObjects = formData.items.filter(item => selectedItems.has(item.id));
-    
-    // Add order information (always show for context)
+    currentY += 12;
+
+    // Status do checklist
     doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text('Status da Documentação:', margin, currentY);
+    
+    currentY += 8;
+    doc.setFontSize(9);
     doc.setFont(undefined, 'normal');
-    doc.text(`Pedido #${formData.orderNumber} - ${formData.customer}`, 20, y);
-    y += 8;
-    doc.text(`OS Interna: ${formData.internalOrderNumber}`, 20, y);
-    y += 8;
-    if (formData.projectName) {
-      doc.text(`Projeto: ${formData.projectName}`, 20, y);
-      y += 8;
-    }
-    doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, y);
-    y += 15;
     
-    // Create a simple table with all items from selected orders
-    const allItems = selectedOrderObjects;
-    
-    // Calculate total weight
-    const totalWeight = allItems.reduce((sum, item) => sum + item.totalWeight, 0);
-    
-    // Create the table
+    const checklistItems = [
+      { key: 'drawings', label: 'Desenhos Técnicos' },
+      { key: 'inspectionTestPlan', label: 'Plano de Inspeção e Testes' },
+      { key: 'paintPlan', label: 'Plano de Pintura' }
+    ];
+
+    checklistItems.forEach((item, index) => {
+      const xPos = margin + (index * 90);
+      const isCompleted = formData.checklist?.[item.key as keyof typeof formData.checklist];
+      
+      doc.setFillColor(isCompleted ? 46 : 231, isCompleted ? 204 : 76, isCompleted ? 113 : 60);
+      doc.circle(xPos, currentY, 2, 'F');
+      doc.setTextColor(44, 62, 80);
+      doc.text(item.label, xPos + 5, currentY + 1);
+    });
+
+    currentY += 15;
+
+    // TABELA DE ITENS COM CRONOGRAMA
+    const tableData = formData.items.map(item => {
+      const itemProgress = calculateItemProgress(item.progress);
+      const stages = Object.entries(item.progress || {});
+      const plannedStages = Object.entries(item.stagePlanning || {});
+      
+      // Status baseado no progresso
+      let status = 'Não Iniciado';
+      let statusColor = [149, 165, 166]; // Cinza
+      
+      if (itemProgress === 100) {
+        status = 'Concluído';
+        statusColor = [46, 204, 113]; // Verde
+      } else if (itemProgress > 0) {
+        status = 'Em Andamento';
+        statusColor = [52, 152, 219]; // Azul
+        
+        // Verificar se está atrasado baseado nas datas planejadas
+        const currentStage = stages.find(([_, progress]) => progress > 0 && progress < 100);
+        if (currentStage && plannedStages.length > 0) {
+          const stageName = currentStage[0];
+          const stageData = item.stagePlanning?.[stageName];
+          if (stageData?.endDate) {
+            const stageEndDate = new Date(stageData.endDate);
+            if (today > stageEndDate && itemProgress < 100) {
+              status = 'Atrasado';
+              statusColor = [231, 76, 60]; // Vermelho
+            }
+          }
+        }
+      }
+
+      // Etapas em andamento
+      const activeStages = stages
+        .filter(([_, progress]) => progress > 0 && progress < 100)
+        .map(([stageName, _]) => stageName)
+        .join(', ') || 'N/A';
+
+      // Próximas etapas
+      const nextStages = stages
+        .filter(([_, progress]) => progress === 0)
+        .slice(0, 2)
+        .map(([stageName, _]) => stageName)
+        .join(', ') || 'N/A';
+
+      return {
+        content: [
+          item.itemNumber.toString(),
+          item.code,
+          item.description.length > 25 ? item.description.substring(0, 25) + '...' : item.description,
+          item.quantity.toString(),
+          `${itemProgress}%`,
+          status,
+          activeStages.length > 20 ? activeStages.substring(0, 20) + '...' : activeStages,
+          nextStages.length > 20 ? nextStages.substring(0, 20) + '...' : nextStages
+        ],
+        styles: {
+          0: { halign: 'center' },
+          1: { halign: 'center' },
+          3: { halign: 'center' },
+          4: { halign: 'center', textColor: statusColor },
+          5: { halign: 'center', textColor: statusColor, fontStyle: 'bold' }
+        }
+      };
+    });
+
+    // Cabeçalho da tabela
+    const headers = [
+      'Item',
+      'Código',
+      'Descrição',
+      'Qtd',
+      'Progresso',
+      'Status',
+      'Etapas Ativas',
+      'Próximas Etapas'
+    ];
+
     autoTable(doc, {
-      startY: y,
-      head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso (kg)']],
-      body: allItems.map(item => [
-        item.itemNumber.toString(),
-        item.code,
-        item.description,
-        item.quantity.toString(),
-        item.totalWeight.toLocaleString('pt-BR')
-      ]),
+      startY: currentY,
+      head: [headers],
+      body: tableData.map(row => row.content),
       theme: 'striped',
-      headStyles: {
+              headStyles: {
         fillColor: [59, 130, 246],
         textColor: [255, 255, 255],
         fontStyle: 'bold'
@@ -609,7 +345,6 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       }
     });
     
-    // Add pagination
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
@@ -623,7 +358,6 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       );
     }
     
-    // Record last export date for sorting
     setFormData(prev => ({
       ...prev,
       lastExportDate: new Date().toISOString()
@@ -632,29 +366,23 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     doc.save(`lista-itens-selecionados.pdf`);
   };
 
-  // Check if an item is fully completed
   const isItemCompleted = (item: OrderItem): boolean => {
     if (!item.progress || Object.keys(item.progress).length === 0) return false;
     return Object.values(item.progress).every(progress => progress === 100);
   };
 
-  // Sort stages by execution order (planning dates)
   const sortStagesByExecutionOrder = (stages: Record<string, any> = {}, stagePlanning: Record<string, any> = {}) => {
     return Object.entries(stages).sort(([stageNameA, _], [stageNameB, __]) => {
-      // Get planning data if available
       const planningA = stagePlanning[stageNameA];
       const planningB = stagePlanning[stageNameB];
       
-      // If both have planning data with start dates, sort by start date
       if (planningA?.startDate && planningB?.startDate) {
         return new Date(planningA.startDate).getTime() - new Date(planningB.startDate).getTime();
       }
       
-      // If only one has planning data, prioritize the one with data
       if (planningA?.startDate) return -1;
       if (planningB?.startDate) return 1;
       
-      // Fallback to stage name comparison for consistent ordering
       return stageNameA.localeCompare(stageNameB);
     });
   };
@@ -671,10 +399,8 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 
   const handleSelectAllItems = () => {
     if (selectedItems.size === formData.items.length) {
-      // Deselect all
       setSelectedItems(new Set());
     } else {
-      // Select all
       setSelectedItems(new Set(formData.items.map(item => item.id)));
     }
   };
@@ -688,23 +414,32 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-5xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-2xl font-bold">
               {order ? 'Editar Pedido' : 'Novo Pedido'}
             </h2>
           </div>
-          <div className="flex space-x-4">
+          <div className="flex space-x-3">
             {order && (
-              <button
-                onClick={handleExportPDF}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-              >
-                <Download className="h-5 w-5 mr-2 inline-block" />
-                Exportar PDF
-              </button>
+              <>
+                <button
+                  onClick={handleExportPDF}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center"
+                >
+                  <Download className="h-5 w-5 mr-2" />
+                  Exportar Cronograma
+                </button>
+                <button
+                  onClick={generateClientAccessLink}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center"
+                >
+                  <Share className="h-5 w-5 mr-2" />
+                  Gerar Link Cliente
+                </button>
+              </>
             )}
             <button onClick={onClose}>
               <X className="h-6 w-6" />
@@ -712,15 +447,69 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
           </div>
         </div>
 
+        {/* Links de acesso existentes */}
+        {formData.clientAccessLinks && formData.clientAccessLinks.length > 0 && (
+          <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
+            <h3 className="text-lg font-medium text-green-800 mb-3 flex items-center">
+              <ExternalLink className="h-5 w-5 mr-2" />
+              Links de Acesso para Cliente
+            </h3>
+            <div className="space-y-2">
+              {formData.clientAccessLinks.map((link, index) => (
+                <div key={link.id} className="flex items-center justify-between bg-white p-3 rounded border">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium">
+                      Link #{index + 1} - Criado em {format(new Date(link.createdAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Expira em: {format(new Date(link.expiresAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+                      {link.accessCount > 0 && ` • Acessado ${link.accessCount} vez(es)`}
+                    </div>
+                  </div>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {
+                        const url = `${window.location.origin}/cronograma-publico/${link.id}`;
+                        navigator.clipboard.writeText(url);
+                        alert('Link copiado!');
+                      }}
+                      className="px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200"
+                    >
+                      <Copy className="h-4 w-4 inline mr-1" />
+                      Copiar
+                    </button>
+                    <span className={`px-2 py-1 rounded text-xs ${
+                      link.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {link.isActive ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700">Número do Pedido</label>
-              <input type="text" value={formData.orderNumber} onChange={e => setFormData(prev => ({ ...prev, orderNumber: e.target.value }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" required />
+              <input 
+                type="text" 
+                value={formData.orderNumber} 
+                onChange={e => setFormData(prev => ({ ...prev, orderNumber: e.target.value }))} 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
+                required 
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Cliente</label>
-              <select value={formData.customer} onChange={e => setFormData(prev => ({ ...prev, customer: e.target.value }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" required>
+              <select 
+                value={formData.customer} 
+                onChange={e => setFormData(prev => ({ ...prev, customer: e.target.value }))} 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
+                required
+              >
                 <option value="">Selecione um cliente</option>
                 {customers.map(customer => (
                   <option key={customer.id} value={customer.name}>{customer.name}</option>
@@ -729,7 +518,13 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">OS Interna</label>
-              <input type="text" value={formData.internalOrderNumber} onChange={e => setFormData(prev => ({ ...prev, internalOrderNumber: e.target.value }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" required />
+              <input 
+                type="text" 
+                value={formData.internalOrderNumber} 
+                onChange={e => setFormData(prev => ({ ...prev, internalOrderNumber: e.target.value }))} 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
+                required 
+              />
             </div>
           </div>
 
@@ -751,11 +546,23 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700">Data de Início</label>
-              <input type="date" value={formData.startDate.split('T')[0]} onChange={e => setFormData(prev => ({ ...prev, startDate: e.target.value }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" required />
+              <input 
+                type="date" 
+                value={formData.startDate.split('T')[0]} 
+                onChange={e => setFormData(prev => ({ ...prev, startDate: e.target.value }))} 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
+                required 
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Data de Entrega</label>
-              <input type="date" value={formData.deliveryDate.split('T')[0]} onChange={e => setFormData(prev => ({ ...prev, deliveryDate: e.target.value }))} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" required />
+              <input 
+                type="date" 
+                value={formData.deliveryDate.split('T')[0]} 
+                onChange={e => setFormData(prev => ({ ...prev, deliveryDate: e.target.value }))} 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
+                required 
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Data de Conclusão</label>
@@ -891,7 +698,6 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
                     </div>
                   </div>
 
-                  {/* Only show invoice/LE fields for 100% completed items - with green styling */}
                   {isItemCompleted(item) && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4 py-3 bg-green-50 rounded-lg border border-green-200">
                       <div>
@@ -948,7 +754,6 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
                 </div>
               ))}
 
-              {/* Make the item creation form separate and don't include it in the main form validation */}
               <div className="border-t pt-4 mt-4">
                 <div className="text-sm text-gray-600 mb-3">Adicionar novo item (opcional):</div>
                 <div className="grid grid-cols-9 gap-2">
@@ -1067,7 +872,13 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
                 </div>
               ))}
               <div className="flex space-x-2">
-                <input type="text" value={newLink} onChange={e => setNewLink(e.target.value)} placeholder="Cole o link do Google Drive aqui" className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" />
+                <input 
+                  type="text" 
+                  value={newLink} 
+                  onChange={e => setNewLink(e.target.value)} 
+                  placeholder="Cole o link do Google Drive aqui" 
+                  className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
+                />
                 <button type="button" onClick={handleAddLink} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
                   <Plus className="h-5 w-5" />
                 </button>
@@ -1086,6 +897,85 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
         </form>
       </div>
 
+      {/* Modal para gerar link de acesso */}
+      {showLinkModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Link de Acesso Gerado</h3>
+              <button onClick={() => setShowLinkModal(false)}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Validade do Link (dias)
+                </label>
+                <select 
+                  value={linkExpiration} 
+                  onChange={e => setLinkExpiration(Number(e.target.value))}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                >
+                  <option value={7}>7 dias</option>
+                  <option value={15}>15 dias</option>
+                  <option value={30}>30 dias</option>
+                  <option value={60}>60 dias</option>
+                  <option value={90}>90 dias</option>
+                </select>
+              </div>
+
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Link Gerado:</label>
+                <div className="flex space-x-2">
+                  <input 
+                    type="text" 
+                    value={generatedLink} 
+                    readOnly 
+                    className="flex-1 rounded-md border-gray-300 bg-gray-100 text-sm"
+                  />
+                  <button 
+                    onClick={copyLinkToClipboard}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <h4 className="font-medium text-blue-800 mb-2">Instruções para o Cliente:</h4>
+                <ul className="text-sm text-blue-700 space-y-1">
+                  <li>• O cliente pode acessar o cronograma atualizado a qualquer momento</li>
+                  <li>• O link expira automaticamente após o período definido</li>
+                  <li>• Apenas visualização - o cliente não pode editar</li>
+                  <li>• O cronograma será sempre a versão mais atual</li>
+                </ul>
+              </div>
+
+              <div className="flex space-x-3">
+                <button 
+                  onClick={() => setShowLinkModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
+                >
+                  Fechar
+                </button>
+                <button 
+                  onClick={() => {
+                    copyLinkToClipboard();
+                    setShowLinkModal(false);
+                  }}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                >
+                  Copiar e Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedItem && (
         <ItemProgressModal
           item={selectedItem}
@@ -1099,3 +989,416 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 };
 
 export default OrderModal;
+        fillColor: [44, 62, 80],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9
+      },
+      styles: {
+        fontSize: 8,
+        cellPadding: 3,
+        overflow: 'linebreak'
+      },
+      columnStyles: {
+        0: { cellWidth: 12, halign: 'center' },
+        1: { cellWidth: 20, halign: 'center' },
+        2: { cellWidth: 50 },
+        3: { cellWidth: 12, halign: 'center' },
+        4: { cellWidth: 18, halign: 'center' },
+        5: { cellWidth: 22, halign: 'center' },
+        6: { cellWidth: 40 },
+        7: { cellWidth: 40 }
+      },
+      didParseCell: function(data) {
+        if (data.row.index >= 0) {
+          const rowData = tableData[data.row.index];
+          if (rowData && rowData.styles && rowData.styles[data.column.index]) {
+            Object.assign(data.cell.styles, rowData.styles[data.column.index]);
+          }
+        }
+      },
+      didDrawPage: function(data) {
+        // Rodapé
+        doc.setFontSize(8);
+        doc.setTextColor(100, 100, 100);
+        doc.text(
+          `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
+          margin,
+          pageHeight - 10
+        );
+        doc.text(
+          `Página ${data.pageNumber}`,
+          pageWidth - margin,
+          pageHeight - 10,
+          { align: 'right' }
+        );
+      }
+    });
+
+    // Se houver espaço, adicionar gráfico de progresso simples
+    const finalY = (doc as any).lastAutoTable?.finalY || currentY + 100;
+    if (finalY < pageHeight - 60) {
+      // Adicionar resumo estatístico
+      const completedItems = formData.items.filter(item => calculateItemProgress(item.progress) === 100).length;
+      const inProgressItems = formData.items.filter(item => {
+        const progress = calculateItemProgress(item.progress);
+        return progress > 0 && progress < 100;
+      }).length;
+      const notStartedItems = formData.items.filter(item => calculateItemProgress(item.progress) === 0).length;
+
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(44, 62, 80);
+      doc.text('Resumo Estatístico:', margin, finalY + 15);
+
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      doc.text(`• Itens Concluídos: ${completedItems}/${totalItems} (${Math.round((completedItems/totalItems)*100)}%)`, margin, finalY + 25);
+      doc.text(`• Itens em Andamento: ${inProgressItems}`, margin, finalY + 32);
+      doc.text(`• Itens Não Iniciados: ${notStartedItems}`, margin, finalY + 39);
+      doc.text(`• Peso Total: ${formData.totalWeight.toLocaleString('pt-BR')} kg`, margin, finalY + 46);
+    }
+
+    // Salvar PDF
+    doc.save(`cronograma-${formData.orderNumber}-${format(new Date(), 'ddMMyyyy')}.pdf`);
+  };
+
+  // Função para gerar link de acesso ao cliente
+  const generateClientAccessLink = async () => {
+    const linkId = crypto.randomUUID();
+    const expirationDate = addDays(new Date(), linkExpiration);
+    
+    const accessLink = {
+      id: linkId,
+      orderId: formData.id,
+      customerName: formData.customer,
+      createdAt: new Date().toISOString(),
+      expiresAt: expirationDate.toISOString(),
+      accessCount: 0,
+      isActive: true
+    };
+
+    // Em produção, você salvaria isso no Firebase
+    // await addDoc(collection(db, 'clientAccessLinks'), accessLink);
+
+    const baseUrl = window.location.origin;
+    const generatedUrl = `${baseUrl}/cronograma-publico/${linkId}`;
+    
+    setGeneratedLink(generatedUrl);
+    
+    // Atualizar o pedido com o novo link
+    const updatedLinks = [...(formData.clientAccessLinks || []), accessLink];
+    setFormData(prev => ({
+      ...prev,
+      clientAccessLinks: updatedLinks
+    }));
+
+    setShowLinkModal(true);
+  };
+
+  const copyLinkToClipboard = () => {
+    navigator.clipboard.writeText(generatedLink);
+    alert('Link copiado para a área de transferência!');
+  };
+
+  // Resto do código permanece igual...
+  const calculateTotals = (item: OrderItem) => {
+    const totalWeight = Number((item.quantity * item.unitWeight).toFixed(2));
+    const totalPrice = Number((item.quantity * item.unitPrice).toFixed(2));
+    return { totalWeight, totalPrice };
+  };
+
+  const handleAddItem = () => {
+    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
+      alert('Por favor, preencha todos os campos obrigatórios do item.');
+      return;
+    }
+    
+    const { totalWeight, totalPrice } = calculateTotals(newItem);
+
+    const item = {
+      ...newItem,
+      id: crypto.randomUUID(),
+      totalWeight,
+      totalPrice,
+    };
+
+    setFormData(prev => ({
+      ...prev,
+      items: [...prev.items, item],
+      totalWeight: Number((prev.totalWeight + totalWeight).toFixed(2)),
+    }));
+
+    setNewItem({
+      id: '',
+      itemNumber: formData.items.length + 2,
+      code: '',
+      description: '',
+      quantity: 0,
+      unitWeight: 0,
+      totalWeight: 0,
+      unitPrice: 0,
+      totalPrice: 0,
+      progress: {},
+      stagePlanning: {},
+      invoiceNumber: '',
+      expeditionLE: ''
+    });
+  };
+
+  const handleEditItem = (item: OrderItem) => {
+    setEditingItem(item);
+    setNewItem({...item});
+  };
+
+  const handleUpdateItem = () => {
+    if (!editingItem) return;
+    
+    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
+      alert('Por favor, preencha todos os campos obrigatórios do item.');
+      return;
+    }
+
+    const { totalWeight: newTotalWeight, totalPrice } = calculateTotals(newItem);
+    const oldTotalWeight = editingItem.totalWeight;
+
+    setFormData(prev => {
+      const updatedItems = prev.items.map(item =>
+        item.id === editingItem.id ? { 
+          ...newItem,
+          totalWeight: newTotalWeight, 
+          totalPrice 
+        } : item
+      );
+
+      return {
+        ...prev,
+        items: updatedItems,
+        totalWeight: Number((prev.totalWeight - oldTotalWeight + newTotalWeight).toFixed(2)),
+      };
+    });
+
+    setEditingItem(null);
+    setNewItem({
+      id: '',
+      itemNumber: formData.items.length + 1,
+      code: '',
+      description: '',
+      quantity: 0,
+      unitWeight: 0,
+      totalWeight: 0,
+      unitPrice: 0,
+      totalPrice: 0,
+      progress: {},
+      stagePlanning: {},
+      invoiceNumber: '',
+      expeditionLE: ''
+    });
+  };
+
+  const handleRemoveItem = (itemId: string) => {
+    const item = formData.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.filter(i => i.id !== itemId),
+      totalWeight: Number((prev.totalWeight - item.totalWeight).toFixed(2)),
+    }));
+
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.map((item, index) => ({
+        ...item,
+        itemNumber: index + 1
+      }))
+    }));
+
+    if (selectedItems.has(itemId)) {
+      const newSelectedItems = new Set(selectedItems);
+      newSelectedItems.delete(itemId);
+      setSelectedItems(newSelectedItems);
+    }
+  };
+
+  const handleAddLink = () => {
+    if (newLink) {
+      setFormData(prev => ({
+        ...prev,
+        driveLinks: [...prev.driveLinks, newLink],
+      }));
+      setNewLink('');
+    }
+  };
+
+  const handleRemoveLink = (link: string) => {
+    setFormData(prev => ({
+      ...prev,
+      driveLinks: prev.driveLinks.filter(l => l !== link),
+    }));
+  };
+
+  const handleToggleChecklist = (item: 'drawings' | 'inspectionTestPlan' | 'paintPlan') => {
+    setFormData(prev => {
+      const checklist = prev.checklist || {
+        drawings: false,
+        inspectionTestPlan: false,
+        paintPlan: false
+      };
+
+      const newChecklist = {
+        drawings: !!checklist.drawings,
+        inspectionTestPlan: !!checklist.inspectionTestPlan,
+        paintPlan: !!checklist.paintPlan
+      };
+
+      newChecklist[item] = !newChecklist[item];
+
+      return {
+        ...prev,
+        checklist: newChecklist
+      };
+    });
+  };
+
+  const handleStatusChange = (newStatus: OrderStatus) => {
+    setFormData(prev => {
+      let completedDate = prev.completedDate;
+      
+      if (newStatus === 'completed' && !completedDate) {
+        completedDate = new Date().toISOString().split('T')[0];
+      } else if (newStatus !== 'completed') {
+        completedDate = '';
+      }
+      
+      return {
+        ...prev,
+        status: newStatus,
+        completedDate
+      };
+    });
+  };
+
+  const safeISODate = (dateStr: string): string => {
+    try {
+      if (!dateStr || dateStr.trim() === '') {
+        return new Date().toISOString();
+      }
+      
+      const date = new Date(`${dateStr}T00:00:00`);
+      
+      if (isNaN(date.getTime())) {
+        console.error("Invalid date:", dateStr);
+        return new Date().toISOString();
+      }
+      
+      return date.toISOString();
+    } catch (error) {
+      console.error("Error parsing date:", dateStr, error);
+      return new Date().toISOString();
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.orderNumber || !formData.customer || !formData.internalOrderNumber || 
+        !formData.startDate || !formData.deliveryDate) {
+      alert('Por favor, preencha todos os campos obrigatórios do pedido.');
+      return;
+    }
+    
+    if (formData.items.length === 0) {
+      alert('Por favor, adicione pelo menos um item ao pedido.');
+      return;
+    }
+    
+    try {
+      const formattedData = {
+        ...formData,
+        startDate: safeISODate(formData.startDate),
+        deliveryDate: safeISODate(formData.deliveryDate),
+        completedDate: formData.completedDate ? safeISODate(formData.completedDate) : '',
+        deleted: false,
+        checklist: {
+          drawings: !!formData.checklist?.drawings,
+          inspectionTestPlan: !!formData.checklist?.inspectionTestPlan,
+          paintPlan: !!formData.checklist?.paintPlan
+        }
+      };
+      
+      onSave(formattedData);
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      alert("Erro ao processar as datas do pedido. Por favor, verifique os valores informados.");
+    }
+  };
+
+  const handleSaveItemProgress = (updatedItem: OrderItem) => {
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.map(item => 
+        item.id === updatedItem.id ? updatedItem : item
+      )
+    }));
+    setSelectedItem(null);
+  };
+
+  const handleUpdateItemField = (itemId: string, field: keyof OrderItem, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.map(item => 
+        item.id === itemId ? { ...item, [field]: value } : item
+      )
+    }));
+  };
+
+  const handleExportItemsListPDF = () => {
+    if (selectedItems.size === 0) {
+      alert('Por favor, selecione pelo menos um item para exportar.');
+      return;
+    }
+
+    const doc = new jsPDF();
+    
+    let y = 20;
+    if (companyLogo) {
+      doc.addImage(companyLogo, 'JPEG', 20, 10, 40, 20);
+      y = 40;
+    }
+    
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Lista de Itens Selecionados`, 105, y, { align: 'center' });
+    y += 15;
+    
+    const selectedOrderObjects = formData.items.filter(item => selectedItems.has(item.id));
+    
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Pedido #${formData.orderNumber} - ${formData.customer}`, 20, y);
+    y += 8;
+    doc.text(`OS Interna: ${formData.internalOrderNumber}`, 20, y);
+    y += 8;
+    if (formData.projectName) {
+      doc.text(`Projeto: ${formData.projectName}`, 20, y);
+      y += 8;
+    }
+    doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, y);
+    y += 15;
+    
+    const allItems = selectedOrderObjects;
+    const totalWeight = allItems.reduce((sum, item) => sum + item.totalWeight, 0);
+    
+    autoTable(doc, {
+      startY: y,
+      head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso (kg)']],
+      body: allItems.map(item => [
+        item.itemNumber.toString(),
+        item.code,
+        item.description,
+        item.quantity.toString(),
+        item.totalWeight.toLocaleString('pt-BR')
+      ]),
+      theme: 'striped',
+      headStyles: {
