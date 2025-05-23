@@ -12,8 +12,7 @@ import ProjectModal from './ProjectModal';
 import { format, isBefore, isToday, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
-import { db } from '../firebase/firebaseConfig';
-import { getCompanyCollection } from '../firebase/firebaseUtils';
+import { db, getCompanyCollection } from '../lib/firebase';
 
 const Orders: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
