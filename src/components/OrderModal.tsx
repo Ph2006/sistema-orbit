@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Link, Trash2, Edit, Download, BarChart, FileText, CheckSquare, Square, Briefcase, ClipboardCheck, Copy, ExternalLink, Share } from 'lucide-react';
+import { X, Plus, Link, Trash2, Edit, Download, BarChart, FileText, CheckSquare, Square, Briefcase, ClipboardCheck, Globe, Copy, ExternalLink, Share } from 'lucide-react';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
 import { Order, OrderItem, OrderStatus, ClientProject } from '../types/kanban';
@@ -7,7 +7,7 @@ import { Customer } from '../types/customer';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import autoTable from 'jspdf-autotable';
-import { format, differenceInDays, parseISO, addDays } from 'date-fns';
+import { format, addDays, differenceInDays, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
 import ItemProgressModal from './ItemProgressModal';
@@ -22,6 +22,25 @@ interface ClientAccessLink {
   accessCount: number;
 }
 
+// Função auxiliar para parsear datas com segurança
+const safeISODate = (dateStr: string): string => {
+  try {
+    if (!dateStr || dateStr.trim() === '') {
+      return new Date().toISOString();
+    }
+    // Assuming dateStr is in 'yyyy-MM-dd' format for simplicity
+    const date = new Date(`${dateStr}T00:00:00`);
+    if (isNaN(date.getTime())) {
+      // Fallback for invalid date strings
+      return new Date().toISOString();
+    }
+    return date.toISOString();
+  } catch (error) {
+    console.error("Error parsing date string:", dateStr, error);
+    return new Date().toISOString();
+  }
+};
+
 interface OrderModalProps {
   order: Order | null;
   onClose: () => void;
@@ -34,9 +53,9 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   const { companyLogo } = useSettingsStore();
   const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
-  const [showLinkModal, setShowLinkModal] = useState(false);
-  const [generatedLink, setGeneratedLink] = useState('');
-  const [linkExpiration, setLinkExpiration] = useState(30); // days
+  const [showPublicLink, setShowPublicLink] = useState(false);
+  const [publicLinkCopied, setPublicLinkCopied] = useState(false);
+  
   const [formData, setFormData] = useState<Order>({
     id: order?.id || 'new',
     orderNumber: order?.orderNumber || '',
@@ -59,77 +78,126 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     projectName: order?.projectName || '',
     completedDate: order?.completedDate || '',
     lastExportDate: order?.lastExportDate || '',
-    clientAccessLinks: order?.clientAccessLinks || []
   });
-
-  const [newItem, setNewItem] = useState<OrderItem>({
-    id: '',
-    itemNumber: formData.items.length + 1,
-    code: '',
-    description: '',
-    quantity: 0,
-    unitWeight: 0,
-    totalWeight: 0,
-    unitPrice: 0,
-    totalPrice: 0,
-    progress: {},
-    stagePlanning: {},
-    invoiceNumber: '',
-    expeditionLE: ''
-  });
-
-  const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
-  const [newLink, setNewLink] = useState('');
 
   useEffect(() => {
     loadCustomers();
   }, []);
 
-  useEffect(() => {
-    if (order) {
-      const checklist = order.checklist || {
-        drawings: false,
-        inspectionTestPlan: false,
-        paintPlan: false
-      };
-      
-      setFormData({
-        ...order,
-        startDate: order.startDate.split('T')[0],
-        deliveryDate: order.deliveryDate.split('T')[0],
-        completedDate: order.completedDate ? order.completedDate.split('T')[0] : '',
-        items: order.items || [],
-        driveLinks: [...order.driveLinks],
-        checklist: {
-          drawings: !!checklist.drawings,
-          inspectionTestPlan: !!checklist.inspectionTestPlan,
-          paintPlan: !!checklist.paintPlan
-        },
-        projectId: order.projectId || '',
-        projectName: order.projectName || '',
-        clientAccessLinks: order.clientAccessLinks || []
-      });
-      
-      setNewItem(prev => ({
-        ...prev,
-        itemNumber: (order.items?.length || 0) + 1,
-      }));
-    }
-  }, [order]);
-
   const loadCustomers = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, getCompanyCollection('customers')));
-      const customersData = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Customer[];
+      const customersRef = collection(db, getCompanyCollection('customers'));
+      const snapshot = await getDocs(customersRef);
+      const customersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
       setCustomers(customersData);
     } catch (error) {
       console.error('Error loading customers:', error);
     }
   };
 
+  const handleProjectChange = (projectId: string) => {
+    const selectedProject = projects.find(p => p.id === projectId);
+    setFormData({
+      ...formData,
+      projectId,
+      projectName: selectedProject?.name || ''
+    });
+  };
+
+  const handleAddItem = () => {
+    const newItem: OrderItem = {
+      id: Date.now().toString(),
+      itemNumber: formData.items.length + 1,
+      code: '',
+      description: '',
+      quantity: 1,
+      totalWeight: 0,
+      unitWeight: 0,
+      progress: {
+        'Programação': 0,
+        'Corte': 0,
+        'Furação': 0,
+        'Dobra': 0,
+        'Caldeiraria': 0,
+        'Usinagem': 0,
+        'Pintura': 0,
+        'Expedição': 0
+      },
+      stage: 'Programação'
+    };
+    setFormData({ ...formData, items: [...formData.items, newItem] });
+  };
+
+  const handleUpdateItem = (index: number, field: keyof OrderItem, value: any) => {
+    const updatedItems = [...formData.items];
+    updatedItems[index] = { ...updatedItems[index], [field]: value };
+    
+    if (field === 'quantity' || field === 'unitWeight') {
+      const quantity = field === 'quantity' ? value : updatedItems[index].quantity;
+      const unitWeight = field === 'unitWeight' ? value : updatedItems[index].unitWeight;
+      updatedItems[index].totalWeight = quantity * unitWeight;
+    }
+    
+    setFormData({ ...formData, items: updatedItems });
+  };
+
+  const handleDeleteItem = (index: number) => {
+    const updatedItems = formData.items.filter((_, i) => i !== index);
+    setFormData({ ...formData, items: updatedItems });
+  };
+
+  const handleAddDriveLink = () => {
+    setFormData({
+      ...formData,
+      driveLinks: [...formData.driveLinks, { name: '', url: '' }]
+    });
+  };
+
+  const handleUpdateDriveLink = (index: number, field: 'name' | 'url', value: string) => {
+    const updatedLinks = [...formData.driveLinks];
+    updatedLinks[index] = { ...updatedLinks[index], [field]: value };
+    setFormData({ ...formData, driveLinks: updatedLinks });
+  };
+
+  const handleDeleteDriveLink = (index: number) => {
+    const updatedLinks = formData.driveLinks.filter((_, i) => i !== index);
+    setFormData({ ...formData, driveLinks: updatedLinks });
+  };
+
+  const handleSave = () => {
+    const totalWeight = formData.items.reduce((sum, item) => sum + item.totalWeight, 0);
+    const orderToSave = { ...formData, totalWeight };
+    onSave(orderToSave);
+  };
+
+  const handleItemProgressSave = (updatedItem: OrderItem) => {
+    const updatedItems = formData.items.map(item => 
+      item.id === updatedItem.id ? updatedItem : item
+    );
+    setFormData({ ...formData, items: updatedItems });
+    setSelectedItem(null);
+  };
+
+  const toggleItemSelection = (itemId: string) => {
+    const newSelected = new Set(selectedItems);
+    if (newSelected.has(itemId)) {
+      newSelected.delete(itemId);
+    } else {
+      newSelected.add(itemId);
+    }
+    setSelectedItems(newSelected);
+  };
+
+  const handleBatchProgressUpdate = () => {
+    if (selectedItems.size === 0) return;
+    
+    const firstSelectedItem = formData.items.find(item => selectedItems.has(item.id));
+    if (firstSelectedItem) {
+      setSelectedItem(firstSelectedItem);
+    }
+  };
+
+  // 🎨 NOVA FUNÇÃO DE EXPORTAÇÃO PROFISSIONAL
   const handleExportPDF = () => {
     const doc = new jsPDF({
       orientation: 'landscape',
@@ -140,418 +208,558 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 15;
-    
-    // Calcular progresso geral
-    const totalItems = formData.items.length;
-    const overallProgress = totalItems > 0 ? Math.round(
-      formData.items.reduce((sum, item) => sum + (calculateItemProgress(item.progress) || 0), 0) / totalItems
-    ) : 0;
-
-    // Calcular dias restantes
-    const today = new Date();
-    const deliveryDate = new Date(formData.deliveryDate);
-    const daysRemaining = differenceInDays(deliveryDate, today);
-    const isDelayed = daysRemaining < 0;
-
     let currentY = margin;
 
-    // CABEÇALHO PROFISSIONAL
+    // 🎨 CABEÇALHO PROFISSIONAL
     if (companyLogo) {
       doc.addImage(companyLogo, 'JPEG', margin, currentY, 40, 20);
     }
-    
+
     // Título principal
     doc.setFontSize(22);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold'); // Corrected: Use a valid font name
     doc.setTextColor(44, 62, 80);
     doc.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, currentY + 12, { align: 'center' });
-    
+
     currentY += 25;
 
     // Informações do pedido em caixas
-    const boxHeight = 8;
-    const boxWidth = (pageWidth - 2 * margin - 30) / 4;
-    
     // Caixa 1 - Pedido
     doc.setFillColor(52, 152, 219);
-    doc.rect(margin, currentY, boxWidth, boxHeight, 'F');
+    doc.rect(margin, currentY, pageWidth - (2 * margin), 25, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold'); // Corrected: Use a valid font name
     doc.text('PEDIDO', margin + 2, currentY + 3);
     doc.setFontSize(12);
     doc.text(`#${formData.orderNumber}`, margin + 2, currentY + 6);
 
     // Caixa 2 - Cliente
-    doc.setFillColor(46, 204, 113);
-    doc.rect(margin + boxWidth + 7.5, currentY, boxWidth, boxHeight, 'F');
+    doc.setFillColor(248, 249, 250);
+    doc.rect(margin, currentY + 25, pageWidth - (2 * margin), 25, 'F');
+    doc.setDrawColor(220, 220, 220);
+    doc.rect(margin, currentY + 25, pageWidth - (2 * margin), 25);
+
+    doc.setTextColor(0, 0, 0);
     doc.setFontSize(10);
-    doc.text('CLIENTE', margin + boxWidth + 9.5, currentY + 3);
-    doc.setFontSize(12);
-    doc.text(formData.customer, margin + boxWidth + 9.5, currentY + 6);
+    doc.setFont('helvetica', 'bold'); // Corrected: Use a valid font name
+    doc.text('Cliente:', margin + 5, currentY + 27);
+    doc.setFont('helvetica', 'normal'); // Corrected: Use a valid font name
+    doc.text(formData.customer, margin + 25, currentY + 27);
 
-    // Caixa 3 - Progresso
-    const progressColor = overallProgress >= 80 ? [46, 204, 113] : 
-                         overallProgress >= 50 ? [241, 196, 15] : [231, 76, 60];
-    doc.setFillColor(progressColor[0], progressColor[1], progressColor[2]);
-    doc.rect(margin + 2 * (boxWidth + 7.5), currentY, boxWidth, boxHeight, 'F');
-    doc.setFontSize(10);
-    doc.text('PROGRESSO', margin + 2 * (boxWidth + 7.5) + 2, currentY + 3);
-    doc.setFontSize(12);
-    doc.text(`${overallProgress}%`, margin + 2 * (boxWidth + 7.5) + 2, currentY + 6);
-
-    // Caixa 4 - Prazo
-    const deadlineColor = isDelayed ? [231, 76, 60] : 
-                         daysRemaining <= 7 ? [241, 196, 15] : [46, 204, 113];
-    doc.setFillColor(deadlineColor[0], deadlineColor[1], deadlineColor[2]);
-    doc.rect(margin + 3 * (boxWidth + 7.5), currentY, boxWidth, boxHeight, 'F');
-    doc.setFontSize(10);
-    doc.text('PRAZO', margin + 3 * (boxWidth + 7.5) + 2, currentY + 3);
-    doc.setFontSize(12);
-    doc.text(`${daysRemaining} dias`, margin + 3 * (boxWidth + 7.5) + 2, currentY + 6);
-
-    currentY += 15;
-
-    // Informações detalhadas
-    doc.setTextColor(44, 62, 80);
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-    
-    const infoY = currentY;
-    doc.text(`OS Interna: ${formData.internalOrderNumber}`, margin, infoY);
-    doc.text(`Projeto: ${formData.projectName || 'N/A'}`, margin + 70, infoY);
-    doc.text(`Início: ${format(parseISO(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 140, infoY);
-    doc.text(`Entrega: ${format(parseISO(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 200, infoY);
-    
-    if (formData.completedDate) {
-      doc.text(`Concluído: ${format(parseISO(formData.completedDate), 'dd/MM/yyyy', { locale: ptBR })}`, margin + 260, infoY);
-    }
-
-    currentY += 12;
-
-    // Status do checklist
-    doc.setFontSize(12);
     doc.setFont(undefined, 'bold');
-    doc.text('Status da Documentação:', margin, currentY);
-    
-    currentY += 8;
-    doc.setFontSize(9);
+    doc.text('OS Interna:', margin + 100, currentY + 27);
     doc.setFont(undefined, 'normal');
-    
-    const checklistItems = [
-      { key: 'drawings', label: 'Desenhos Técnicos' },
-      { key: 'inspectionTestPlan', label: 'Plano de Inspeção e Testes' },
-      { key: 'paintPlan', label: 'Plano de Pintura' }
-    ];
+    doc.text(formData.internalOrderNumber, margin + 125, currentY + 27);
 
-    checklistItems.forEach((item, index) => {
-      const xPos = margin + (index * 90);
-      const isCompleted = formData.checklist?.[item.key as keyof typeof formData.checklist];
-      
-      doc.setFillColor(isCompleted ? 46 : 231, isCompleted ? 204 : 76, isCompleted ? 113 : 60);
-      doc.circle(xPos, currentY, 2, 'F');
-      doc.setTextColor(44, 62, 80);
-      doc.text(item.label, xPos + 5, currentY + 1);
-    });
+    currentY += 28;
 
-    currentY += 15;
+    // Caixa 3 - Data
+    doc.setFillColor(248, 249, 250);
+    doc.rect(margin, currentY, pageWidth - (2 * margin), 25, 'F');
+    doc.setDrawColor(220, 220, 220);
+    doc.rect(margin, currentY, pageWidth - (2 * margin), 25);
 
-    // TABELA DE ITENS COM CRONOGRAMA
-    const tableData = formData.items.map(item => {
-      const itemProgress = calculateItemProgress(item.progress);
-      const stages = Object.entries(item.progress || {});
-      const plannedStages = Object.entries(item.stagePlanning || {});
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold'); // Corrected: Use a valid font name
+    doc.text('Data de Início:', margin + 5, currentY + 3);
+    doc.setFont('helvetica', 'normal'); // Corrected: Use a valid font name
+    doc.text(format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR }), margin + 30, currentY + 3);
+
+    doc.setFont(undefined, 'bold');
+    doc.text('Data de Entrega:', margin + 100, currentY + 3);
+    doc.setFont(undefined, 'normal');
+    doc.text(format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }), margin + 130, currentY + 3);
+
+    currentY += 28;
+
+    // Caixa 4 - Progresso Geral
+    doc.setFillColor(248, 249, 250);
+    doc.rect(margin, currentY, pageWidth - (2 * margin), 25, 'F');
+    doc.setDrawColor(220, 220, 220);
+    doc.rect(margin, currentY, pageWidth - (2 * margin), 25);
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold'); // Corrected: Use a valid font name
+    doc.text('Progresso Geral:', margin + 5, currentY + 3);
+    doc.setFont('helvetica', 'normal'); // Corrected: Use a valid font name
+
+    const totalItems = formData.items.length;
+    const overallProgress = totalItems > 0 ? Math.round(formData.items.reduce((sum, item) => sum + (calculateItemProgress(item.progress) || 0), 0) / totalItems) : 0;
+    const daysRemaining = differenceInDays(new Date(formData.deliveryDate), new Date());
+
+    doc.setFont(undefined, 'bold');
+    doc.text(`${overallProgress}%`, margin + 35, currentY + 3);
+
+    doc.setFont(undefined, 'bold');
+    doc.text('Dias Restantes:', margin + 100, currentY + 3);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(daysRemaining < 0 ? 220, 53, 69 : daysRemaining < 7 ? 255, 193, 7 : 40, 167, 69);
+    doc.text(`${daysRemaining} dias`, margin + 130, currentY + 3);
+    doc.setTextColor(0, 0, 0);
+
+    currentY += 20;
+
+    // 📈 GRÁFICO DE PROGRESSO VISUAL
+    const addProgressChart = () => {
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      doc.text('PROGRESSO POR ETAPA', margin, currentY);
+      currentY += 10;
       
-      // Status baseado no progresso
-      let status = 'Não Iniciado';
-      let statusColor = [149, 165, 166]; // Cinza
+      // Agrupar progresso por etapas
+      const stageProgress: Record<string, { total: number, completed: number }> = {};
       
-      if (itemProgress === 100) {
-        status = 'Concluído';
-        statusColor = [46, 204, 113]; // Verde
-      } else if (itemProgress > 0) {
-        status = 'Em Andamento';
-        statusColor = [52, 152, 219]; // Azul
+      formData.items.forEach(item => {
+        if (item.progress) {
+          Object.entries(item.progress).forEach(([stage, progress]) => {
+            if (!stageProgress[stage]) {
+              stageProgress[stage] = { total: 0, completed: 0 };
+            }
+            stageProgress[stage].total += 100;
+            stageProgress[stage].completed += progress || 0;
+          });
+        }
+      });
+      
+      // Desenhar barras de progresso
+      Object.entries(stageProgress).forEach(([stage, data], index) => {
+        const progressPercent = data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0;
+        const barY = currentY + (index * 15);
         
-        // Verificar se está atrasado baseado nas datas planejadas
-        const currentStage = stages.find(([_, progress]) => progress > 0 && progress < 100);
-        if (currentStage && plannedStages.length > 0) {
-          const stageName = currentStage[0];
-          const stageData = item.stagePlanning?.[stageName];
-          if (stageData?.endDate) {
-            const stageEndDate = new Date(stageData.endDate);
-            if (today > stageEndDate && itemProgress < 100) {
-              status = 'Atrasado';
-              statusColor = [231, 76, 60]; // Vermelho
+        // Nome da etapa
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'normal');
+        doc.text(stage, margin, barY);
+        
+        // Barra de progresso
+        const barX = margin + 60;
+        const barWidth = 100;
+        const barHeight = 6;
+        
+        // Fundo da barra
+        doc.setFillColor(230, 230, 230);
+        doc.rect(barX, barY - 4, barWidth, barHeight, 'F');
+        
+        // Progresso da barra
+        const fillWidth = (barWidth * progressPercent) / 100;
+        const color = progressPercent === 100 ? [40, 167, 69] : 
+                     progressPercent >= 70 ? [23, 162, 184] :
+                     progressPercent >= 30 ? [255, 193, 7] : [220, 53, 69];
+        doc.setFillColor(color[0], color[1], color[2]);
+        doc.rect(barX, barY - 4, fillWidth, barHeight, 'F');
+        
+        // Percentual
+        doc.setFont(undefined, 'bold');
+        doc.text(`${progressPercent}%`, barX + barWidth + 5, barY);
+      });
+      
+      currentY += Object.keys(stageProgress).length * 15 + 10;
+    };
+
+    // 📋 TABELA DETALHADA DOS ITENS
+    const addItemsTable = () => {
+      const tableData = formData.items.map(item => {
+        const itemProgress = calculateItemProgress(item.progress) || 0;
+        const status = itemProgress === 100 ? 'Concluído' : 
+                     itemProgress >= 70 ? 'Quase Pronto' :
+                     itemProgress >= 30 ? 'Em Andamento' : 'Não Iniciado';
+        
+        return [
+          item.itemNumber.toString(),
+          item.code,
+          item.description.length > 30 ? item.description.substring(0, 30) + '...' : item.description,
+          item.quantity.toString(),
+          `${item.totalWeight.toLocaleString('pt-BR')} kg`,
+          `${itemProgress}%`,
+          status
+        ];
+      });
+
+      (doc as any).autoTable({
+        startY: currentY,
+        head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso', 'Progresso', 'Status']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: {
+          fillColor: [41, 128, 185],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 10
+        },
+        bodyStyles: {
+          fontSize: 9
+        },
+        columnStyles: {
+          0: { cellWidth: 15, halign: 'center' },
+          1: { cellWidth: 25 },
+          2: { cellWidth: 60 },
+          3: { cellWidth: 15, halign: 'center' },
+          4: { cellWidth: 25, halign: 'right' },
+          5: { cellWidth: 20, halign: 'center' },
+          6: { cellWidth: 30, halign: 'center' }
+        },
+        didParseCell: function(data: any) {
+          // Colorir células de status
+          if (data.column.index === 6 && data.section === 'body') {
+            const status = data.cell.text[0];
+            if (status === 'Concluído') {
+              data.cell.styles.textColor = [40, 167, 69];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (status === 'Quase Pronto') {
+              data.cell.styles.textColor = [23, 162, 184];
+            } else if (status === 'Em Andamento') {
+              data.cell.styles.textColor = [255, 193, 7];
+            } else {
+              data.cell.styles.textColor = [220, 53, 69];
             }
           }
         }
+      });
+      
+      currentY = (doc as any).lastAutoTable.finalY + 15;
+    };
+
+    // 🎯 CRONOGRAMA VISUAL (GANTT SIMPLIFICADO)
+    const addVisualTimeline = () => {
+      // Verificar se cabe na página atual
+      if (currentY > pageHeight - 80) {
+        doc.addPage();
+        currentY = margin;
       }
+      
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      doc.text('CRONOGRAMA VISUAL', margin, currentY);
+      currentY += 10;
+      
+      const startDate = new Date(formData.startDate);
+      const endDate = new Date(formData.deliveryDate);
+      const totalDays = differenceInDays(endDate, startDate);
+      const timelineWidth = pageWidth - (2 * margin) - 60;
+      
+      // Cabeçalho do cronograma
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'normal');
+      doc.text('Início', margin + 60, currentY);
+      doc.text(format(startDate, 'dd/MM', { locale: ptBR }), margin + 60, currentY + 5);
+      
+      doc.text('Fim', margin + 60 + timelineWidth, currentY, { align: 'right' });
+      doc.text(format(endDate, 'dd/MM', { locale: ptBR }), margin + 60 + timelineWidth, currentY + 5, { align: 'right' });
+      
+      currentY += 15;
+      
+      // Linha do tempo para cada item
+      formData.items.slice(0, 8).forEach((item, index) => { // Limitar a 8 itens para não estourar a página
+        const itemY = currentY + (index * 12);
+        
+        // Nome do item
+        doc.setFontSize(8);
+        doc.text(`${item.itemNumber}. ${item.code}`, margin, itemY);
+        
+        // Barra de progresso no cronograma
+        const barX = margin + 60;
+        const barHeight = 6;
+        const progressPercent = calculateItemProgress(item.progress) || 0;
+        
+        // Fundo da barra
+        doc.setFillColor(240, 240, 240);
+        doc.rect(barX, itemY - 3, timelineWidth, barHeight, 'F');
+        
+        // Progresso
+        const fillWidth = (timelineWidth * progressPercent) / 100;
+        const color = progressPercent === 100 ? [40, 167, 69] : [23, 162, 184];
+        doc.setFillColor(color[0], color[1], color[2]);
+        doc.rect(barX, itemY - 3, fillWidth, barHeight, 'F');
+        
+        // Borda
+        doc.setDrawColor(200, 200, 200);
+        doc.rect(barX, itemY - 3, timelineWidth, barHeight);
+      });
+      
+      currentY += Math.min(formData.items.length, 8) * 12 + 10;
+    };
 
-      // Etapas em andamento
-      const activeStages = stages
-        .filter(([_, progress]) => progress > 0 && progress < 100)
-        .map(([stageName, _]) => stageName)
-        .join(', ') || 'N/A';
-
-      // Próximas etapas
-      const nextStages = stages
-        .filter(([_, progress]) => progress === 0)
-        .slice(0, 2)
-        .map(([stageName, _]) => stageName)
-        .join(', ') || 'N/A';
-
-      return {
-        content: [
-          item.itemNumber.toString(),
-          item.code,
-          item.description.length > 25 ? item.description.substring(0, 25) + '...' : item.description,
-          item.quantity.toString(),
-          `${itemProgress}%`,
-          status,
-          activeStages.length > 20 ? activeStages.substring(0, 20) + '...' : activeStages,
-          nextStages.length > 20 ? nextStages.substring(0, 20) + '...' : nextStages
-        ],
-        styles: {
-          0: { halign: 'center' },
-          1: { halign: 'center' },
-          3: { halign: 'center' },
-          4: { halign: 'center', textColor: statusColor },
-          5: { halign: 'center', textColor: statusColor, fontStyle: 'bold' }
-        }
-      };
-    });
-
-    // Cabeçalho da tabela
-    const headers = [
-      'Item',
-      'Código',
-      'Descrição',
-      'Qtd',
-      'Progresso',
-      'Status',
-      'Etapas Ativas',
-      'Próximas Etapas'
-    ];
-
-    autoTable(doc, {
-      startY: currentY,
-      head: [headers],
-      body: tableData.map(row => row.content),
-      theme: 'striped',
-              headStyles: {
-        fillColor: [59, 130, 246],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold'
-      },
-      foot: [['', '', '', 'Peso Total:', formData.totalWeight.toLocaleString('pt-BR') + ' kg']],
-      footStyles: {
-        fillColor: [240, 240, 240],
-        textColor: [0, 0, 0],
-        fontStyle: 'bold'
-      }
-    });
-    
-    const totalPages = doc.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
+    // 📝 RODAPÉ PROFISSIONAL
+    const addFooter = () => {
+      const footerY = pageHeight - 20;
+      
+      // Linha separadora
+      doc.setDrawColor(41, 128, 185);
+      doc.setLineWidth(0.5);
+      doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+      
+      // Informações do rodapé
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
       doc.text(
-        `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })} - Página ${i} de ${totalPages}`,
-        105, 
-        287, 
-        { align: 'center' }
+        `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
+        margin,
+        footerY
       );
-    }
-    
-    setFormData(prev => ({
-      ...prev,
-      lastExportDate: new Date().toISOString()
-    }));
-    
-    doc.save(`lista-itens-selecionados.pdf`);
-  };
-
-  const isItemCompleted = (item: OrderItem): boolean => {
-    if (!item.progress || Object.keys(item.progress).length === 0) return false;
-    return Object.values(item.progress).every(progress => progress === 100);
-  };
-
-  const sortStagesByExecutionOrder = (stages: Record<string, any> = {}, stagePlanning: Record<string, any> = {}) => {
-    return Object.entries(stages).sort(([stageNameA, _], [stageNameB, __]) => {
-      const planningA = stagePlanning[stageNameA];
-      const planningB = stagePlanning[stageNameB];
       
-      if (planningA?.startDate && planningB?.startDate) {
-        return new Date(planningA.startDate).getTime() - new Date(planningB.startDate).getTime();
-      }
-      
-      if (planningA?.startDate) return -1;
-      if (planningB?.startDate) return 1;
-      
-      return stageNameA.localeCompare(stageNameB);
-    });
-  };
-
-  const handleToggleSelectItem = (itemId: string) => {
-    const newSelectedItems = new Set(selectedItems);
-    if (newSelectedItems.has(itemId)) {
-      newSelectedItems.delete(itemId);
-    } else {
-      newSelectedItems.add(itemId);
-    }
-    setSelectedItems(newSelectedItems);
-  };
-
-  const handleSelectAllItems = () => {
-    if (selectedItems.size === formData.items.length) {
-      setSelectedItems(new Set());
-    } else {
-      setSelectedItems(new Set(formData.items.map(item => item.id)));
-    }
-  };
-
-  const handleExportSelectedItems = () => {
-    if (selectedItems.size === 0) {
-      alert('Por favor, selecione pelo menos um item para exportar.');
-      return;
-    }
-    handleExportItemsListPDF();
-  };
-
-  const handleExportItemsListPDF = () => {
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 15;
-    let currentY = margin;
-
-    // Cabeçalho
-    if (companyLogo) {
-      doc.addImage(companyLogo, 'JPEG', margin, currentY, 40, 20);
-    }
-
-    doc.setFontSize(20);
-    doc.setFont(undefined, 'bold');
-    doc.text('LISTA DE ITENS', pageWidth / 2, currentY + 15, { align: 'center' });
-    
-    doc.setFontSize(12);
-    doc.text(`Pedido: #${formData.orderNumber}`, margin, currentY + 25);
-    doc.text(`Cliente: ${formData.customer}`, margin, currentY + 35);
-
-    currentY += 45;
-
-    // Tabela de itens
-    const tableData = formData.items.map(item => [
-      item.itemNumber.toString(),
-      item.code,
-      item.description,
-      item.quantity.toString(),
-      `${item.unitWeight} kg`,
-      `${item.totalWeight} kg`,
-      item.invoiceNumber || '-',
-      item.expeditionLE || '-'
-    ]);
-
-    autoTable(doc, {
-      startY: currentY,
-      head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total', 'NF', 'LE']],
-      body: tableData,
-      theme: 'grid',
-      headStyles: {
-        fillColor: [44, 62, 80],
-        textColor: 255
-      }
-    });
-
-    doc.save(`itens_${formData.orderNumber}.pdf`);
-  };
-
-  const generateClientAccessLink = async () => {
-    const linkId = crypto.randomUUID();
-    const expirationDate = addDays(new Date(), linkExpiration);
-    
-    const accessLink: ClientAccessLink = {
-      id: linkId,
-      url: `${window.location.origin}/cronograma-publico/${linkId}`,
-      createdAt: new Date().toISOString(),
-      expiresAt: expirationDate.toISOString(),
-      isActive: true,
-      accessCount: 0
+      doc.text(
+        `Cronograma sempre atualizado - Página ${doc.getCurrentPageInfo().pageNumber}`,
+        pageWidth - margin,
+        footerY,
+        { align: 'right' }
+      );
     };
-    
-    setGeneratedLink(accessLink.url);
-    
-    // Atualizar o pedido com o novo link
-    const updatedLinks = [...(formData.clientAccessLinks || []), accessLink];
-    setFormData(prev => ({
-      ...prev,
-      clientAccessLinks: updatedLinks
-    }));
 
-    setShowLinkModal(true);
+    // 🎨 GERAR O PDF
+    addHeader();
+    addOrderInfo();
+    addProgressChart();
+    addItemsTable();
+    addVisualTimeline();
+    addFooter();
+
+    // Salvar arquivo
+    doc.save(`cronograma-${formData.orderNumber}-${format(new Date(), 'ddMMyyyy')}.pdf`);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.orderNumber || !formData.customer || !formData.internalOrderNumber || 
-        !formData.startDate || !formData.deliveryDate) {
-      alert('Por favor, preencha todos os campos obrigatórios do pedido.');
-      return;
-    }
-    
-    if (formData.items.length === 0) {
-      alert('Por favor, adicione pelo menos um item ao pedido.');
-      return;
-    }
-    
+  // 🔗 GERAR LINK PÚBLICO PARA CLIENTE
+  const generatePublicLink = () => {
+    const baseUrl = window.location.origin;
+    const publicUrl = `${baseUrl}/cronograma/${formData.id}?token=${btoa(formData.orderNumber + formData.customer)}`;
+    return publicUrl;
+  };
+
+  const handleCopyPublicLink = async () => {
+    const publicLink = generatePublicLink();
     try {
-      const formattedData = {
-        ...formData,
-        startDate: safeISODate(formData.startDate),
-        deliveryDate: safeISODate(formData.deliveryDate),
-        completedDate: formData.completedDate ? safeISODate(formData.completedDate) : '',
-        deleted: false,
-        checklist: {
-          drawings: !!formData.checklist?.drawings,
-          inspectionTestPlan: !!formData.checklist?.inspectionTestPlan,
-          paintPlan: !!formData.checklist?.paintPlan
-        }
-      };
-      
-      onSave(formattedData);
+      await navigator.clipboard.writeText(publicLink);
+      setPublicLinkCopied(true);
+      setTimeout(() => setPublicLinkCopied(false), 3000);
     } catch (error) {
-      console.error("Error formatting date:", error);
-      alert("Erro ao processar as datas do pedido. Por favor, verifique os valores informados.");
+      // Fallback para browsers mais antigos
+      const textArea = document.createElement('textarea');
+      textArea.value = publicLink;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setPublicLinkCopied(true);
+      setTimeout(() => setPublicLinkCopied(false), 3000);
+    }
+  };
+
+  const handleStatusChange = (newStatus: OrderStatus) => {
+    setFormData(prev => ({
+      ...prev,
+      status: newStatus,
+      // Optionally reset completedDate if status is not 'completed'
+      completedDate: newStatus === 'completed' ? prev.completedDate : ''
+    }));
+  };
+
+  const handleToggleChecklist = (key: keyof typeof formData.checklist) => {
+    setFormData(prev => ({
+      ...prev,
+      checklist: {
+        ...prev.checklist,
+        [key]: !prev.checklist?.[key]
+      }
+    }));
+  };
+
+  const handleAddItem = () => {
+    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
+      alert('Por favor, preencha Código, Descrição, Quantidade e Peso Unitário para adicionar um item.');
+      return;
+    }
+
+    const totalWeight = newItem.quantity * newItem.unitWeight;
+    const totalPrice = newItem.quantity * (newItem.unitPrice || 0);
+
+    const itemToAdd: OrderItem = {
+      ...newItem,
+      id: crypto.randomUUID(),
+      totalWeight: totalWeight,
+      totalPrice: totalPrice,
+      progress: {},
+      stagePlanning: {},
+      itemNumber: formData.items.length + 1, // Assign next item number
+    };
+
+    setFormData(prev => ({
+      ...prev,
+      items: [...prev.items, itemToAdd],
+      totalWeight: (prev.totalWeight || 0) + totalWeight // Update total weight
+    }));
+
+    // Reset new item form
+    setNewItem({
+      id: '',
+      itemNumber: formData.items.length + 2, // Prepare for the next item
+      code: '',
+      description: '',
+      quantity: 0,
+      unitWeight: 0,
+      totalWeight: 0,
+      unitPrice: 0,
+      totalPrice: 0,
+      progress: {},
+      stagePlanning: {},
+      invoiceNumber: '',
+      expeditionLE: ''
+    });
+  };
+
+  const handleEditItem = (item: OrderItem) => {
+    setEditingItem(item);
+    setNewItem({ ...item }); // Load item data into the new item form for editing
+  };
+
+  const handleUpdateItem = () => {
+    if (!editingItem) return;
+
+    if (!newItem.code || !newItem.description || newItem.quantity <= 0 || newItem.unitWeight <= 0) {
+      alert('Por favor, preencha Código, Descrição, Quantidade e Peso Unitário para atualizar o item.');
+      return;
+    }
+
+    const totalWeight = newItem.quantity * newItem.unitWeight;
+    const totalPrice = newItem.quantity * (newItem.unitPrice || 0);
+
+    setFormData(prev => {
+      const updatedItems = prev.items.map(item =>
+        item.id === editingItem.id
+          ? {
+              ...newItem,
+              totalWeight: totalWeight,
+              totalPrice: totalPrice,
+              // Preserve progress and stage planning when updating
+              progress: item.progress,
+              stagePlanning: item.stagePlanning,
+            }
+          : item
+      );
+
+      // Recalculate total weight for the order
+      const newTotalWeight = updatedItems.reduce((sum, item) => sum + (item.totalWeight || 0), 0);
+
+      return {
+        ...prev,
+        items: updatedItems,
+        totalWeight: newTotalWeight
+      };
+    });
+
+    setEditingItem(null);
+    setNewItem({
+      id: '',
+      itemNumber: formData.items.length + 1,
+      code: '',
+      description: '',
+      quantity: 0,
+      unitWeight: 0,
+      totalWeight: 0,
+      unitPrice: 0,
+      totalPrice: 0,
+      progress: {},
+      stagePlanning: {},
+      invoiceNumber: '',
+      expeditionLE: ''
+    }); // Reset new item form
+  };
+
+  const handleRemoveItem = (itemId: string) => {
+    setFormData(prev => {
+      const updatedItems = prev.items.filter(item => item.id !== itemId);
+      
+      // Re-sequence item numbers after removal
+      const reSequencedItems = updatedItems.map((item, index) => ({
+        ...item,
+        itemNumber: index + 1
+      }));
+
+      // Recalculate total weight
+      const newTotalWeight = reSequencedItems.reduce((sum, item) => sum + (item.totalWeight || 0), 0);
+
+      return {
+        ...prev,
+        items: reSequencedItems,
+        totalWeight: newTotalWeight
+      };
+    });
+  };
+  
+  const handleUpdateItemField = (itemId: string, field: keyof OrderItem, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.map(item =>
+        item.id === itemId ? { ...item, [field]: value } : item
+      )
+    }));
+  };
+
+  const handleSaveItemProgress = (updatedItem: OrderItem) => {
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items.map(item =>
+        item.id === updatedItem.id ? updatedItem : item
+      )
+    }));
+    setSelectedItem(null); // Close the modal
+  };
+
+  const handleAddLink = () => {
+    if (newLink.trim()) {
+      setFormData(prev => ({
+        ...prev,
+        driveLinks: [...prev.driveLinks, newLink.trim()]
+      }));
+      setNewLink('');
+    }
+  };
+
+  const handleRemoveLink = (linkToRemove: string) => {
+    setFormData(prev => ({
+      ...prev,
+      driveLinks: prev.driveLinks.filter(link => link !== linkToRemove)
+    }));
+  };
+
+  const copyLinkToClipboard = () => {
+    if (generatedLink) {
+      navigator.clipboard.writeText(generatedLink);
+      alert('Link copiado para a área de transferência!');
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-2xl font-bold">
               {order ? 'Editar Pedido' : 'Novo Pedido'}
             </h2>
           </div>
-          <div className="flex space-x-3">
+          <div className="flex space-x-2">
             {order && (
               <>
+                {/* 🎨 NOVO: Botão de Link Público */}
+                <button
+                  onClick={() => setShowPublicLink(!showPublicLink)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center"
+                  title="Gerar link público para cliente"
+                >
+                  <Globe className="h-5 w-5 mr-2" />
+                  Link Cliente
+                </button>
+                
+                {/* 🎨 NOVO: Botão PDF Melhorado */}
                 <button
                   onClick={handleExportPDF}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center"
+                  title="Exportar cronograma profissional"
                 >
                   <Download className="h-5 w-5 mr-2" />
-                  Exportar Cronograma
-                </button>
-                <button
-                  onClick={generateClientAccessLink}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center"
-                >
-                  <Share className="h-5 w-5 mr-2" />
-                  Gerar Link Cliente
+                  Cronograma PDF
                 </button>
               </>
             )}
@@ -561,541 +769,382 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
           </div>
         </div>
 
-        {/* Links de acesso existentes */}
-        {formData.clientAccessLinks && formData.clientAccessLinks.length > 0 && (
-          <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
+        {/* 🔗 PAINEL DO LINK PÚBLICO */}
+        {showPublicLink && order && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
             <h3 className="text-lg font-medium text-green-800 mb-3 flex items-center">
-              <ExternalLink className="h-5 w-5 mr-2" />
-              Links de Acesso para Cliente
+              <Globe className="h-5 w-5 mr-2" />
+              Link Público para Cliente
             </h3>
-            <div className="space-y-2">
-              {formData.clientAccessLinks.map((link, index) => (
-                <div key={link.id} className="flex items-center justify-between bg-white p-3 rounded border">
-                  <div className="flex-1">
-                    <div className="text-sm font-medium">
-                      Link #{index + 1} - Criado em {format(new Date(link.createdAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      Expira em: {format(new Date(link.expiresAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
-                      {link.accessCount > 0 && ` • Acessado ${link.accessCount} vez(es)`}
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => {
-                        const url = `${window.location.origin}/cronograma-publico/${link.id}`;
-                        navigator.clipboard.writeText(url);
-                        alert('Link copiado!');
-                      }}
-                      className="px-3 py-1 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200"
-                    >
-                      <Copy className="h-4 w-4 inline mr-1" />
-                      Copiar
-                    </button>
-                    <span className={`px-2 py-1 rounded text-xs ${
-                      link.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {link.isActive ? 'Ativo' : 'Inativo'}
-                    </span>
-                  </div>
-                </div>
-              ))}
+            <p className="text-sm text-green-700 mb-3">
+              Compartilhe este link com seu cliente para que ele possa acessar o cronograma sempre atualizado:
+            </p>
+            <div className="flex items-center space-x-3">
+              <input
+                type="text"
+                value={generatePublicLink()}
+                readOnly
+                className="flex-1 px-3 py-2 bg-white border border-green-300 rounded-md text-sm"
+              />
+              <button
+                onClick={handleCopyPublicLink}
+                className={`px-4 py-2 rounded-md flex items-center ${
+                  publicLinkCopied 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                }`}
+              >
+                <Copy className="h-4 w-4 mr-2" />
+                {publicLinkCopied ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+            <div className="mt-3 text-xs text-green-600">
+              ✅ Cronograma sempre atualizado em tempo real<br/>
+              ✅ Acesso seguro apenas com o link<br/>
+              ✅ Visual profissional para seus clientes
             </div>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Número do Pedido</label>
-              <input 
-                type="text" 
-                value={formData.orderNumber} 
-                onChange={e => setFormData(prev => ({ ...prev, orderNumber: e.target.value }))} 
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Cliente</label>
-              <select 
-                value={formData.customer} 
-                onChange={e => setFormData(prev => ({ ...prev, customer: e.target.value }))} 
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                required
-              >
-                <option value="">Selecione um cliente</option>
-                {customers.map(customer => (
-                  <option key={customer.id} value={customer.name}>{customer.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">OS Interna</label>
-              <input 
-                type="text" 
-                value={formData.internalOrderNumber} 
-                onChange={e => setFormData(prev => ({ ...prev, internalOrderNumber: e.target.value }))} 
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                required 
-              />
-            </div>
-          </div>
-
+        {/* FORMULÁRIO DO PEDIDO */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Projeto do Cliente</label>
-            <input 
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Número do Pedido *
+            </label>
+            <input
               type="text"
-              value={formData.projectName || ''}
-              onChange={e => setFormData(prev => ({ 
-                ...prev, 
-                projectName: e.target.value,
-                projectId: e.target.value ? (prev.projectId || crypto.randomUUID()) : ''
-              }))}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
-              placeholder="Nome do projeto"
+              value={formData.orderNumber}
+              onChange={(e) => setFormData({ ...formData, orderNumber: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Data de Início</label>
-              <input 
-                type="date" 
-                value={formData.startDate.split('T')[0]} 
-                onChange={e => setFormData(prev => ({ ...prev, startDate: e.target.value }))} 
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Data de Entrega</label>
-              <input 
-                type="date" 
-                value={formData.deliveryDate.split('T')[0]} 
-                onChange={e => setFormData(prev => ({ ...prev, deliveryDate: e.target.value }))} 
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Data de Conclusão</label>
-              <input 
-                type="date"
-                value={formData.completedDate ? formData.completedDate.split('T')[0] : ''}
-                onChange={e => setFormData(prev => ({ ...prev, completedDate: e.target.value }))}
-                className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 ${formData.status === 'completed' ? 'border-green-500' : ''}`}
-              />
-              {formData.status === 'completed' && !formData.completedDate && (
-                <p className="mt-1 text-sm text-orange-600">Recomendado definir a data de conclusão para pedidos marcados como concluídos.</p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Status</label>
-              <select 
-                value={formData.status} 
-                onChange={e => handleStatusChange(e.target.value as OrderStatus)} 
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                required
-              >
-                <option value="in-progress">Em Processo</option>
-                <option value="delayed">Atrasado</option>
-                <option value="waiting-docs">Aguardando Validação de Documentação</option>
-                <option value="completed">Documentação Validada</option>
-                <option value="ready">Aguardando Embarque</option>
-                <option value="urgent">Pedido Urgente</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="border rounded-lg p-4 bg-gray-50">
-            <h3 className="text-lg font-medium mb-4 flex items-center">
-              <ClipboardCheck className="h-5 w-5 mr-2 text-blue-600" />
-              Checklist do Pedido
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div 
-                className="flex items-center p-3 bg-white rounded-lg border cursor-pointer hover:bg-blue-50"
-                onClick={() => handleToggleChecklist('drawings')}
-              >
-                {formData.checklist?.drawings ? (
-                  <CheckSquare className="h-6 w-6 mr-3 text-blue-600" />
-                ) : (
-                  <Square className="h-6 w-6 mr-3 text-gray-400" />
-                )}
-                <div>
-                  <div className="font-medium">Desenhos</div>
-                  <div className="text-sm text-gray-500">Desenhos técnicos do pedido</div>
-                </div>
-              </div>
-              
-              <div 
-                className="flex items-center p-3 bg-white rounded-lg border cursor-pointer hover:bg-blue-50"
-                onClick={() => handleToggleChecklist('inspectionTestPlan')}
-              >
-                {formData.checklist?.inspectionTestPlan ? (
-                  <CheckSquare className="h-6 w-6 mr-3 text-blue-600" />
-                ) : (
-                  <Square className="h-6 w-6 mr-3 text-gray-400" />
-                )}
-                <div>
-                  <div className="font-medium">PIT</div>
-                  <div className="text-sm text-gray-500">Plano de inspeção e testes</div>
-                </div>
-              </div>
-              
-              <div 
-                className="flex items-center p-3 bg-white rounded-lg border cursor-pointer hover:bg-blue-50"
-                onClick={() => handleToggleChecklist('paintPlan')}
-              >
-                {formData.checklist?.paintPlan ? (
-                  <CheckSquare className="h-6 w-6 mr-3 text-blue-600" />
-                ) : (
-                  <Square className="h-6 w-6 mr-3 text-gray-400" />
-                )}
-                <div>
-                  <div className="font-medium">Plano de Pintura</div>
-                  <div className="text-sm text-gray-500">Especificações de pintura</div>
-                </div>
-              </div>
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              OS Interna
+            </label>
+            <input
+              type="text"
+              value={formData.internalOrderNumber}
+              onChange={(e) => setFormData({ ...formData, internalOrderNumber: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
 
           <div>
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium">Itens do Pedido</h3>
-              <div className="flex space-x-3">
-                <button 
-                  type="button" 
-                  onClick={handleSelectAllItems} 
-                  className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
-                >
-                  {selectedItems.size === formData.items.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
-                </button>
-                <button 
-                  type="button" 
-                  onClick={handleExportSelectedItems} 
-                  className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                  disabled={selectedItems.size === 0}
-                >
-                  <Download className="h-4 w-4 mr-1 inline-block" />
-                  Exportar Selecionados
-                </button>
-              </div>
-            </div>
-            
-            <div className="space-y-4">
-              {formData.items.map(item => (
-                <div key={item.id} className="space-y-2">
-                  <div className="flex items-center space-x-2 bg-gray-50 p-4 rounded-lg">
-                    <input 
-                      type="checkbox"
-                      checked={selectedItems.has(item.id)}
-                      onChange={() => handleToggleSelectItem(item.id)}
-                      className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
-                    />
-                    <div className="w-8 text-center">{item.itemNumber}</div>
-                    <div className="w-40 truncate">{item.code}</div>
-                    <div className="flex-1 truncate">{item.description}</div>
-                    <div className="w-20 text-right">{item.quantity}</div>
-                    <div className="w-32 text-right">{item.totalWeight.toLocaleString('pt-BR')} kg</div>
-                    <div className="flex space-x-2">
-                      <button type="button" onClick={() => setSelectedItem(item)} className="text-blue-600 hover:text-blue-800" title="Atualizar Progresso">
-                        <BarChart className="h-5 w-5" />
-                      </button>
-                      <button type="button" onClick={() => handleEditItem(item)} className="text-blue-600 hover:text-blue-800">
-                        <Edit className="h-5 w-5" />
-                      </button>
-                      <button type="button" onClick={() => handleRemoveItem(item.id)} className="text-red-600 hover:text-red-800">
-                        <Trash2 className="h-5 w-5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {isItemCompleted(item) && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4 py-3 bg-green-50 rounded-lg border border-green-200">
-                      <div>
-                        <label className="block text-sm font-medium text-green-800 mb-1">Nota Fiscal do Item</label>
-                        <input 
-                          type="text"
-                          value={item.invoiceNumber || ''}
-                          onChange={e => handleUpdateItemField(item.id, 'invoiceNumber', e.target.value)}
-                          className="mt-1 block w-full rounded-md border-green-300 shadow-sm focus:border-green-500 focus:ring focus:ring-green-200"
-                          placeholder="Número da NF específica do item"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-green-800 mb-1">LE do Item</label>
-                        <input 
-                          type="text"
-                          value={item.expeditionLE || ''}
-                          onChange={e => handleUpdateItemField(item.id, 'expeditionLE', e.target.value)}
-                          className="mt-1 block w-full rounded-md border-green-300 shadow-sm focus:border-green-500 focus:ring focus:ring-green-200"
-                          placeholder="Número da LE específica do item"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="px-4">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium text-gray-700">Progresso</span>
-                      <span className="text-gray-700">{calculateItemProgress(item.progress)}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden mt-1">
-                      <div className={`h-full transition-all ${
-                        item.progress && calculateItemProgress(item.progress) === 100
-                          ? 'bg-green-500'
-                          : item.progress && calculateItemProgress(item.progress) >= 70
-                          ? 'bg-blue-500'
-                          : item.progress && calculateItemProgress(item.progress) >= 30
-                          ? 'bg-yellow-500'
-                          : 'bg-red-500'
-                      }`} style={{ width: `${calculateItemProgress(item.progress)}%` }} />
-                    </div>
-                  </div>
-                  
-                  {item.stagePlanning && Object.keys(item.stagePlanning).length > 0 && (
-                    <div className="px-4 mt-2">
-                      <div 
-                        className="text-xs text-blue-600 cursor-pointer hover:underline" 
-                        onClick={() => setSelectedItem(item)}
-                      >
-                        Ver planejamento de etapas ({Object.keys(item.stagePlanning).length} etapas)
-                      </div>
-                    </div>
-                  )}
-                </div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cliente *
+            </label>
+            <select
+              value={formData.customer}
+              onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            >
+              <option value="">Selecione um cliente</option>
+              {customers.map(customer => (
+                <option key={customer.id} value={customer.name}>
+                  {customer.name}
+                </option>
               ))}
+            </select>
+          </div>
 
-              <div className="border-t pt-4 mt-4">
-                <div className="text-sm text-gray-600 mb-3">Adicionar novo item (opcional):</div>
-                <div className="grid grid-cols-9 gap-2">
-                  <input 
-                    type="number" 
-                    placeholder="Nº" 
-                    value={newItem.itemNumber || ''} 
-                    onChange={e => setNewItem(prev => ({ 
-                      ...prev, 
-                      itemNumber: e.target.value ? parseInt(e.target.value) : 0 
-                    }))} 
-                    className="w-16 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                    min="1" 
-                    step="1" 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Projeto
+            </label>
+            <select
+              value={formData.projectId}
+              onChange={(e) => handleProjectChange(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Nenhum projeto</option>
+              {projects.map(project => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Data de Início *
+            </label>
+            <input
+              type="date"
+              value={formData.startDate}
+              onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Data de Entrega *
+            </label>
+            <input
+              type="date"
+              value={formData.deliveryDate}
+              onChange={(e) => setFormData({ ...formData, deliveryDate: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+        </div>
+
+        {/* CHECKLIST */}
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-3 flex items-center">
+            <ClipboardCheck className="h-5 w-5 mr-2" />
+            Checklist de Documentos
+          </h3>
+          <div className="grid grid-cols-3 gap-4">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.checklist.drawings}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  checklist: { ...formData.checklist, drawings: e.target.checked }
+                })}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Desenhos</span>
+            </label>
+
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.checklist.inspectionTestPlan}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  checklist: { ...formData.checklist, inspectionTestPlan: e.target.checked }
+                })}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Plano de Inspeção e Teste</span>
+            </label>
+
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.checklist.paintPlan}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  checklist: { ...formData.checklist, paintPlan: e.target.checked }
+                })}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Plano de Pintura</span>
+            </label>
+          </div>
+        </div>
+
+        {/* LINKS DO DRIVE */}
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-lg font-semibold flex items-center">
+              <Link className="h-5 w-5 mr-2" />
+              Links do Drive
+            </h3>
+            <button
+              onClick={handleAddDriveLink}
+              className="text-blue-600 hover:text-blue-700 flex items-center"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Adicionar Link
+            </button>
+          </div>
+          
+          {formData.driveLinks.map((link, index) => (
+            <div key={index} className="flex space-x-2 mb-2">
+              <input
+                type="text"
+                placeholder="Nome do arquivo"
+                value={link.name}
+                onChange={(e) => handleUpdateDriveLink(index, 'name', e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="url"
+                placeholder="URL do Google Drive"
+                value={link.url}
+                onChange={(e) => handleUpdateDriveLink(index, 'url', e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={() => handleDeleteDriveLink(index)}
+                className="p-2 text-red-600 hover:text-red-700"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* ITENS DO PEDIDO */}
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-lg font-semibold flex items-center">
+              <Package className="h-5 w-5 mr-2" />
+              Itens do Pedido
+            </h3>
+            <div className="flex space-x-2">
+              {selectedItems.size > 0 && (
+                <button
+                  onClick={handleBatchProgressUpdate}
+                  className="text-green-600 hover:text-green-700 flex items-center"
+                >
+                  <BarChart className="h-4 w-4 mr-1" />
+                  Atualizar Selecionados ({selectedItems.size})
+                </button>
+              )}
+              <button
+                onClick={handleAddItem}
+                className="text-blue-600 hover:text-blue-700 flex items-center"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Adicionar Item
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {formData.items.map((item, index) => (
+              <div key={item.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedItems.has(item.id)}
+                    onChange={() => toggleItemSelection(item.id)}
+                    className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                   />
-                  <input 
-                    type="text" 
-                    placeholder="Código" 
-                    value={newItem.code} 
-                    onChange={e => setNewItem(prev => ({ ...prev, code: e.target.value }))} 
-                    className="col-span-2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
-                  />
-                  <input 
-                    type="text" 
-                    placeholder="Descrição" 
-                    value={newItem.description} 
-                    onChange={e => setNewItem(prev => ({ ...prev, description: e.target.value }))} 
-                    className="col-span-2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                  />
-                  <input 
-                    type="number" 
-                    placeholder="Qtd" 
-                    value={newItem.quantity || ''} 
-                    onChange={e => setNewItem(prev => ({ 
-                      ...prev, 
-                      quantity: e.target.value ? Number(e.target.value) : 0 
-                    }))} 
-                    className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                  />
-                  <input 
-                    type="number" 
-                    placeholder="Peso Unit" 
-                    value={newItem.unitWeight || ''} 
-                    onChange={e => setNewItem(prev => ({ 
-                      ...prev, 
-                      unitWeight: e.target.value ? Number(e.target.value) : 0 
-                    }))} 
-                    className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                  />
-                  <input 
-                    type="number" 
-                    placeholder="R$ Unit" 
-                    value={newItem.unitPrice || ''} 
-                    onChange={e => setNewItem(prev => ({ 
-                      ...prev, 
-                      unitPrice: e.target.value ? Number(e.target.value) : 0 
-                    }))} 
-                    className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                  />
-                  <div className="flex space-x-1">
-                    <button 
-                      type="button" 
-                      onClick={editingItem ? handleUpdateItem : handleAddItem} 
-                      className="flex-shrink-0 flex items-center justify-center bg-blue-600 text-white rounded-md hover:bg-blue-700 px-2 w-full"
+                  
+                  <div className="flex-1 grid grid-cols-6 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">Item</label>
+                      <input
+                        type="number"
+                        value={item.itemNumber}
+                        onChange={(e) => handleUpdateItem(index, 'itemNumber', parseInt(e.target.value) || 0)}
+                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">Código</label>
+                      <input
+                        type="text"
+                        value={item.code}
+                        onChange={(e) => handleUpdateItem(index, 'code', e.target.value)}
+                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div className="col-span-2">
+                      <label className="block text-xs font-medium text-gray-600">Descrição</label>
+                      <input
+                        type="text"
+                        value={item.description}
+                        onChange={(e) => handleUpdateItem(index, 'description', e.target.value)}
+                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">Qtd</label>
+                      <input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => handleUpdateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600">Peso Unit. (kg)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={item.unitWeight}
+                        onChange={(e) => handleUpdateItem(index, 'unitWeight', parseFloat(e.target.value) || 0)}
+                        className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setSelectedItem(item)}
+                      className="p-1 text-blue-600 hover:text-blue-700"
+                      title="Editar progresso"
                     >
-                      {editingItem ? 'Atualizar' : <Plus className="h-5 w-5" />}
+                      <BarChart className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteItem(index)}
+                      className="p-1 text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
-                {editingItem && (
-                  <div className="mt-2 text-sm text-blue-600">
-                    Editando o item {editingItem.itemNumber}: {editingItem.code}
-                  </div>
-                )}
 
-                {editingItem && isItemCompleted(editingItem) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 bg-green-50 rounded-lg border border-green-200">
-                    <div>
-                      <label className="block text-sm font-medium text-green-800 mb-1">Nota Fiscal do Item</label>
-                      <input 
-                        type="text"
-                        value={newItem.invoiceNumber || ''}
-                        onChange={e => setNewItem(prev => ({ ...prev, invoiceNumber: e.target.value }))}
-                        className="mt-1 block w-full rounded-md border-green-300 shadow-sm focus:border-green-500 focus:ring focus:ring-green-200"
-                        placeholder="Número da NF específica do item"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-green-800 mb-1">LE do Item</label>
-                      <input 
-                        type="text"
-                        value={newItem.expeditionLE || ''}
-                        onChange={e => setNewItem(prev => ({ ...prev, expeditionLE: e.target.value }))}
-                        className="mt-1 block w-full rounded-md border-green-300 shadow-sm focus:border-green-500 focus:ring focus:ring-green-200"
-                        placeholder="Número da LE específica do item"
-                      />
-                    </div>
+                <div className="mt-2 flex items-center justify-between">
+                  <div className="text-xs text-gray-500">
+                    Peso Total: <span className="font-medium">{item.totalWeight.toFixed(2)} kg</span>
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-lg font-medium mb-4">Links do Google Drive</h3>
-            <div className="space-y-4">
-              {formData.driveLinks.map((link, index) => (
-                <div key={index} className="flex items-center space-x-4">
-                  <Link className="h-5 w-5 text-blue-600" />
-                  <a href={link} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-blue-600 hover:underline">
-                    {link}
-                  </a>
-                  <button type="button" onClick={() => handleRemoveLink(link)} className="text-red-500 hover:text-red-700">
-                    <Trash2 className="h-5 w-5" />
-                  </button>
+                  <div className="text-xs">
+                    Progresso: <span className="font-medium text-blue-600">
+                      {calculateItemProgress(item.progress) || 0}%
+                    </span>
+                  </div>
                 </div>
-              ))}
-              <div className="flex space-x-2">
-                <input 
-                  type="text" 
-                  value={newLink} 
-                  onChange={e => setNewLink(e.target.value)} 
-                  placeholder="Cole o link do Google Drive aqui" 
-                  className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200" 
-                />
-                <button type="button" onClick={handleAddLink} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-                  <Plus className="h-5 w-5" />
-                </button>
               </div>
-            </div>
+            ))}
           </div>
 
-          <div className="pt-4 flex justify-end space-x-3">
-            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400">
-              Cancelar
-            </button>
-            <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-              Salvar
-            </button>
-          </div>
-        </form>
+          {formData.items.length > 0 && (
+            <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-blue-900">Total do Pedido:</span>
+                <span className="text-lg font-bold text-blue-900">
+                  {formData.items.reduce((sum, item) => sum + item.totalWeight, 0).toFixed(2)} kg
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* BOTÕES DE AÇÃO */}
+        <div className="flex justify-end space-x-3 pt-4 border-t">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+          >
+            <CheckSquare className="h-4 w-4 mr-2" />
+            {order ? 'Salvar Alterações' : 'Criar Pedido'}
+          </button>
+        </div>
       </div>
 
-      {/* Modal para gerar link de acesso */}
-      {showLinkModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">Link de Acesso Gerado</h3>
-              <button onClick={() => setShowLinkModal(false)}>
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Validade do Link (dias)
-                </label>
-                <select 
-                  value={linkExpiration} 
-                  onChange={e => setLinkExpiration(Number(e.target.value))}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
-                >
-                  <option value={7}>7 dias</option>
-                  <option value={15}>15 dias</option>
-                  <option value={30}>30 dias</option>
-                  <option value={60}>60 dias</option>
-                  <option value={90}>90 dias</option>
-                </select>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Link Gerado:</label>
-                <div className="flex space-x-2">
-                  <input 
-                    type="text" 
-                    value={generatedLink} 
-                    readOnly 
-                    className="flex-1 rounded-md border-gray-300 bg-gray-100 text-sm"
-                  />
-                  <button 
-                    onClick={copyLinkToClipboard}
-                    className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 p-3 rounded-lg">
-                <h4 className="font-medium text-blue-800 mb-2">Instruções para o Cliente:</h4>
-                <ul className="text-sm text-blue-700 space-y-1">
-                  <li>• O cliente pode acessar o cronograma atualizado a qualquer momento</li>
-                  <li>• O link expira automaticamente após o período definido</li>
-                  <li>• Apenas visualização - o cliente não pode editar</li>
-                  <li>• O cronograma será sempre a versão mais atual</li>
-                </ul>
-              </div>
-
-              <div className="flex space-x-3">
-                <button 
-                  onClick={() => setShowLinkModal(false)}
-                  className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400"
-                >
-                  Fechar
-                </button>
-                <button 
-                  onClick={() => {
-                    copyLinkToClipboard();
-                    setShowLinkModal(false);
-                  }}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                >
-                  Copiar e Fechar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* MODAL DE PROGRESSO DO ITEM */}
       {selectedItem && (
         <ItemProgressModal
           item={selectedItem}
-          allItems={formData.items}
           onClose={() => setSelectedItem(null)}
-          onSave={handleSaveItemProgress}
+          onSave={handleItemProgressSave}
         />
       )}
     </div>
