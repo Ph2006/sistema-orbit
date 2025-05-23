@@ -296,7 +296,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     doc.setFont(undefined, 'bold');
     doc.text('Dias Restantes:', margin + 100, currentY + 3);
     doc.setFont(undefined, 'normal');
-    doc.setTextColor(daysRemaining < 0 ? 220, 53, 69 : daysRemaining < 7 ? 255, 193, 7 : 40, 167, 69);
+    doc.setTextColor(daysRemaining < 0 ? [220, 53, 69] : daysRemaining < 7 ? [255, 193, 7] : [40, 167, 69]);
     doc.text(`${daysRemaining} dias`, margin + 130, currentY + 3);
     doc.setTextColor(0, 0, 0);
 
