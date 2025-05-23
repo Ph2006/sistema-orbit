@@ -51,18 +51,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loadTeamMember: async (email) => {
     if (!email) return;
     
+    const companyId = get().companyId;
+    if (!companyId) {
+      console.log('Cannot load team member: companyId is not available yet.');
+      set({ teamMember: null, loading: false });
+      return;
+    }
+    
     try {
       set({ loading: true });
-      const companyId = get().companyId;
-      
-      if (!companyId) {
-        console.error('No company ID found');
-        set({ teamMember: null });
-        return;
-      }
       
       // Query team members collection from the company-specific collection path
-      const teamMembersPath = `empresa/${companyId}/teamMembers`;
+      const teamMembersPath = `companies/${companyId}/teamMembers`;
       const teamMembersRef = collection(db, teamMembersPath);
       const q = query(teamMembersRef, where('email', '==', email));
       const snapshot = await getDocs(q);
