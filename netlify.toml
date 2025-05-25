@@ -1,3 +1,5 @@
+# Forçando deploy Netlify
+
 [[redirects]]
   from = "http://*"
   to = "https://:splat"
@@ -10,7 +12,8 @@
 
 [build.environment]
   NODE_VERSION = "18"
-  NPM_FLAGS = "--include=dev"
+# Atualizado para garantir deploy correto  
+NPM_FLAGS = "--include=dev"
 
 [[redirects]]
   from = "/*"
