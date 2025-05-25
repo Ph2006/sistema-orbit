@@ -314,6 +314,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     doc.text(`Ordem: ${formData.orderNumber}`, 10, 40);
     doc.text(`Cliente: ${customers.find(c => c.id === formData.customer)?.name || formData.customer}`, 10, 50);
     doc.text(`Data de emissão: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 60);
+    doc.text(`Data de entrega: ${formData.deliveryDate ? new Date(formData.deliveryDate).toLocaleDateString('pt-BR') : '-'}`, 10, 70);
     
     // Filtrar apenas os itens selecionados
     const selectedItemsList = formData.items.filter(item => selectedItems.has(item.id));
