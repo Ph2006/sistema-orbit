@@ -11,12 +11,14 @@ interface MaterialRequisitionDetailModalProps {
   requisition: MaterialRequisition;
   onClose: () => void;
   onEdit: () => void;
+  onEditItem?: (item: MaterialRequisitionItem) => void;
 }
 
 const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalProps> = ({
   requisition,
   onClose,
-  onEdit
+  onEdit,
+  onEditItem
 }) => {
   const { companyLogo, companyName } = useSettingsStore();
   
@@ -423,6 +425,9 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
                     <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Detalhes de Recebimento
                     </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Ações
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -511,6 +516,15 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
                             Aguardando recebimento
                           </div>
                         )}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <button
+                          className="p-1 text-blue-600 hover:bg-blue-100 rounded"
+                          title="Editar Item"
+                          onClick={() => onEditItem && onEditItem(item)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}

@@ -82,15 +82,13 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
       if (order) {
         setCurrentOrder(order);
         setOrderItems(order.items);
-        
-        // If new requisition, set order info
         if (formData.id === 'new' || !requisition) {
-          const budgetLimit = calculateBudgetLimit(order);
+          const budgetLimit = calculateBudgetLimit(order as any);
           setFormData(prev => ({
             ...prev,
             orderNumber: order.orderNumber,
             customer: order.customer,
-            budgetLimit
+            budgetLimit: budgetLimit || 0
           }));
         }
       }
@@ -108,9 +106,47 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     setFormData(prev => ({
       ...prev,
       totalCost: totalCost,
-      budgetExceeded: totalCost > prev.budgetLimit
+      budgetExceeded: totalCost > (prev.budgetLimit ?? 0)
     }));
   }, [formData.items]);
+
+  // Sincronizar formData e orderItems ao editar uma requisição existente
+  useEffect(() => {
+    if (requisition) {
+      setFormData({
+        ...requisition,
+        lastUpdated: new Date().toISOString()
+      });
+      const order = orders.find(o => o.id === requisition.orderId);
+      if (order) setOrderItems(order.items);
+    }
+  }, [requisition, orders]);
+
+  // Garantir que orderItems seja zerado se não encontrar o pedido
+  useEffect(() => {
+    if (formData.orderId) {
+      const order = orders.find(o => o.id === formData.orderId);
+      if (order) setOrderItems(order.items);
+      else if (requisition && requisition.items) {
+        // Fallback: monta orderItems a partir dos itens da requisição
+        setOrderItems(requisition.items.map((item, idx) => ({
+          id: item.orderItemId,
+          itemNumber: idx + 1,
+          code: item.itemCode,
+          description: item.description,
+          quantity: item.quantity || 1,
+          unitWeight: item.weight || 0,
+          totalWeight: item.totalWeight || 0,
+          unitPrice: 0,
+          totalPrice: 0
+        })));
+      } else {
+        setOrderItems([]);
+      }
+    } else {
+      setOrderItems([]);
+    }
+  }, [formData.orderId, orders, requisition]);
 
   const handleOrderChange = (orderId: string) => {
     setFormData(prev => ({ ...prev, orderId }));
@@ -220,49 +256,39 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
 
   const handleSave = async () => {
     try {
+      // Logar o formData antes de salvar
+      console.log('[REQUISITION] Tentando salvar:', formData);
       // Validar campos obrigatórios
       if (!formData.orderId) {
         alert('Por favor, selecione um pedido.');
         return;
       }
-
       if (!formData.requestDate) {
         alert('Por favor, selecione a data da requisição.');
         return;
       }
-
       if (!formData.items || formData.items.length === 0) {
         alert('Por favor, adicione pelo menos um item à requisição.');
         return;
       }
-
-      // Validar cada item
       for (const item of formData.items) {
         if (!item.description || !item.quantity || !item.unit) {
           alert('Por favor, preencha todos os campos obrigatórios dos itens (descrição, quantidade e unidade).');
           return;
         }
       }
-
-      // Validar fornecedor se estiver em modo de cotação
-      if (isQuotationMode && !formData.supplierId) {
-        alert('Por favor, selecione um fornecedor para a cotação.');
-        return;
-      }
-
       // Preparar dados para salvar
       const requisitionData: MaterialRequisition = {
         ...formData,
         id: requisition?.id || 'new',
-        status: isQuotationMode ? 'quotation' : 'pending',
+        status: 'pending',
         createdAt: requisition?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        lastUpdated: new Date().toISOString()
       };
-
       await onSave(requisitionData);
       onClose();
     } catch (error) {
-      console.error('Error saving requisition:', error);
+      console.error('[REQUISITION] Erro ao salvar requisição:', error);
       alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
@@ -353,7 +379,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                   </div>
                   <input
                     type="text"
-                    value={formatCurrency(formData.budgetLimit)}
+                    value={formatCurrency(formData.budgetLimit ?? 0)}
                     className="pl-10 block w-full rounded-md border-gray-300 bg-gray-100 cursor-not-allowed"
                     readOnly
                   />
@@ -384,7 +410,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                 <div className="ml-3">
                   <h3 className="text-sm font-medium text-red-800">Limite de Orçamento Excedido</h3>
                   <div className="mt-2 text-sm text-red-700">
-                    <p>O custo total de materiais ({formatCurrency(formData.totalCost)}) excede o limite de 30% do valor do pedido ({formatCurrency(formData.budgetLimit)}).</p>
+                    <p>O custo total de materiais ({formatCurrency(formData.totalCost ?? 0)}) excede o limite de 30% do valor do pedido ({formatCurrency(formData.budgetLimit ?? 0)}).</p>
                   </div>
                 </div>
               </div>
@@ -414,6 +440,9 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                       className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
                     >
                       <option value="">Selecione um item</option>
+                      {orderItems.length === 0 && formData.orderId && (
+                        <option disabled value="">Nenhum item disponível para este pedido</option>
+                      )}
                       {orderItems.map(item => (
                         <option key={item.id} value={item.id}>
                           {item.code} - {item.description}
@@ -455,8 +484,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                     <input
                       type="number"
                       value={newItem.quantity || ''}
-                      onChange={(e) => handleNewItemChange('quantity', parseInt(e.target.value))}
-                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                      onChange={(e) => handleNewItemChange('quantity', e.target.value ? parseInt(e.target.value) : 1)}
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                       min="1"
                     />
                   </div>
@@ -494,9 +523,9 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                       </label>
                       <input
                         type="number"
-                        value={newItem.weight || ''}
-                        onChange={(e) => handleNewItemChange('weight', parseFloat(e.target.value))}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                        value={typeof newItem.weight === 'number' ? newItem.weight : 0}
+                        onChange={(e) => handleNewItemChange('weight', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
+                        className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                         min="0"
                         step="0.01"
                       />
@@ -508,9 +537,9 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                       </label>
                       <input
                         type="number"
-                        value={newItem.surplusWeight || ''}
-                        onChange={(e) => handleNewItemChange('surplusWeight', parseFloat(e.target.value))}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                        value={typeof newItem.surplusWeight === 'number' ? newItem.surplusWeight : 0}
+                        onChange={(e) => handleNewItemChange('surplusWeight', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
+                        className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                         min="0"
                         step="0.01"
                       />
@@ -575,7 +604,10 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                       <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Valor (R$)
                       </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px] w-[120px]">
+                        Data Receb.
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[90px] w-[90px]">
                         Ações
                       </th>
                     </tr>
@@ -610,7 +642,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                           <input
                             type="number"
                             value={item.quantity}
-                            onChange={(e) => handleItemChange(item.id, 'quantity', parseInt(e.target.value))}
+                            onChange={(e) => handleItemChange(item.id, 'quantity', e.target.value ? parseInt(e.target.value) : 1)}
                             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                             min="1"
                           />
@@ -627,8 +659,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                           <div className="flex items-center space-x-1">
                             <input
                               type="number"
-                              value={item.weight}
-                              onChange={(e) => handleItemChange(item.id, 'weight', parseFloat(e.target.value))}
+                              value={typeof item.weight === 'number' ? item.weight : 0}
+                              onChange={(e) => handleItemChange(item.id, 'weight', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
                               className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                               min="0"
                               step="0.01"
@@ -636,8 +668,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <span>+</span>
                             <input
                               type="number"
-                              value={item.surplusWeight}
-                              onChange={(e) => handleItemChange(item.id, 'surplusWeight', parseFloat(e.target.value))}
+                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
+                              onChange={(e) => handleItemChange(item.id, 'surplusWeight', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
                               className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                               min="0"
                               step="0.01"
@@ -713,8 +745,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                           <div className="space-y-2">
                             <input
                               type="number"
-                              value={item.invoiceValue || ''}
-                              onChange={(e) => handleItemChange(item.id, 'invoiceValue', parseFloat(e.target.value))}
+                              value={typeof item.invoiceValue === 'number' ? item.invoiceValue : 0}
+                              onChange={(e) => handleItemChange(item.id, 'invoiceValue', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
                               className={`w-full rounded-md shadow-sm focus:ring focus:ring-blue-200 text-sm 
                               ${
                                 item.invoiceValue && item.invoiceValue > 0
@@ -725,24 +757,44 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                               step="0.01"
                               placeholder="Valor (R$)"
                             />
-                            <input
-                              type="date"
-                              value={item.receiptDate ? item.receiptDate.split('T')[0] : ''}
-                              onChange={(e) => handleItemChange(item.id, 'receiptDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
-                              className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm
-                              ${item.receiptDate ? 'bg-green-50 border-green-300' : ''}`}
-                              placeholder="Data Receb."
-                            />
+                            <td className="px-3 py-2 whitespace-nowrap text-sm min-w-[120px] w-[120px]">
+                              <input
+                                type="date"
+                                value={item.receiptDate ? item.receiptDate.split('T')[0] : ''}
+                                onChange={(e) => handleItemChange(item.id, 'receiptDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+                                className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm
+                                ${item.receiptDate ? 'bg-green-50 border-green-300' : ''}`}
+                                placeholder="Data Receb."
+                              />
+                            </td>
                           </div>
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(item.id)}
-                            className="text-red-600 hover:text-red-800"
-                          >
-                            <Trash2 className="h-5 w-5" />
-                          </button>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center min-w-[90px] w-[90px]">
+                          <div className="flex flex-row items-center justify-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                let orderItemId = item.orderItemId;
+                                if (!orderItemId && orderItems && item.itemCode) {
+                                  const found = orderItems.find(oi => oi.code === item.itemCode);
+                                  if (found) orderItemId = found.id;
+                                }
+                                setNewItem({ ...item, orderItemId });
+                              }}
+                              className="text-blue-600 hover:text-blue-800"
+                              title="Editar Item"
+                            >
+                              <Edit className="h-5 w-5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(item.id)}
+                              className="text-red-600 hover:text-red-800"
+                              title="Remover Item"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -753,7 +805,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                         Total de Itens: {formData.items.length}
                       </td>
                       <td className="px-3 py-3 text-sm font-medium">
-                        {formatCurrency(formData.totalCost)}
+                        {formatCurrency(formData.totalCost ?? 0)}
                       </td>
                       <td></td>
                     </tr>

@@ -362,18 +362,19 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 
   // Gerar PDF com os detalhes da ordem e cronograma
   const generatePdf = () => {
-    // PDF em paisagem, tamanho A3
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const centerX = pageWidth / 2;
 
-    // Adicionar logo se disponível
-    if (companyLogo) {
+    // Adicionar logo da empresa se disponível e válida (base64)
+    if (companyLogo && typeof companyLogo === 'string' && companyLogo.startsWith('data:image')) {
       try {
         doc.addImage(companyLogo, 'JPEG', 10, 10, 50, 20);
       } catch (error) {
-        console.error("Erro ao adicionar logo:", error);
+        console.error('Erro ao adicionar logo no PDF:', error);
       }
+    } else {
+      console.warn('Logo da empresa não disponível ou não está em formato base64.');
     }
 
     // Título

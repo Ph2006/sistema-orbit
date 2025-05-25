@@ -297,9 +297,12 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
       });
     }
 
-    // Se houver etapa alterada, recalcule apenas as seguintes habilitadas
+    // Se houver etapa alterada, recalcule a etapa alterada e todas as seguintes
     const idx = enabledStages.findIndex(s => s.name === changedStageName);
     if (idx === -1) return stagesList;
+    // Recalcula a etapa alterada
+    enabledStages[idx].endDate = calculateEndDate(enabledStages[idx].startDate, enabledStages[idx].days);
+    // Propaga para as seguintes
     for (let i = idx + 1; i < enabledStages.length; i++) {
       const prevStage = enabledStages[i - 1];
       enabledStages[i].startDate = prevStage.endDate;

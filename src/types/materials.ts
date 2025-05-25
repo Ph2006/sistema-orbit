@@ -23,6 +23,7 @@ export interface MaterialRequisitionItem {
   description: string;
   material: string;
   quantity: number;
+  unit?: string;
   dimensions: string;
   weight: number; // in kg
   surplusWeight: number; // in kg
