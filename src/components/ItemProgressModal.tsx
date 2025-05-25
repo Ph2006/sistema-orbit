@@ -218,88 +218,97 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
 
   // Calculate end date based on start date and business days
   const calculateEndDate = (startDate: string, days: number): string => {
-    // Check if startDate is empty or invalid
     if (!startDate) {
       return addDays(new Date(), days).toISOString().split('T')[0];
     }
-    
-    // Try to create a valid date object
+
     let date;
     try {
       date = new Date(startDate);
-      
-      // Check if date is valid
       if (isNaN(date.getTime())) {
         date = new Date();
       }
     } catch (e) {
       date = new Date();
     }
-    
-    let businessDaysToAdd = days;
-    
-    // If duration is less than 1 day, return the same date (no days to add)
-    if (businessDaysToAdd < 1) {
+
+    if (days <= 0) {
       return date.toISOString().split('T')[0];
     }
-    
-    // For whole days, add working days
-    while (businessDaysToAdd > 0) {
+
+    // Se for menor que 1, termina no mesmo dia
+    if (days < 1) {
+      return date.toISOString().split('T')[0];
+    }
+
+    // Para valores >= 1, somar os dias inteiros em dias úteis
+    let diasInteiros = Math.floor(days);
+    let fracao = days - diasInteiros;
+
+    // Adiciona os dias inteiros (pulando finais de semana)
+    while (diasInteiros > 0) {
       date = addDays(date, 1);
       if (!isWeekend(date)) {
-        // Allow partial days by decrementing by 0.1 for fractional days
-        businessDaysToAdd = Math.round((businessDaysToAdd - 1) * 10) / 10; 
+        diasInteiros--;
       }
     }
-    
+
+    // Se houver fração, termina no mesmo dia útil
+    // (poderia ser expandido para considerar expediente, mas para maioria dos casos basta isso)
     return date.toISOString().split('T')[0];
   };
 
   // Recalculate all dates when a stage's days or enabled status changes
-  const recalculateDates = (stagesList: Stage[]): Stage[] => {
+  const recalculateDates = (stagesList: Stage[], changedStageName?: string): Stage[] => {
+    // Sempre trabalhar só com as etapas habilitadas para o cálculo sequencial
     const enabledStages = stagesList.filter(stage => stage.enabled);
     if (enabledStages.length === 0) return stagesList;
-    
-    // Sort enabled stages by their order in the database (as loaded)
     enabledStages.sort((a, b) => {
       const stageA = availableStages.find(s => s.name === a.name);
       const stageB = availableStages.find(s => s.name === b.name);
       return (stageA?.order || 0) - (stageB?.order || 0);
     });
-    
-    // Set start date of first stage
-    let currentDate;
-    try {
-      currentDate = new Date(enabledStages[0].startDate);
-      if (isNaN(currentDate.getTime())) {
+
+    // Se não houver etapa alterada, recalcule tudo
+    if (!changedStageName) {
+      let currentDate;
+      try {
+        currentDate = new Date(enabledStages[0].startDate);
+        if (isNaN(currentDate.getTime())) {
+          currentDate = new Date();
+        }
+      } catch (e) {
         currentDate = new Date();
       }
-    } catch (e) {
-      currentDate = new Date();
-    }
-    
-    // Recalculate dates for each enabled stage
-    for (let i = 0; i < enabledStages.length; i++) {
-      const stage = enabledStages[i];
-      
-      // Set start date (except for first stage which keeps its original date)
-      if (i > 0) {
-        // Start date should be EXACTLY the same as the end date of previous stage
-        // This is the key change to fix the scheduling issue
-        const prevStage = enabledStages[i - 1];
-        const prevEndDate = new Date(prevStage.endDate);
-        
-        stage.startDate = prevEndDate.toISOString().split('T')[0];
+      for (let i = 0; i < enabledStages.length; i++) {
+        const stage = enabledStages[i];
+        if (i > 0) {
+          const prevStage = enabledStages[i - 1];
+          stage.startDate = prevStage.endDate;
+        } else {
+          stage.startDate = new Date(stage.startDate).toISOString().split('T')[0];
+        }
+        stage.endDate = calculateEndDate(stage.startDate, stage.days);
       }
-      
-      // Calculate end date
-      stage.endDate = calculateEndDate(stage.startDate, stage.days);
+      // Atualiza apenas as etapas habilitadas, mantém as desabilitadas intactas
+      return stagesList.map(stage => {
+        const updatedStage = enabledStages.find(s => s.name === stage.name);
+        return updatedStage ? { ...stage, ...updatedStage } : stage;
+      });
     }
-    
-    // Update the stages in the original list
+
+    // Se houver etapa alterada, recalcule apenas as seguintes habilitadas
+    const idx = enabledStages.findIndex(s => s.name === changedStageName);
+    if (idx === -1) return stagesList;
+    for (let i = idx + 1; i < enabledStages.length; i++) {
+      const prevStage = enabledStages[i - 1];
+      enabledStages[i].startDate = prevStage.endDate;
+      enabledStages[i].endDate = calculateEndDate(enabledStages[i].startDate, enabledStages[i].days);
+    }
+    // Atualiza apenas as etapas habilitadas, mantém as desabilitadas intactas
     return stagesList.map(stage => {
       const updatedStage = enabledStages.find(s => s.name === stage.name);
-      return updatedStage || stage;
+      return updatedStage ? { ...stage, ...updatedStage } : stage;
     });
   };
 
@@ -316,7 +325,7 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
         stage.name === stageName ? { ...stage, enabled: !stage.enabled } : stage
       );
       
-      return recalculateDates(updatedStages);
+      return recalculateDates(updatedStages, stageName);
     });
 
     // Remove progress for disabled stage
@@ -336,7 +345,7 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
         stage.name === stageName ? { ...stage, days } : stage
       );
       
-      return recalculateDates(updatedStages);
+      return recalculateDates(updatedStages, stageName);
     });
   };
 
@@ -350,33 +359,12 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
     setStages(prev => {
       const stageIndex = prev.findIndex(s => s.name === stageName);
       if (stageIndex === -1) return prev;
-      
       const newStages = [...prev];
       const stage = { ...newStages[stageIndex] };
-      
       stage.startDate = startDate;
       stage.endDate = calculateEndDate(startDate, stage.days);
       newStages[stageIndex] = stage;
-      
-      // Update all subsequent stages
-      for (let i = stageIndex + 1; i < newStages.length; i++) {
-        if (!newStages[i].enabled) continue;
-        
-        const prevStage = newStages[i - 1];
-        if (prevStage.enabled) {
-          // Start date should be exactly the same as the end date of previous stage
-          // This is the key change - we're using the exact same date, not adding a day
-          const prevEndDate = new Date(prevStage.endDate);
-          
-          newStages[i] = {
-            ...newStages[i],
-            startDate: prevEndDate.toISOString().split('T')[0],
-            endDate: calculateEndDate(prevEndDate.toISOString().split('T')[0], newStages[i].days)
-          };
-        }
-      }
-      
-      return newStages;
+      return recalculateDates(newStages, stageName);
     });
   };
 
@@ -445,7 +433,8 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
     onSave({
       ...item,
       progress: finalProgress,
-      stagePlanning
+      stagePlanning,
+      overallProgress: calculateOverallProgress()
     });
   };
 
@@ -522,6 +511,16 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
       setIsAddingAllStages(false);
     }
   };
+
+  // Adicionar método para remover etapa e recalcular datas
+  const handleRemoveStage = (stageName: string) => {
+    setStages(prev => {
+      const updatedStages = prev.filter(stage => stage.name !== stageName);
+      return recalculateDates(updatedStages);
+    });
+  };
+
+  console.log('Itens recebidos em allItems:', allItems.length, allItems);
 
   if (isEditingStages) {
     return (
@@ -648,11 +647,11 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
             {allItems.length > 1 && (
               <button
                 onClick={() => setShowCopyProgressModal(true)}
-                className="text-blue-600 hover:text-blue-800 px-3 py-1 border border-blue-200 rounded-md hover:bg-blue-50 flex items-center"
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center"
                 title="Copiar Progresso de Outro Item"
               >
-                <Duplicate className="h-5 w-5 mr-1" />
-                <span>Copiar Progresso</span>
+                <Duplicate className="h-5 w-5 mr-2" />
+                Copiar Progresso
               </button>
             )}
             <button

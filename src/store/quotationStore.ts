@@ -132,15 +132,10 @@ export const useQuotationStore = create<QuotationState>((set, get) => ({
         updatedAt: new Date().toISOString()
       });
       
-      // Update local state
-      set(state => ({
-        quotations: [{ ...quotationData, id: docRef.id }, ...state.quotations],
-        lastQuoteNumber: quotationData.number,
-      }));
-      
-      // Recalculate stats
+      // Atualizar apenas o lastQuoteNumber, não adicionar ao array local
+      set({ lastQuoteNumber: quotationData.number });
+      // Recalcular stats
       get().calculateStats();
-      
       return docRef.id;
     } catch (error) {
       console.error('Error adding quotation:', error);
@@ -344,14 +339,16 @@ export const useQuotationStore = create<QuotationState>((set, get) => ({
         throw new Error("Columns were not properly initialized. Please set up your Kanban board first.");
       }
       
-      // Find the "Pedidos em processo" column specifically
-      const processColumn = columnStore.columns.find(col => col.title === 'Pedidos em processo');
-      if (!processColumn) {
-        console.warn("Couldn't find 'Pedidos em processo' column, falling back to the first available column");
+      // Sempre buscar as colunas mais recentes do Kanban
+      const freshColumns = await getDocs(collection(db, getCompanyCollection('columns')));
+      let validColumnId = '';
+      if (!freshColumns.empty) {
+        // Priorizar 'Pedidos em processo', senão usar a primeira
+        const processCol = freshColumns.docs.find(col => col.data().title === 'Pedidos em processo');
+        validColumnId = processCol ? processCol.id : freshColumns.docs[0].id;
+      } else {
+        throw new Error('Nenhuma coluna encontrada no Kanban!');
       }
-      
-      // Get column ID to use, prioritizing "Pedidos em processo"
-      const columnId = processColumn?.id || columnStore.columns[0].id;
       
       // Map quotation items to order items
       const orderItems = quotation.items.map((item, index) => ({
@@ -366,9 +363,6 @@ export const useQuotationStore = create<QuotationState>((set, get) => ({
         totalPrice: item.totalPrice
       }));
       
-      // Calculate total weight
-      const totalWeight = orderItems.reduce((sum, item) => sum + item.totalWeight, 0);
-      
       // Create the order, EXPLICITLY setting the columnId
       const orderId = await orderStore.addOrder({
         id: 'new',
@@ -377,11 +371,11 @@ export const useQuotationStore = create<QuotationState>((set, get) => ({
         deliveryDate: addDays(new Date(), 30).toISOString(), // Default to 30 days
         internalOrderNumber: `OS/${quotation.number}`,
         customer: quotation.customerName,
-        totalWeight: totalWeight,
+        totalWeight: orderItems.reduce((sum, item) => sum + item.totalWeight, 0),
         status: 'in-progress',
         items: orderItems,
         driveLinks: [],
-        columnId: columnId, // EXPLICITLY set to "Pedidos em processo" column ID
+        columnId: validColumnId, // Sempre usar coluna válida
         checklist: {
           drawings: false,
           inspectionTestPlan: false,

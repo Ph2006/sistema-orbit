@@ -33,23 +33,23 @@ interface ClientProductionData {
 }
 
 const COLORS = [
-  '#3366CC', // deep blue
-  '#DC3912', // red
-  '#FF9900', // orange
-  '#109618', // green
-  '#990099', // purple
-  '#0099C6', // turquoise
-  '#DD4477', // pink
-  '#66AA00', // light green
-  '#B82E2E', // brick red
-  '#316395', // dark blue
-  '#994499', // dark purple
-  '#22AA99', // sea green
-  '#AAAA11', // olive
-  '#6633CC', // purple-blue
-  '#E67300', // dark orange
-  '#329262', // blue-green
-  '#5574A6', // slate blue
+  '#4B5563', // cinza slate
+  '#6B7280', // cinza
+  '#9CA3AF', // cinza claro
+  '#D1D5DB', // cinza mais claro
+  '#60A5FA', // azul suave
+  '#34D399', // verde suave
+  '#FBBF24', // amarelo suave
+  '#F87171', // vermelho suave
+  '#A78BFA', // roxo suave
+  '#2DD4BF', // turquesa suave
+  '#818CF8', // índigo suave
+  '#FB923C', // laranja suave
+  '#94A3B8', // slate suave
+  '#38BDF8', // azul céu suave
+  '#4ADE80', // verde esmeralda suave
+  '#FCD34D', // amarelo âmbar suave
+  '#FB7185', // rosa suave
 ];
 
 const Dashboard: React.FC = () => {
@@ -74,6 +74,7 @@ const Dashboard: React.FC = () => {
   const [uniqueCustomersKpi, setUniqueCustomersKpi] = useState<KpiData>({ current: 0, previous: 0, percentChange: 0 });
   const [totalWeightKpi, setTotalWeightKpi] = useState<KpiData>({ current: 0, previous: 0, percentChange: 0 });
   const [completedOrdersKpi, setCompletedOrdersKpi] = useState<KpiData>({ current: 0, previous: 0, percentChange: 0 });
+  const [deliveryKpi, setDeliveryKpi] = useState({ total: 0, onTime: 0, percent: 0 });
   
   // Estado para alertas de pedidos
   const [lateOrders, setLateOrders] = useState<typeof orders>([]);
@@ -120,6 +121,30 @@ const Dashboard: React.FC = () => {
 
     // Also update completed orders
     setCompletedOrders(orders.filter(o => o.status === 'completed' || o.completedDate));
+  }, [orders]);
+
+  useEffect(() => {
+    const allItems = orders.flatMap(order => 
+      order.items?.map(item => ({
+        ...item,
+        deliveryDate: item.deliveryDate || order.deliveryDate,
+        finishedDate: item.finishedDate || order.completedDate
+      })) || []
+    );
+
+    const finalizados = allItems.filter(item => item.overallProgress === 100 && item.finishedDate);
+    const noPrazo = finalizados.filter(item => {
+      if (!item.finishedDate || !item.deliveryDate) return false;
+      return new Date(item.finishedDate) <= new Date(item.deliveryDate);
+    });
+
+    const percent = finalizados.length > 0 ? (noPrazo.length / finalizados.length) * 100 : 0;
+
+    setDeliveryKpi({
+      total: finalizados.length,
+      onTime: noPrazo.length,
+      percent: parseFloat(percent.toFixed(1))
+    });
   }, [orders]);
 
   const handleLogout = async () => {
@@ -400,7 +425,7 @@ const Dashboard: React.FC = () => {
     if (Math.abs(percentChange) < 0.5) return null;
     
     const isPositive = percentChange > 0;
-    const color = isPositive ? 'text-green-600' : 'text-red-600';
+    const color = isPositive ? 'text-green-400' : 'text-red-400';
     const Icon = isPositive ? ArrowUp : ArrowDown;
     
     return (
@@ -425,19 +450,19 @@ const Dashboard: React.FC = () => {
   const uniqueCustomers = getUniqueCustomers();
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
       {/* Navbar */}
-      <nav className="bg-white shadow-lg">
+      <nav className="bg-gray-900/50 backdrop-blur-lg border-b border-gray-700/50">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between h-16">
             <div className="flex items-center">
-              <h1 className="text-xl font-bold text-gray-800">Sistema de Monitoramento</h1>
+              <h1 className="text-xl font-bold text-white">Sistema de Monitoramento</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-gray-600">{user?.email}</span>
+              <span className="text-gray-300">{user?.email}</span>
               <button
                 onClick={handleLogout}
-                className="flex items-center space-x-2 text-gray-600 hover:text-gray-800"
+                className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
               >
                 <LogOut className="h-5 w-5" />
                 <span>Sair</span>
@@ -449,295 +474,180 @@ const Dashboard: React.FC = () => {
 
       {/* Filtros de Data */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-            <Calendar className="h-5 w-5 mr-2 text-blue-600" />
+        <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl shadow-xl p-6 mb-8 border border-gray-700/50">
+          <h2 className="text-lg font-semibold text-white mb-4 flex items-center">
+            <Calendar className="h-5 w-5 mr-2 text-blue-400" />
             Filtros de Período
           </h2>
           
           <div className="flex flex-wrap gap-4 items-center">
-            <div className="flex space-x-2">
+            <div className="flex flex-wrap gap-2">
               <button 
                 onClick={() => setDateRange('7days')}
-                className={`px-3 py-1 rounded-md ${dateRange === '7days' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+                className={`px-3 py-1 rounded-lg transition-all ${
+                  dateRange === '7days' 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                }`}
               >
                 Últimos 7 dias
               </button>
               <button 
                 onClick={() => setDateRange('30days')}
-                className={`px-3 py-1 rounded-md ${dateRange === '30days' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+                className={`px-3 py-1 rounded-lg transition-all ${
+                  dateRange === '30days' 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                }`}
               >
                 Últimos 30 dias
               </button>
               <button 
                 onClick={() => setDateRange('90days')}
-                className={`px-3 py-1 rounded-md ${dateRange === '90days' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+                className={`px-3 py-1 rounded-lg transition-all ${
+                  dateRange === '90days' 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                }`}
               >
                 Últimos 90 dias
               </button>
               <button 
                 onClick={() => setDateRange('thisMonth')}
-                className={`px-3 py-1 rounded-md ${dateRange === 'thisMonth' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+                className={`px-3 py-1 rounded-lg transition-all ${
+                  dateRange === 'thisMonth' 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                }`}
               >
                 Este Mês
               </button>
               <button 
                 onClick={() => setDateRange('thisYear')}
-                className={`px-3 py-1 rounded-md ${dateRange === 'thisYear' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+                className={`px-3 py-1 rounded-lg transition-all ${
+                  dateRange === 'thisYear' 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                }`}
               >
                 Este Ano
               </button>
             </div>
             
             {/* Seletor de datas personalizadas */}
-            <div className="flex items-center space-x-2 ml-auto">
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
               <div>
                 <input 
                   type="date" 
                   value={customStartDate}
                   onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                  className="rounded-lg bg-gray-700/50 border-gray-600 text-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-500/25"
                 />
               </div>
-              <span>até</span>
+              <span className="text-gray-400">até</span>
               <div>
                 <input 
                   type="date" 
                   value={customEndDate}
                   onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+                  className="rounded-lg bg-gray-700/50 border-gray-600 text-gray-300 focus:border-blue-500 focus:ring focus:ring-blue-500/25"
                 />
               </div>
               <button 
                 onClick={applyCustomDateRange}
-                className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                className="px-4 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25"
               >
                 Aplicar
               </button>
             </div>
           </div>
           
-          <div className="mt-4 text-sm text-gray-600">
+          <div className="mt-4 text-sm text-gray-400">
             Exibindo dados de {format(startDate, 'dd/MM/yyyy', { locale: ptBR })} até {format(endDate, 'dd/MM/yyyy', { locale: ptBR })}
           </div>
         </div>
 
-        {/* Alertas de Pedidos */}
-        {(lateOrders.length > 0 || upcomingDeadlineOrders.length > 0) && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Pedidos que Requerem Atenção</h2>
-            
-            {lateOrders.length > 0 && (
-              <div className="bg-red-50 border-l-4 border-red-500 rounded-lg shadow-md p-4 mb-4">
-                <div className="flex items-center mb-2">
-                  <AlertTriangle className="h-6 w-6 text-red-600 mr-2" />
-                  <h3 className="text-lg font-semibold text-red-800">Pedidos Atrasados</h3>
-                </div>
-                
-                <div className="mt-2 space-y-2">
-                  {lateOrders.slice(0, 5).map(order => (
-                    <div key={order.id} className="flex justify-between items-center p-2 bg-white rounded border border-red-200">
-                      <div>
-                        <span className="font-medium">#{order.orderNumber}</span>
-                        <span className="text-gray-600 ml-2">{order.customer}</span>
-                      </div>
-                      <div className="flex items-center">
-                        <span className="text-red-600 text-sm">
-                          {Math.abs(differenceInDays(new Date(order.deliveryDate), new Date()))} dias atrasado
-                        </span>
-                        <button 
-                          onClick={() => navigate('/orders')}
-                          className="ml-4 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                          Ver Detalhes
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  {lateOrders.length > 5 && (
-                    <div className="text-center text-sm mt-2">
-                      <button 
-                        onClick={() => navigate('/orders')}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        Ver todos os {lateOrders.length} pedidos atrasados
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            {upcomingDeadlineOrders.length > 0 && (
-              <div className="bg-yellow-50 border-l-4 border-yellow-500 rounded-lg shadow-md p-4">
-                <div className="flex items-center mb-2">
-                  <Clock className="h-6 w-6 text-yellow-600 mr-2" />
-                  <h3 className="text-lg font-semibold text-yellow-800">Prazo de Entrega Próximo</h3>
-                </div>
-                
-                <div className="mt-2 space-y-2">
-                  {upcomingDeadlineOrders.slice(0, 5).map(order => (
-                    <div key={order.id} className="flex justify-between items-center p-2 bg-white rounded border border-yellow-200">
-                      <div>
-                        <span className="font-medium">#{order.orderNumber}</span>
-                        <span className="text-gray-600 ml-2">{order.customer}</span>
-                      </div>
-                      <div className="flex items-center">
-                        <span className="text-yellow-600 text-sm">
-                          {differenceInDays(new Date(order.deliveryDate), new Date())} dias restantes
-                        </span>
-                        <button 
-                          onClick={() => navigate('/orders')}
-                          className="ml-4 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                          Ver Detalhes
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  {upcomingDeadlineOrders.length > 5 && (
-                    <div className="text-center text-sm mt-2">
-                      <button 
-                        onClick={() => navigate('/orders')}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        Ver todos os {upcomingDeadlineOrders.length} pedidos com prazo próximo
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Completed Orders Section */}
-        {completedOrders.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">Pedidos Expedidos Recentemente</h2>
-            
-            <div className="bg-green-50 border-l-4 border-green-500 rounded-lg shadow-md p-4">
-              <div className="flex items-center mb-2">
-                <CheckCircle className="h-6 w-6 text-green-600 mr-2" />
-                <h3 className="text-lg font-semibold text-green-800">Pedidos Concluídos</h3>
-              </div>
-              
-              <div className="mt-2 space-y-2">
-                {completedOrders.slice(0, 5).map(order => {
-                  const completionDate = order.completedDate ? new Date(order.completedDate) : new Date();
-                  const deliveryDate = new Date(order.deliveryDate);
-                  const daysDiff = differenceInDays(completionDate, deliveryDate);
-                  
-                  return (
-                    <div key={order.id} className="flex justify-between items-center p-2 bg-white rounded border border-green-200">
-                      <div>
-                        <span className="font-medium">#{order.orderNumber}</span>
-                        <span className="text-gray-600 ml-2">{order.customer}</span>
-                      </div>
-                      <div className="flex items-center">
-                        <span className={`text-sm ${
-                          daysDiff > 0 ? 'text-orange-600' : 
-                          daysDiff < 0 ? 'text-green-600' : 
-                          'text-blue-600'
-                        }`}>
-                          {daysDiff === 0 ? 'No prazo' : 
-                           daysDiff > 0 ? `${daysDiff} dias após o prazo` : 
-                           `${Math.abs(daysDiff)} dias antes do prazo`}
-                        </span>
-                        <button 
-                          onClick={() => navigate('/orders')}
-                          className="ml-4 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                          Ver Detalhes
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-                
-                {completedOrders.length > 5 && (
-                  <div className="text-center text-sm mt-2">
-                    <button 
-                      onClick={() => navigate('/orders')}
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      Ver todos os {completedOrders.length} pedidos concluídos
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           {/* Card 1 - Pedidos em Produção */}
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl shadow-xl p-6 border border-gray-700/50 hover:border-gray-600/50 transition-colors">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">Pedidos em Produção</h2>
-              <Package className="h-6 w-6 text-blue-500" />
+              <h2 className="text-lg font-semibold text-white">Pedidos em Produção</h2>
+              <Package className="h-6 w-6 text-blue-400" />
             </div>
             <div className="flex justify-between items-center">
-              <p className="text-3xl font-bold text-gray-900">{activeOrdersKpi.current}</p>
+              <p className="text-3xl font-bold text-white">{activeOrdersKpi.current}</p>
               <div className="flex items-center">
                 {renderKpiComparison(activeOrdersKpi.percentChange)}
               </div>
             </div>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-gray-400 mt-2">
               Comparado a {activeOrdersKpi.previous} pedidos no período anterior
             </p>
           </div>
 
           {/* Card 2 - Pedidos Concluídos */}
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl shadow-xl p-6 border border-gray-700/50 hover:border-gray-600/50 transition-colors">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">Pedidos Concluídos</h2>
-              <CheckCircle className="h-6 w-6 text-green-500" />
+              <h2 className="text-lg font-semibold text-white">Pedidos Concluídos</h2>
+              <CheckCircle className="h-6 w-6 text-green-400" />
             </div>
             <div className="flex justify-between items-center">
-              <p className="text-3xl font-bold text-gray-900">{completedOrdersKpi.current}</p>
+              <p className="text-3xl font-bold text-white">{completedOrdersKpi.current}</p>
               <div className="flex items-center">
                 {renderKpiComparison(completedOrdersKpi.percentChange)}
               </div>
             </div>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-gray-400 mt-2">
               Comparado a {completedOrdersKpi.previous} no período anterior
             </p>
           </div>
 
           {/* Card 3 - Total de Clientes */}
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl shadow-xl p-6 border border-gray-700/50 hover:border-gray-600/50 transition-colors">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">Total de Clientes</h2>
-              <Users className="h-6 w-6 text-green-500" />
+              <h2 className="text-lg font-semibold text-white">Total de Clientes</h2>
+              <Users className="h-6 w-6 text-green-400" />
             </div>
             <div className="flex justify-between items-center">
-              <p className="text-3xl font-bold text-gray-900">{uniqueCustomersKpi.current}</p>
+              <p className="text-3xl font-bold text-white">{uniqueCustomersKpi.current}</p>
               <div className="flex items-center">
                 {renderKpiComparison(uniqueCustomersKpi.percentChange)}
               </div>
             </div>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-gray-400 mt-2">
               Comparado a {uniqueCustomersKpi.previous} clientes no período anterior
             </p>
           </div>
 
           {/* Card 4 - Produção Total */}
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl shadow-xl p-6 border border-gray-700/50 hover:border-gray-600/50 transition-colors">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">Produção Total</h2>
-              <TrendingUp className="h-6 w-6 text-purple-500" />
+              <h2 className="text-lg font-semibold text-white">Produção Total</h2>
+              <TrendingUp className="h-6 w-6 text-purple-400" />
             </div>
             <div className="flex justify-between items-center">
-              <p className="text-3xl font-bold text-gray-900">{formatNumber(totalWeightKpi.current)}kg</p>
+              <p className="text-3xl font-bold text-white">{formatNumber(totalWeightKpi.current)}kg</p>
               <div className="flex items-center">
                 {renderKpiComparison(totalWeightKpi.percentChange)}
               </div>
             </div>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-gray-400 mt-2">
               Comparado a {formatNumber(totalWeightKpi.previous)}kg no período anterior
+            </p>
+          </div>
+
+          {/* Card 5 - Entregas no Prazo (Itens) */}
+          <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl shadow-xl p-6 border border-gray-700/50 hover:border-gray-600/50 transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">Entregas no Prazo</h2>
+              <CheckCircle className="h-6 w-6 text-blue-400" />
+            </div>
+            <div className="flex justify-between items-center">
+              <p className="text-3xl font-bold text-white">{deliveryKpi.percent.toFixed(1)}%</p>
+              <p className="text-sm text-gray-400">{deliveryKpi.onTime} de {deliveryKpi.total} itens</p>
+            </div>
+            <p className="text-sm text-gray-400 mt-2">
+              Considerando apenas itens 100% expedidos
             </p>
           </div>
         </div>
@@ -745,64 +655,155 @@ const Dashboard: React.FC = () => {
         {/* Gráficos */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Gráfico de Status dos Pedidos */}
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Status dos Pedidos</h2>
-            <div className="h-[300px]">
+          <div className="bg-gray-800/50 backdrop-blur-lg p-6 rounded-xl shadow-xl border border-gray-700/50">
+            <h2 className="text-lg font-semibold text-white mb-4">Status dos Pedidos</h2>
+            <div className="h-[400px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={statusData}
                     cx="50%"
-                    cy="50%"
+                    cy="45%"
                     labelLine={true}
                     label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={100}
+                    outerRadius={130}
+                    innerRadius={60}
                     fill="#8884d8"
                     dataKey="value"
+                    paddingAngle={2}
                   >
                     {statusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={entry.color}
+                        stroke="rgba(31, 41, 55, 0.5)"
+                        strokeWidth={2}
+                      />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value) => [value, 'Quantidade']} />
-                  <Legend />
+                  <Tooltip 
+                    formatter={(value) => [value, 'Quantidade']}
+                    contentStyle={{ 
+                      backgroundColor: 'rgba(31, 41, 55, 0.9)',
+                      border: '1px solid rgba(75, 85, 99, 0.5)',
+                      borderRadius: '0.5rem',
+                      color: 'white',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                    }}
+                  />
+                  <Legend 
+                    layout="vertical"
+                    align="right"
+                    verticalAlign="middle"
+                    formatter={(value) => <span className="text-gray-300">{value}</span>}
+                    wrapperStyle={{
+                      right: 0,
+                      top: '50%',
+                      transform: 'translateY(-50%)'
+                    }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
           </div>
           
           {/* Gráfico de Produção Mensal */}
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Produção Mensal (por Data de Entrega)</h2>
-            <div className="h-[300px]">
+          <div className="bg-gray-800/50 backdrop-blur-lg p-6 rounded-xl shadow-xl border border-gray-700/50">
+            <h2 className="text-lg font-semibold text-white mb-4">Produção Mensal (por Data de Entrega)</h2>
+            <div className="h-[400px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={productionData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis tickFormatter={(value) => formatNumber(value)} />
+                <BarChart data={productionData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(75, 85, 99, 0.3)" />
+                  <XAxis 
+                    dataKey="month" 
+                    stroke="rgba(156, 163, 175, 1)"
+                    tick={{ fill: '#9CA3AF' }}
+                    axisLine={{ stroke: 'rgba(75, 85, 99, 0.5)' }}
+                  />
+                  <YAxis 
+                    tickFormatter={(value) => formatNumber(value)} 
+                    stroke="rgba(156, 163, 175, 1)"
+                    tick={{ fill: '#9CA3AF' }}
+                    axisLine={{ stroke: 'rgba(75, 85, 99, 0.5)' }}
+                    width={80}
+                  />
                   <Tooltip 
                     formatter={(value: number) => [formatNumber(value), 'Produção (kg)']}
+                    contentStyle={{ 
+                      backgroundColor: 'rgba(31, 41, 55, 0.9)',
+                      border: '1px solid rgba(75, 85, 99, 0.5)',
+                      borderRadius: '0.5rem',
+                      color: 'white',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                    }}
                   />
-                  <Legend />
-                  <Bar dataKey="producao" fill="#3B82F6" name="Produção (kg)" />
+                  <Legend 
+                    verticalAlign="top" 
+                    height={36}
+                    formatter={(value) => <span className="text-gray-300">{value}</span>}
+                    wrapperStyle={{
+                      paddingBottom: '20px'
+                    }}
+                  />
+                  <Bar 
+                    dataKey="producao" 
+                    fill="#60A5FA" 
+                    name="Produção (kg)"
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={50}
+                    label={{ 
+                      position: 'top',
+                      fill: '#9CA3AF',
+                      fontSize: 12,
+                      formatter: (value: number) => formatNumber(value)
+                    }}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           {/* Gráfico de Produção por Cliente por Mês */}
-          <div className="bg-white p-6 rounded-lg shadow-md md:col-span-2">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Produção por Cliente (por Mês)</h2>
-            <div className="h-[400px]">
+          <div className="bg-gray-800/50 backdrop-blur-lg p-6 rounded-xl shadow-xl border border-gray-700/50 md:col-span-2">
+            <h2 className="text-lg font-semibold text-white mb-4">Produção por Cliente (por Mês)</h2>
+            <div className="h-[500px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={customerMonthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis tickFormatter={(value) => formatNumber(value)} />
+                <BarChart data={customerMonthlyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(75, 85, 99, 0.3)" />
+                  <XAxis 
+                    dataKey="month" 
+                    stroke="rgba(156, 163, 175, 1)"
+                    tick={{ fill: '#9CA3AF' }}
+                    axisLine={{ stroke: 'rgba(75, 85, 99, 0.5)' }}
+                  />
+                  <YAxis 
+                    tickFormatter={(value) => formatNumber(value)} 
+                    stroke="rgba(156, 163, 175, 1)"
+                    tick={{ fill: '#9CA3AF' }}
+                    axisLine={{ stroke: 'rgba(75, 85, 99, 0.5)' }}
+                    width={80}
+                  />
                   <Tooltip 
                     formatter={(value: number) => [formatNumber(value), 'Produção (kg)']}
+                    contentStyle={{ 
+                      backgroundColor: 'rgba(31, 41, 55, 0.9)',
+                      border: '1px solid rgba(75, 85, 99, 0.5)',
+                      borderRadius: '0.5rem',
+                      color: 'white',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                    }}
                   />
-                  <Legend />
+                  <Legend 
+                    layout="vertical"
+                    align="right"
+                    verticalAlign="middle"
+                    formatter={(value) => <span className="text-gray-300">{value}</span>}
+                    wrapperStyle={{
+                      right: 0,
+                      top: '50%',
+                      transform: 'translateY(-50%)'
+                    }}
+                  />
                   {uniqueCustomers.map((customer, index) => (
                     <Bar 
                       key={customer}
@@ -810,12 +811,20 @@ const Dashboard: React.FC = () => {
                       name={customer} 
                       fill={getCustomerColor(customer, index)} 
                       stackId="a"
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={50}
+                      label={{ 
+                        position: 'top',
+                        fill: '#9CA3AF',
+                        fontSize: 12,
+                        formatter: (value: number) => formatNumber(value)
+                      }}
                     />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <p className="text-sm text-gray-600 mt-4 text-center">
+            <p className="text-sm text-gray-400 mt-4 text-center">
               Produção em kg por cliente, agrupada por mês (empilhada)
             </p>
           </div>

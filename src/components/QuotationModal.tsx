@@ -815,138 +815,126 @@ const QuotationModal: React.FC<QuotationModalProps> = ({
               {errors.items && <p className="mt-2 text-sm text-red-500">{errors.items}</p>}
             </div>
             
-            {/* Items List */}
-            {formData.items.length === 0 ? (
-              <div className="text-center p-6 bg-gray-50 rounded-lg border border-gray-200">
-                <p className="text-gray-500">Nenhum item adicionado ao orçamento.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-lg border border-gray-200">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Código
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Descrição
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Qtd.
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Dimensões
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Peso (kg)
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Preço Unit.
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Subtotal
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Imposto
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Total c/ Imposto
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Prazo
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Ações
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {formData.items.map((item, index) => (
-                      <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          {item.code}
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          {item.description}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          {item.quantity}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          N/A
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          {item.unitWeight > 0 ? (
-                            <div>
-                              <div>{item.unitWeight.toLocaleString('pt-BR')} kg/un</div>
-                              <div className="text-xs text-gray-500">
-                                Total: {(item.totalWeight || 0).toLocaleString('pt-BR')} kg
-                              </div>
+            {/* Container com rolagem para a tabela de itens */}
+            <div className="relative max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Código
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Descrição
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Qtd.
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Dimensões
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Peso (kg)
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Preço Unit.
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Subtotal
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Imposto
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Total c/ Imposto
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Prazo
+                    </th>
+                    <th scope="col" className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Ações
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {formData.items.map((item, index) => (
+                    <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        {item.code}
+                      </td>
+                      <td className="px-3 py-2 text-sm">
+                        {item.description}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        {item.quantity}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        N/A
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        {item.unitWeight > 0 ? (
+                          <div>
+                            <div>{item.unitWeight.toLocaleString('pt-BR')} kg/un</div>
+                            <div className="text-xs text-gray-500">
+                              Total: {(item.totalWeight || 0).toLocaleString('pt-BR')} kg
                             </div>
-                          ) : 'N/A'}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          {formatCurrency(item.unitPrice)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          {formatCurrency(item.totalPrice)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          <div>{item.taxRate.toFixed(2)}%</div>
-                          <div className="text-xs text-gray-500">
-                            {formatCurrency(item.taxAmount)}
                           </div>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-center">
-                          {formatCurrency(item.totalWithTax)}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          {item.leadTimeDays} dias
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
-                          <div className="flex space-x-2 justify-center">
-                            <button
-                              type="button"
-                              onClick={() => handleEditItem(item.id)}
-                              className="text-blue-600 hover:text-blue-800"
-                              title="Editar Item"
-                            >
-                              <Edit className="h-5 w-5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDuplicateItem(item.id)}
-                              className="text-purple-600 hover:text-purple-800"
-                              title="Duplicar Item"
-                            >
-                              <Copy className="h-5 w-5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveItem(item.id)}
-                              className="text-red-600 hover:text-red-800"
-                              title="Remover Item"
-                            >
-                              <Trash2 className="h-5 w-5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-gray-50">
-                    <tr>
-                      <td colSpan={8} className="px-3 py-3 text-right text-sm font-medium">
-                        Valor Total com Impostos:
+                        ) : 'N/A'}
                       </td>
-                      <td colSpan={3} className="px-3 py-3 font-bold text-sm text-center">
-                        {formatCurrency(formData.totalWithTaxes)}
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        {formatCurrency(item.unitPrice)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        {formatCurrency(item.totalPrice)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        <div>{item.taxRate.toFixed(2)}%</div>
+                        <div className="text-xs text-gray-500">
+                          {formatCurrency(item.taxAmount)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-center">
+                        {formatCurrency(item.totalWithTax)}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        {item.leadTimeDays} dias
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm text-center">
+                        <div className="flex space-x-2 justify-center">
+                          <button
+                            type="button"
+                            onClick={() => handleEditItem(item.id)}
+                            className="text-blue-600 hover:text-blue-800"
+                            title="Editar Item"
+                          >
+                            <Edit className="h-5 w-5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateItem(item.id)}
+                            className="text-purple-600 hover:text-purple-800"
+                            title="Duplicar Item"
+                          >
+                            <Copy className="h-5 w-5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveItem(item.id)}
+                            className="text-red-600 hover:text-red-800"
+                            title="Remover Item"
+                          >
+                            <Trash2 className="h-5 w-5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
-                  </tfoot>
-                </table>
+                  ))}
+                </tbody>
+              </table>
+              {/* Valor total sticky */}
+              <div className="sticky bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex justify-end">
+                <span className="font-bold text-lg">Valor Total com Impostos: R$ {formatCurrency(formData.totalWithTaxes)}</span>
               </div>
-            )}
+            </div>
           </div>
 
           <div className="flex flex-wrap justify-end gap-3 pt-4 border-t">

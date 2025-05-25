@@ -13,14 +13,14 @@ import { Column, Order, OrderStatus } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
 import { useProjectStore } from '../store/projectStore';
-import KanbanColumn from './KanbanColumn';
+import { KanbanColumn } from './KanbanColumn';
 import KanbanCard from './KanbanCard';
 import ColumnModal from './ColumnModal';
 import ManageOrdersModal from './ManageOrdersModal';
 import OrderModal from './OrderModal';
 import ManufacturingStages from './ManufacturingStages';
 import OccupationRateTab from './OccupationRateTab';
-import { format, isAfter, isBefore, addDays } from 'date-fns';
+import { format, isAfter, isBefore, addDays, isToday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
 import { jsPDF } from 'jspdf';
@@ -58,6 +58,21 @@ const sanitizeForFirestore = (obj: any): any => {
   return sanitized;
 };
 
+const getMonthlyOrderStats = (orders) => {
+  // Agrupa pedidos por mês de entrega (YYYY-MM)
+  const stats = {};
+  orders.forEach(order => {
+    if (order.status === 'completed' || order.deleted) return;
+    const month = format(new Date(order.deliveryDate), 'yyyy-MM');
+    if (!stats[month]) {
+      stats[month] = { count: 0, totalWeight: 0 };
+    }
+    stats[month].count += 1;
+    stats[month].totalWeight += order.totalWeight || 0;
+  });
+  return stats;
+};
+
 const Kanban: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
@@ -70,6 +85,7 @@ const Kanban: React.FC = () => {
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isManufacturingStagesOpen, setIsManufacturingStagesOpen] = useState(false);
+  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   
   // Estados para filtros
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
@@ -103,43 +119,42 @@ const Kanban: React.FC = () => {
       setError(null);
       
       try {
-        console.log('🔍 Kanban: Starting initialization...');
+        console.log('🔍 Kanban: Iniciando inicialização...');
         
         // Tentar inicializar colunas com tratamento específico de erro
         try {
-          console.log('🔍 Kanban: Calling initializeDefaultColumns...');
+          console.log('🔍 Kanban: Chamando initializeDefaultColumns...');
           await initializeDefaultColumns();
-          console.log('✅ Kanban: Default columns initialized successfully');
+          console.log('✅ Kanban: Colunas padrão inicializadas com sucesso');
         } catch (columnError: any) {
-          console.error('❌ Kanban: Error initializing columns:', columnError);
-          console.error('❌ Column error code:', columnError?.code);
-          console.error('❌ Column error message:', columnError?.message);
+          console.error('❌ Kanban: Erro ao inicializar colunas:', columnError);
+          console.error('❌ Código do erro:', columnError?.code);
+          console.error('❌ Mensagem do erro:', columnError?.message);
           
-          // Se for erro de permissão, não falhar completamente
           if (columnError?.code === 'permission-denied') {
-            console.warn('⚠️ Permission denied for columns, continuing anyway...');
+            console.warn('⚠️ Permissão negada para colunas, continuando mesmo assim...');
           } else {
-            throw columnError; // Re-throw se não for erro de permissão
+            throw columnError;
           }
         }
         
         // Subscrições em tempo real
-        console.log('🔍 Kanban: Setting up subscriptions...');
+        console.log('🔍 Kanban: Configurando subscrições...');
         const unsubscribeColumns = subscribeToColumns();
         const unsubscribeOrders = subscribeToOrders();
         const unsubscribeProjects = subscribeToProjects();
         
-        console.log('✅ Kanban: All subscriptions set up successfully');
+        console.log('✅ Kanban: Todas as subscrições configuradas com sucesso');
         
         return () => {
-          console.log('🔍 Kanban: Cleaning up subscriptions...');
+          console.log('🔍 Kanban: Limpando subscrições...');
           unsubscribeColumns();
           unsubscribeOrders();
           unsubscribeProjects();
         };
       } catch (error: any) {
-        console.error('❌ Kanban: Critical error during initialization:', error);
-        console.error('❌ Error details:', JSON.stringify(error, null, 2));
+        console.error('❌ Kanban: Erro crítico durante inicialização:', error);
+        console.error('❌ Detalhes do erro:', JSON.stringify(error, null, 2));
         setError('Erro ao carregar o quadro Kanban. Por favor, recarregue a página.');
       } finally {
         setIsLoading(false);
@@ -151,6 +166,7 @@ const Kanban: React.FC = () => {
 
   // Coletar clientes e projetos disponíveis para filtragem
   useEffect(() => {
+    console.log('📊 Kanban: Atualizando clientes e projetos disponíveis...');
     const uniqueCustomers = [...new Set(orders.map(order => order.customer))];
     setAvailableCustomers(uniqueCustomers.sort());
     
@@ -160,6 +176,7 @@ const Kanban: React.FC = () => {
       return project ? project.name : 'Projeto não encontrado';
     });
     setAvailableProjects(projectNames.sort());
+    console.log('✅ Kanban: Clientes e projetos atualizados');
   }, [orders, projects]);
 
   // Efeito para garantir que todos os pedidos tenham uma coluna válida
@@ -574,10 +591,22 @@ const Kanban: React.FC = () => {
 
   const filteredOrders = getFilteredOrders();
   
-  const columnsWithOrders = columns.map(column => ({
-    ...column,
-    orders: filteredOrders.filter(order => order.columnId === column.id)
-  }));
+  // Montar columnsWithOrders respeitando o status do pedido
+  const columnsWithOrders = columns.map(column => {
+    let ordersForColumn = [];
+    if (column.title === 'Pedidos em processo') {
+      ordersForColumn = filteredOrders.filter(order => order.status === 'in-progress' && !order.deleted);
+    } else if (column.title === 'Pedidos expedidos') {
+      ordersForColumn = filteredOrders.filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted);
+    } else {
+      // Outras colunas recebem pedidos pelo columnId
+      ordersForColumn = filteredOrders.filter(order => order.columnId === column.id && !order.deleted);
+    }
+    return {
+      ...column,
+      orders: ordersForColumn
+    };
+  });
 
   const ordersWithoutColumn = filteredOrders.filter(
     order => order.columnId === null || order.columnId === undefined || !columns.some(col => col.id === order.columnId)
@@ -606,351 +635,322 @@ const Kanban: React.FC = () => {
   // Marca se existem filtros ativos
   const hasActiveFilters = activeFilters > 0;
 
+  const handleOrderSelect = (orderId: string) => {
+    setSelectedOrders(prev => {
+      if (prev.includes(orderId)) {
+        return prev.filter(id => id !== orderId);
+      }
+      return [...prev, orderId];
+    });
+  };
+
+  // LOG DE DEBUG para IDs de colunas e pedidos
+  console.log('columns:', columns.map(c => ({ id: c.id, title: c.title })));
+  console.log('orders:', filteredOrders.map(o => ({ id: o.id, columnId: o.columnId, deleted: o.deleted })));
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg font-medium text-gray-600">Carregando...</div>
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
+        <div className="text-lg font-medium text-white">Carregando...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg font-medium text-red-600">{error}</div>
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
+        <div className="text-lg font-medium text-red-400">{error}</div>
       </div>
     );
   }
 
+  console.log('🎯 Kanban: Renderizando componente...', {
+    columns: columns.length,
+    orders: orders.length,
+    projects: projects.length,
+    activeTab,
+    isLoading,
+    error
+  });
+
   return (
-    <div className="min-h-screen p-6 bg-gradient-to-br from-blue-900 via-blue-800 to-blue-600">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-white text-shadow">Quadro Kanban</h2>
-        <div className="flex space-x-4">
-          <button
-            onClick={() => setActiveTab('stages')}
-            className="flex items-center px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors duration-200 shadow-lg"
-            title="Gerenciar Etapas de Fabricação"
-          >
-            <Clipboard className="h-5 w-5 mr-2" />
-            Etapas de Fabricação
-          </button>
-          
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex flex-row w-full h-full">
+      {/* Kanban principal */}
+      <div className="flex-1 overflow-x-auto">
+        {/* Header com controles */}
+        <div className="max-w-[2000px] mx-auto mb-6">
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+            {/* Título e Tabs */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+              <h1 className="text-2xl font-bold text-white">Quadro de Produção</h1>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setActiveTab('kanban')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'kanban'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <LayoutGrid className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => setActiveTab('stages')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'stages'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <StagedList className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => setActiveTab('occupation')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'occupation'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <BarChart className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de pesquisa e filtros */}
+            <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
+              <div className="relative flex-1 lg:flex-none">
+                <input
+                  type="text"
+                  placeholder="Buscar pedidos..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full lg:w-64 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setFilterMenuOpen(!filterMenuOpen)}
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
+                    filterMenuOpen
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <Filter className="h-5 w-5" />
+                  <span className="hidden sm:inline">Filtros</span>
+                </button>
+
+                <button
+                  onClick={() => setCompactView(!compactView)}
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
+                    compactView
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <LayoutList className="h-5 w-5" />
+                  <span className="hidden sm:inline">Compacto</span>
+                </button>
+
+                <button
+                  onClick={() => setIsManageOrdersModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25 flex items-center gap-2"
+                >
+                  <Clipboard className="h-5 w-5" />
+                  <span className="hidden sm:inline">Gerenciar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Menu de Filtros */}
+          {filterMenuOpen && (
+            <div className="mt-4 bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Filtro por Cliente */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Cliente</label>
+                  <select
+                    multiple
+                    value={filterByCustomer}
+                    onChange={(e) => setFilterByCustomer(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {availableCustomers.map(customer => (
+                      <option key={customer} value={customer} className="py-1">
+                        {customer}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filtro por Status */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Status</label>
+                  <select
+                    multiple
+                    value={filterByStatus}
+                    onChange={(e) => setFilterByStatus(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {statusLegend.map(status => (
+                      <option key={status.status} value={status.status} className="py-1">
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filtro por Projeto */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Projeto</label>
+                  <select
+                    multiple
+                    value={filterByProject}
+                    onChange={(e) => setFilterByProject(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {availableProjects.map(project => (
+                      <option key={project} value={project} className="py-1">
+                        {project}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filtro por Prazo */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Prazo de Entrega</label>
+                  <select
+                    value={filterByDeadline}
+                    onChange={(e) => setFilterByDeadline(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="today">Hoje</option>
+                    <option value="week">Esta Semana</option>
+                    <option value="month">Este Mês</option>
+                    <option value="overdue">Atrasados</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Botões de Ação dos Filtros */}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  onClick={resetAllFilters}
+                  className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                >
+                  Limpar Filtros
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Conteúdo Principal */}
+        <div className="max-w-[2000px] mx-auto">
           {activeTab === 'kanban' && (
-            <>
-              <button
-                onClick={() => setCompactView(!compactView)}
-                className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200 shadow-lg"
-                title={compactView ? "Visualização normal" : "Visualização compacta"}
-              >
-                {compactView ? (
-                  <>
-                    <LayoutGrid className="h-5 w-5 mr-2" />
-                    Normal
-                  </>
-                ) : (
-                  <>
-                    <LayoutList className="h-5 w-5 mr-2" />
-                    Compacto
-                  </>
+            <DndContext
+              sensors={sensors}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                {columnsWithOrders.map(column => (
+                  <KanbanColumn
+                    key={column.id}
+                    column={column}
+                    onEdit={() => handleEditColumn(column)}
+                    onDelete={() => handleDeleteColumn(column.id)}
+                    onOrderClick={handleOrderClick}
+                    highlightTerm={searchTerm}
+                    compactView={compactView}
+                    isManagingOrders={isManageOrdersModalOpen}
+                    selectedOrders={selectedOrders}
+                  />
+                ))}
+              </div>
+
+              <DragOverlay>
+                {draggedOrder && (
+                  <KanbanCard
+                    order={draggedOrder}
+                    isManaging={false}
+                    isSelected={false}
+                    highlight={false}
+                    compactView={compactView}
+                  />
                 )}
-              </button>
-              <button
-                onClick={() => setIsColumnModalOpen(true)}
-                className="flex items-center px-4 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors duration-200 shadow-lg"
-              >
-                <Settings className="h-5 w-5 mr-2" />
-                Gerenciar Colunas
-              </button>
-              <button
-                onClick={() => setIsManageOrdersModalOpen(true)}
-                className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors duration-200 shadow-lg"
-              >
-                <ListX className="h-5 w-5 mr-2" />
-                Gerenciar Pedidos
-              </button>
-            </>
+              </DragOverlay>
+            </DndContext>
+          )}
+
+          {activeTab === 'stages' && (
+            <ManufacturingStages />
+          )}
+
+          {activeTab === 'occupation' && (
+            <OccupationRateTab />
+          )}
+        </div>
+
+        {/* Modais */}
+        {isColumnModalOpen && selectedColumn && (
+          <ColumnModal
+            column={selectedColumn}
+            onClose={() => {
+              setIsColumnModalOpen(false);
+              setSelectedColumn(null);
+            }}
+            onSave={handleSaveColumn}
+          />
+        )}
+
+        {isManageOrdersModalOpen && (
+          <ManageOrdersModal
+            onClose={() => setIsManageOrdersModalOpen(false)}
+            onDelete={handleDeleteSelectedOrders}
+            orders={orders.filter(order => selectedOrders.includes(order.id))}
+          />
+        )}
+
+        {isOrderModalOpen && selectedOrder && (
+          <OrderModal
+            order={selectedOrder}
+            onClose={() => {
+              setIsOrderModalOpen(false);
+              setSelectedOrder(null);
+            }}
+            onSave={handleSaveOrder}
+            projects={projects}
+          />
+        )}
+      </div>
+      {/* Dashboard lateral */}
+      <div className="hidden lg:block w-72 min-w-[260px] max-w-xs bg-gray-900/80 border-l border-gray-800 p-4 text-white sticky top-0 h-[calc(100vh-64px)] overflow-y-auto">
+        <h3 className="text-lg font-bold mb-4">Resumo de Entregas</h3>
+        <div className="space-y-3">
+          {Object.entries(getMonthlyOrderStats(orders))
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([month, data]) => (
+              <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col">
+                <span className="font-semibold text-blue-300">{format(new Date(month + '-01'), 'MMMM/yyyy', { locale: ptBR })}</span>
+                <span className="text-sm mt-1">Pedidos: <span className="font-bold">{data.count}</span></span>
+                <span className="text-sm">Peso pendente: <span className="font-bold">{data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</span></span>
+              </div>
+            ))}
+          {Object.keys(getMonthlyOrderStats(orders)).length === 0 && (
+            <div className="text-gray-400 text-sm">Nenhum pedido pendente para os próximos meses.</div>
           )}
         </div>
       </div>
-
-      {activeTab === 'occupation' ? (
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <OccupationRateTab />
-        </div>
-      ) : activeTab === 'stages' ? (
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <ManufacturingStages />
-        </div>
-      ) : (
-        <>
-          {/* Barra de filtros */}
-          <div className="mb-6">
-            <div className="bg-white/20 backdrop-blur-sm rounded-lg shadow-lg border border-white/30 p-4">
-              <div className="flex flex-wrap gap-4 items-center">
-                {/* Campo de busca */}
-                <div className="relative flex-1 min-w-[250px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-white/70" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Buscar pedido por número, cliente ou OS..."
-                    className="pl-10 pr-4 py-2 w-full bg-white/20 backdrop-blur-sm border border-white/30 rounded-lg text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-white/50"
-                  />
-                </div>
-                
-                {/* Botão para abrir/fechar menu de filtros */}
-                <button 
-                  onClick={() => setFilterMenuOpen(!filterMenuOpen)}
-                  className="flex items-center px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors"
-                >
-                  <Filter className="h-5 w-5 mr-2" />
-                  Filtros
-                  <ChevronDown className={`ml-2 h-4 w-4 transition-transform ${filterMenuOpen ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {hasActiveFilters && (
-                  <button 
-                    onClick={resetAllFilters}
-                    className="text-white/80 hover:text-white underline text-sm"
-                  >
-                    Limpar filtros
-                  </button>
-                )}
-                
-                {/* Contador de resultados */}
-                <div className="text-white/80 text-sm ml-auto">
-                  {totalDisplayedOrders} pedido(s) {hasActiveFilters ? 'encontrado(s)' : 'ativo(s)'}
-                </div>
-              </div>
-
-              {/* Menu expandido de filtros */}
-              {filterMenuOpen && (
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
-                  {/* Filtro por cliente */}
-                  <div>
-                    <label className="block text-sm font-medium text-white mb-2 flex items-center">
-                      <Users className="h-4 w-4 mr-2" />
-                      Cliente
-                    </label>
-                    <select 
-                      multiple
-                      size={6}
-                      className="w-full bg-white/20 backdrop-blur-sm border border-white/30 rounded-lg text-white p-2 focus:outline-none focus:ring-2 focus:ring-white/50"
-                      value={filterByCustomer}
-                      onChange={(e) => {
-                        const options = e.target.options;
-                        const selectedValues = [];
-                        for (let i = 0; i < options.length; i++) {
-                          if (options[i].selected) {
-                            selectedValues.push(options[i].value);
-                          }
-                        }
-                        setFilterByCustomer(selectedValues);
-                      }}
-                    >
-                      {availableCustomers.map(customer => (
-                        <option key={customer} value={customer} className="py-1">
-                          {customer}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="text-xs text-white/70 mt-1">
-                      Use Ctrl+clique para selecionar múltiplos
-                    </div>
-                  </div>
-                  
-                  {/* Filtro por projeto */}
-                  <div>
-                    <label className="block text-sm font-medium text-white mb-2 flex items-center">
-                      <Briefcase className="h-4 w-4 mr-2" />
-                      Projeto
-                    </label>
-                    <select 
-                      multiple
-                      size={6}
-                      className="w-full bg-white/20 backdrop-blur-sm border border-white/30 rounded-lg text-white p-2 focus:outline-none focus:ring-2 focus:ring-white/50"
-                      value={filterByProject}
-                      onChange={(e) => {
-                        const options = e.target.options;
-                        const selectedValues = [];
-                        for (let i = 0; i < options.length; i++) {
-                          if (options[i].selected) {
-                            selectedValues.push(options[i].value);
-                          }
-                        }
-                        setFilterByProject(selectedValues);
-                      }}
-                    >
-                      {availableProjects.map(project => (
-                        <option key={project} value={project} className="py-1">
-                          {project}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="text-xs text-white/70 mt-1">
-                      Use Ctrl+clique para selecionar múltiplos
-                    </div>
-                  </div>
-                  
-                  {/* Filtro por status */}
-                  <div>
-                    <label className="block text-sm font-medium text-white mb-2 flex items-center">
-                      <Flag className="h-4 w-4 mr-2" />
-                      Status
-                    </label>
-                    <select 
-                      multiple
-                      size={6}
-                      className="w-full bg-white/20 backdrop-blur-sm border border-white/30 rounded-lg text-white p-2 focus:outline-none focus:ring-2 focus:ring-white/50"
-                      value={filterByStatus}
-                      onChange={(e) => {
-                        const options = e.target.options;
-                        const selectedValues = [];
-                        for (let i = 0; i < options.length; i++) {
-                          if (options[i].selected) {
-                            selectedValues.push(options[i].value);
-                          }
-                        }
-                        setFilterByStatus(selectedValues);
-                      }}
-                    >
-                      {statusLegend.map(status => (
-                        <option key={status.status} value={status.status} className="py-1">
-                          {status.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="text-xs text-white/70 mt-1">
-                      Use Ctrl+clique para selecionar múltiplos
-                    </div>
-                  </div>
-                  
-                  {/* Filtro por prazo */}
-                  <div>
-                    <label className="block text-sm font-medium text-white mb-2 flex items-center">
-                      <Calendar className="h-4 w-4 mr-2" />
-                      Prazo de Entrega
-                    </label>
-                    <select
-                      value={filterByDeadline}
-                      onChange={(e) => setFilterByDeadline(e.target.value)}
-                      className="w-full bg-white/20 backdrop-blur-sm border border-white/30 rounded-lg text-white p-2 focus:outline-none focus:ring-2 focus:ring-white/50"
-                    >
-                      <option value="all">Todos os prazos</option>
-                      <option value="late">Atrasados</option>
-                      <option value="today">Entrega hoje</option>
-                      <option value="week">Próximos 7 dias</option>
-                      <option value="month">Próximos 30 dias</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Layout Kanban */}
-          <div className="flex gap-6">
-            <div className="w-64 shrink-0 bg-white/20 backdrop-blur-sm rounded-lg shadow-lg border border-white/30 p-4 self-start sticky top-6">
-              <h3 className="text-base font-semibold mb-3 text-white">Status dos Pedidos</h3>
-              <div className="space-y-3">
-                {statusLegend.map(({ status, color, borderColor, label }) => (
-                  <div key={status} className="flex items-center space-x-3">
-                    <div className={`w-4 h-4 rounded-md ${color} border-2 ${borderColor}`}></div>
-                    <span className="text-sm font-medium text-white">{label}</span>
-                  </div>
-                ))}
-              </div>
-              
-              {ordersWithoutColumn.length > 0 && (
-                <div className="mt-8">
-                  <h3 className="text-base font-semibold mb-3 text-white">Pedidos sem Coluna</h3>
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                    {ordersWithoutColumn.map(order => (
-                      <div 
-                        key={order.id}
-                        className={`p-2 text-white rounded cursor-pointer
-                          ${shouldHighlight(order, searchTerm) 
-                            ? 'bg-blue-400/40 border border-blue-300/70' 
-                            : 'bg-gray-300/30 hover:bg-gray-300/50'
-                          }`}
-                        onClick={() => handleOrderClick(order)}
-                      >
-                        #{order.orderNumber} - {order.customer}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex-1 overflow-x-auto">
-              <div className="flex space-x-4 pb-4">
-                <DndContext
-                  sensors={sensors}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                >
-                  <div className="flex space-x-4">
-                    {columnsWithOrders.map((column) => (
-                      <KanbanColumn
-                        key={column.id}
-                        column={column}
-                        onEdit={() => handleEditColumn(column)}
-                        onDelete={() => handleDeleteColumn(column.id)}
-                        onOrderClick={handleOrderClick}
-                        highlightTerm={searchTerm}
-                        compactView={compactView}
-                      />
-                    ))}
-                  </div>
-                  <DragOverlay>
-                    {activeId && draggedOrder && (
-                      <KanbanCard
-                        order={draggedOrder}
-                        overlay
-                        compactView={compactView}
-                      />
-                    )}
-                  </DragOverlay>
-                </DndContext>
-              </div>
-            </div>
-          </div>
-
-          {isColumnModalOpen && (
-            <ColumnModal
-              column={selectedColumn}
-              onClose={() => {
-                setIsColumnModalOpen(false);
-                setSelectedColumn(null);
-              }}
-              onSave={handleSaveColumn}
-            />
-          )}
-
-          {isManageOrdersModalOpen && (
-            <ManageOrdersModal
-              orders={orders}
-              onClose={() => setIsManageOrdersModalOpen(false)}
-              onDelete={handleDeleteSelectedOrders}
-            />
-          )}
-
-          {isOrderModalOpen && selectedOrder && (
-            <OrderModal
-              order={selectedOrder}
-              onClose={() => {
-                setIsOrderModalOpen(false);
-                setSelectedOrder(null);
-              }}
-              onSave={handleSaveOrder}
-              projects={projects}
-            />
-          )}
-        </>
-      )}
     </div>
   );
 };
@@ -986,14 +986,6 @@ const Briefcase = (props: any) => {
       <path d="M16 21V5a2 12 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
     </svg>
   );
-};
-
-// Function to check if a date is today
-const isToday = (date: Date): boolean => {
-  const today = new Date();
-  return date.getDate() === today.getDate() &&
-    date.getMonth() === today.getMonth() &&
-    date.getFullYear() === today.getFullYear();
 };
 
 export default Kanban;

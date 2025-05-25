@@ -5,8 +5,9 @@ import { Order } from '../types/kanban';
 import { format, isPast, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { calculateOrderProgress } from '../utils/progress';
-import { FileText, FileCheck, Brush, Briefcase, CheckCircle, Clock, ClipboardCheck } from 'lucide-react';
+import { FileText, FileCheck, Brush, Briefcase, CheckCircle, Clock, ClipboardCheck, Calendar, Package, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { formatDate, formatNumber } from '../utils/format';
 
 interface KanbanCardProps {
   order: Order;
@@ -16,6 +17,7 @@ interface KanbanCardProps {
   highlight?: boolean;
   compactView?: boolean;
   columnTitle?: string;
+  onClick?: () => void;
 }
 
 const KanbanCard: React.FC<KanbanCardProps> = ({ 
@@ -25,7 +27,8 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   isSelected = false,
   highlight = false,
   compactView = false,
-  columnTitle
+  columnTitle,
+  onClick
 }) => {
   const {
     attributes,
@@ -62,18 +65,6 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
 
   // Check if the order is in the expedited column
   const isExpedited = columnTitle?.toLowerCase().includes('expedi');
-
-  // Format a date for display
-  const formatDate = (dateString: string) => {
-    try {
-      // Remove any timezone offset by using the date part only
-      const date = new Date(dateString.split('T')[0] + 'T00:00:00');
-      return format(date, 'dd/MM/yyyy', { locale: ptBR });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateString;
-    }
-  };
 
   // Map status to background and border colors
   const getStatusColors = (status: string) => {
@@ -134,10 +125,12 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     border-2 backdrop-blur-sm ${getStatusColors(order.status)}
     ${overlay ? 'shadow-lg' : 'shadow-sm'}
     ${isSelected ? 'ring-2 ring-blue-500' : ''}
-    ${isManaging ? 'ml-4' : ''}
+    ${isManaging ? 'ml-1' : ''}
     ${highlight ? 'animate-pulse bg-opacity-90' : ''}
-    cursor-grab hover:shadow-md transition-all hover:scale-[1.02]
-    ${compactView ? 'p-2 rounded' : 'p-4 rounded-lg'}
+    cursor-grab hover:shadow-md transition-all hover:scale-[1.005]
+    p-1.5 sm:p-2 rounded sm:rounded-md
+    text-[11px] sm:text-xs
+    leading-tight
   `;
 
   // Calculate days until delivery for in-progress orders
@@ -156,12 +149,27 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   const deliveryStatus = calculateDeliveryStatus();
   const isDueToday = !isCompleted && deliveryStatus === 0;
 
+  const getStatusColor = () => {
+    if (isCompleted) return 'bg-green-500/20 border-green-500/30';
+    if (isLate) return 'bg-red-500/20 border-red-500/30';
+    if (isOverdue) return 'bg-yellow-500/20 border-yellow-500/30';
+    return 'bg-blue-500/20 border-blue-500/30';
+  };
+
+  const getStatusIcon = () => {
+    if (isCompleted) return <CheckCircle2 className="h-4 w-4 text-green-400" />;
+    if (isLate) return <AlertTriangle className="h-4 w-4 text-red-400" />;
+    if (isOverdue) return <Clock className="h-4 w-4 text-yellow-400" />;
+    return <Package className="h-4 w-4 text-blue-400" />;
+  };
+
   if (compactView) {
     return (
       <div
         ref={setNodeRef}
         style={style}
         className={cardClasses}
+        onClick={!isManaging && onClick ? onClick : undefined}
         {...(!isManaging ? { ...attributes, ...listeners } : {})}
       >
         <div className="space-y-1">
@@ -173,7 +181,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
                 isLate ? 'bg-orange-200 text-orange-800' : 
                 'bg-blue-200 text-blue-800'
               }`}>
-                <CheckCircle className="h-3 w-3 mr-0.5" />
+                {getStatusIcon()}
                 {isEarly ? `${Math.abs(completionDiff!)}d antes` : 
                  isLate ? `${completionDiff}d após` : 
                  'No prazo'}
@@ -189,7 +197,6 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <div className="text-xs text-gray-600">
             <div className="truncate">{order.customer}</div>
           </div>
-          
           {/* Project display in compact view */}
           {order.projectName && (
             <div className="flex items-center text-xs text-gray-600">
@@ -202,12 +209,12 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all ${
-                calculateOrderProgress(order.items) === 100 ? 'bg-green-500' :
-                calculateOrderProgress(order.items) >= 70 ? 'bg-blue-500' :
-                calculateOrderProgress(order.items) >= 30 ? 'bg-yellow-500' :
+                (order.overallProgress ?? 0) === 100 ? 'bg-green-500' :
+                (order.overallProgress ?? 0) >= 70 ? 'bg-blue-500' :
+                (order.overallProgress ?? 0) >= 30 ? 'bg-yellow-500' :
                 'bg-red-500'
               }`}
-              style={{ width: `${calculateOrderProgress(order.items)}%` }}
+              style={{ width: `${order.overallProgress ?? 0}%` }}
             />
           </div>
           
@@ -257,6 +264,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
       ref={setNodeRef}
       style={style}
       className={cardClasses}
+      onClick={!isManaging && onClick ? onClick : undefined}
       {...(!isManaging ? { ...attributes, ...listeners } : {})}
     >
       <div className="space-y-2">
@@ -268,7 +276,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
               isLate ? 'bg-orange-200 text-orange-800' : 
               'bg-blue-200 text-blue-800'
             }`}>
-              <CheckCircle className="h-3.5 w-3.5 mr-1" />
+              {getStatusIcon()}
               {isEarly ? `${Math.abs(completionDiff!)}d antes` : 
                isLate ? `${completionDiff}d após` : 
                'No prazo'}
@@ -286,73 +294,63 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <div>OS: {order.internalOrderNumber}</div>
           <div>Início: {formatDate(order.startDate)}</div>
           <div>Entrega: {formatDate(order.deliveryDate)}</div>
-          {isCompleted && (
-            <div className="text-green-600 font-medium flex items-center">
-              <CheckCircle className="h-4 w-4 mr-1" />
-              Concluído: {formatDate(order.completedDate || '')}
+          {/* Project display */}
+          {order.projectName && (
+            <div className="text-sm flex items-center text-gray-700">
+              <Briefcase className="h-4 w-4 mr-1 text-gray-500" />
+              <span className="font-medium">{order.projectName}</span>
             </div>
           )}
-        </div>
-        
-        {/* Project display */}
-        {order.projectName && (
-          <div className="text-sm flex items-center text-gray-700">
-            <Briefcase className="h-4 w-4 mr-1 text-gray-500" />
-            <span className="font-medium">{order.projectName}</span>
+          
+          <div className="font-medium">
+            Peso Total: {formatNumber(order.totalWeight)} kg
           </div>
-        )}
-        
-        <div className="font-medium">
-          Peso Total: {order.totalWeight.toLocaleString('pt-BR', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          })}kg
-        </div>
 
-        {/* Quality Control Link - More prominent and repositioned */}
-        <Link 
-          to={`/quality?orderId=${order.id}`} 
-          onClick={(e) => e.stopPropagation()} 
-          className="flex items-center bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-1.5 rounded-lg text-sm mt-2 w-full justify-center font-medium"
-        >
-          <ClipboardCheck className="h-4 w-4 mr-2" />
-          Controle de Qualidade
-        </Link>
+          {/* Quality Control Link - More prominent and repositioned */}
+          <Link 
+            to={`/quality?orderId=${order.id}`} 
+            onClick={(e) => e.stopPropagation()} 
+            className="flex items-center bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-1.5 rounded-lg text-sm mt-2 w-full justify-center font-medium"
+          >
+            <ClipboardCheck className="h-4 w-4 mr-2" />
+            Controle de Qualidade
+          </Link>
 
-        {/* Checklist status indicators */}
-        {order.checklist && (
-          <div className="flex space-x-4 mt-1 text-sm">
-            <div className={`flex items-center ${order.checklist.drawings ? 'text-blue-600' : 'text-gray-400'}`}>
-              <FileText className="h-4 w-4 mr-1" />
-              <span>Desenhos</span>
+          {/* Checklist status indicators */}
+          {order.checklist && (
+            <div className="flex space-x-4 mt-1 text-sm">
+              <div className={`flex items-center ${order.checklist.drawings ? 'text-blue-600' : 'text-gray-400'}`}>
+                <FileText className="h-4 w-4 mr-1" />
+                <span>Desenhos</span>
+              </div>
+              <div className={`flex items-center ${order.checklist.inspectionTestPlan ? 'text-blue-600' : 'text-gray-400'}`}>
+                <FileCheck className="h-4 w-4 mr-1" />
+                <span>PIT</span>
+              </div>
+              <div className={`flex items-center ${order.checklist.paintPlan ? 'text-blue-600' : 'text-gray-400'}`}>
+                <Brush className="h-4 w-4 mr-1" />
+                <span>Pintura</span>
+              </div>
             </div>
-            <div className={`flex items-center ${order.checklist.inspectionTestPlan ? 'text-blue-600' : 'text-gray-400'}`}>
-              <FileCheck className="h-4 w-4 mr-1" />
-              <span>PIT</span>
-            </div>
-            <div className={`flex items-center ${order.checklist.paintPlan ? 'text-blue-600' : 'text-gray-400'}`}>
-              <Brush className="h-4 w-4 mr-1" />
-              <span>Pintura</span>
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Progress bar */}
-        <div className="mt-2">
-          <div className="flex justify-between text-sm mb-1">
-            <span className="font-medium text-gray-700">Progresso</span>
-            <span className="text-gray-600">{calculateOrderProgress(order.items)}%</span>
-          </div>
-          <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div
-              className={`h-full transition-all ${
-                calculateOrderProgress(order.items) === 100 ? 'bg-green-500' :
-                calculateOrderProgress(order.items) >= 70 ? 'bg-blue-500' :
-                calculateOrderProgress(order.items) >= 30 ? 'bg-yellow-500' :
-                'bg-red-500'
-              }`}
-              style={{ width: `${calculateOrderProgress(order.items)}%` }}
-            />
+          {/* Progress bar */}
+          <div className="mt-2">
+            <div className="flex justify-between text-sm mb-1">
+              <span className="font-medium text-gray-700">Progresso</span>
+              <span className="text-gray-600">{order.overallProgress ?? 0}%</span>
+            </div>
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all ${
+                  (order.overallProgress ?? 0) === 100 ? 'bg-green-500' :
+                  (order.overallProgress ?? 0) >= 70 ? 'bg-blue-500' :
+                  (order.overallProgress ?? 0) >= 30 ? 'bg-yellow-500' :
+                  'bg-red-500'
+                }`}
+                style={{ width: `${order.overallProgress ?? 0}%` }}
+              />
+            </div>
           </div>
         </div>
       </div>

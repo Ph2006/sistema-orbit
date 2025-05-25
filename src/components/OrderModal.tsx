@@ -55,20 +55,20 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 
   // Calcular o peso total quando os itens mudam
   const totalWeight = useMemo(() => {
-    return formData.items.reduce((total, item) => total + (item.quantity * item.weight), 0);
+    return formData.items.reduce((total, item) => total + (item.totalWeight || (item.unitWeight * item.quantity)), 0);
   }, [formData.items]);
 
   // Calcular o peso total dos itens selecionados
   const selectedItemsWeight = useMemo(() => {
     return formData.items
       .filter(item => selectedItems.has(item.id))
-      .reduce((total, item) => total + (item.quantity * item.weight), 0);
+      .reduce((total, item) => total + (item.totalWeight || (item.unitWeight * item.quantity)), 0);
   }, [formData.items, selectedItems]);
 
   useEffect(() => {
     const fetchCustomers = async () => {
       try {
-        const customersCollection = collection(getCompanyCollection(db), 'customers');
+        const customersCollection = collection(db, getCompanyCollection('customers'));
         const customersSnapshot = await getDocs(customersCollection);
         const customersList = customersSnapshot.docs.map(doc => ({
           id: doc.id,
@@ -83,6 +83,35 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     fetchCustomers();
   }, []);
 
+  // useEffect para sincronizar formData com order, customers e projects
+  useEffect(() => {
+    if (order) {
+      setFormData({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        startDate: order.startDate,
+        deliveryDate: order.deliveryDate,
+        internalOrderNumber: order.internalOrderNumber,
+        totalWeight: order.totalWeight,
+        status: order.status,
+        items: order.items,
+        driveLinks: order.driveLinks,
+        customer: order.customer,
+        columnId: order.columnId,
+        deleted: order.deleted || false,
+        checklist: {
+          drawings: typeof order?.checklist?.drawings === 'boolean' ? order.checklist.drawings : false,
+          inspectionTestPlan: typeof order?.checklist?.inspectionTestPlan === 'boolean' ? order.checklist.inspectionTestPlan : false,
+          paintPlan: typeof order?.checklist?.paintPlan === 'boolean' ? order.checklist.paintPlan : false,
+        },
+        projectId: order.projectId || '',
+        projectName: order.projectName || '',
+        completedDate: order.completedDate || '',
+        lastExportDate: order.lastExportDate || '',
+      });
+    }
+  }, [order, customers, projects]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     
@@ -92,8 +121,9 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       setFormData({
         ...formData,
         checklist: {
-          ...formData.checklist,
-          [checklistItem]: checkbox.checked
+          drawings: checklistItem === 'drawings' ? checkbox.checked : !!formData.checklist?.drawings,
+          inspectionTestPlan: checklistItem === 'inspectionTestPlan' ? checkbox.checked : !!formData.checklist?.inspectionTestPlan,
+          paintPlan: checklistItem === 'paintPlan' ? checkbox.checked : !!formData.checklist?.paintPlan,
         }
       });
     } else {
@@ -104,22 +134,15 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   const handleAddItem = () => {
     const newItem: OrderItem = {
       id: `item-${Date.now()}`,
-      name: '',
+      itemNumber: formData.items.length + 1,
+      code: '',
       description: '',
       quantity: 1,
-      weight: 0,
-      status: 'pending',
-      progress: 0,
-      checklist: {
-        design: false,
-        programming: false,
-        cutting: false,
-        bending: false,
-        welding: false,
-        painting: false,
-        packing: false,
-      },
-      progressHistory: []
+      unitWeight: 0,
+      totalWeight: 0,
+      unitPrice: 0,
+      totalPrice: 0,
+      progress: {},
     };
 
     setFormData({
@@ -181,12 +204,33 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     });
   };
 
+  // Função utilitária para garantir formato yyyy-MM-dd
+  const toDateInput = (dateStr: string) => {
+    if (!dateStr) return '';
+    return dateStr.split('T')[0];
+  };
+
   const handleSave = () => {
+    // Calcular menor data de início e maior data de término dos itens/etapas
+    let minStart = formData.startDate;
+    let maxEnd = formData.deliveryDate;
+
+    formData.items.forEach(item => {
+      if (item.stagePlanning) {
+        Object.values(item.stagePlanning).forEach((etapa: any) => {
+          if (etapa.startDate && (!minStart || etapa.startDate < minStart)) minStart = etapa.startDate;
+          if (etapa.endDate && (!maxEnd || etapa.endDate > maxEnd)) maxEnd = etapa.endDate;
+        });
+      }
+    });
+
     const updatedOrder = {
       ...formData,
-      totalWeight // Usar o valor calculado com useMemo
-    };
-
+      totalWeight,
+      overallProgress: formData.overallProgress,
+      startDate: toDateInput(minStart),
+      deliveryDate: toDateInput(maxEnd)
+    } as any;
     onSave(updatedOrder);
     onClose();
   };
@@ -217,11 +261,18 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   };
 
   const handleUpdateItemProgress = (updatedItem: OrderItem) => {
-    setFormData({
-      ...formData,
-      items: formData.items.map(item => 
-        item.id === updatedItem.id ? updatedItem : item
-      )
+    setFormData((prev) => {
+      const updatedItems = prev.items.map(item => item.id === updatedItem.id ? { ...item, ...updatedItem } : item);
+      // Calcule o progresso geral do pedido (média dos overallProgress dos itens)
+      const overallProgress =
+        updatedItems.length > 0
+          ? Math.round(updatedItems.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / updatedItems.length)
+          : 0;
+      return {
+        ...prev,
+        items: updatedItems,
+        overallProgress
+      };
     });
     setIsItemProgressModalOpen(false);
   };
@@ -268,11 +319,11 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     ];
     
     const tableRows = selectedItemsList.map(item => [
-      item.name,
+      item.itemNumber,
       item.description,
       item.quantity.toString(),
-      item.weight.toFixed(2),
-      (item.quantity * item.weight).toFixed(2)
+      item.unitWeight.toFixed(2),
+      (item.totalWeight || (item.unitWeight * item.quantity)).toFixed(2)
     ]);
     
     let finalY = 0;
@@ -292,7 +343,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
         fontSize: 10
       },
       didDrawPage: (data) => {
-        finalY = data.cursor.y;
+        finalY = data.cursor ? data.cursor.y : 0;
       }
     });
     
@@ -311,10 +362,11 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
 
   // Gerar PDF com os detalhes da ordem e cronograma
   const generatePdf = () => {
-    const doc = new jsPDF();
+    // PDF em paisagem, tamanho A3
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const centerX = pageWidth / 2;
-    
+
     // Adicionar logo se disponível
     if (companyLogo) {
       try {
@@ -323,84 +375,137 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
         console.error("Erro ao adicionar logo:", error);
       }
     }
-    
-    // Cabeçalho do documento
-    doc.setFontSize(20);
-    doc.text("Ordem de Serviço - Cronograma", centerX, 20, { align: 'center' });
-    
+
+    // Título
+    doc.setFontSize(24);
+    doc.text("Cronograma", centerX, 20, { align: 'center' });
+
+    // Cabeçalho
     doc.setFontSize(12);
     doc.text(`Número: ${formData.orderNumber}`, 10, 40);
     doc.text(`Cliente: ${customers.find(c => c.id === formData.customer)?.name || formData.customer}`, 10, 50);
-    doc.text(`Data de início: ${format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 60);
-    doc.text(`Data de entrega: ${format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 70);
-    
-    // Calcular duração total do projeto em dias
-    const projectDuration = differenceInDays(new Date(formData.deliveryDate), new Date(formData.startDate)) || 1;
-    
-    // Tabela de itens com cronograma
+    doc.text(`Projeto: ${formData.projectName || (projects.find(p => p.id === formData.projectId)?.name || '-')}`, 10, 60);
+    doc.text(`Data de início: ${format(new Date(formData.startDate), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 70);
+    doc.text(`Data de entrega: ${format(new Date(formData.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 10, 80);
+    doc.text(`Última atualização: ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`, 10, 90);
+
+    // Tabela de itens e etapas
     const tableColumn = [
-      "Item", 
-      "Descrição", 
-      "Qtd", 
-      "Peso (kg)", 
-      "Total (kg)",
-      "Início Previsto",
-      "Entrega Prevista", 
-      "Progresso",
-      "Status"
+      "Item",
+      "Descrição",
+      "Progresso Geral",
+      "Entrega Prevista",
+      "Etapa",
+      "Início",
+      "Término",
+      "Progresso da Etapa"
     ];
-    
-    const tableRows = formData.items.map((item, index) => {
-      // Distribuir itens ao longo do período do projeto (simplificação)
-      const itemStartOffset = Math.floor((index / formData.items.length) * projectDuration);
-      const itemDuration = Math.max(1, Math.floor(projectDuration / formData.items.length));
+
+    // Montar linhas: cada linha = uma etapa de um item
+    const tableRows: any[] = [];
+    formData.items.forEach(item => {
+      // Buscar maior data de término das etapas
+      let entregaPrevista = '-';
+      const etapas = item.stagePlanning ? Object.values(item.stagePlanning) : [];
+      if (etapas.length > 0) {
+        const datasFim = etapas.map((etapa: any) => etapa.endDate).filter(Boolean);
+        if (datasFim.length > 0) {
+          const maxDate = datasFim.reduce((max, curr) => (curr > max ? curr : max), datasFim[0]);
+          entregaPrevista = format(new Date(maxDate), 'dd/MM/yyyy', { locale: ptBR });
+        }
+      }
+      // Linha de cabeçalho do item com todas as células em negrito
+      tableRows.push({
+        row: [
+          item.itemNumber,
+          item.description,
+          `${item.overallProgress ? Math.round(item.overallProgress) : 0}%`,
+          entregaPrevista,
+          '', '', '', ''
+        ],
+        isItemHeader: true,
+        styles: {
+          fontStyle: 'bold',
+          fillColor: [220, 230, 241],
+          textColor: [40, 40, 40]
+        }
+      });
       
-      const itemStartDate = addDays(new Date(formData.startDate), itemStartOffset);
-      const itemEndDate = addDays(itemStartDate, itemDuration);
-      
-      return [
-        item.name,
-        item.description,
-        item.quantity.toString(),
-        item.weight.toFixed(2),
-        (item.quantity * item.weight).toFixed(2),
-        format(itemStartDate, 'dd/MM/yyyy', { locale: ptBR }),
-        format(itemEndDate, 'dd/MM/yyyy', { locale: ptBR }),
-        `${calculateItemProgress(item)}%`,
-        item.status === 'pending' ? 'Pendente' : 
-          item.status === 'in-progress' ? 'Em Andamento' : 'Concluído'
-      ];
+      // Linhas das etapas
+      let etapasEntries = item.stagePlanning ? Object.entries(item.stagePlanning) : [];
+      // Ordenar por data de início
+      etapasEntries = etapasEntries.sort((a, b) => {
+        const aDate = a[1].startDate ? new Date(a[1].startDate).getTime() : 0;
+        const bDate = b[1].startDate ? new Date(b[1].startDate).getTime() : 0;
+        return aDate - bDate;
+      });
+      etapasEntries.forEach(([etapaNome, etapaDados]) => {
+        let etapaProgress = '-';
+        if (item.progress && typeof item.progress === 'object' && item.progress[etapaNome] !== undefined) {
+          etapaProgress = `${item.progress[etapaNome]}%`;
+        }
+        tableRows.push({
+          row: [
+            '', '', '', '',
+            etapaNome,
+            etapaDados.startDate ? format(new Date(etapaDados.startDate), 'dd/MM/yyyy', { locale: ptBR }) : '-',
+            etapaDados.endDate ? format(new Date(etapaDados.endDate), 'dd/MM/yyyy', { locale: ptBR }) : '-',
+            etapaProgress
+          ],
+          isItemHeader: false
+        });
+      });
     });
-    
+
     // Variável para armazenar a posição Y final
     let finalY = 0;
-    
+
     autoTable(doc, {
       head: [tableColumn],
-      body: tableRows,
-      startY: 80,
+      body: tableRows.map(r => r.row),
+      startY: 100,
       headStyles: { fillColor: [41, 128, 185] },
-      columnStyles: {
-        0: { cellWidth: 25 }, // Item
-        1: { cellWidth: 30 }, // Descrição
-      },
       styles: {
         overflow: 'linebreak',
         cellPadding: 2,
         fontSize: 9
       },
+      showHead: 'firstPage',
+      didDrawCell: (data) => {
+        // Destacar datas que contenham 'HP'
+        if ((data.column.index === 5 || data.column.index === 6) && typeof data.cell.raw === 'string' && data.cell.raw.includes('HP')) {
+          data.cell.styles.fillColor = [255, 230, 0]; // Amarelo
+          data.cell.styles.textColor = [0, 0, 0];
+        }
+        // Destacar linha de etapa concluída (progresso da etapa = 100%)
+        if (data.row && data.row.raw && Array.isArray(data.row.raw)) {
+          const progressoEtapa = data.row.raw[7];
+          if (typeof progressoEtapa === 'string' && progressoEtapa.replace('%','').trim() === '100') {
+            const cells = Object.values(data.row.cells || {}) as any[];
+            cells.forEach((cell) => {
+              cell.styles.fillColor = [200, 255, 200]; // Verde suave
+            });
+          }
+        }
+        // Negrito apenas nas células da linha do item (isItemHeader)
+        if (data.row && tableRows[data.row.index] && tableRows[data.row.index].isItemHeader) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [220, 230, 241]; // Azul claro
+          data.cell.styles.textColor = [40, 40, 40]; // Texto mais escuro
+        }
+      },
       didDrawPage: (data) => {
-        finalY = data.cursor.y;
+        finalY = data.cursor ? data.cursor.y : 0;
       }
     });
-    
+
     // Adicionar peso total e data de exportação
     doc.text(`Peso total: ${totalWeight.toFixed(2)} kg`, 10, finalY + 10);
     doc.text(`Data de exportação: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 10, finalY + 20);
-    
+
     // Salvar o PDF
     doc.save(`Cronograma_${formData.orderNumber}.pdf`);
-    
+
     // Atualizar a data da última exportação
     setFormData({
       ...formData,
@@ -457,311 +562,298 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
         </div>
         
         <div className="p-4">
-          {/* Seção de informações gerais */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block mb-1 text-sm font-medium">Número da Ordem</label>
-              <input
-                type="text"
-                name="orderNumber"
-                value={formData.orderNumber}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border rounded-md"
-              />
+          {/* Informações principais do pedido - destaque no topo */}
+          <div className="mb-4 p-3 rounded-lg bg-gray-100 border border-gray-200 flex flex-wrap gap-4 items-center justify-between text-sm">
+            <div><span className="font-semibold">Nº Ordem:</span> {formData.orderNumber}</div>
+            <div><span className="font-semibold">Nº Interno:</span> {formData.internalOrderNumber}</div>
+            <div><span className="font-semibold">Cliente:</span> {(() => {
+              // Se for ID, busca na lista; se for nome, mostra direto
+              const found = customers.find(c => c.id === formData.customer);
+              return found ? found.name : formData.customer || '-';
+            })()}</div>
+            <div><span className="font-semibold">Projeto:</span> {(() => {
+              if (formData.projectName) return formData.projectName;
+              const found = projects.find(p => p.id === formData.projectId);
+              return found ? found.name : 'Sem projeto';
+            })()}</div>
+            <div><span className="font-semibold">Início:</span> {formData.startDate ? format(new Date(formData.startDate), 'dd/MM/yyyy') : '-'}</div>
+            <div><span className="font-semibold">Entrega:</span> {formData.deliveryDate ? format(new Date(formData.deliveryDate), 'dd/MM/yyyy') : '-'}</div>
+            <div><span className="font-semibold">Peso Total:</span> {(() => {
+              const sum = formData.items.reduce((total, item) => {
+                if (typeof item.totalWeight === 'number' && !isNaN(item.totalWeight)) return total + item.totalWeight;
+                if (typeof item.unitWeight === 'number' && typeof item.quantity === 'number') return total + (item.unitWeight * item.quantity);
+                return total;
+              }, 0);
+              return sum > 0 ? sum.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' kg' : '-';
+            })()}</div>
+          </div>
+          {/* Bloco: Dados do Pedido */}
+          <div className="mb-4 p-4 rounded-lg bg-gray-50 border border-gray-200 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="block mb-1 text-xs font-medium">Número da Ordem</label>
+                <input type="text" name="orderNumber" value={formData.orderNumber} onChange={handleChange} className="w-full px-2 py-1 border rounded-md text-sm" />
+              </div>
+              <div>
+                <label className="block mb-1 text-xs font-medium">Número Interno</label>
+                <input type="text" name="internalOrderNumber" value={formData.internalOrderNumber} onChange={handleChange} className="w-full px-2 py-1 border rounded-md text-sm" />
+              </div>
+              <div>
+                <label className="block mb-1 text-xs font-medium">Status</label>
+                <select name="status" value={formData.status} onChange={handleChange} className="w-full px-2 py-1 border rounded-md text-sm">
+                  <option value="pending">Pendente</option>
+                  <option value="in-progress">Em Andamento</option>
+                  <option value="completed">Concluído</option>
+                  <option value="cancelled">Cancelado</option>
+                </select>
+              </div>
+              <div>
+                <label className="block mb-1 text-xs font-medium">Data de Início</label>
+                <input type="date" name="startDate" value={formData.startDate} onChange={handleChange} className="w-full px-2 py-1 border rounded-md text-sm" />
+              </div>
+              <div>
+                <label className="block mb-1 text-xs font-medium">Data de Entrega</label>
+                <input type="date" name="deliveryDate" value={formData.deliveryDate} onChange={handleChange} className="w-full px-2 py-1 border rounded-md text-sm" />
+              </div>
+              <div>
+                <label className="block mb-1 text-xs font-medium">Cliente</label>
+                <select name="customer" value={formData.customer} onChange={handleChange} className="w-full px-2 py-1 border rounded-md text-sm">
+                  <option value="">Selecione um cliente</option>
+                  {customers.map(customer => (
+                    <option key={customer.id} value={customer.id}>{customer.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block mb-1 text-xs font-medium">Projeto</label>
+                <select name="projectId" value={formData.projectId} onChange={handleChange} className="w-full px-2 py-1 border rounded-md text-sm">
+                  <option value="">Sem projeto</option>
+                  {projects.map(project => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            
-            <div>
-              <label className="block mb-1 text-sm font-medium">Número Interno</label>
-              <input
-                type="text"
-                name="internalOrderNumber"
-                value={formData.internalOrderNumber}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border rounded-md"
-              />
-            </div>
-            
-            <div>
-              <label className="block mb-1 text-sm font-medium">Data de Início</label>
-              <input
-                type="date"
-                name="startDate"
-                value={formData.startDate}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border rounded-md"
-              />
-            </div>
-            
-            <div>
-              <label className="block mb-1 text-sm font-medium">Data de Entrega</label>
-              <input
-                type="date"
-                name="deliveryDate"
-                value={formData.deliveryDate}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border rounded-md"
-              />
-            </div>
-            
-            <div>
-              <label className="block mb-1 text-sm font-medium">Cliente</label>
-              <select
-                name="customer"
-                value={formData.customer}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border rounded-md"
-              >
-                <option value="">Selecione um cliente</option>
-                {customers.map(customer => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            <div>
-              <label className="block mb-1 text-sm font-medium">Status</label>
-              <select
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border rounded-md"
-              >
-                <option value="pending">Pendente</option>
-                <option value="in-progress">Em Andamento</option>
-                <option value="completed">Concluído</option>
-                <option value="cancelled">Cancelado</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block mb-1 text-sm font-medium">Projeto</label>
-              <select
-                name="projectId"
-                value={formData.projectId}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border rounded-md"
-              >
-                <option value="">Sem projeto</option>
-                {projects.map(project => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center space-x-4">
+            {/* Checklist em linha */}
+            <div className="flex flex-wrap gap-4 items-center mt-4">
               <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  data-checklist-item="drawings"
-                  name="checklist"
-                  checked={formData.checklist?.drawings || false}
-                  onChange={handleChange}
-                  className="mr-2"
-                />
-                <label>Desenhos</label>
+                <input type="checkbox" data-checklist-item="drawings" name="checklist" checked={formData.checklist?.drawings || false} onChange={handleChange} className="mr-1" />
+                <label className="text-xs">Desenhos</label>
               </div>
               <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  data-checklist-item="inspectionTestPlan"
-                  name="checklist"
-                  checked={formData.checklist?.inspectionTestPlan || false}
-                  onChange={handleChange}
-                  className="mr-2"
-                />
-                <label>Plano de Inspeção</label>
+                <input type="checkbox" data-checklist-item="inspectionTestPlan" name="checklist" checked={formData.checklist?.inspectionTestPlan || false} onChange={handleChange} className="mr-1" />
+                <label className="text-xs">Plano de Inspeção</label>
               </div>
               <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  data-checklist-item="paintPlan"
-                  name="checklist"
-                  checked={formData.checklist?.paintPlan || false}
-                  onChange={handleChange}
-                  className="mr-2"
-                />
-                <label>Plano de Pintura</label>
+                <input type="checkbox" data-checklist-item="paintPlan" name="checklist" checked={formData.checklist?.paintPlan || false} onChange={handleChange} className="mr-1" />
+                <label className="text-xs">Plano de Pintura</label>
               </div>
             </div>
           </div>
-          
-          {/* Links do Drive */}
-          <div className="mb-6">
+          <hr className="my-4" />
+          {/* Bloco: Links Google Drive */}
+          <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-medium">Links Google Drive</h3>
-              <button
-                onClick={handleAddLink}
-                className="px-2 py-1 bg-blue-500 text-white rounded-md flex items-center text-sm"
-              >
-                <Plus size={16} className="mr-1" /> Adicionar Link
-              </button>
+              <h3 className="text-base font-medium">Links Google Drive</h3>
+              <button onClick={handleAddLink} className="px-2 py-1 bg-blue-500 text-white rounded-md flex items-center text-xs"><Plus size={14} className="mr-1" /> Adicionar Link</button>
             </div>
-            
             {formData.driveLinks.map((link, index) => (
-              <div key={index} className="flex items-center mb-2">
+              <div key={index} className="flex items-center mb-2 gap-2">
                 <input
                   type="text"
                   value={link}
                   onChange={(e) => handleLinkChange(index, e.target.value)}
-                  className="flex-1 px-3 py-2 border rounded-md mr-2"
+                  className="flex-1 px-2 py-1 border rounded-md mr-2 text-xs"
                   placeholder="https://drive.google.com/..."
                 />
-                <button
-                  onClick={() => handleRemoveLink(index)}
-                  className="p-2 text-red-500 hover:bg-red-100 rounded-md"
-                >
-                  <Trash2 size={18} />
+                {link && link.startsWith('http') && (
+                  <a href={link} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs mr-2">Abrir</a>
+                )}
+                <button onClick={() => handleRemoveLink(index)} className="p-2 text-red-500 hover:bg-red-100 rounded-md">
+                  <Trash2 size={16} />
                 </button>
               </div>
             ))}
           </div>
-          
-          {/* Itens da ordem */}
-          <div>
+          <hr className="my-4" />
+          {/* Bloco: Itens */}
+          <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-medium">Itens</h3>
-              <div className="flex space-x-2">
+              <h3 className="text-base font-medium">Itens</h3>
+              <div className="flex gap-2">
                 <button
-                  onClick={handleAddItem}
-                  className="px-2 py-1 bg-blue-500 text-white rounded-md flex items-center text-sm"
+                  onClick={toggleAllItems}
+                  className="px-2 py-1 bg-gray-200 text-gray-800 rounded-md text-xs border border-gray-300 hover:bg-gray-300"
                 >
-                  <Plus size={16} className="mr-1" /> Adicionar Item
+                  {areAllItemsSelected ? 'Desmarcar todos' : 'Marcar todos'}
                 </button>
+                <button onClick={handleAddItem} className="px-2 py-1 bg-blue-500 text-white rounded-md flex items-center text-xs"><Plus size={14} className="mr-1" /> Adicionar Item</button>
               </div>
             </div>
-            
-            {formData.items.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="min-w-full bg-white border">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-2 border">
-                        <div className="flex items-center">
-                          <div onClick={toggleAllItems} className="cursor-pointer mr-2">
-                            {areAllItemsSelected ? <CheckSquare size={18} /> : <Square size={18} />}
-                          </div>
-                          Item
-                        </div>
-                      </th>
-                      <th className="px-4 py-2 border">Descrição</th>
-                      <th className="px-4 py-2 border">Qtd</th>
-                      <th className="px-4 py-2 border">Peso (kg)</th>
-                      <th className="px-4 py-2 border">Peso Total (kg)</th>
-                      <th className="px-4 py-2 border">Status</th>
-                      <th className="px-4 py-2 border">Progresso</th>
-                      <th className="px-4 py-2 border">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {formData.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="px-4 py-2 border">
+            <div className="overflow-x-auto max-h-[500px] border rounded-lg shadow-inner bg-white text-xs sm:text-sm">
+              <table className="min-w-full border">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-1 py-2 border whitespace-nowrap min-w-[40px] w-[40px] text-center">Nº Item</th>
+                    <th className="px-2 py-2 border whitespace-nowrap min-w-[110px] w-[130px]">Código</th>
+                    <th className="px-2 py-2 border min-w-[180px] w-[300px] whitespace-normal break-words">Descrição</th>
+                    <th className="px-2 py-2 border min-w-[35px] w-[45px] text-center">Qtd</th>
+                    <th className="px-2 py-2 border min-w-[80px] w-[100px] text-center">Peso Unit. (kg)</th>
+                    <th className="px-2 py-2 border min-w-[90px] w-[110px] text-center">Peso Total (kg)</th>
+                    <th className="px-2 py-2 border min-w-[110px] w-[130px] text-center">Progresso</th>
+                    <th className="px-2 py-2 border min-w-[70px] w-[80px] text-center">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {formData.items.map((item) => (
+                    <React.Fragment key={item.id}>
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-2 py-2 border min-w-[90px]">
                           <div className="flex items-center">
-                            <div 
-                              onClick={() => toggleItemSelection(item.id)} 
-                              className="cursor-pointer mr-2"
-                            >
-                              {selectedItems.has(item.id) ? <CheckSquare size={18} /> : <Square size={18} />}
+                            <div onClick={() => toggleItemSelection(item.id)} className="cursor-pointer mr-2">
+                              {selectedItems.has(item.id) ? <CheckSquare size={16} /> : <Square size={16} />}
                             </div>
                             <input
                               type="text"
-                              value={item.name}
-                              onChange={(e) => handleItemChange(item.id, 'name', e.target.value)}
-                              className="w-full border-none focus:ring-0"
+                              value={item.itemNumber || ''}
+                              onChange={(e) => handleItemChange(item.id, 'itemNumber', e.target.value)}
+                              className="w-full border-none focus:ring-0 text-xs sm:text-sm"
                             />
                           </div>
                         </td>
-                        <td className="px-4 py-2 border">
+                        <td className="px-2 py-2 border min-w-[110px] w-[130px] whitespace-nowrap">
+                          <input
+                            type="text"
+                            value={item.code || ''}
+                            onChange={(e) => handleItemChange(item.id, 'code', e.target.value)}
+                            className="w-full border-none focus:ring-0 text-xs sm:text-sm"
+                          />
+                        </td>
+                        <td className="px-2 py-2 border min-w-[180px] w-[300px] whitespace-normal break-words">
                           <input
                             type="text"
                             value={item.description}
                             onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                            className="w-full border-none focus:ring-0"
+                            className="w-full border-none focus:ring-0 text-xs sm:text-sm"
                           />
                         </td>
-                        <td className="px-4 py-2 border">
+                        <td className="px-2 py-2 border min-w-[35px] w-[45px] text-center">
                           <input
                             type="number"
                             value={item.quantity}
                             onChange={(e) => handleItemChange(item.id, 'quantity', Number(e.target.value))}
-                            className="w-20 border-none focus:ring-0"
+                            className="w-14 border-none focus:ring-0 text-xs sm:text-sm"
                             min="1"
                           />
                         </td>
-                        <td className="px-4 py-2 border">
+                        <td className="px-2 py-2 border min-w-[80px] w-[100px] text-center">
                           <input
                             type="number"
-                            value={item.weight}
-                            onChange={(e) => handleItemChange(item.id, 'weight', Number(e.target.value))}
-                            className="w-20 border-none focus:ring-0"
+                            value={item.unitWeight || ''}
+                            onChange={(e) => handleItemChange(item.id, 'unitWeight', Number(e.target.value))}
+                            className="w-16 border-none focus:ring-0 text-xs sm:text-sm"
                             min="0"
                             step="0.01"
                           />
                         </td>
-                        <td className="px-4 py-2 border">
-                          {(item.quantity * item.weight).toFixed(2)}
+                        <td className="px-2 py-2 border min-w-[90px] w-[110px] text-center">
+                          {item.totalWeight ? item.totalWeight.toFixed(2) : (item.unitWeight * item.quantity).toFixed(2)}
                         </td>
-                        <td className="px-4 py-2 border">
-                          <select
-                            value={item.status}
-                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
-                            className="w-full border-none focus:ring-0"
-                          >
-                            <option value="pending">Pendente</option>
-                            <option value="in-progress">Em Andamento</option>
-                            <option value="completed">Concluído</option>
-                          </select>
-                        </td>
-                        <td className="px-4 py-2 border">
+                        <td className="px-2 py-2 border min-w-[110px] w-[130px] text-center">
                           <div className="flex items-center">
                             <div className="w-full bg-gray-200 rounded-full h-2.5 mr-2">
                               <div 
                                 className="bg-blue-600 h-2.5 rounded-full" 
-                                style={{ width: `${calculateProgress(item)}%` }}
+                                style={{ width: `${item.overallProgress || 0}%` }}
                               ></div>
                             </div>
-                            <span className="text-xs">{calculateProgress(item)}%</span>
+                            <span className="text-xs">{item.overallProgress ? Math.round(item.overallProgress) : 0}%</span>
                           </div>
                         </td>
-                        <td className="px-4 py-2 border">
+                        <td className="px-2 py-2 border min-w-[70px] w-[80px] text-center">
                           <div className="flex space-x-2">
                             <button
                               onClick={() => openItemProgressModal(item)}
                               className="p-1 text-blue-500 hover:bg-blue-100 rounded"
                               title="Atualizar Progresso"
                             >
-                              <BarChart size={18} />
+                              <BarChart size={16} />
+                            </button>
+                            <button
+                              onClick={() => alert('Editar item: ' + item.id)}
+                              className="p-1 text-yellow-600 hover:bg-yellow-100 rounded"
+                              title="Editar Item"
+                            >
+                              <Edit size={16} />
                             </button>
                             <button
                               onClick={() => handleRemoveItem(item.id)}
                               className="p-1 text-red-500 hover:bg-red-100 rounded"
                               title="Remover Item"
                             >
-                              <Trash2 size={18} />
+                              <Trash2 size={16} />
                             </button>
                           </div>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-gray-50">
-                      <td colSpan={4} className="px-4 py-2 text-right font-semibold">
-                        Peso Total:
-                      </td>
-                      <td className="px-4 py-2 font-semibold">
-                        {totalWeight.toFixed(2)} kg
-                      </td>
-                      <td colSpan={3}></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
+                      {item.progress && item.progress['Expedição'] === 100 && (
+                        <tr className="bg-green-50">
+                          <td colSpan={8} className="p-2">
+                            <div className="flex flex-wrap gap-4 items-center">
+                              <div>
+                                <label className="block text-xs font-medium mb-1">LE (Lista de Embarque)</label>
+                                <input
+                                  type="text"
+                                  value={item.expeditionLE || ''}
+                                  onChange={e => handleItemChange(item.id, 'expeditionLE', e.target.value)}
+                                  className="px-2 py-1 border rounded-md text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium mb-1">NF (Nota Fiscal)</label>
+                                <input
+                                  type="text"
+                                  value={item.invoiceNumber || ''}
+                                  onChange={e => handleItemChange(item.id, 'invoiceNumber', e.target.value)}
+                                  className="px-2 py-1 border rounded-md text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium mb-1">Data de Entrega</label>
+                                <input
+                                  type="date"
+                                  value={item.expeditionDate || ''}
+                                  onChange={e => handleItemChange(item.id, 'expeditionDate', e.target.value)}
+                                  className="px-2 py-1 border rounded-md text-xs"
+                                />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 sticky bottom-0">
+                    <td colSpan={4} className="px-2 sm:px-4 py-2 text-right font-semibold">
+                      Peso Total:
+                    </td>
+                    <td className="px-2 sm:px-4 py-2 font-semibold">
+                      {(() => {
+                        const sum = formData.items.reduce((total, item) => {
+                          if (typeof item.totalWeight === 'number' && !isNaN(item.totalWeight)) return total + item.totalWeight;
+                          if (typeof item.unitWeight === 'number' && typeof item.quantity === 'number') return total + (item.unitWeight * item.quantity);
+                          return total;
+                        }, 0);
+                        return sum > 0 ? sum.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' kg' : '-';
+                      })()}
+                    </td>
+                    <td colSpan={3}></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
             {selectedItems.size > 0 && (
               <div className="mt-2 text-right text-sm text-gray-600">
                 {selectedItems.size} {selectedItems.size === 1 ? 'item selecionado' : 'itens selecionados'} 
@@ -840,6 +932,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       {isItemProgressModalOpen && selectedItem && (
         <ItemProgressModal
           item={selectedItem}
+          allItems={formData.items}
           onClose={() => setIsItemProgressModalOpen(false)}
           onSave={handleUpdateItemProgress}
         />

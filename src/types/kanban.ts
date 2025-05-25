@@ -27,6 +27,8 @@ export interface OrderItem {
   expeditionDate?: string;
   completedDate?: string;
   overallProgress?: number;
+  deliveryDate?: string;
+  finishedDate?: string;
 }
 
 export interface ClientProject {

@@ -14,7 +14,8 @@ import {
   Trash2,
   AlertTriangle,
   Settings,
-  ShoppingBag
+  ShoppingBag,
+  Copy
 } from 'lucide-react';
 import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
@@ -548,6 +549,27 @@ const Quotations: React.FC = () => {
     });
   };
 
+  // Função para duplicar orçamento
+  const handleDuplicateQuotation = async (quotation: Quotation) => {
+    // Buscar próximo número sequencial
+    const nextNumber = await getNextQuoteNumber();
+    // Criar novo orçamento com as mesmas informações, mas novo número e status draft
+    const duplicatedQuotation: Quotation = {
+      ...quotation,
+      id: 'new',
+      number: nextNumber,
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      approvedAt: undefined,
+      rejectedAt: undefined,
+      expiresAt: undefined,
+      convertedToOrderId: undefined,
+    };
+    setSelectedQuotation(duplicatedQuotation);
+    setIsModalOpen(true);
+  };
+
   // Filter quotations based on search term, status, customer, and date range
   const filteredQuotations = quotations.filter(quotation => {
     // Apply search filter
@@ -852,9 +874,9 @@ const Quotations: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredQuotations.map((quotation) => (
+                    {filteredQuotations.map((quotation, idx) => (
                       <tr 
-                        key={quotation.id}
+                        key={quotation.id ? `${quotation.id}-${idx}` : idx}
                         className={`hover:bg-gray-50 ${
                           quotation.status === 'approved' ? 'bg-green-50' :
                           quotation.status === 'rejected' ? 'bg-red-50' :
@@ -1002,6 +1024,13 @@ const Quotations: React.FC = () => {
                               <ShoppingBag className="h-5 w-5" />
                             </button>
                           )}
+                          <button
+                            onClick={() => handleDuplicateQuotation(quotation)}
+                            className="text-gray-600 hover:text-gray-900 inline-block"
+                            title="Duplicar Orçamento"
+                          >
+                            <Copy className="h-5 w-5" />
+                          </button>
                           <button
                             onClick={() => handleDeleteQuotation(quotation)}
                             className="text-red-600 hover:text-red-800 inline-block"
