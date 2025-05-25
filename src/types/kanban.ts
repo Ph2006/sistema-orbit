@@ -68,6 +68,7 @@ export interface Order {
   items: OrderItem[];
   driveLinks: string[];
   customer: string;
+  customerName?: string;
   columnId: string | null; // Aceita coluna null
   deleted?: boolean; // Marca se o pedido foi excluído
   customerEmail?: string;
@@ -86,6 +87,7 @@ export interface Order {
   completedDate?: string;
   lastExportDate?: string; // Date when the order was last exported
   clientAccessLinks?: ClientAccessLink[];
+  overallProgress?: number;
 }
 
 export interface Column {

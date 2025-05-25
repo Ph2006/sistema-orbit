@@ -32,6 +32,7 @@ import CostCenter from './components/CostCenter';
 import AboutSystem from './components/AboutSystem';
 import InternalProcedures from './components/InternalProcedures';
 import QualityCalibration from './components/QualityCalibration';
+import PublicSchedulePage from './components/PublicSchedulePage';
 
 function App() {
   const { setUser, setLoading, companyId } = useAuthStore();
@@ -54,6 +55,7 @@ function App() {
         <Route path="/validate/:orderId" element={<DocumentValidation />} />
         <Route path="/scan/:code" element={<ProductionOrderScan />} />
         <Route path="/update/:code" element={<QRProgressScan />} />
+        <Route path="/cronograma/:orderId" element={<PublicSchedulePage />} />
         <Route path="/migrate" element={
           <PrivateRoute>
             <DataMigration />

@@ -13,6 +13,7 @@ import { Column, Order, OrderStatus } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
 import { useProjectStore } from '../store/projectStore';
+import { useCustomerStore } from '../store/customerStore';
 import { KanbanColumn } from './KanbanColumn';
 import KanbanCard from './KanbanCard';
 import ColumnModal from './ColumnModal';
@@ -112,6 +113,7 @@ const Kanban: React.FC = () => {
   } = useColumnStore();
   const { projects, subscribeToProjects } = useProjectStore();
   const { companyLogo } = useSettingsStore();
+  const { customers, loadCustomers, subscribeToCustomers } = useCustomerStore();
 
   useEffect(() => {
     const init = async () => {
@@ -209,6 +211,20 @@ const Kanban: React.FC = () => {
     };
     
     ensureOrdersHaveColumn();
+  }, [columns, orders, updateOrder]);
+
+  // Adicionar após o useEffect de ensureOrdersHaveColumn
+  React.useEffect(() => {
+    if (!columns.length || !orders.length) return;
+    const expedidosColumn = columns.find(col => col.title.toLowerCase().includes('expedi'));
+    if (!expedidosColumn) return;
+
+    orders.forEach(order => {
+      const isCompleted = order.status === 'completed' || !!order.completedDate;
+      if (isCompleted && order.columnId !== expedidosColumn.id) {
+        updateOrder({ ...order, columnId: expedidosColumn.id });
+      }
+    });
   }, [columns, orders, updateOrder]);
 
   const sensors = useSensors(
@@ -648,6 +664,12 @@ const Kanban: React.FC = () => {
   console.log('columns:', columns.map(c => ({ id: c.id, title: c.title })));
   console.log('orders:', filteredOrders.map(o => ({ id: o.id, columnId: o.columnId, deleted: o.deleted })));
 
+  useEffect(() => {
+    loadCustomers();
+    const unsubscribe = subscribeToCustomers();
+    return () => unsubscribe();
+  }, [loadCustomers, subscribeToCustomers]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
@@ -874,6 +896,7 @@ const Kanban: React.FC = () => {
                     compactView={compactView}
                     isManagingOrders={isManageOrdersModalOpen}
                     selectedOrders={selectedOrders}
+                    customers={customers}
                   />
                 ))}
               </div>

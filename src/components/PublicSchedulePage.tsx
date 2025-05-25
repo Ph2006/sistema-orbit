@@ -80,7 +80,7 @@ const PublicSchedulePage: React.FC = () => {
     
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, 15, { align: 'center' });
     
     doc.setFontSize(14);
@@ -96,7 +96,7 @@ const PublicSchedulePage: React.FC = () => {
     // 📊 RESUMO EXECUTIVO
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('RESUMO DO PROJETO', margin, currentY);
     currentY += 10;
 
@@ -109,20 +109,20 @@ const PublicSchedulePage: React.FC = () => {
     
     currentY += 8;
     doc.setFontSize(11);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     
     // Informações do cliente
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('Cliente:', margin + 5, currentY);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     doc.text(order.customer, margin + 25, currentY);
     
     currentY += 7;
     
     // Prazo
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('Prazo:', margin + 5, currentY);
-    doc.setFont(undefined, 'normal');
+    doc.setFont('helvetica', 'normal');
     if (daysRemaining < 0) {
       doc.setTextColor(220, 53, 69);
       doc.text(`${Math.abs(daysRemaining)} dias em atraso`, margin + 20, currentY);
@@ -139,7 +139,7 @@ const PublicSchedulePage: React.FC = () => {
 
     // 📈 PROGRESSO VISUAL
     doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('PROGRESSO POR ETAPA', margin, currentY);
     currentY += 10;
 
@@ -165,7 +165,7 @@ const PublicSchedulePage: React.FC = () => {
       
       // Nome da etapa
       doc.setFontSize(11);
-      doc.setFont(undefined, 'bold');
+      doc.setFont('helvetica', 'bold');
       doc.text(stage, margin, barY);
       
       // Barra de progresso
@@ -195,12 +195,12 @@ const PublicSchedulePage: React.FC = () => {
       doc.rect(barX, barY - 5, barWidth, barHeight);
       
       // Percentual
-      doc.setFont(undefined, 'bold');
       doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
       doc.text(`${progressPercent}%`, barX + barWidth + 5, barY);
       
       // Status em texto
-      doc.setFont(undefined, 'normal');
+      doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       const statusText = progressPercent === 100 ? '✓ Concluído' : 
                         progressPercent >= 70 ? '⚡ Finalizando' : 
@@ -212,7 +212,7 @@ const PublicSchedulePage: React.FC = () => {
 
     // 📋 TABELA DE ITENS
     doc.setFontSize(16);
-    doc.setFont(undefined, 'bold');
+    doc.setFont('helvetica', 'bold');
     doc.text('ITENS DO PEDIDO', margin, currentY);
     currentY += 5;
 
@@ -278,11 +278,11 @@ const PublicSchedulePage: React.FC = () => {
       doc.rect(margin, finalY, pageWidth - (2 * margin), 25);
       
       doc.setFontSize(12);
-      doc.setFont(undefined, 'bold');
+      doc.setFont('helvetica', 'bold');
       doc.text('DÚVIDAS OU INFORMAÇÕES?', pageWidth / 2, finalY + 8, { align: 'center' });
       
       doc.setFontSize(10);
-      doc.setFont(undefined, 'normal');
+      doc.setFont('helvetica', 'normal');
       doc.text('Entre em contato conosco para esclarecimentos sobre seu pedido.', pageWidth / 2, finalY + 15, { align: 'center' });
       doc.text('Este cronograma é atualizado automaticamente conforme o progresso da produção.', pageWidth / 2, finalY + 20, { align: 'center' });
     }
@@ -566,36 +566,3 @@ const PublicSchedulePage: React.FC = () => {
 };
 
 export default PublicSchedulePage;
-    doc.setFont(undefined, 'bold');
-    doc.text('Data de Início:', margin + 5, currentY);
-    doc.setFont(undefined, 'normal');
-    doc.text(format(new Date(order.startDate), 'dd/MM/yyyy', { locale: ptBR }), margin + 30, currentY);
-    
-    doc.setFont(undefined, 'bold');
-    doc.text('Previsão de Entrega:', margin + 100, currentY);
-    doc.setFont(undefined, 'normal');
-    doc.text(format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }), margin + 140, currentY);
-    
-    currentY += 7;
-    
-    // Status geral
-    const totalItems = order.items?.length || 0;
-    const overallProgress = totalItems > 0 ? Math.round(order.items!.reduce((sum, item) => sum + (calculateItemProgress(item.progress) || 0), 0) / totalItems) : 0;
-    const daysRemaining = differenceInDays(new Date(order.deliveryDate), new Date());
-    
-    doc.setFont(undefined, 'bold');
-    doc.text('Progresso Geral:', margin + 5, currentY);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(52, 152, 219);
-    doc.text(`${overallProgress}%`, margin + 35, currentY);
-    doc.setTextColor(0, 0, 0);
-    
-    doc.setFont(undefined, 'bold');
-    doc.text('Status:', margin + 100, currentY);
-    doc.setFont(undefined, 'normal');
-    const statusText = overallProgress === 100 ? 'Concluído' : 
-                      overallProgress >= 70 ? 'Quase Pronto' : 
-                      overallProgress >= 30 ? 'Em Produção' : 'Iniciando';
-    doc.text(statusText, margin + 115, currentY);
-    
-    currentY += 7;

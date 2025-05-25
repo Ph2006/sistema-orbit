@@ -211,6 +211,15 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
   };
 
   const handleSave = () => {
+    // Validação obrigatória das datas
+    if (!formData.startDate) {
+      alert('Por favor, preencha a data de início.');
+      return;
+    }
+    if (!formData.deliveryDate) {
+      alert('Por favor, preencha a data de entrega.');
+      return;
+    }
     // Calcular menor data de início e maior data de término dos itens/etapas
     let minStart = formData.startDate;
     let maxEnd = formData.deliveryDate;
@@ -568,7 +577,6 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
             <div><span className="font-semibold">Nº Ordem:</span> {formData.orderNumber}</div>
             <div><span className="font-semibold">Nº Interno:</span> {formData.internalOrderNumber}</div>
             <div><span className="font-semibold">Cliente:</span> {(() => {
-              // Se for ID, busca na lista; se for nome, mostra direto
               const found = customers.find(c => c.id === formData.customer);
               return found ? found.name : formData.customer || '-';
             })()}</div>
@@ -577,8 +585,8 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
               const found = projects.find(p => p.id === formData.projectId);
               return found ? found.name : 'Sem projeto';
             })()}</div>
-            <div><span className="font-semibold">Início:</span> {formData.startDate ? format(new Date(formData.startDate), 'dd/MM/yyyy') : '-'}</div>
-            <div><span className="font-semibold">Entrega:</span> {formData.deliveryDate ? format(new Date(formData.deliveryDate), 'dd/MM/yyyy') : '-'}</div>
+            <div><span className="font-semibold">Início:</span> {formData.startDate ? new Date(formData.startDate).toLocaleDateString('pt-BR') : '-'}</div>
+            <div><span className="font-semibold">Entrega:</span> {formData.deliveryDate ? new Date(formData.deliveryDate).toLocaleDateString('pt-BR') : '-'}</div>
             <div><span className="font-semibold">Peso Total:</span> {(() => {
               const sum = formData.items.reduce((total, item) => {
                 if (typeof item.totalWeight === 'number' && !isNaN(item.totalWeight)) return total + item.totalWeight;

@@ -18,6 +18,7 @@ interface KanbanCardProps {
   compactView?: boolean;
   columnTitle?: string;
   onClick?: () => void;
+  customers?: any[];
 }
 
 const KanbanCard: React.FC<KanbanCardProps> = ({ 
@@ -28,7 +29,8 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   highlight = false,
   compactView = false,
   columnTitle,
-  onClick
+  onClick,
+  customers
 }) => {
   const {
     attributes,
@@ -195,7 +197,13 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
             )}
           </div>
           <div className="text-xs text-gray-600">
-            <div className="truncate">{order.customer}</div>
+            <div className="truncate">{(() => {
+              if (customers && customers.length > 0) {
+                const found = customers.find(c => c.id === order.customer);
+                return found ? found.name : order.customer;
+              }
+              return order.customerName || order.customer;
+            })()}</div>
           </div>
           {/* Project display in compact view */}
           {order.projectName && (
@@ -290,7 +298,13 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           )}
         </div>
         <div className="text-sm text-gray-600">
-          <div>Cliente: {order.customer}</div>
+          <div>Cliente: {(() => {
+            if (customers && customers.length > 0) {
+              const found = customers.find(c => c.id === order.customer);
+              return found ? found.name : order.customer;
+            }
+            return order.customerName || order.customer;
+          })()}</div>
           <div>OS: {order.internalOrderNumber}</div>
           <div>Início: {formatDate(order.startDate)}</div>
           <div>Entrega: {formatDate(order.deliveryDate)}</div>
