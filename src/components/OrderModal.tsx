@@ -322,6 +322,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     // Tabela de itens selecionados
     const tableColumn = [
       "Item", 
+      "Código",
       "Descrição", 
       "Quantidade", 
       "Peso unitário (kg)", 
@@ -330,6 +331,7 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
     
     const tableRows = selectedItemsList.map(item => [
       item.itemNumber,
+      item.code || '-',
       item.description,
       item.quantity.toString(),
       item.unitWeight.toFixed(2),
@@ -344,8 +346,9 @@ const OrderModal: React.FC<OrderModalProps> = ({ order, onClose, onSave, project
       startY: 70,
       headStyles: { fillColor: [41, 128, 185] },
       columnStyles: {
-        0: { cellWidth: 40 }, // Nome do item
-        1: { cellWidth: 60 }, // Descrição
+        0: { cellWidth: 30 }, // Número do item
+        1: { cellWidth: 40 }, // Código
+        2: { cellWidth: 60 }, // Descrição
       },
       styles: { 
         overflow: 'linebreak',
