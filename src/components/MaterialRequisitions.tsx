@@ -34,11 +34,9 @@ import { useAuthStore } from '../store/authStore';
 
 // Função para obter a coleção correta baseada na empresa
 const getCompanyCollection = (collectionName: string, companyId: string | null): string => {
-  // TODO: Implementar lógica de múltiplas empresas se necessário
-  // Se não houver companyId (ex: usuário não logado), retornar uma coleção inválida ou vazia
   if (!companyId) {
     console.error("Company ID is not available.");
-    return 'invalidCollection'; // Use a placeholder or throw an error based on desired behavior
+    throw new Error("Company ID is required but not available");
   }
   return `companies/${companyId}/${collectionName}`;
 };
@@ -105,6 +103,20 @@ const MaterialRequisitions: React.FC = () => {
   const { suppliers, loadSuppliers, subscribeToSuppliers } = useSupplierStore();
   const { companyId } = useAuthStore();
 
+  // Early return se não houver companyId
+  if (!companyId) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h3 className="text-lg font-medium text-red-800">Erro de Autenticação</h3>
+          <p className="text-red-600 mt-2">
+            Não foi possível identificar a empresa. Por favor, faça login novamente.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   useEffect(() => {
     // Subscribe to order updates
     const unsubscribe = useOrderStore.getState().subscribeToOrders();
@@ -123,60 +135,72 @@ const MaterialRequisitions: React.FC = () => {
   }, [subscribeToSuppliers, loadSuppliers, suppliers.length]);
 
   useEffect(() => {
-    const fetchData = async () => {
+    let unsubscribeRequisitions: (() => void) | undefined;
+    let unsubscribeQuotations: (() => void) | undefined;
+
+    const setupListeners = async () => {
+      if (!companyId) {
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       try {
-        // Configurar listener em tempo real para requisições
+        // Configurar listener para requisições
         const requisitionsQuery = query(
           collection(db, getCompanyCollection('materialRequisitions', companyId)),
           orderBy('requestDate', 'desc')
         );
-        
         console.log("Setting up requisition listener for companyId:", companyId);
-        
-        const unsubscribeRequisitions = onSnapshot(requisitionsQuery, (snapshot) => {
-          const requisitionsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as MaterialRequisition[];
-          setRequisitions(requisitionsData);
-        });
-        
-        // Configurar listener em tempo real para cotações
+        unsubscribeRequisitions = onSnapshot(
+          requisitionsQuery,
+          (snapshot) => {
+            const requisitionsData = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            })) as MaterialRequisition[];
+            setRequisitions(requisitionsData);
+            setLoading(false);
+          },
+          (error) => {
+            console.error('Error listening to requisitions:', error);
+            setLoading(false);
+          }
+        );
+        // Configurar listener para cotações
         const quotationsQuery = query(
           collection(db, getCompanyCollection('quotationRequests', companyId)),
           orderBy('requestDate', 'desc')
         );
-        
         console.log("Setting up quotation listener for companyId:", companyId);
-        
-        const unsubscribeQuotations = onSnapshot(quotationsQuery, (snapshot) => {
-          const quotationsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as QuotationRequest[];
-          setQuotations(quotationsData);
-        });
-        
-        setLoading(false);
-        
-        // Retornar função de limpeza
-        return () => {
-          unsubscribeRequisitions();
-          unsubscribeQuotations();
-        };
+        unsubscribeQuotations = onSnapshot(
+          quotationsQuery,
+          (snapshot) => {
+            const quotationsData = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            })) as QuotationRequest[];
+            setQuotations(quotationsData);
+          },
+          (error) => {
+            console.error('Error listening to quotations:', error);
+          }
+        );
       } catch (error) {
         console.error('Error setting up listeners:', error);
         setLoading(false);
       }
     };
-    
-    // Fetch data only when companyId is available
-    if (companyId) {
-      fetchData();
-    } else {
-      setLoading(false); // Stop loading if companyId is not available
-    }
+    setupListeners();
+    // Cleanup function
+    return () => {
+      if (unsubscribeRequisitions) {
+        unsubscribeRequisitions();
+      }
+      if (unsubscribeQuotations) {
+        unsubscribeQuotations();
+      }
+    };
   }, [companyId]);
 
   const handleAddRequisition = () => {
@@ -199,14 +223,16 @@ const MaterialRequisitions: React.FC = () => {
   };
 
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
+    if (!companyId) {
+      alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
+      return;
+    }
     try {
       // Validar dados obrigatórios
       if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
         alert('Por favor, preencha todos os campos obrigatórios e adicione pelo menos um item.');
         return;
       }
-
-      // Verificar se é uma nova requisição ou atualização
       if (requisition.id === 'new') {
         // Verificar se já existe uma requisição similar
         const existingRequisitionsQuery = query(
@@ -214,34 +240,38 @@ const MaterialRequisitions: React.FC = () => {
           where('orderId', '==', requisition.orderId),
           where('requestDate', '==', requisition.requestDate)
         );
-        
         const existingRequisitions = await getDocs(existingRequisitionsQuery);
-        
         if (!existingRequisitions.empty) {
           alert('Já existe uma requisição para este pedido na mesma data. Por favor, verifique.');
           return;
         }
-
         // Create new requisition
         const { id, ...requisitionData } = requisition;
         const sanitizedData = sanitizeForFirestore(requisitionData);
+        console.log('[REQUISITION] Itens após sanitização:', sanitizedData.items);
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.updatedAt = new Date().toISOString();
-        
         console.log('[REQUISITION] Dados a serem salvos no Firestore:', sanitizedData);
-        const docRef = await addDoc(collection(db, getCompanyCollection('materialRequisitions', companyId)), sanitizedData);
+        const docRef = await addDoc(
+          collection(db, getCompanyCollection('materialRequisitions', companyId)),
+          sanitizedData
+        );
+        console.log('Requisição criada with ID:', docRef.id);
         alert('Requisição criada com sucesso!');
       } else {
         // Update existing requisition
         const { id, ...requisitionData } = requisition;
         const sanitizedData = sanitizeForFirestore(requisitionData);
+        console.log('[REQUISITION] Itens após sanitização:', sanitizedData.items);
         sanitizedData.updatedAt = new Date().toISOString();
-        
-        console.log('[REQUISITION] Dados a serem salvos no Firestore:', sanitizedData);
-        await updateDoc(doc(db, getCompanyCollection('materialRequisitions', companyId), id), sanitizedData);
+        console.log('[REQUISITION] Dados a serem atualizados no Firestore:', sanitizedData);
+        await updateDoc(
+          doc(db, getCompanyCollection('materialRequisitions', companyId), id),
+          sanitizedData
+        );
+        console.log('Requisição atualizada with ID:', id);
         alert('Requisição atualizada com sucesso!');
       }
-      
       setIsModalOpen(false);
       setSelectedRequisition(null);
     } catch (error) {
@@ -256,12 +286,18 @@ const MaterialRequisitions: React.FC = () => {
   };
 
   const handleSaveQuotationRequest = async (quotation: QuotationRequest, itemIds: string[]) => {
+    if (!companyId) {
+      alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
+      return;
+    }
     try {
       // Sanitize data for Firestore before saving
       const sanitizedQuotation = sanitizeForFirestore(quotation);
       // Add the quotation request
-      const docRef = await addDoc(collection(db, getCompanyCollection('quotationRequests', companyId)), sanitizedQuotation);
-      
+      const docRef = await addDoc(
+        collection(db, getCompanyCollection('quotationRequests', companyId)),
+        sanitizedQuotation
+      );
       // Update the requisition items to mark them as sent for quotation
       if (selectedRequisition) {
         const updatedItems = selectedRequisition.items.map(item => {
@@ -273,28 +309,27 @@ const MaterialRequisitions: React.FC = () => {
           }
           return item;
         });
-        
         const updateData = sanitizeForFirestore({
           items: updatedItems,
           lastUpdated: new Date().toISOString()
         });
-        
-        await updateDoc(doc(db, getCompanyCollection('materialRequisitions', companyId), selectedRequisition.id), updateData);
-        
+        await updateDoc(
+          doc(db, getCompanyCollection('materialRequisitions', companyId), selectedRequisition.id),
+          updateData
+        );
         // Update local state
-        setRequisitions(requisitions.map(r => 
-          r.id === selectedRequisition.id 
-            ? { ...r, items: updatedItems, lastUpdated: new Date().toISOString() } 
+        setRequisitions(requisitions.map(r =>
+          r.id === selectedRequisition.id
+            ? { ...r, items: updatedItems, lastUpdated: new Date().toISOString() }
             : r
         ));
       }
-      
       setQuotations([...quotations, { ...quotation, id: docRef.id }]);
       setIsQuotationModalOpen(false);
       alert('Solicitação de cotação enviada com sucesso!');
     } catch (error) {
       console.error('Error saving quotation request:', error);
-      alert('Erro ao salvar solicitação de cotação.');
+      alert(`Erro ao salvar solicitação de cotação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
 
