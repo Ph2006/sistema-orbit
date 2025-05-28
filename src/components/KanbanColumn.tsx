@@ -52,7 +52,15 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
     ? [...column.orders].sort((a, b) => {
         const dateA = a.deliveryDate ? new Date(a.deliveryDate).getTime() : Infinity;
         const dateB = b.deliveryDate ? new Date(b.deliveryDate).getTime() : Infinity;
-        return dateA - dateB;
+        
+        if (dateA !== Infinity && dateB !== Infinity) {
+          return dateA - dateB;
+        }
+        
+        if (dateA !== Infinity) return -1;
+        if (dateB !== Infinity) return 1;
+        
+        return 0;
       })
     : column.orders;
 

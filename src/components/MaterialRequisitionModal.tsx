@@ -55,6 +55,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     sentForQuotation: false
   });
   const [isQuotationMode, setIsQuotationMode] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
 
   // Load suppliers
   useEffect(() => {
@@ -167,38 +168,57 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     });
   };
 
-  const handleAddItem = () => {
+  const handleAddOrEditItem = () => {
     if (!formData.orderId || !newItem.orderItemId || !newItem.description || !newItem.material || !newItem.unit) {
       alert('Por favor, preencha todos os campos obrigatórios.');
       return;
     }
-
     const orderItem = orderItems.find(item => item.id === newItem.orderItemId);
     if (!orderItem) return;
 
-    const newMaterialItem: MaterialRequisitionItem = {
-      id: crypto.randomUUID(),
-      traceabilityCode: generateTraceabilityCode(formData.orderId, orderItem.id),
-      orderItemId: orderItem.id,
-      itemCode: orderItem.code,
-      description: newItem.description || '',
-      material: newItem.material || '',
-      quantity: newItem.quantity || 1,
-      unit: newItem.unit || '',
-      dimensions: newItem.dimensions || '',
-      weight: newItem.weight || 0,
-      surplusWeight: newItem.surplusWeight || 0,
-      totalWeight: (newItem.weight || 0) + (newItem.surplusWeight || 0),
-      status: 'pending',
-      sentForQuotation: false
-    };
-
-    setFormData(prev => ({
-      ...prev,
-      items: [...prev.items, newMaterialItem]
-    }));
-
-    // Reset new item form
+    if (editingItemId) {
+      // Atualizar item existente
+      setFormData(prev => ({
+        ...prev,
+        items: prev.items.map(item =>
+          item.id === editingItemId
+            ? {
+                ...item,
+                ...newItem,
+                id: editingItemId,
+                traceabilityCode: generateTraceabilityCode(formData.orderId, orderItem.id),
+                orderItemId: orderItem.id,
+                itemCode: orderItem.code,
+                totalWeight: (newItem.weight || 0) + (newItem.surplusWeight || 0),
+              }
+            : item
+        )
+      }));
+      setEditingItemId(null);
+    } else {
+      // Adicionar novo item
+      const newMaterialItem: MaterialRequisitionItem = {
+        id: crypto.randomUUID(),
+        traceabilityCode: generateTraceabilityCode(formData.orderId, orderItem.id),
+        orderItemId: orderItem.id,
+        itemCode: orderItem.code,
+        description: newItem.description || '',
+        material: newItem.material || '',
+        quantity: newItem.quantity || 1,
+        unit: newItem.unit || '',
+        dimensions: newItem.dimensions || '',
+        weight: newItem.weight || 0,
+        surplusWeight: newItem.surplusWeight || 0,
+        totalWeight: (newItem.weight || 0) + (newItem.surplusWeight || 0),
+        status: 'pending',
+        sentForQuotation: false
+      };
+      setFormData(prev => ({
+        ...prev,
+        items: [...prev.items, newMaterialItem]
+      }));
+    }
+    // Resetar formulário
     setNewItem({
       description: '',
       material: '',
@@ -550,13 +570,44 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                 <div className="flex justify-end">
                   <button
                     type="button"
-                    onClick={handleAddItem}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    onClick={handleAddOrEditItem}
+                    className={`px-4 py-2 ${editingItemId ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded-md`}
                     disabled={!newItem.orderItemId || !newItem.description || !newItem.material || !newItem.unit}
                   >
-                    <Plus className="h-5 w-5 inline-block mr-1" />
-                    Adicionar Item
+                    {editingItemId ? (
+                      <>
+                        <span className="inline-block mr-1">Salvar Modificações</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-5 w-5 inline-block mr-1" />
+                        Adicionar Item
+                      </>
+                    )}
                   </button>
+                  {editingItemId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingItemId(null);
+                        setNewItem({
+                          description: '',
+                          material: '',
+                          quantity: 1,
+                          unit: '',
+                          dimensions: '',
+                          weight: 0,
+                          surplusWeight: 0,
+                          totalWeight: 0,
+                          status: 'pending',
+                          sentForQuotation: false
+                        });
+                      }}
+                      className="ml-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      Cancelar
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -780,6 +831,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                                   if (found) orderItemId = found.id;
                                 }
                                 setNewItem({ ...item, orderItemId });
+                                setEditingItemId(item.id);
                               }}
                               className="text-blue-600 hover:text-blue-800"
                               title="Editar Item"

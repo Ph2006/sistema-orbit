@@ -225,16 +225,31 @@ const CuttingPlanCalculator: React.FC = () => {
       cuts: [],
       remainingLength: barLength
     };
+    bars.push(currentBar);
 
-    // First-Fit Decreasing algorithm for bin packing
+    // Best-Fit Decreasing algorithm for bin packing
     expandedCuts.forEach(cut => {
-      // Check if current cut can fit in the current bar
-      if (currentBar.remainingLength >= cut.length + cuttingThickness) {
-        // Add cut to current bar
-        const startPosition = barLength - currentBar.remainingLength;
+      // Find the best bar that can fit this cut
+      let bestBarIndex = -1;
+      let bestRemainingSpace = barLength + 1;
+
+      for (let i = 0; i < bars.length; i++) {
+        const bar = bars[i];
+        const remainingSpace = bar.remainingLength - (cut.length + cuttingThickness);
+        
+        if (remainingSpace >= 0 && remainingSpace < bestRemainingSpace) {
+          bestBarIndex = i;
+          bestRemainingSpace = remainingSpace;
+        }
+      }
+
+      if (bestBarIndex !== -1) {
+        // Add cut to the best fitting bar
+        const bar = bars[bestBarIndex];
+        const startPosition = barLength - bar.remainingLength;
         const endPosition = startPosition + cut.length;
         
-        currentBar.cuts.push({
+        bar.cuts.push({
           itemId: cut.id,
           drawingCode: cut.drawingCode,
           itemNumber: cut.itemNumber,
@@ -244,39 +259,20 @@ const CuttingPlanCalculator: React.FC = () => {
           isScrap: false
         });
         
-        // Update remaining length accounting for the cutting thickness
-        currentBar.remainingLength -= (cut.length + cuttingThickness);
+        bar.remainingLength -= (cut.length + cuttingThickness);
       } else {
-        // If there's some remaining space, add it as scrap
-        if (currentBar.remainingLength > 0) {
-          const startPosition = barLength - currentBar.remainingLength;
-          const endPosition = barLength;
-          
-          currentBar.cuts.push({
-            itemId: 'scrap',
-            drawingCode: 'SOBRA',
-            itemNumber: 'S',
-            length: currentBar.remainingLength,
-            startPosition,
-            endPosition,
-            isScrap: true
-          });
-        }
-        
-        // Create a new bar
-        bars.push(currentBar);
-        currentBar = {
+        // Create a new bar if no existing bar can fit the cut
+        const newBar: Bar = {
           barNumber: bars.length + 1,
           totalLength: barLength,
           cuts: [],
           remainingLength: barLength
         };
         
-        // Try again with the new bar
-        const startPosition = barLength - currentBar.remainingLength;
-        const endPosition = startPosition + cut.length;
+        const startPosition = 0;
+        const endPosition = cut.length;
         
-        currentBar.cuts.push({
+        newBar.cuts.push({
           itemId: cut.id,
           drawingCode: cut.drawingCode,
           itemNumber: cut.itemNumber,
@@ -286,46 +282,35 @@ const CuttingPlanCalculator: React.FC = () => {
           isScrap: false
         });
         
-        currentBar.remainingLength -= (cut.length + cuttingThickness);
+        newBar.remainingLength -= (cut.length + cuttingThickness);
+        bars.push(newBar);
       }
     });
 
-    // Add the last bar if it has any cuts
-    if (currentBar.cuts.length > 0) {
-      // If there's some remaining space, add it as scrap
-      if (currentBar.remainingLength > 0) {
-        const startPosition = barLength - currentBar.remainingLength;
+    // Add scrap pieces and calculate statistics
+    let totalScrapWeight = 0;
+    bars.forEach(bar => {
+      if (bar.remainingLength > 0) {
+        const startPosition = barLength - bar.remainingLength;
         const endPosition = barLength;
         
-        currentBar.cuts.push({
+        bar.cuts.push({
           itemId: 'scrap',
           drawingCode: 'SOBRA',
           itemNumber: 'S',
-          length: currentBar.remainingLength,
+          length: bar.remainingLength,
           startPosition,
           endPosition,
           isScrap: true
         });
+        
+        totalScrapWeight += (bar.remainingLength / 1000) * weightPerMeter;
       }
-      
-      bars.push(currentBar);
-    }
+    });
 
     // Calculate statistics
     const totalBarsNeeded = bars.length;
-    const totalMaterialWeight = totalBarsNeeded * (barLength / 1000) * weightPerMeter; // in kg
-    
-    // Calculate scrap
-    let totalScrapWeight = 0;
-    bars.forEach(bar => {
-      bar.cuts.forEach(cut => {
-        if (cut.isScrap) {
-          totalScrapWeight += (cut.length / 1000) * weightPerMeter;
-        }
-      });
-    });
-    
-    // Calculate utilization
+    const totalMaterialWeight = totalBarsNeeded * (barLength / 1000) * weightPerMeter;
     const utilizationPercentage = totalBarsNeeded > 0
       ? ((totalMaterialWeight - totalScrapWeight) / totalMaterialWeight) * 100
       : 0;
@@ -342,14 +327,14 @@ const CuttingPlanCalculator: React.FC = () => {
       cuttingThickness,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      createdBy: 'system', // In a real app, this would be the current user
+      createdBy: 'system',
       totalBarsNeeded,
       totalMaterialWeight,
       totalScrapWeight,
       utilizationPercentage,
       traceabilityCode: `PC-${planCounter.toString().padStart(3, '0')}`,
       bars,
-      deleted: false // Add this field to track deleted status
+      deleted: false
     };
 
     setCuttingPlan(newCuttingPlan);
@@ -377,15 +362,24 @@ const CuttingPlanCalculator: React.FC = () => {
         if (!confirm) return;
       }
 
-      // Adicionar timestamps
+      // Sanitize data before saving
       const planToSave = {
         ...cuttingPlan,
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        bars: cuttingPlan.bars.map(bar => ({
+          ...bar,
+          cuts: bar.cuts.map(cut => ({
+            ...cut,
+            startPosition: Number(cut.startPosition),
+            endPosition: Number(cut.endPosition),
+            length: Number(cut.length)
+          }))
+        }))
       };
 
       const docRef = await addDoc(collection(db, getCompanyCollection('cuttingPlans')), planToSave);
-      alert(`Plano de corte salvo com ID: ${docRef.id}`);
+      console.log('Plano de corte salvo com ID:', docRef.id);
       
       // Increment plan counter for next plan
       setPlanCounter(prev => prev + 1);
@@ -393,11 +387,13 @@ const CuttingPlanCalculator: React.FC = () => {
       // Clear the form after saving
       resetForm();
       
+      alert('Plano de corte salvo com sucesso!');
+      
       // Optionally, export to PDF after saving
       exportToPDF(cuttingPlan);
     } catch (error) {
       console.error('Error saving cutting plan:', error);
-      alert('Erro ao salvar plano de corte');
+      alert('Erro ao salvar plano de corte: ' + (error instanceof Error ? error.message : 'Erro desconhecido'));
     }
   };
 

@@ -59,9 +59,22 @@ const sanitizeForFirestore = (data: any): any => {
   
   const sanitizedData: Record<string, any> = {};
   for (const [key, value] of Object.entries(data)) {
-    // Não remover campos importantes
-    if (key === 'id' || key === 'orderId' || key === 'requestDate' || 
-        key === 'items' || key === 'status' || key === 'totalCost') {
+    // Preservar todos os campos importantes da requisição
+    if (key === 'id' || 
+        key === 'orderId' || 
+        key === 'orderNumber' ||
+        key === 'customer' ||
+        key === 'requestDate' || 
+        key === 'items' || 
+        key === 'status' || 
+        key === 'totalCost' ||
+        key === 'budgetLimit' ||
+        key === 'budgetExceeded' ||
+        key === 'notes' ||
+        key === 'createdAt' ||
+        key === 'updatedAt' ||
+        key === 'lastUpdated' ||
+        key === 'createdBy') {
       sanitizedData[key] = value;
       continue;
     }
@@ -211,31 +224,19 @@ const MaterialRequisitions: React.FC = () => {
 
         // Create new requisition
         const { id, ...requisitionData } = requisition;
-        // Sanitize data for Firestore before saving
         const sanitizedData = sanitizeForFirestore(requisitionData);
-        
-        // Adicionar timestamps
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.updatedAt = new Date().toISOString();
         
-        console.log("Saving new requisition data:", sanitizedData);
-        
         const docRef = await addDoc(collection(db, getCompanyCollection('materialRequisitions', companyId)), sanitizedData);
-        console.log('Nova requisição criada com ID:', docRef.id);
-        
         alert('Requisição criada com sucesso!');
       } else {
         // Update existing requisition
         const { id, ...requisitionData } = requisition;
-        // Sanitize data for Firestore before saving
         const sanitizedData = sanitizeForFirestore(requisitionData);
-        
-        // Atualizar timestamp
         sanitizedData.updatedAt = new Date().toISOString();
         
         await updateDoc(doc(db, getCompanyCollection('materialRequisitions', companyId), id), sanitizedData);
-        console.log('Requisição atualizada com sucesso');
-        
         alert('Requisição atualizada com sucesso!');
       }
       
