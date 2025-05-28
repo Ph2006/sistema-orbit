@@ -211,6 +211,13 @@ const MaterialRequisitions: React.FC = () => {
       alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
       return;
     }
+    // LOGS DE DEBUG
+    console.log('[DEBUG] Requisition ID:', requisition.id);
+    console.log('[DEBUG] Is new?', requisition.id === 'new');
+    console.log('[DEBUG] CompanyId:', companyId);
+    console.log('[DEBUG] Full path:', getCompanyCollection('materialRequisitions', companyId));
+    console.log('[DEBUG] Original requisition:', selectedRequisition);
+    console.log('[DEBUG] Modified requisition:', requisition);
     try {
       // Validar dados obrigatórios
       if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
