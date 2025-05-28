@@ -228,6 +228,7 @@ const MaterialRequisitions: React.FC = () => {
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.updatedAt = new Date().toISOString();
         
+        console.log('[REQUISITION] Dados a serem salvos no Firestore:', sanitizedData);
         const docRef = await addDoc(collection(db, getCompanyCollection('materialRequisitions', companyId)), sanitizedData);
         alert('Requisição criada com sucesso!');
       } else {
@@ -236,6 +237,7 @@ const MaterialRequisitions: React.FC = () => {
         const sanitizedData = sanitizeForFirestore(requisitionData);
         sanitizedData.updatedAt = new Date().toISOString();
         
+        console.log('[REQUISITION] Dados a serem salvos no Firestore:', sanitizedData);
         await updateDoc(doc(db, getCompanyCollection('materialRequisitions', companyId), id), sanitizedData);
         alert('Requisição atualizada com sucesso!');
       }
