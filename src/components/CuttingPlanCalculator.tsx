@@ -346,15 +346,24 @@ const CuttingPlanCalculator: React.FC = () => {
 
     try {
       // Verificar se já existe um plano similar
+      const collectionPath = getCompanyCollection('cuttingPlans');
+      if (!collectionPath || typeof collectionPath !== 'string' || collectionPath.includes('invalid')) {
+        alert('Caminho da coleção de planos de corte inválido! Verifique a autenticação e a empresa selecionada.');
+        console.error('Caminho da coleção inválido:', collectionPath);
+        return;
+      }
+
+      // Logar o plano que será salvo
+      console.log('Plano de corte a ser salvo:', cuttingPlan);
+      console.log('Caminho da coleção:', collectionPath);
+
       const existingPlansQuery = query(
-        collection(db, getCompanyCollection('cuttingPlans')),
+        collection(db, collectionPath),
         where('orderId', '==', cuttingPlan.orderId),
         where('materialName', '==', cuttingPlan.materialName),
         where('deleted', '==', false)
       );
-      
       const existingPlans = await getDocs(existingPlansQuery);
-      
       if (!existingPlans.empty) {
         const confirm = window.confirm(
           'Já existe um plano de corte para este pedido e material. Deseja criar um novo mesmo assim?'
@@ -377,23 +386,17 @@ const CuttingPlanCalculator: React.FC = () => {
           }))
         }))
       };
+      console.log('Objeto final a ser salvo:', planToSave);
 
-      const docRef = await addDoc(collection(db, getCompanyCollection('cuttingPlans')), planToSave);
+      const docRef = await addDoc(collection(db, collectionPath), planToSave);
       console.log('Plano de corte salvo com ID:', docRef.id);
-      
-      // Increment plan counter for next plan
       setPlanCounter(prev => prev + 1);
-      
-      // Clear the form after saving
       resetForm();
-      
       alert('Plano de corte salvo com sucesso!');
-      
-      // Optionally, export to PDF after saving
       exportToPDF(cuttingPlan);
     } catch (error) {
-      console.error('Error saving cutting plan:', error);
-      alert('Erro ao salvar plano de corte: ' + (error instanceof Error ? error.message : 'Erro desconhecido'));
+      console.error('Erro ao salvar plano de corte:', error);
+      alert('Erro ao salvar plano de corte: ' + (error instanceof Error ? error.message : JSON.stringify(error)));
     }
   };
 
