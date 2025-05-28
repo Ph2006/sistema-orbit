@@ -31,6 +31,7 @@ import CuttingPlanCalculator from './CuttingPlanCalculator';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuthStore } from '../store/authStore';
+import { getAuth } from 'firebase/auth';
 
 // Função para obter a coleção correta baseada na empresa
 const getCompanyCollection = (collectionName: string, companyId: string | null): string => {
@@ -86,6 +87,28 @@ const MaterialRequisitions: React.FC = () => {
   const { orders } = useOrderStore();
   const { suppliers, loadSuppliers, subscribeToSuppliers } = useSupplierStore();
   const { companyId } = useAuthStore();
+
+  // DEBUG: companyId e path da coleção
+  console.log('[DEBUG] CompanyId atual:', companyId);
+  try {
+    console.log('[DEBUG] Path da coleção:', getCompanyCollection('materialRequisitions', companyId));
+  } catch (e) {
+    console.log('[DEBUG] Erro ao obter path da coleção:', e);
+  }
+
+  // DEBUG: Auth state
+  useEffect(() => {
+    console.log('[DEBUG] Auth state changed:', { companyId });
+  }, [companyId]);
+
+  // DEBUG: Usuário autenticado
+  useEffect(() => {
+    const auth = getAuth();
+    console.log('[DEBUG] Current user:', auth.currentUser);
+    auth.currentUser?.getIdToken().then(token => {
+      console.log('[DEBUG] User token:', token);
+    });
+  }, []);
 
   // Early return se não houver companyId
   if (!companyId) {
@@ -207,75 +230,30 @@ const MaterialRequisitions: React.FC = () => {
   };
 
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
+    console.log('[DEBUG] Starting save process...');
+    console.log('[DEBUG] CompanyId:', companyId);
+    console.log('[DEBUG] Requisition ID:', requisition.id);
     if (!companyId) {
       alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
       return;
     }
-    // LOGS DE DEBUG
-    console.log('[DEBUG] Requisition ID:', requisition.id);
-    console.log('[DEBUG] Is new?', requisition.id === 'new');
-    console.log('[DEBUG] CompanyId:', companyId);
-    console.log('[DEBUG] Full path:', getCompanyCollection('materialRequisitions', companyId));
-    console.log('[DEBUG] Original requisition:', selectedRequisition);
-    console.log('[DEBUG] Modified requisition:', requisition);
     try {
-      // Validar dados obrigatórios
-      if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
-        alert('Por favor, preencha todos os campos obrigatórios e adicione pelo menos um item.');
-        return;
-      }
-      const path = getCompanyCollection('materialRequisitions', companyId);
-      if (requisition.id === 'new') {
-        // Verificar se já existe uma requisição similar
-        const existingRequisitionsQuery = query(
-          collection(db, path),
-          where('orderId', '==', requisition.orderId),
-          where('requestDate', '==', requisition.requestDate)
-        );
-        const existingRequisitions = await getDocs(existingRequisitionsQuery);
-        if (!existingRequisitions.empty) {
-          alert('Já existe uma requisição para este pedido na mesma data. Por favor, verifique.');
-          return;
-        }
-        // Create new requisition
-        const { id, ...requisitionData } = requisition;
-        const sanitizedData = sanitizeForFirestore(requisitionData);
-        sanitizedData.createdAt = new Date().toISOString();
-        sanitizedData.updatedAt = new Date().toISOString();
-        console.log('[REQUISITION][CREATE] Path:', path, 'Data:', sanitizedData);
-        const docRef = await addDoc(collection(db, path), sanitizedData);
-        console.log('[REQUISITION][CREATE] Criada com ID:', docRef.id);
-        alert('Requisição criada com sucesso!');
-      } else {
-        // Update existing requisition
-        if (requisition.id === 'new') {
-          alert('Erro: ID inválido para edição.');
-          return;
-        }
-        const { id, ...requisitionData } = requisition;
-        const sanitizedData = sanitizeForFirestore(requisitionData);
-        sanitizedData.updatedAt = new Date().toISOString();
-        const docRef = doc(db, path, id);
-        const docSnap = await getDoc(docRef);
-        if (!docSnap.exists()) {
-          console.error('[REQUISITION][UPDATE] Documento não existe:', path, id);
-          alert('Erro: Documento não existe para atualização.');
-          return;
-        }
-        console.log('[REQUISITION][UPDATE] Path:', path, 'ID:', id, 'Data:', sanitizedData);
-        await setDoc(docRef, sanitizedData, { merge: true });
-        console.log('[REQUISITION][UPDATE] Atualizada com sucesso:', id);
-        alert('Requisição atualizada com sucesso!');
-      }
-      setIsModalOpen(false);
-      setSelectedRequisition(null);
-    } catch (error: any) {
-      if (error.code === 'permission-denied') {
-        alert('Permissão negada ao salvar requisição. Verifique suas regras do Firestore.');
-      } else {
-        console.error('Error saving requisition:', error);
-        alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
-      }
+      // TESTE: Criar um documento simples para verificar se funciona
+      const testData = {
+        test: true,
+        timestamp: new Date().toISOString(),
+        companyId: companyId
+      };
+      const testRef = await addDoc(
+        collection(db, getCompanyCollection('materialRequisitions', companyId)),
+        testData
+      );
+      console.log('[DEBUG] Test document created:', testRef.id);
+      alert('Teste funcionou! ID: ' + testRef.id);
+      // ...restante do código normal (pode ser comentado para testar só o teste)
+    } catch (error) {
+      console.error('[DEBUG] Error in test:', error);
+      alert('Erro no teste: ' + error.message);
     }
   };
 
