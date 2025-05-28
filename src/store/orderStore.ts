@@ -156,6 +156,13 @@ export const useOrderStore = create<OrderState>((set, get) => ({
 
       const orders = await Promise.all(ordersPromises);
       
+      // Ordenar por data de entrega (crescente)
+      orders.sort((a, b) => {
+        const dateA = new Date(a.deliveryDate).getTime();
+        const dateB = new Date(b.deliveryDate).getTime();
+        return dateA - dateB;
+      });
+      
       console.log(`🎉 LoadOrders completed: ${orders.length} orders loaded`);
       console.log('📋 Orders summary:', orders.map(order => ({
         orderNumber: order.orderNumber,
