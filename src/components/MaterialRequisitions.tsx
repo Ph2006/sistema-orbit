@@ -18,7 +18,7 @@ import {
   Download,
   X
 } from 'lucide-react';
-import { collection, getDocs, query, where, orderBy, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, addDoc, updateDoc, doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useOrderStore } from '../store/orderStore';
 import { useSupplierStore } from '../store/supplierStore';
@@ -46,39 +46,23 @@ const sanitizeForFirestore = (data: any): any => {
   if (data === undefined) {
     return null;
   }
-  
   if (data === null || typeof data !== 'object') {
     return data;
   }
-  
   if (Array.isArray(data)) {
     return data.map(item => sanitizeForFirestore(item));
   }
-  
   const sanitizedData: Record<string, any> = {};
   for (const [key, value] of Object.entries(data)) {
-    // Preservar todos os campos importantes da requisição
-    if (key === 'id' || 
-        key === 'orderId' || 
-        key === 'orderNumber' ||
-        key === 'customer' ||
-        key === 'requestDate' || 
-        key === 'items' || 
-        key === 'status' || 
-        key === 'totalCost' ||
-        key === 'budgetLimit' ||
-        key === 'budgetExceeded' ||
-        key === 'notes' ||
-        key === 'createdAt' ||
-        key === 'updatedAt' ||
-        key === 'lastUpdated' ||
-        key === 'createdBy') {
-      sanitizedData[key] = value;
+    // Ignorar campos internos do Firestore
+    if (key.startsWith('_')) continue;
+    // Converter Date para string ISO
+    if (value instanceof Date) {
+      sanitizedData[key] = value.toISOString();
       continue;
     }
     sanitizedData[key] = sanitizeForFirestore(value);
   }
-  
   return sanitizedData;
 };
 
@@ -233,10 +217,11 @@ const MaterialRequisitions: React.FC = () => {
         alert('Por favor, preencha todos os campos obrigatórios e adicione pelo menos um item.');
         return;
       }
+      const path = getCompanyCollection('materialRequisitions', companyId);
       if (requisition.id === 'new') {
         // Verificar se já existe uma requisição similar
         const existingRequisitionsQuery = query(
-          collection(db, getCompanyCollection('materialRequisitions', companyId)),
+          collection(db, path),
           where('orderId', '==', requisition.orderId),
           where('requestDate', '==', requisition.requestDate)
         );
@@ -248,35 +233,42 @@ const MaterialRequisitions: React.FC = () => {
         // Create new requisition
         const { id, ...requisitionData } = requisition;
         const sanitizedData = sanitizeForFirestore(requisitionData);
-        console.log('[REQUISITION] Itens após sanitização:', sanitizedData.items);
         sanitizedData.createdAt = new Date().toISOString();
         sanitizedData.updatedAt = new Date().toISOString();
-        console.log('[REQUISITION] Dados a serem salvos no Firestore:', sanitizedData);
-        const docRef = await addDoc(
-          collection(db, getCompanyCollection('materialRequisitions', companyId)),
-          sanitizedData
-        );
-        console.log('Requisição criada with ID:', docRef.id);
+        console.log('[REQUISITION][CREATE] Path:', path, 'Data:', sanitizedData);
+        const docRef = await addDoc(collection(db, path), sanitizedData);
+        console.log('[REQUISITION][CREATE] Criada com ID:', docRef.id);
         alert('Requisição criada com sucesso!');
       } else {
         // Update existing requisition
+        if (requisition.id === 'new') {
+          alert('Erro: ID inválido para edição.');
+          return;
+        }
         const { id, ...requisitionData } = requisition;
         const sanitizedData = sanitizeForFirestore(requisitionData);
-        console.log('[REQUISITION] Itens após sanitização:', sanitizedData.items);
         sanitizedData.updatedAt = new Date().toISOString();
-        console.log('[REQUISITION] Dados a serem atualizados no Firestore:', sanitizedData);
-        await updateDoc(
-          doc(db, getCompanyCollection('materialRequisitions', companyId), id),
-          sanitizedData
-        );
-        console.log('Requisição atualizada with ID:', id);
+        const docRef = doc(db, path, id);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) {
+          console.error('[REQUISITION][UPDATE] Documento não existe:', path, id);
+          alert('Erro: Documento não existe para atualização.');
+          return;
+        }
+        console.log('[REQUISITION][UPDATE] Path:', path, 'ID:', id, 'Data:', sanitizedData);
+        await setDoc(docRef, sanitizedData, { merge: true });
+        console.log('[REQUISITION][UPDATE] Atualizada com sucesso:', id);
         alert('Requisição atualizada com sucesso!');
       }
       setIsModalOpen(false);
       setSelectedRequisition(null);
-    } catch (error) {
-      console.error('Error saving requisition:', error);
-      alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+    } catch (error: any) {
+      if (error.code === 'permission-denied') {
+        alert('Permissão negada ao salvar requisição. Verifique suas regras do Firestore.');
+      } else {
+        console.error('Error saving requisition:', error);
+        alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      }
     }
   };
 
