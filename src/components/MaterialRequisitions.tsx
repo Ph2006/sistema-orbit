@@ -230,30 +230,137 @@ const MaterialRequisitions: React.FC = () => {
   };
 
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
-    console.log('[DEBUG] Starting save process...');
+    console.log('=== INÍCIO DO DEBUG DE SALVAMENTO ===');
     console.log('[DEBUG] CompanyId:', companyId);
+    console.log('[DEBUG] Requisition completa:', requisition);
     console.log('[DEBUG] Requisition ID:', requisition.id);
+    console.log('[DEBUG] É nova?', requisition.id === 'new');
+    
     if (!companyId) {
+      console.error('[DEBUG] CompanyId não disponível!');
       alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
       return;
     }
+
     try {
-      // TESTE: Criar um documento simples para verificar se funciona
-      const testData = {
-        test: true,
-        timestamp: new Date().toISOString(),
-        companyId: companyId
-      };
-      const testRef = await addDoc(
-        collection(db, getCompanyCollection('materialRequisitions', companyId)),
-        testData
-      );
-      console.log('[DEBUG] Test document created:', testRef.id);
-      alert('Teste funcionou! ID: ' + testRef.id);
-      // ...restante do código normal (pode ser comentado para testar só o teste)
+      // Validar dados obrigatórios
+      if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
+        console.error('[DEBUG] Dados obrigatórios faltando:', {
+          orderId: requisition.orderId,
+          requestDate: requisition.requestDate,
+          items: requisition.items?.length
+        });
+        alert('Por favor, preencha todos os campos obrigatórios e adicione pelo menos um item.');
+        return;
+      }
+
+      const collectionPath = getCompanyCollection('materialRequisitions', companyId);
+      console.log('[DEBUG] Path da coleção:', collectionPath);
+
+      // Verificar se é uma nova requisição ou atualização
+      if (requisition.id === 'new') {
+        console.log('[DEBUG] === CRIANDO NOVA REQUISIÇÃO ===');
+        
+        // Verificar se já existe uma requisição similar
+        const existingRequisitionsQuery = query(
+          collection(db, collectionPath),
+          where('orderId', '==', requisition.orderId),
+          where('requestDate', '==', requisition.requestDate)
+        );
+        
+        const existingRequisitions = await getDocs(existingRequisitionsQuery);
+        console.log('[DEBUG] Requisições existentes encontradas:', existingRequisitions.size);
+        
+        if (!existingRequisitions.empty) {
+          alert('Já existe uma requisição para este pedido na mesma data. Por favor, verifique.');
+          return;
+        }
+
+        // Create new requisition
+        const { id, ...requisitionData } = requisition;
+        console.log('[DEBUG] Dados antes da sanitização:', requisitionData);
+        
+        const sanitizedData = sanitizeForFirestore(requisitionData);
+        console.log('[DEBUG] Dados após sanitização:', sanitizedData);
+        
+        sanitizedData.createdAt = new Date().toISOString();
+        sanitizedData.updatedAt = new Date().toISOString();
+        
+        console.log('[DEBUG] Dados finais para salvar:', sanitizedData);
+        console.log('[DEBUG] Tentando salvar na coleção:', collectionPath);
+        
+        const docRef = await addDoc(
+          collection(db, collectionPath), 
+          sanitizedData
+        );
+        
+        console.log('[DEBUG] ✅ Requisição criada com sucesso! ID:', docRef.id);
+        alert('Requisição criada com sucesso! ID: ' + docRef.id);
+        
+      } else {
+        console.log('[DEBUG] === ATUALIZANDO REQUISIÇÃO EXISTENTE ===');
+        console.log('[DEBUG] ID do documento:', requisition.id);
+        
+        // Verificar se o documento existe
+        const docRef = doc(db, collectionPath, requisition.id);
+        console.log('[DEBUG] Referência do documento:', docRef.path);
+        
+        try {
+          const docSnap = await getDoc(docRef);
+          console.log('[DEBUG] Documento existe?', docSnap.exists());
+          
+          if (!docSnap.exists()) {
+            console.error('[DEBUG] ❌ Documento não encontrado!');
+            alert('Erro: Documento não encontrado para atualização');
+            return;
+          }
+          
+          console.log('[DEBUG] Dados atuais do documento:', docSnap.data());
+        } catch (getError) {
+          console.error('[DEBUG] Erro ao verificar documento:', getError);
+        }
+
+        // Update existing requisition
+        const { id, ...requisitionData } = requisition;
+        console.log('[DEBUG] Dados antes da sanitização:', requisitionData);
+        
+        const sanitizedData = sanitizeForFirestore(requisitionData);
+        console.log('[DEBUG] Dados após sanitização:', sanitizedData);
+        
+        sanitizedData.updatedAt = new Date().toISOString();
+        
+        console.log('[DEBUG] Dados finais para atualizar:', sanitizedData);
+        console.log('[DEBUG] Tentando atualizar documento:', docRef.path);
+        
+        // Usar setDoc com merge ao invés de updateDoc
+        await setDoc(docRef, sanitizedData, { merge: true });
+        
+        console.log('[DEBUG] ✅ Requisição atualizada com sucesso!');
+        alert('Requisição atualizada com sucesso!');
+      }
+      
+      console.log('[DEBUG] === FIM DO PROCESSO DE SALVAMENTO ===');
+      setIsModalOpen(false);
+      setSelectedRequisition(null);
+      
     } catch (error) {
-      console.error('[DEBUG] Error in test:', error);
-      alert('Erro no teste: ' + error.message);
+      console.error('[DEBUG] ❌ ERRO NO SALVAMENTO:', error);
+      
+      // Log detalhado do erro
+      if (error instanceof Error) {
+        console.error('[DEBUG] Detalhes do erro:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+      }
+      
+      // Se for erro do Firebase, mostrar código específico
+      if ((error as any).code) {
+        console.error('[DEBUG] Código do erro Firebase:', (error as any).code);
+      }
+      
+      alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
 
