@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Download, Edit, Tag, ShoppingBag, DollarSign, Check, AlertTriangle, Clock } from 'lucide-react';
+import { X, Download, Edit, Tag, ShoppingBag, DollarSign, Check, AlertTriangle, Clock, Trash2 } from 'lucide-react';
 import { MaterialRequisition, MaterialRequisitionItem } from '../types/materials';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -11,6 +11,7 @@ interface MaterialRequisitionDetailModalProps {
   requisition: MaterialRequisition;
   onClose: () => void;
   onEdit: () => void;
+  onDelete?: (requisition: MaterialRequisition) => void;
   onEditItem?: (item: MaterialRequisitionItem) => void;
 }
 
@@ -89,6 +90,7 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
   requisition,
   onClose,
   onEdit,
+  onDelete,
   onEditItem
 }) => {
   console.log('🔍 DetailModal renderizado com requisition:', requisition);
@@ -389,6 +391,16 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
               <Edit className="h-5 w-5 mr-2" />
               Editar
             </button>
+            {onDelete && (
+              <button
+                onClick={() => onDelete(correctedRequisition)}
+                className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                title="Excluir Requisição"
+              >
+                <Trash2 className="h-5 w-5 mr-2" />
+                Excluir
+              </button>
+            )}
             <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
               <X className="h-6 w-6" />
             </button>
