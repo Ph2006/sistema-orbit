@@ -3,7 +3,77 @@ import { useDroppable } from '@dnd-kit/core';
 import KanbanCard from './KanbanCard';
 import { Column, Order } from '../types/kanban';
 import { Settings, Trash2, Plus } from 'lucide-react';
-import { formatNumber, compareDates, formatDate } from '../utils/format';
+import { formatNumber } from '../utils/format';
+
+// Função local para formatar datas com segurança
+const formatDateSafe = (date: any, formatStr: string = 'dd/MM/yyyy'): string => {
+  try {
+    if (!date) return 'Data não informada';
+    
+    let dateObj: Date;
+    if (typeof date === 'string') {
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else if (date.toDate && typeof date.toDate === 'function') {
+      dateObj = date.toDate();
+    } else {
+      return 'Data inválida';
+    }
+    
+    if (isNaN(dateObj.getTime())) {
+      return 'Data inválida';
+    }
+    
+    return dateObj.toLocaleDateString('pt-BR');
+  } catch (error) {
+    console.error('Erro ao formatar data:', error);
+    return 'Data inválida';
+  }
+};
+
+// Função local para normalizar datas
+const normalizeDate = (date: any): Date | null => {
+  try {
+    if (!date) return null;
+    
+    let dateObj: Date;
+    if (typeof date === 'string') {
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else if (date.toDate && typeof date.toDate === 'function') {
+      dateObj = date.toDate();
+    } else {
+      return null;
+    }
+    
+    if (isNaN(dateObj.getTime())) {
+      return null;
+    }
+    
+    return dateObj;
+  } catch (error) {
+    console.error('Erro ao normalizar data:', error);
+    return null;
+  }
+};
+
+// Função local para comparar datas
+const compareDates = (dateA: any, dateB: any): number => {
+  const normalizedA = normalizeDate(dateA);
+  const normalizedB = normalizeDate(dateB);
+  
+  // Se ambas são nulas/inválidas, são iguais
+  if (!normalizedA && !normalizedB) return 0;
+  
+  // Se uma é nula/inválida, vai para o final
+  if (!normalizedA) return 1;
+  if (!normalizedB) return -1;
+  
+  // Comparar timestamps
+  return normalizedA.getTime() - normalizedB.getTime();
+};
 
 interface KanbanColumnProps {
   column: Column;
@@ -78,7 +148,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
       const comparison = compareDates(a.deliveryDate, b.deliveryDate);
       
       // Debug logging para verificar as ordenações
-      console.log(`🔍 Ordenando: #${a.orderNumber} (${formatDate(a.deliveryDate)}) vs #${b.orderNumber} (${formatDate(b.deliveryDate)}) = ${comparison}`);
+      console.log(`🔍 Ordenando: #${a.orderNumber} (${formatDateSafe(a.deliveryDate)}) vs #${b.orderNumber} (${formatDateSafe(b.deliveryDate)}) = ${comparison}`);
       
       return comparison;
     });
@@ -94,7 +164,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   if (isProgressColumn) {
     console.log('📋 Pedidos ordenados por data de entrega:');
     sortedOrders.forEach((order, index) => {
-      console.log(`  ${index + 1}. #${order.orderNumber} - ${formatDate(order.deliveryDate)} (Data original: ${order.deliveryDate})`);
+      console.log(`  ${index + 1}. #${order.orderNumber} - ${formatDateSafe(order.deliveryDate)} (Data original: ${order.deliveryDate})`);
     });
   }
 
