@@ -44,6 +44,36 @@ import { ptBR } from 'date-fns/locale';
 import { useAuthStore } from '../store/authStore';
 import { getAuth } from 'firebase/auth';
 
+// Função para formatar datas com segurança
+const formatDateSafely = (date: any, formatStr: string = 'dd/MM/yyyy'): string => {
+  try {
+    if (!date) return 'Data não informada';
+    
+    // Se é uma string, tentar converter
+    let dateObj: Date;
+    if (typeof date === 'string') {
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else if (date.toDate && typeof date.toDate === 'function') {
+      // Firestore Timestamp
+      dateObj = date.toDate();
+    } else {
+      return 'Data inválida';
+    }
+    
+    // Verificar se a data é válida
+    if (isNaN(dateObj.getTime())) {
+      return 'Data inválida';
+    }
+    
+    return format(dateObj, formatStr, { locale: ptBR });
+  } catch (error) {
+    console.error('Erro ao formatar data:', error, 'Data original:', date);
+    return 'Data inválida';
+  }
+};
+
 // Função para obter a coleção correta baseada na empresa
 const getCompanyCollection = (collectionName: string, companyId: string | null): string => {
   if (!companyId) {
@@ -51,6 +81,31 @@ const getCompanyCollection = (collectionName: string, companyId: string | null):
     throw new Error("Company ID is required but not available");
   }
   return `companies/${companyId}/${collectionName}`;
+};
+
+// Função de validação de dados
+const validateRequisitionData = (requisition: MaterialRequisition): string[] => {
+  const errors: string[] = [];
+  
+  if (!requisition.orderId) {
+    errors.push('ID do pedido é obrigatório');
+  }
+  
+  if (!requisition.requestDate) {
+    errors.push('Data da requisição é obrigatória');
+  } else {
+    // Validar se a data é válida
+    const date = new Date(requisition.requestDate);
+    if (isNaN(date.getTime())) {
+      errors.push('Data da requisição é inválida');
+    }
+  }
+  
+  if (!requisition.items || requisition.items.length === 0) {
+    errors.push('Pelo menos um item é obrigatório');
+  }
+  
+  return errors;
 };
 
 const MaterialRequisitions: React.FC = () => {
@@ -286,7 +341,7 @@ const MaterialRequisitions: React.FC = () => {
     console.log('✅ Modal deve estar aberto agora');
   };
 
-  // FUNÇÃO DE SALVAMENTO COM LOGS DETALHADOS
+  // FUNÇÃO DE SALVAMENTO COM LOGS DETALHADOS E VALIDAÇÃO MELHORADA
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
     console.log('💾 === INÍCIO DO SALVAMENTO ===');
     console.log('💾 Dados recebidos:', JSON.stringify(requisition, null, 2));
@@ -300,19 +355,16 @@ const MaterialRequisitions: React.FC = () => {
       return;
     }
 
-    try {
-      // Validar dados básicos
-      if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
-        console.error('❌ Dados obrigatórios faltando:', {
-          orderId: !!requisition.orderId,
-          requestDate: !!requisition.requestDate,
-          items: requisition.items?.length || 0
-        });
-        alert('Por favor, preencha todos os campos obrigatórios');
-        return;
-      }
+    // Validar dados
+    const validationErrors = validateRequisitionData(requisition);
+    if (validationErrors.length > 0) {
+      console.error('❌ Erros de validação:', validationErrors);
+      alert('Erros encontrados:\n' + validationErrors.join('\n'));
+      return;
+    }
 
-      // Preparar dados limpos
+    try {
+      // Preparar dados limpos com validação de datas
       console.log('🧹 Limpando dados...');
       const cleanedItems = requisition.items.map(item => ({
         id: item.id || '',
@@ -335,7 +387,7 @@ const MaterialRequisitions: React.FC = () => {
         orderId: requisition.orderId,
         orderNumber: requisition.orderNumber || '',
         customer: requisition.customer || '',
-        requestDate: requisition.requestDate,
+        requestDate: requisition.requestDate || new Date().toISOString(),
         expectedDeliveryDate: requisition.expectedDeliveryDate || null,
         status: requisition.status || 'pending',
         items: cleanedItems,
@@ -690,7 +742,7 @@ const MaterialRequisitions: React.FC = () => {
                           Cliente: {requisition.customer}
                         </p>
                         <p className="text-gray-600">
-                          Data da Solicitação: {format(new Date(requisition.requestDate), 'dd/MM/yyyy', { locale: ptBR })}
+                          Data da Solicitação: {formatDateSafely(requisition.requestDate)}
                         </p>
                         
                         {/* Budget info with warning if exceeded */}
@@ -860,18 +912,18 @@ const MaterialRequisitions: React.FC = () => {
                         </h4>
                         <div className="flex items-center text-sm text-gray-500">
                           <CalendarIcon className="h-4 w-4 mr-1" />
-                          {format(new Date(quotation.requestDate), 'dd/MM/yyyy', { locale: ptBR })}
+                          {formatDateSafely(quotation.requestDate)}
                         </div>
                       </div>
                       
                       <div className="text-sm text-gray-600 mt-1">
                         <span>Itens: {quotation.items.length}</span>
                         <span className="mx-2">|</span>
-                        <span>Expira em: {format(new Date(quotation.expirationDate), 'dd/MM/yyyy', { locale: ptBR })}</span>
+                        <span>Expira em: {formatDateSafely(quotation.expirationDate)}</span>
                         {quotation.responseDate && (
                           <>
                             <span className="mx-2">|</span>
-                            <span>Respondida em: {format(new Date(quotation.responseDate), 'dd/MM/yyyy', { locale: ptBR })}</span>
+                            <span>Respondida em: {formatDateSafely(quotation.responseDate)}</span>
                           </>
                         )}
                       </div>
