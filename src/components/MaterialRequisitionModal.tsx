@@ -24,6 +24,13 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   generateTraceabilityCode,
   calculateBudgetLimit
 }) => {
+  // Log quando o modal é renderizado
+  console.log('🏗️ Modal renderizado com props:', { 
+    requisition: requisition?.id, 
+    onSave: typeof onSave,
+    onClose: typeof onClose 
+  });
+
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [formData, setFormData] = useState<MaterialRequisition>({
     id: requisition?.id || 'new',
@@ -274,10 +281,22 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   };
 
-  const handleSave = async () => {
+  // FUNÇÃO DE SALVAMENTO CORRIGIDA
+  const handleSave = async (e?: React.FormEvent) => {
+    // Prevenir submit do formulário se for evento de form
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    console.log('🏗️ === MODAL: TENTANDO SALVAR ===');
+    console.log('🏗️ onSave function exists?', typeof onSave);
+    console.log('🏗️ onSave function:', onSave);
+    console.log('🏗️ Current formData:', formData);
+    
     try {
-      // Logar o formData antes de salvar
       console.log('[REQUISITION] Tentando salvar:', formData);
+      
       // Validar campos obrigatórios
       if (!formData.orderId) {
         alert('Por favor, selecione um pedido.');
@@ -297,6 +316,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
           return;
         }
       }
+      
       // Preparar dados para salvar
       const requisitionData: MaterialRequisition = {
         ...formData,
@@ -305,10 +325,27 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         createdAt: requisition?.createdAt || new Date().toISOString(),
         lastUpdated: new Date().toISOString()
       };
+      
+      console.log('🏗️ Dados preparados para envio:', requisitionData);
+      
+      // Verificar se a função onSave existe
+      if (!onSave) {
+        console.error('❌ onSave function is missing!');
+        alert('Erro: Função de salvamento não encontrada');
+        return;
+      }
+      
+      console.log('🏗️ Chamando onSave...');
       await onSave(requisitionData);
+      console.log('🏗️ onSave chamada com sucesso');
+      
+      // Fechar modal apenas se o salvamento foi bem-sucedido
+      console.log('🏗️ Fechando modal...');
       onClose();
+      
     } catch (error) {
       console.error('[REQUISITION] Erro ao salvar requisição:', error);
+      console.error('🏗️ Erro detalhado:', error);
       alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
@@ -347,7 +384,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSave} className="space-y-6">
+        {/* REMOVIDO O FORM, AGORA É UM DIV */}
+        <div className="space-y-6">
           {/* Order Selection */}
           <div className="border-b pb-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -808,17 +846,17 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                               step="0.01"
                               placeholder="Valor (R$)"
                             />
-                            <td className="px-3 py-2 whitespace-nowrap text-sm min-w-[120px] w-[120px]">
-                              <input
-                                type="date"
-                                value={item.receiptDate ? item.receiptDate.split('T')[0] : ''}
-                                onChange={(e) => handleItemChange(item.id, 'receiptDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
-                                className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm
-                                ${item.receiptDate ? 'bg-green-50 border-green-300' : ''}`}
-                                placeholder="Data Receb."
-                              />
-                            </td>
                           </div>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm min-w-[120px] w-[120px]">
+                          <input
+                            type="date"
+                            value={item.receiptDate ? item.receiptDate.split('T')[0] : ''}
+                            onChange={(e) => handleItemChange(item.id, 'receiptDate', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+                            className={`w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm
+                            ${item.receiptDate ? 'bg-green-50 border-green-300' : ''}`}
+                            placeholder="Data Receb."
+                          />
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm text-center min-w-[90px] w-[90px]">
                           <div className="flex flex-row items-center justify-center space-x-2">
@@ -860,6 +898,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                         {formatCurrency(formData.totalCost ?? 0)}
                       </td>
                       <td></td>
+                      <td></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -875,15 +914,17 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             >
               Cancelar
             </button>
+            {/* BOTÃO CORRIGIDO - SEM FORM, SÓ onClick */}
             <button
-              type="submit"
+              type="button"
+              onClick={handleSave}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
               disabled={formData.items.length === 0}
             >
               Salvar Requisição
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
