@@ -485,6 +485,112 @@ const MaterialRequisitions: React.FC = () => {
     setIsQuotationModalOpen(true);
   };
 
+  // FUNÇÃO PARA EXCLUIR REQUISIÇÃO
+  const handleDeleteRequisition = async (requisition: MaterialRequisition) => {
+    console.log('🗑️ === TENTATIVA DE EXCLUSÃO ===');
+    console.log('🗑️ Requisição:', requisition.id);
+    
+    if (!companyId) {
+      alert('Erro: ID da empresa não disponível');
+      return;
+    }
+
+    // Confirmação dupla para exclusão
+    const confirmFirst = window.confirm(
+      `❌ ATENÇÃO: Você tem certeza que deseja excluir a requisição do pedido #${requisition.orderNumber}?\n\n` +
+      `Esta ação NÃO pode ser desfeita!`
+    );
+    
+    if (!confirmFirst) {
+      console.log('🗑️ Exclusão cancelada pelo usuário (primeira confirmação)');
+      return;
+    }
+
+    const confirmSecond = window.confirm(
+      `⚠️ CONFIRMAÇÃO FINAL:\n\n` +
+      `Tem ABSOLUTA CERTEZA que deseja excluir permanentemente:\n` +
+      `• Requisição do Pedido: #${requisition.orderNumber}\n` +
+      `• Cliente: ${requisition.customer}\n` +
+      `• ${requisition.items.length} itens\n` +
+      `• Valor total: ${requisition.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\n\n` +
+      `Digite "EXCLUIR" se tem certeza:`
+    );
+
+    if (!confirmSecond) {
+      console.log('🗑️ Exclusão cancelada pelo usuário (segunda confirmação)');
+      return;
+    }
+
+    // Solicitar palavra de confirmação
+    const confirmationWord = window.prompt(
+      `Para confirmar a exclusão, digite exatamente: EXCLUIR`
+    );
+
+    if (confirmationWord !== 'EXCLUIR') {
+      console.log('🗑️ Palavra de confirmação incorreta:', confirmationWord);
+      alert('❌ Palavra de confirmação incorreta. Exclusão cancelada.');
+      return;
+    }
+
+    try {
+      console.log('🗑️ Iniciando exclusão definitiva...');
+      
+      const collectionPath = `companies/${companyId}/materialRequisitions`;
+      console.log('🗑️ Collection path:', collectionPath);
+
+      // Verificar se a requisição existe antes de tentar excluir
+      const docRef = doc(db, collectionPath, requisition.id);
+      const docSnap = await getDoc(docRef);
+      
+      if (!docSnap.exists()) {
+        console.error('❌ Requisição não encontrada para exclusão');
+        alert('❌ Erro: Requisição não encontrada no banco de dados');
+        return;
+      }
+
+      console.log('✅ Requisição encontrada, procedendo com exclusão...');
+
+      // Excluir permanentemente
+      await updateDoc(docRef, {
+        deleted: true,
+        deletedAt: new Date().toISOString(),
+        deletedBy: 'sistema' // Aqui você pode colocar o usuário atual
+      });
+
+      console.log('✅ Requisição excluída com sucesso!');
+      alert('✅ Requisição excluída com sucesso!');
+
+      // O listener automático vai atualizar a lista, mas podemos forçar uma atualização local
+      setRequisitions(prevRequisitions => 
+        prevRequisitions.filter(r => r.id !== requisition.id)
+      );
+
+    } catch (error) {
+      console.error('💥 Erro ao excluir requisição:', error);
+      
+      let errorMessage = 'Erro desconhecido';
+      if (error?.code) {
+        switch (error.code) {
+          case 'permission-denied':
+            errorMessage = 'Sem permissão para excluir';
+            break;
+          case 'not-found':
+            errorMessage = 'Requisição não encontrada';
+            break;
+          case 'unavailable':
+            errorMessage = 'Serviço indisponível';
+            break;
+          default:
+            errorMessage = `Erro Firebase: ${error.message}`;
+        }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      alert(`❌ Erro ao excluir: ${errorMessage}`);
+    }
+  };
+
   const handleSaveQuotationRequest = async (quotation: QuotationRequest, itemIds: string[]) => {
     if (!companyId) {
       alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
@@ -580,8 +686,11 @@ const MaterialRequisitions: React.FC = () => {
     return totalBudget * 0.3;
   };
 
-  // Filter requisitions based on search term, status, and date
+  // Filter requisitions based on search term, status, and date (exclude deleted)
   const filteredRequisitions = requisitions.filter(req => {
+    // Exclude deleted requisitions
+    if (req.deleted) return false;
+    
     // Apply search filter
     const matchesSearch = !searchTerm || 
       req.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -801,6 +910,14 @@ const MaterialRequisitions: React.FC = () => {
                         >
                           <Edit className="h-4 w-4 inline-block mr-1" />
                           Editar
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRequisition(requisition)}
+                          className="px-3 py-1 bg-red-100 text-red-800 rounded hover:bg-red-200"
+                          title="Excluir Requisição"
+                        >
+                          <Trash2 className="h-4 w-4 inline-block mr-1" />
+                          Excluir
                         </button>
                       </div>
                     </div>
@@ -1045,6 +1162,7 @@ const MaterialRequisitions: React.FC = () => {
             setIsDetailModalOpen(false);
             setIsModalOpen(true);
           }}
+          onDelete={handleDeleteRequisition}
         />
       )}
 
