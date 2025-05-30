@@ -229,6 +229,7 @@ const MaterialRequisitions: React.FC = () => {
     setIsModalOpen(true);
   };
 
+  // FUNÇÃO MODIFICADA PARA CORRIGIR PROBLEMAS DE SALVAMENTO
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
     console.log('=== INÍCIO DO DEBUG DE SALVAMENTO ===');
     console.log('[DEBUG] CompanyId:', companyId);
@@ -257,6 +258,39 @@ const MaterialRequisitions: React.FC = () => {
       const collectionPath = getCompanyCollection('materialRequisitions', companyId);
       console.log('[DEBUG] Path da coleção:', collectionPath);
 
+      // Preparar os dados para salvar, removendo campos problemáticos
+      const { id, ...requisitionData } = requisition;
+      
+      // Um objeto simplificado para salvar, evitando problemas com estruturas complexas
+      let dataToSave: any = {
+        orderId: requisitionData.orderId,
+        orderNumber: requisitionData.orderNumber,
+        customer: requisitionData.customer,
+        requestDate: requisitionData.requestDate,
+        status: requisitionData.status,
+        budgetLimit: requisitionData.budgetLimit || 0,
+        totalCost: requisitionData.totalCost || 0,
+        budgetExceeded: requisitionData.budgetExceeded || false,
+        notes: requisitionData.notes || '',
+        items: requisitionData.items.map(item => ({
+          id: item.id,
+          materialId: item.materialId,
+          description: item.description,
+          material: item.material,
+          quantity: item.quantity,
+          dimensions: item.dimensions,
+          weight: item.weight || 0,
+          pricePerKg: item.pricePerKg || 0,
+          finalPrice: item.finalPrice || 0,
+          status: item.status,
+          sentForQuotation: item.sentForQuotation || false,
+          notes: item.notes || ''
+        }))
+      };
+      
+      // Adicionar timestamps
+      const now = new Date().toISOString();
+      
       // Verificar se é uma nova requisição ou atualização
       if (requisition.id === 'new') {
         console.log('[DEBUG] === CRIANDO NOVA REQUISIÇÃO ===');
@@ -276,23 +310,14 @@ const MaterialRequisitions: React.FC = () => {
           return;
         }
 
-        // Create new requisition
-        const { id, ...requisitionData } = requisition;
-        console.log('[DEBUG] Dados antes da sanitização:', requisitionData);
+        // Adicionar timestamps para nova requisição
+        dataToSave.createdAt = now;
+        dataToSave.updatedAt = now;
         
-        const sanitizedData = sanitizeForFirestore(requisitionData);
-        console.log('[DEBUG] Dados após sanitização:', sanitizedData);
+        console.log('[DEBUG] Dados finais para salvar (nova requisição):', dataToSave);
         
-        sanitizedData.createdAt = new Date().toISOString();
-        sanitizedData.updatedAt = new Date().toISOString();
-        
-        console.log('[DEBUG] Dados finais para salvar:', sanitizedData);
-        console.log('[DEBUG] Tentando salvar na coleção:', collectionPath);
-        
-        const docRef = await addDoc(
-          collection(db, collectionPath), 
-          sanitizedData
-        );
+        // Usar addDoc diretamente sem sanitização complexa
+        const docRef = await addDoc(collection(db, collectionPath), dataToSave);
         
         console.log('[DEBUG] ✅ Requisição criada com sucesso! ID:', docRef.id);
         alert('Requisição criada com sucesso! ID: ' + docRef.id);
@@ -303,7 +328,6 @@ const MaterialRequisitions: React.FC = () => {
         
         // Verificar se o documento existe
         const docRef = doc(db, collectionPath, requisition.id);
-        console.log('[DEBUG] Referência do documento:', docRef.path);
         
         try {
           const docSnap = await getDoc(docRef);
@@ -314,26 +338,19 @@ const MaterialRequisitions: React.FC = () => {
             alert('Erro: Documento não encontrado para atualização');
             return;
           }
-          
-          console.log('[DEBUG] Dados atuais do documento:', docSnap.data());
         } catch (getError) {
           console.error('[DEBUG] Erro ao verificar documento:', getError);
+          alert(`Erro ao verificar documento: ${getError instanceof Error ? getError.message : 'Erro desconhecido'}`);
+          return;
         }
 
-        // Update existing requisition
-        const { id, ...requisitionData } = requisition;
-        console.log('[DEBUG] Dados antes da sanitização:', requisitionData);
+        // Adicionar timestamp de atualização
+        dataToSave.updatedAt = now;
         
-        const sanitizedData = sanitizeForFirestore(requisitionData);
-        console.log('[DEBUG] Dados após sanitização:', sanitizedData);
+        console.log('[DEBUG] Dados finais para atualizar:', dataToSave);
         
-        sanitizedData.updatedAt = new Date().toISOString();
-        
-        console.log('[DEBUG] Dados finais para atualizar:', sanitizedData);
-        console.log('[DEBUG] Tentando atualizar documento:', docRef.path);
-        
-        // Usar setDoc com merge ao invés de updateDoc
-        await setDoc(docRef, sanitizedData, { merge: true });
+        // Usar updateDoc em vez de setDoc para atualizações
+        await updateDoc(doc(db, collectionPath, requisition.id), dataToSave);
         
         console.log('[DEBUG] ✅ Requisição atualizada com sucesso!');
         alert('Requisição atualizada com sucesso!');
