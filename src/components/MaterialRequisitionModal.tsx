@@ -106,10 +106,9 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   // Update total cost and budget exceeded status
   useEffect(() => {
     const totalCost = formData.items.reduce((sum, item) => {
-      return sum + (item.invoiceValue || 0);
+      const invoiceValue = typeof item.invoiceValue === 'number' ? item.invoiceValue : 0;
+      return sum + invoiceValue;
     }, 0);
-    
-    const totalWithTaxes = totalCost;
     
     setFormData(prev => ({
       ...prev,
@@ -118,13 +117,30 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   }, [formData.items]);
 
-  // Sincronizar formData e orderItems ao editar uma requisição existente
+  // CORRIGIDO: Sincronizar formData e orderItems ao editar uma requisição existente
   useEffect(() => {
     if (requisition) {
+      // Garantir que todos os itens tenham os campos necessários
+      const itemsWithDefaults = requisition.items.map(item => ({
+        ...item,
+        weight: typeof item.weight === 'number' ? item.weight : 0,
+        surplusWeight: typeof item.surplusWeight === 'number' ? item.surplusWeight : 0,
+        totalWeight: typeof item.totalWeight === 'number' ? item.totalWeight : 
+                     (typeof item.weight === 'number' ? item.weight : 0) + 
+                     (typeof item.surplusWeight === 'number' ? item.surplusWeight : 0),
+        quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+        invoiceValue: typeof item.invoiceValue === 'number' ? item.invoiceValue : 0
+      }));
+      
       setFormData({
         ...requisition,
+        items: itemsWithDefaults,
+        totalCost: typeof requisition.totalCost === 'number' ? requisition.totalCost : 0,
+        budgetLimit: typeof requisition.budgetLimit === 'number' ? requisition.budgetLimit : 0,
+        budgetExceeded: Boolean(requisition.budgetExceeded),
         lastUpdated: new Date().toISOString()
       });
+      
       const order = orders.find(o => o.id === requisition.orderId);
       if (order) setOrderItems(order.items);
     }
@@ -142,9 +158,9 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
           itemNumber: idx + 1,
           code: item.itemCode,
           description: item.description,
-          quantity: item.quantity || 1,
-          unitWeight: item.weight || 0,
-          totalWeight: item.totalWeight || 0,
+          quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+          unitWeight: typeof item.weight === 'number' ? item.weight : 0,
+          totalWeight: typeof item.totalWeight === 'number' ? item.totalWeight : 0,
           unitPrice: 0,
           totalPrice: 0
         })));
@@ -166,8 +182,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
       
       // If weight or surplusWeight changes, update totalWeight
       if (field === 'weight' || field === 'surplusWeight') {
-        const weight = field === 'weight' ? value : (prev.weight || 0);
-        const surplusWeight = field === 'surplusWeight' ? value : (prev.surplusWeight || 0);
+        const weight = field === 'weight' ? (typeof value === 'number' ? value : 0) : (typeof prev.weight === 'number' ? prev.weight : 0);
+        const surplusWeight = field === 'surplusWeight' ? (typeof value === 'number' ? value : 0) : (typeof prev.surplusWeight === 'number' ? prev.surplusWeight : 0);
         updated.totalWeight = weight + surplusWeight;
       }
       
@@ -196,7 +212,9 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                 traceabilityCode: generateTraceabilityCode(formData.orderId, orderItem.id),
                 orderItemId: orderItem.id,
                 itemCode: orderItem.code,
-                totalWeight: (newItem.weight || 0) + (newItem.surplusWeight || 0),
+                weight: typeof newItem.weight === 'number' ? newItem.weight : 0,
+                surplusWeight: typeof newItem.surplusWeight === 'number' ? newItem.surplusWeight : 0,
+                totalWeight: (typeof newItem.weight === 'number' ? newItem.weight : 0) + (typeof newItem.surplusWeight === 'number' ? newItem.surplusWeight : 0),
               }
             : item
         )
@@ -211,12 +229,12 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         itemCode: orderItem.code,
         description: newItem.description || '',
         material: newItem.material || '',
-        quantity: newItem.quantity || 1,
+        quantity: typeof newItem.quantity === 'number' ? newItem.quantity : 1,
         unit: newItem.unit || '',
         dimensions: newItem.dimensions || '',
-        weight: newItem.weight || 0,
-        surplusWeight: newItem.surplusWeight || 0,
-        totalWeight: (newItem.weight || 0) + (newItem.surplusWeight || 0),
+        weight: typeof newItem.weight === 'number' ? newItem.weight : 0,
+        surplusWeight: typeof newItem.surplusWeight === 'number' ? newItem.surplusWeight : 0,
+        totalWeight: (typeof newItem.weight === 'number' ? newItem.weight : 0) + (typeof newItem.surplusWeight === 'number' ? newItem.surplusWeight : 0),
         status: 'pending',
         sentForQuotation: false
       };
@@ -247,12 +265,25 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   };
 
+  // CORRIGIDO: handleItemChange com validações
   const handleItemChange = (itemId: string, field: keyof MaterialRequisitionItem, value: any) => {
     setFormData(prev => ({
       ...prev,
       items: prev.items.map(item => {
         if (item.id === itemId) {
           const updatedItem = { ...item, [field]: value };
+          
+          // Garantir que weight e surplusWeight sejam números
+          if (field === 'weight') {
+            updatedItem.weight = typeof value === 'number' ? value : 0;
+          }
+          if (field === 'surplusWeight') {
+            updatedItem.surplusWeight = typeof value === 'number' ? value : 0;
+          }
+          
+          // Garantir que totalWeight seja calculado corretamente
+          const weight = typeof updatedItem.weight === 'number' ? updatedItem.weight : 0;
+          const surplusWeight = typeof updatedItem.surplusWeight === 'number' ? updatedItem.surplusWeight : 0;
           
           // If we're updating status to 'stock', clear supplier-related fields
           if (field === 'status' && value === 'stock') {
@@ -263,7 +294,10 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
           
           // Update total weight when weight or surplus changes
           if (field === 'weight' || field === 'surplusWeight') {
-            updatedItem.totalWeight = updatedItem.weight + updatedItem.surplusWeight;
+            updatedItem.totalWeight = weight + surplusWeight;
+          } else {
+            // Garantir que totalWeight sempre existe
+            updatedItem.totalWeight = weight + surplusWeight;
           }
           
           // When supplier changes, update supplier name
@@ -281,7 +315,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   };
 
-  // FUNÇÃO DE SALVAMENTO CORRIGIDA
+  // FUNÇÃO DE SALVAMENTO TOTALMENTE CORRIGIDA
   const handleSave = async (e?: React.FormEvent) => {
     // Prevenir submit do formulário se for evento de form
     if (e) {
@@ -295,22 +329,38 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     console.log('🏗️ Current formData:', formData);
     
     try {
-      console.log('[REQUISITION] Tentando salvar:', formData);
+      // Corrigir dados antes de validar
+      const correctedFormData = {
+        ...formData,
+        items: formData.items.map(item => ({
+          ...item,
+          weight: typeof item.weight === 'number' ? item.weight : 0,
+          surplusWeight: typeof item.surplusWeight === 'number' ? item.surplusWeight : 0,
+          totalWeight: typeof item.totalWeight === 'number' ? item.totalWeight : 
+                       (typeof item.weight === 'number' ? item.weight : 0) + 
+                       (typeof item.surplusWeight === 'number' ? item.surplusWeight : 0),
+          quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+          invoiceValue: typeof item.invoiceValue === 'number' ? item.invoiceValue : 0
+        }))
+      };
+      
+      console.log('🏗️ Dados corrigidos:', correctedFormData);
+      console.log('[REQUISITION] Tentando salvar:', correctedFormData);
       
       // Validar campos obrigatórios
-      if (!formData.orderId) {
+      if (!correctedFormData.orderId) {
         alert('Por favor, selecione um pedido.');
         return;
       }
-      if (!formData.requestDate) {
+      if (!correctedFormData.requestDate) {
         alert('Por favor, selecione a data da requisição.');
         return;
       }
-      if (!formData.items || formData.items.length === 0) {
+      if (!correctedFormData.items || correctedFormData.items.length === 0) {
         alert('Por favor, adicione pelo menos um item à requisição.');
         return;
       }
-      for (const item of formData.items) {
+      for (const item of correctedFormData.items) {
         if (!item.description || !item.quantity || !item.unit) {
           alert('Por favor, preencha todos os campos obrigatórios dos itens (descrição, quantidade e unidade).');
           return;
@@ -319,7 +369,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
       
       // Preparar dados para salvar
       const requisitionData: MaterialRequisition = {
-        ...formData,
+        ...correctedFormData,
         id: requisition?.id || 'new',
         status: 'pending',
         createdAt: requisition?.createdAt || new Date().toISOString(),
@@ -384,7 +434,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
           </button>
         </div>
 
-        {/* REMOVIDO O FORM, AGORA É UM DIV */}
         <div className="space-y-6">
           {/* Order Selection */}
           <div className="border-b pb-4">
@@ -730,7 +779,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                         <td className="px-3 py-2 whitespace-nowrap text-sm">
                           <input
                             type="number"
-                            value={item.quantity}
+                            value={typeof item.quantity === 'number' ? item.quantity : 1}
                             onChange={(e) => handleItemChange(item.id, 'quantity', e.target.value ? parseInt(e.target.value) : 1)}
                             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                             min="1"
@@ -749,7 +798,10 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <input
                               type="number"
                               value={typeof item.weight === 'number' ? item.weight : 0}
-                              onChange={(e) => handleItemChange(item.id, 'weight', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
+                              }}
                               className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                               min="0"
                               step="0.01"
@@ -758,7 +810,10 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <input
                               type="number"
                               value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
-                              onChange={(e) => handleItemChange(item.id, 'surplusWeight', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
+                              }}
                               className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                               min="0"
                               step="0.01"
@@ -766,7 +821,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             />
                           </div>
                           <div className="text-xs text-gray-500 mt-1">
-                            Total: {item.totalWeight.toLocaleString('pt-BR')} kg
+                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toLocaleString('pt-BR')} kg
                           </div>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm">
@@ -835,7 +890,10 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <input
                               type="number"
                               value={typeof item.invoiceValue === 'number' ? item.invoiceValue : 0}
-                              onChange={(e) => handleItemChange(item.id, 'invoiceValue', e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0)}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'invoiceValue', isNaN(newValue) ? 0 : newValue);
+                              }}
                               className={`w-full rounded-md shadow-sm focus:ring focus:ring-blue-200 text-sm 
                               ${
                                 item.invoiceValue && item.invoiceValue > 0
@@ -914,7 +972,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             >
               Cancelar
             </button>
-            {/* BOTÃO CORRIGIDO - SEM FORM, SÓ onClick */}
             <button
               type="button"
               onClick={handleSave}
