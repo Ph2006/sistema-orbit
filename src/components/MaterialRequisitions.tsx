@@ -82,6 +82,15 @@ const MaterialRequisitions: React.FC = () => {
     console.log('[DEBUG] Auth user ID:', auth.currentUser?.uid);
   }, [companyId]);
 
+  // Monitorar mudanças no modal
+  useEffect(() => {
+    console.log('👀 Modal state changed:', {
+      isModalOpen,
+      selectedRequisitionId: selectedRequisition?.id,
+      selectedRequisitionData: selectedRequisition ? 'tem dados' : 'sem dados'
+    });
+  }, [isModalOpen, selectedRequisition]);
+
   // Early return se não houver companyId
   if (!companyId) {
     return (
@@ -241,6 +250,7 @@ const MaterialRequisitions: React.FC = () => {
   };
 
   const handleAddRequisition = () => {
+    console.log('➕ Adicionando nova requisição');
     setSelectedRequisition(null);
     setIsModalOpen(true);
   };
@@ -250,39 +260,60 @@ const MaterialRequisitions: React.FC = () => {
   };
 
   const handleViewRequisition = (requisition: MaterialRequisition) => {
+    console.log('👁️ Visualizando requisição:', requisition.id);
     setSelectedRequisition(requisition);
     setIsDetailModalOpen(true);
   };
 
+  // FUNÇÃO DE EDIÇÃO COM DEBUG COMPLETO
   const handleEditRequisition = (requisition: MaterialRequisition) => {
+    console.log('🔧 === CLICOU EM EDITAR ===');
+    console.log('🔧 Requisição selecionada:', requisition);
+    console.log('🔧 ID da requisição:', requisition.id);
+    console.log('🔧 CompanyId atual:', companyId);
+    console.log('🔧 Dados completos da requisição:', JSON.stringify(requisition, null, 2));
+    
+    // Verificar se o ID é válido
+    if (!requisition.id || requisition.id === 'new') {
+      console.error('❌ ID da requisição é inválido:', requisition.id);
+      alert('Erro: ID da requisição é inválido');
+      return;
+    }
+    
+    console.log('✅ ID válido, definindo estado...');
     setSelectedRequisition(requisition);
     setIsModalOpen(true);
+    console.log('✅ Modal deve estar aberto agora');
   };
 
-  // FUNÇÃO CORRIGIDA PARA SALVAR REQUISIÇÕES
+  // FUNÇÃO DE SALVAMENTO COM LOGS DETALHADOS
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
-    console.log('=== INÍCIO DO PROCESSO DE SALVAMENTO ===');
-    console.log('[DEBUG] Requisition completa:', requisition);
-    console.log('[DEBUG] CompanyId:', companyId);
+    console.log('💾 === INÍCIO DO SALVAMENTO ===');
+    console.log('💾 Dados recebidos:', JSON.stringify(requisition, null, 2));
+    console.log('💾 ID da requisição:', requisition.id);
+    console.log('💾 CompanyId:', companyId);
+    console.log('💾 É edição?', requisition.id !== 'new' && requisition.id);
     
     if (!companyId) {
-      alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
+      console.error('❌ CompanyId não disponível');
+      alert('Erro: ID da empresa não disponível');
       return;
     }
 
     try {
-      // Validar dados obrigatórios
+      // Validar dados básicos
       if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
-        console.error('[DEBUG] Dados obrigatórios faltando:', {
-          orderId: requisition.orderId,
-          requestDate: requisition.requestDate,
-          itemsLength: requisition.items?.length
+        console.error('❌ Dados obrigatórios faltando:', {
+          orderId: !!requisition.orderId,
+          requestDate: !!requisition.requestDate,
+          items: requisition.items?.length || 0
         });
-        alert('Por favor, preencha todos os campos obrigatórios e adicione pelo menos um item.');
+        alert('Por favor, preencha todos os campos obrigatórios');
         return;
       }
 
-      // Preparar dados para o Firebase (remover campos undefined/null problemáticos)
+      // Preparar dados limpos
+      console.log('🧹 Limpando dados...');
       const cleanedItems = requisition.items.map(item => ({
         id: item.id || '',
         description: item.description || '',
@@ -317,78 +348,83 @@ const MaterialRequisitions: React.FC = () => {
         updatedAt: new Date().toISOString()
       };
 
-      console.log('[DEBUG] Dados limpos para envio:', cleanedRequisition);
+      console.log('✅ Dados limpos:', cleanedRequisition);
 
       const collectionPath = `companies/${companyId}/materialRequisitions`;
-      console.log('[DEBUG] Collection path:', collectionPath);
+      console.log('📁 Collection path:', collectionPath);
 
       if (requisition.id === 'new' || !requisition.id) {
-        // Criar nova requisição
-        console.log('[DEBUG] Criando nova requisição...');
-        
-        const docRef = await addDoc(
-          collection(db, collectionPath),
-          cleanedRequisition
-        );
-        
-        console.log('[DEBUG] Nova requisição criada com ID:', docRef.id);
+        // CRIAR NOVA
+        console.log('➕ Criando nova requisição...');
+        const docRef = await addDoc(collection(db, collectionPath), cleanedRequisition);
+        console.log('✅ Criada com ID:', docRef.id);
         alert('✅ Requisição criada com sucesso!');
       } else {
-        // Atualizar requisição existente
-        console.log('[DEBUG] Atualizando requisição existente ID:', requisition.id);
+        // ATUALIZAR EXISTENTE
+        console.log('✏️ Atualizando requisição ID:', requisition.id);
         
+        // Verificar se existe
         const docRef = doc(db, collectionPath, requisition.id);
+        console.log('🔍 Verificando se documento existe...');
         
-        // Verificar se o documento existe
         const docSnap = await getDoc(docRef);
         if (!docSnap.exists()) {
-          console.error('[DEBUG] Documento não encontrado para atualização');
-          alert('❌ Erro: Requisição não encontrada para atualização.');
+          console.error('❌ Documento não encontrado no Firebase');
+          console.error('❌ Path tentado:', `${collectionPath}/${requisition.id}`);
+          alert('❌ Erro: Requisição não encontrada no banco de dados');
           return;
         }
         
+        console.log('✅ Documento existe, dados atuais:', docSnap.data());
+        console.log('✅ Iniciando atualização...');
+        
         await updateDoc(docRef, cleanedRequisition);
-        console.log('[DEBUG] Requisição atualizada com sucesso');
+        console.log('✅ Atualização concluída com sucesso!');
         alert('✅ Requisição atualizada com sucesso!');
       }
 
-      // Fechar modal após sucesso
+      // Fechar modal
+      console.log('🚪 Fechando modal...');
       setIsModalOpen(false);
       setSelectedRequisition(null);
       
     } catch (error) {
-      console.error('[DEBUG] ERRO DETALHADO NO SALVAMENTO:', error);
+      console.error('💥 ERRO COMPLETO:', error);
+      console.error('💥 Error details:', {
+        name: error?.name,
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack
+      });
       
-      // Log detalhado do erro
-      if (error instanceof Error) {
-        console.error('[DEBUG] Error name:', error.name);
-        console.error('[DEBUG] Error message:', error.message);
-        console.error('[DEBUG] Error stack:', error.stack);
-      }
-      
-      // Verificar tipos específicos de erro do Firebase
-      if (error.code) {
-        console.error('[DEBUG] Firebase error code:', error.code);
-        
+      let errorMessage = 'Erro desconhecido';
+      if (error?.code) {
         switch (error.code) {
           case 'permission-denied':
-            alert('❌ Erro de permissão: Verifique se você tem acesso a esta empresa.');
+            errorMessage = 'Sem permissão para esta operação';
+            console.error('💥 PERMISSION DENIED - Verifique as regras do Firestore');
             break;
           case 'not-found':
-            alert('❌ Erro: Documento não encontrado.');
+            errorMessage = 'Documento não encontrado';
+            console.error('💥 NOT FOUND - Documento foi deletado ou não existe');
             break;
           case 'unavailable':
-            alert('❌ Erro: Serviço temporariamente indisponível. Tente novamente.');
+            errorMessage = 'Serviço indisponível';
+            console.error('💥 UNAVAILABLE - Firebase temporariamente indisponível');
             break;
           case 'failed-precondition':
-            alert('❌ Erro: Falha na precondição. Verifique os dados enviados.');
+            errorMessage = 'Falha na precondição';
+            console.error('💥 FAILED PRECONDITION - Dados inválidos ou conflitantes');
             break;
           default:
-            alert(`❌ Erro do Firebase: ${error.message}`);
+            errorMessage = `Erro Firebase: ${error.message}`;
+            console.error('💥 OTHER FIREBASE ERROR:', error.code);
         }
-      } else {
-        alert(`❌ Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      } else if (error?.message) {
+        errorMessage = error.message;
       }
+      
+      alert(`❌ ${errorMessage}`);
     }
   };
 
@@ -933,6 +969,7 @@ const MaterialRequisitions: React.FC = () => {
         <MaterialRequisitionModal
           requisition={selectedRequisition}
           onClose={() => {
+            console.log('🚪 Fechando modal via onClose');
             setIsModalOpen(false);
             setSelectedRequisition(null);
           }}
@@ -952,6 +989,7 @@ const MaterialRequisitions: React.FC = () => {
             setSelectedRequisition(null);
           }}
           onEdit={() => {
+            console.log('✏️ Mudando de detail para edit modal');
             setIsDetailModalOpen(false);
             setIsModalOpen(true);
           }}
