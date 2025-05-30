@@ -14,6 +14,34 @@ interface MaterialRequisitionDetailModalProps {
   onEditItem?: (item: MaterialRequisitionItem) => void;
 }
 
+// Função para formatar datas com segurança
+const formatDateSafely = (date: any, formatStr: string = 'dd/MM/yyyy'): string => {
+  try {
+    if (!date) return 'Data não informada';
+    
+    let dateObj: Date;
+    if (typeof date === 'string') {
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else if (date.toDate && typeof date.toDate === 'function') {
+      // Firestore Timestamp
+      dateObj = date.toDate();
+    } else {
+      return 'Data inválida';
+    }
+    
+    if (isNaN(dateObj.getTime())) {
+      return 'Data inválida';
+    }
+    
+    return format(dateObj, formatStr, { locale: ptBR });
+  } catch (error) {
+    console.error('Erro ao formatar data:', error, 'Data original:', date);
+    return 'Data inválida';
+  }
+};
+
 // Funções utilitárias para valores seguros
 const safeNumber = (value: any, defaultValue: number = 0): number => {
   return typeof value === 'number' && !isNaN(value) ? value : defaultValue;
@@ -204,7 +232,7 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
       doc.text(`PEDIDO #${correctedRequisition.orderNumber}`, margin + 5, y + 8);
       doc.text(`Cliente: ${correctedRequisition.customer}`, margin + 5, y + 16);
       
-      doc.text(`Data da Solicitação: ${format(new Date(correctedRequisition.requestDate), 'dd/MM/yyyy', { locale: ptBR })}`, pageWidth - margin - 70, y + 8);
+      doc.text(`Data da Solicitação: ${formatDateSafely(correctedRequisition.requestDate)}`, pageWidth - margin - 70, y + 8);
       doc.text(`Status: ${
         correctedRequisition.status === 'pending' ? 'Pendente' :
         correctedRequisition.status === 'partial' ? 'Parcial' :
@@ -320,7 +348,7 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
         doc.setFontSize(8);
         doc.setTextColor(100, 100, 100);
         doc.text(
-          `Relatório gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })} - Página ${i} de ${totalPages}`,
+          `Relatório gerado em ${formatDateSafely(new Date(), 'dd/MM/yyyy HH:mm')} - Página ${i} de ${totalPages}`,
           pageWidth / 2, 
           pageHeight - 10, 
           { align: 'center' }
@@ -378,15 +406,15 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
               <div className="mt-3 space-y-2 text-sm">
                 <div>
                   <span className="text-gray-600">Data da Solicitação:</span>{' '}
-                  <span className="font-medium">{format(new Date(correctedRequisition.requestDate), 'dd/MM/yyyy', { locale: ptBR })}</span>
+                  <span className="font-medium">{formatDateSafely(correctedRequisition.requestDate)}</span>
                 </div>
                 <div>
                   <span className="text-gray-600">Criado em:</span>{' '}
-                  <span className="font-medium">{format(new Date(correctedRequisition.createdAt), 'dd/MM/yyyy', { locale: ptBR })}</span>
+                  <span className="font-medium">{formatDateSafely(correctedRequisition.createdAt)}</span>
                 </div>
                 <div>
                   <span className="text-gray-600">Última Atualização:</span>{' '}
-                  <span className="font-medium">{format(new Date(correctedRequisition.lastUpdated), 'dd/MM/yyyy', { locale: ptBR })}</span>
+                  <span className="font-medium">{formatDateSafely(correctedRequisition.updatedAt || correctedRequisition.lastUpdated)}</span>
                 </div>
                 {correctedRequisition.notes && (
                   <div>
@@ -563,7 +591,7 @@ const MaterialRequisitionDetailModal: React.FC<MaterialRequisitionDetailModalPro
                             {item.receiptDate && (
                               <div className="text-sm">
                                 <span className="text-gray-500">Data de Recebimento:</span>{' '}
-                                {format(new Date(item.receiptDate), 'dd/MM/yyyy', { locale: ptBR })}
+                                {formatDateSafely(item.receiptDate)}
                               </div>
                             )}
                             {safeString(item.invoiceNumber) && (
