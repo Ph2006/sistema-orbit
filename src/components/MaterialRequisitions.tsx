@@ -43,7 +43,6 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuthStore } from '../store/authStore';
 import { getAuth } from 'firebase/auth';
-import { materialRequisitionService } from '../services/materialRequisitionService';
 
 // Função para obter a coleção correta baseada na empresa
 const getCompanyCollection = (collectionName: string, companyId: string | null): string => {
@@ -78,11 +77,9 @@ const MaterialRequisitions: React.FC = () => {
   // DEBUG: Registro do companyId
   useEffect(() => {
     console.log('[DEBUG] CompanyId atual:', companyId);
-    if (companyId) {
-      // Salvar companyId para redundância
-      materialRequisitionService.saveCompanyId(companyId);
-      console.log('[DEBUG] CompanyId salvo localmente');
-    }
+    const auth = getAuth();
+    console.log('[DEBUG] Auth user:', auth.currentUser);
+    console.log('[DEBUG] Auth user ID:', auth.currentUser?.uid);
   }, [companyId]);
 
   // Early return se não houver companyId
@@ -150,6 +147,7 @@ const MaterialRequisitions: React.FC = () => {
               id: doc.id,
               ...doc.data()
             })) as MaterialRequisition[];
+            console.log('[DEBUG] Requisições carregadas:', requisitionsData.length);
             setRequisitions(requisitionsData);
             setLoading(false);
           },
@@ -171,6 +169,7 @@ const MaterialRequisitions: React.FC = () => {
               id: doc.id,
               ...doc.data()
             })) as QuotationRequest[];
+            console.log('[DEBUG] Cotações carregadas:', quotationsData.length);
             setQuotations(quotationsData);
           },
           (error) => {
@@ -194,6 +193,53 @@ const MaterialRequisitions: React.FC = () => {
     };
   }, [companyId]);
 
+  // FUNÇÃO DE TESTE DO FIREBASE
+  const testFirebaseConnection = async () => {
+    if (!companyId) {
+      console.error('[TEST] CompanyId não disponível');
+      alert('CompanyId não disponível!');
+      return;
+    }
+
+    try {
+      const collectionPath = `companies/${companyId}/materialRequisitions`;
+      console.log('[TEST] Testando conexão com:', collectionPath);
+      
+      // Tentar ler a coleção
+      const testQuery = query(
+        collection(db, collectionPath),
+        orderBy('requestDate', 'desc')
+      );
+      
+      const snapshot = await getDocs(testQuery);
+      console.log('[TEST] Conexão OK - Documentos encontrados:', snapshot.size);
+      
+      // Tentar criar um documento de teste
+      const testDoc = {
+        test: true,
+        timestamp: new Date().toISOString(),
+        companyId: companyId,
+        createdBy: 'teste-conexao'
+      };
+      
+      const docRef = await addDoc(collection(db, collectionPath), testDoc);
+      console.log('[TEST] Documento de teste criado:', docRef.id);
+      
+      // Remover o documento de teste
+      await updateDoc(doc(db, collectionPath, docRef.id), { 
+        deleted: true,
+        deletedAt: new Date().toISOString()
+      });
+      console.log('[TEST] Documento de teste marcado como deletado');
+      
+      alert('✅ Teste de conexão com Firebase: SUCESSO');
+      
+    } catch (error) {
+      console.error('[TEST] Erro no teste de conexão:', error);
+      alert(`❌ Teste de conexão FALHOU: ${error.message}`);
+    }
+  };
+
   const handleAddRequisition = () => {
     setSelectedRequisition(null);
     setIsModalOpen(true);
@@ -213,54 +259,136 @@ const MaterialRequisitions: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  // FUNÇÃO REVISADA: usando o serviço para salvar requisições
+  // FUNÇÃO CORRIGIDA PARA SALVAR REQUISIÇÕES
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
     console.log('=== INÍCIO DO PROCESSO DE SALVAMENTO ===');
     console.log('[DEBUG] Requisition completa:', requisition);
-    console.log('[DEBUG] Requisition ID:', requisition.id);
-    console.log('[DEBUG] É nova?', requisition.id === 'new');
+    console.log('[DEBUG] CompanyId:', companyId);
     
+    if (!companyId) {
+      alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
+      return;
+    }
+
     try {
       // Validar dados obrigatórios
       if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
-        console.error('[DEBUG] Dados obrigatórios faltando');
+        console.error('[DEBUG] Dados obrigatórios faltando:', {
+          orderId: requisition.orderId,
+          requestDate: requisition.requestDate,
+          itemsLength: requisition.items?.length
+        });
         alert('Por favor, preencha todos os campos obrigatórios e adicione pelo menos um item.');
         return;
       }
 
-      // Salvar companyId localmente para redundância
-      if (companyId) {
-        materialRequisitionService.saveCompanyId(companyId);
-      }
+      // Preparar dados para o Firebase (remover campos undefined/null problemáticos)
+      const cleanedItems = requisition.items.map(item => ({
+        id: item.id || '',
+        description: item.description || '',
+        material: item.material || '',
+        quantity: Number(item.quantity) || 0,
+        dimensions: item.dimensions || '',
+        weight: Number(item.weight) || 0,
+        status: item.status || 'pending',
+        unitPrice: Number(item.unitPrice) || 0,
+        totalPrice: Number(item.totalPrice) || 0,
+        traceabilityCode: item.traceabilityCode || '',
+        sentForQuotation: Boolean(item.sentForQuotation),
+        deliveryDate: item.deliveryDate || null,
+        supplier: item.supplier || '',
+        notes: item.notes || ''
+      }));
 
-      // Usar o novo serviço para salvar
-      if (requisition.id === 'new') {
+      const cleanedRequisition = {
+        orderId: requisition.orderId,
+        orderNumber: requisition.orderNumber || '',
+        customer: requisition.customer || '',
+        requestDate: requisition.requestDate,
+        expectedDeliveryDate: requisition.expectedDeliveryDate || null,
+        status: requisition.status || 'pending',
+        items: cleanedItems,
+        totalCost: Number(requisition.totalCost) || 0,
+        budgetLimit: Number(requisition.budgetLimit) || 0,
+        budgetExceeded: Boolean(requisition.budgetExceeded),
+        notes: requisition.notes || '',
+        createdBy: requisition.createdBy || 'sistema',
+        createdAt: requisition.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      console.log('[DEBUG] Dados limpos para envio:', cleanedRequisition);
+
+      const collectionPath = `companies/${companyId}/materialRequisitions`;
+      console.log('[DEBUG] Collection path:', collectionPath);
+
+      if (requisition.id === 'new' || !requisition.id) {
         // Criar nova requisição
-        const newId = await materialRequisitionService.createRequisition(requisition);
-        console.log('[DEBUG] Nova requisição criada com ID:', newId);
-        alert('Requisição criada com sucesso!');
+        console.log('[DEBUG] Criando nova requisição...');
+        
+        const docRef = await addDoc(
+          collection(db, collectionPath),
+          cleanedRequisition
+        );
+        
+        console.log('[DEBUG] Nova requisição criada com ID:', docRef.id);
+        alert('✅ Requisição criada com sucesso!');
       } else {
         // Atualizar requisição existente
-        await materialRequisitionService.updateRequisition(requisition.id, requisition);
+        console.log('[DEBUG] Atualizando requisição existente ID:', requisition.id);
+        
+        const docRef = doc(db, collectionPath, requisition.id);
+        
+        // Verificar se o documento existe
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) {
+          console.error('[DEBUG] Documento não encontrado para atualização');
+          alert('❌ Erro: Requisição não encontrada para atualização.');
+          return;
+        }
+        
+        await updateDoc(docRef, cleanedRequisition);
         console.log('[DEBUG] Requisição atualizada com sucesso');
-        alert('Requisição atualizada com sucesso!');
+        alert('✅ Requisição atualizada com sucesso!');
       }
 
+      // Fechar modal após sucesso
       setIsModalOpen(false);
       setSelectedRequisition(null);
       
     } catch (error) {
-      console.error('[DEBUG] ERRO NO SALVAMENTO:', error);
+      console.error('[DEBUG] ERRO DETALHADO NO SALVAMENTO:', error);
       
+      // Log detalhado do erro
       if (error instanceof Error) {
-        console.error('[DEBUG] Detalhes do erro:', {
-          message: error.message,
-          stack: error.stack,
-          name: error.name
-        });
+        console.error('[DEBUG] Error name:', error.name);
+        console.error('[DEBUG] Error message:', error.message);
+        console.error('[DEBUG] Error stack:', error.stack);
       }
       
-      alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      // Verificar tipos específicos de erro do Firebase
+      if (error.code) {
+        console.error('[DEBUG] Firebase error code:', error.code);
+        
+        switch (error.code) {
+          case 'permission-denied':
+            alert('❌ Erro de permissão: Verifique se você tem acesso a esta empresa.');
+            break;
+          case 'not-found':
+            alert('❌ Erro: Documento não encontrado.');
+            break;
+          case 'unavailable':
+            alert('❌ Erro: Serviço temporariamente indisponível. Tente novamente.');
+            break;
+          case 'failed-precondition':
+            alert('❌ Erro: Falha na precondição. Verifique os dados enviados.');
+            break;
+          default:
+            alert(`❌ Erro do Firebase: ${error.message}`);
+        }
+      } else {
+        alert(`❌ Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      }
     }
   };
 
@@ -398,6 +526,14 @@ const MaterialRequisitions: React.FC = () => {
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Requisições de Materiais</h2>
         <div className="flex space-x-4">
+          {/* Botão de teste - REMOVER após resolver o problema */}
+          <button
+            onClick={testFirebaseConnection}
+            className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            🔥 Testar Firebase
+          </button>
+          
           <button
             onClick={handleOpenCuttingPlan}
             className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
@@ -853,5 +989,4 @@ const MaterialRequisitions: React.FC = () => {
   );
 };
 
-// Certifique-se de que esta exportação esteja presente e correta!
 export default MaterialRequisitions;
