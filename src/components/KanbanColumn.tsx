@@ -3,7 +3,7 @@ import { useDroppable } from '@dnd-kit/core';
 import KanbanCard from './KanbanCard';
 import { Column, Order } from '../types/kanban';
 import { Settings, Trash2, Plus } from 'lucide-react';
-import { formatNumber } from '../utils/format';
+import { formatNumber, compareDates, formatDate } from '../utils/format';
 
 interface KanbanColumnProps {
   column: Column;
@@ -47,22 +47,56 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
     );
   };
 
-  const isInProgress = column.title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === 'pedidos em progresso';
-  const sortedOrders = isInProgress
-    ? [...column.orders].sort((a, b) => {
-        const dateA = a.deliveryDate ? new Date(a.deliveryDate).getTime() : Infinity;
-        const dateB = b.deliveryDate ? new Date(b.deliveryDate).getTime() : Infinity;
-        
-        if (dateA !== Infinity && dateB !== Infinity) {
-          return dateA - dateB;
-        }
-        
-        if (dateA !== Infinity) return -1;
-        if (dateB !== Infinity) return 1;
-        
-        return 0;
-      })
+  // Função melhorada para detectar se é a coluna "Pedidos em progresso"
+  const isInProgressColumn = (title: string): boolean => {
+    const normalizedTitle = title
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+    
+    // Verificar várias variações possíveis do título
+    const progressVariations = [
+      'pedidos em progresso',
+      'pedidos em processo', 
+      'em progresso',
+      'em processo',
+      'progresso',
+      'processo'
+    ];
+    
+    return progressVariations.some(variation => 
+      normalizedTitle.includes(variation) || 
+      normalizedTitle === variation
+    );
+  };
+
+  // Função para ordenar pedidos por data de entrega usando a função segura
+  const sortOrdersByDeliveryDate = (orders: Order[]): Order[] => {
+    return [...orders].sort((a, b) => {
+      // Usar a função de comparação segura
+      const comparison = compareDates(a.deliveryDate, b.deliveryDate);
+      
+      // Debug logging para verificar as ordenações
+      console.log(`🔍 Ordenando: #${a.orderNumber} (${formatDate(a.deliveryDate)}) vs #${b.orderNumber} (${formatDate(b.deliveryDate)}) = ${comparison}`);
+      
+      return comparison;
+    });
+  };
+
+  // Aplicar ordenação apenas se for a coluna de progresso
+  const isProgressColumn = isInProgressColumn(column.title);
+  const sortedOrders = isProgressColumn 
+    ? sortOrdersByDeliveryDate(column.orders)
     : column.orders;
+
+  console.log(`🏗️ Coluna "${column.title}" - É coluna de progresso: ${isProgressColumn}`);
+  if (isProgressColumn) {
+    console.log('📋 Pedidos ordenados por data de entrega:');
+    sortedOrders.forEach((order, index) => {
+      console.log(`  ${index + 1}. #${order.orderNumber} - ${formatDate(order.deliveryDate)} (Data original: ${order.deliveryDate})`);
+    });
+  }
 
   return (
     <div className="flex flex-col w-full sm:w-80 min-w-[280px] max-w-full shrink-0">
@@ -93,6 +127,16 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
           <span>{column.orders.length} pedido(s)</span>
           <span>{formatNumber(totalWeight)} kg</span>
         </div>
+
+        {/* Indicador de ordenação para colunas de progresso */}
+        {isProgressColumn && (
+          <div className="mt-2 text-xs text-blue-400 flex items-center">
+            <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+            </svg>
+            Ordenado por data de entrega
+          </div>
+        )}
       </div>
 
       {/* Lista de Pedidos */}
@@ -101,17 +145,25 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
         className="flex-1 bg-gray-800/30 backdrop-blur-sm rounded-b-xl p-2 border-x border-b border-gray-700/50 overflow-y-auto custom-scrollbar min-h-[200px] max-h-[70vh]"
       >
         <div className="space-y-2">
-          {sortedOrders.map((order) => (
-            <KanbanCard
-              key={order.id}
-              order={order}
-              onClick={() => onOrderClick(order)}
-              highlight={shouldHighlight(order)}
-              compactView={compactView}
-              isManaging={isManagingOrders}
-              isSelected={selectedOrders.includes(order.id)}
-              customers={customers}
-            />
+          {sortedOrders.map((order, index) => (
+            <div key={order.id} className="relative">
+              {/* Debug: mostrar posição e data na coluna de progresso */}
+              {isProgressColumn && (
+                <div className="absolute -left-1 top-0 bg-blue-500 text-white text-xs px-1 rounded-r text-[10px] z-10">
+                  {index + 1}
+                </div>
+              )}
+              <KanbanCard
+                order={order}
+                onClick={() => onOrderClick(order)}
+                highlight={shouldHighlight(order)}
+                compactView={compactView}
+                isManaging={isManagingOrders}
+                isSelected={selectedOrders.includes(order.id)}
+                customers={customers}
+                columnTitle={column.title}
+              />
+            </div>
           ))}
         </div>
       </div>
