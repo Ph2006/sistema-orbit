@@ -18,7 +18,20 @@ import {
   Download,
   X
 } from 'lucide-react';
-import { collection, getDocs, query, where, orderBy, addDoc, updateDoc, doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
+import { 
+  collection, 
+  getDocs, 
+  query, 
+  where, 
+  orderBy, 
+  addDoc, 
+  updateDoc, 
+  doc, 
+  onSnapshot, 
+  getDoc, 
+  setDoc,
+  Firestore
+} from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useOrderStore } from '../store/orderStore';
 import { useSupplierStore } from '../store/supplierStore';
@@ -33,38 +46,42 @@ import { ptBR } from 'date-fns/locale';
 import { useAuthStore } from '../store/authStore';
 import { getAuth } from 'firebase/auth';
 
-// Função para obter a coleção correta baseada na empresa
+// FUNÇÃO REVISADA para obter a coleção correta baseada na empresa
 const getCompanyCollection = (collectionName: string, companyId: string | null): string => {
-  if (!companyId) {
-    console.error("Company ID is not available.");
-    throw new Error("Company ID is required but not available");
+  // Verificação completa do companyId
+  if (!companyId || companyId === 'undefined' || companyId === 'null') {
+    // Erro detalhado para facilitar depuração
+    console.error(`ERRO CRÍTICO: CompanyId (${companyId}) inválido ao tentar acessar coleção: ${collectionName}`);
+    
+    // Em vez de retornar um caminho inválido, lançamos um erro explícito
+    throw new Error(`ID da empresa é necessário para acessar a coleção ${collectionName}`);
   }
+  
+  // Log para depuração
+  console.log(`Acessando coleção: companies/${companyId}/${collectionName}`);
+  
+  // Retorna o caminho da coleção específica da empresa
   return `companies/${companyId}/${collectionName}`;
 };
 
-// Helper function to sanitize data for Firestore
-const sanitizeForFirestore = (data: any): any => {
-  if (data === undefined) {
-    return null;
-  }
-  if (data === null || typeof data !== 'object') {
-    return data;
-  }
-  if (Array.isArray(data)) {
-    return data.map(item => sanitizeForFirestore(item));
-  }
-  const sanitizedData: Record<string, any> = {};
-  for (const [key, value] of Object.entries(data)) {
-    // Ignorar campos internos do Firestore
-    if (key.startsWith('_')) continue;
-    // Converter Date para string ISO
-    if (value instanceof Date) {
-      sanitizedData[key] = value.toISOString();
-      continue;
+// Função segura para executar operações no Firestore
+const safeFirestoreOperation = async <T,>(
+  operation: () => Promise<T>,
+  errorMessage: string = "Ocorreu um erro na operação do Firestore"
+): Promise<T | null> => {
+  try {
+    return await operation();
+  } catch (error) {
+    console.error(`${errorMessage}:`, error);
+    if (error instanceof Error) {
+      console.error('Detalhes:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
     }
-    sanitizedData[key] = sanitizeForFirestore(value);
+    throw error;
   }
-  return sanitizedData;
 };
 
 const MaterialRequisitions: React.FC = () => {
@@ -83,42 +100,104 @@ const MaterialRequisitions: React.FC = () => {
   const [isCuttingPlanModalOpen, setIsCuttingPlanModalOpen] = useState(false);
   const [selectedRequisition, setSelectedRequisition] = useState<MaterialRequisition | null>(null);
   const [activeTab, setActiveTab] = useState<'requisitions' | 'quotations' | 'cutting-plan'>('requisitions');
+  const [authChecked, setAuthChecked] = useState(false); // Novo estado para rastrear verificação de autenticação
   
   const { orders } = useOrderStore();
   const { suppliers, loadSuppliers, subscribeToSuppliers } = useSupplierStore();
-  const { companyId } = useAuthStore();
+  const { companyId, user } = useAuthStore();
 
-  // DEBUG: companyId e path da coleção
-  console.log('[DEBUG] CompanyId atual:', companyId);
-  try {
-    console.log('[DEBUG] Path da coleção:', getCompanyCollection('materialRequisitions', companyId));
-  } catch (e) {
-    console.log('[DEBUG] Erro ao obter path da coleção:', e);
-  }
+  // Logger aprimorado para depuração
+  const logDebug = (message: string, data?: any) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] DEBUG: ${message}`, data || '');
+  };
 
-  // DEBUG: Auth state
-  useEffect(() => {
-    console.log('[DEBUG] Auth state changed:', { companyId });
-  }, [companyId]);
+  // Logger de erro aprimorado
+  const logError = (message: string, error?: any) => {
+    const timestamp = new Date().toISOString();
+    console.error(`[${timestamp}] ERRO: ${message}`, error || '');
+    if (error instanceof Error) {
+      console.error('Detalhes:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+    }
+  };
 
-  // DEBUG: Usuário autenticado
+  // NOVO: Verificação completa de autenticação e companyId
   useEffect(() => {
     const auth = getAuth();
-    console.log('[DEBUG] Current user:', auth.currentUser);
-    auth.currentUser?.getIdToken().then(token => {
-      console.log('[DEBUG] User token:', token);
-    });
-  }, []);
+    
+    logDebug('=========== VERIFICAÇÃO DE AUTENTICAÇÃO ===========');
+    logDebug('CompanyId do store:', companyId);
+    logDebug('Usuário atual:', auth.currentUser?.email);
+    logDebug('UID do usuário:', auth.currentUser?.uid);
+    
+    // Verificar se autenticação está em andamento
+    const checkAuth = async () => {
+      if (!auth.currentUser) {
+        logError('Nenhum usuário autenticado');
+        setAuthChecked(true);
+        return;
+      }
 
-  // Early return se não houver companyId
-  if (!companyId) {
+      try {
+        // Obter token e claims atualizados
+        const tokenResult = await auth.currentUser.getIdTokenResult(true);
+        logDebug('Token atualizado obtido com claims:', tokenResult.claims);
+        
+        // Verificar claims personalizadas
+        if (tokenResult.claims.companyId && !companyId) {
+          logDebug('CompanyId encontrado nas claims:', tokenResult.claims.companyId);
+          // Se sua store tiver um método para atualizar o companyId:
+          // useAuthStore.getState().setCompanyId(tokenResult.claims.companyId);
+          
+          // Ou se precisar fazer refresh na página:
+          // window.location.reload();
+        }
+        
+        // Se ainda não temos companyId, tentar obter do usuário
+        if (!companyId && auth.currentUser) {
+          logDebug('Tentando buscar dados do usuário para obter companyId...');
+          
+          // Aqui você pode implementar lógica para buscar companyId do Firestore
+          // Exemplo:
+          // const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+          // if (userDoc.exists() && userDoc.data().companyId) {
+          //   useAuthStore.getState().setCompanyId(userDoc.data().companyId);
+          // }
+        }
+      } catch (error) {
+        logError('Erro ao verificar autenticação:', error);
+      } finally {
+        setAuthChecked(true);
+      }
+    };
+    
+    checkAuth();
+  }, [companyId]);
+
+  // Verificação de disponibilidade do companyId
+  if (authChecked && !companyId) {
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <h3 className="text-lg font-medium text-red-800">Erro de Autenticação</h3>
           <p className="text-red-600 mt-2">
-            Não foi possível identificar a empresa. Por favor, faça login novamente.
+            Não foi possível identificar sua empresa. Por favor, faça logout e login novamente.
           </p>
+          <button 
+            onClick={() => {
+              // Função para fazer logout
+              getAuth().signOut();
+              // Redirecionar para login se necessário
+              // window.location.href = '/login';
+            }}
+            className="mt-3 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700"
+          >
+            Fazer Logout
+          </button>
         </div>
       </div>
     );
@@ -141,27 +220,33 @@ const MaterialRequisitions: React.FC = () => {
     return () => unsubscribe();
   }, [subscribeToSuppliers, loadSuppliers, suppliers.length]);
 
+  // FUNÇÃO REVISADA: Configurar listeners de dados
   useEffect(() => {
     let unsubscribeRequisitions: (() => void) | undefined;
     let unsubscribeQuotations: (() => void) | undefined;
 
     const setupListeners = async () => {
       if (!companyId) {
+        logError('Não foi possível configurar listeners: companyId indisponível');
         setLoading(false);
         return;
       }
 
       setLoading(true);
       try {
-        // Configurar listener para requisições
+        // Configurar listener para requisições com tratamento de erro aprimorado
+        const requisitionsPath = getCompanyCollection('materialRequisitions', companyId);
+        logDebug(`Configurando listener para requisições em: ${requisitionsPath}`);
+        
         const requisitionsQuery = query(
-          collection(db, getCompanyCollection('materialRequisitions', companyId)),
+          collection(db, requisitionsPath),
           orderBy('requestDate', 'desc')
         );
-        console.log("Setting up requisition listener for companyId:", companyId);
+        
         unsubscribeRequisitions = onSnapshot(
           requisitionsQuery,
           (snapshot) => {
+            logDebug(`Recebidos ${snapshot.docs.length} documentos de requisições`);
             const requisitionsData = snapshot.docs.map(doc => ({
               id: doc.id,
               ...doc.data()
@@ -170,19 +255,24 @@ const MaterialRequisitions: React.FC = () => {
             setLoading(false);
           },
           (error) => {
-            console.error('Error listening to requisitions:', error);
+            logError('Erro ao escutar requisições:', error);
             setLoading(false);
           }
         );
+        
         // Configurar listener para cotações
+        const quotationsPath = getCompanyCollection('quotationRequests', companyId);
+        logDebug(`Configurando listener para cotações em: ${quotationsPath}`);
+        
         const quotationsQuery = query(
-          collection(db, getCompanyCollection('quotationRequests', companyId)),
+          collection(db, quotationsPath),
           orderBy('requestDate', 'desc')
         );
-        console.log("Setting up quotation listener for companyId:", companyId);
+        
         unsubscribeQuotations = onSnapshot(
           quotationsQuery,
           (snapshot) => {
+            logDebug(`Recebidos ${snapshot.docs.length} documentos de cotações`);
             const quotationsData = snapshot.docs.map(doc => ({
               id: doc.id,
               ...doc.data()
@@ -190,15 +280,20 @@ const MaterialRequisitions: React.FC = () => {
             setQuotations(quotationsData);
           },
           (error) => {
-            console.error('Error listening to quotations:', error);
+            logError('Erro ao escutar cotações:', error);
           }
         );
       } catch (error) {
-        console.error('Error setting up listeners:', error);
+        logError('Erro ao configurar listeners:', error);
         setLoading(false);
       }
     };
-    setupListeners();
+    
+    // Somente configurar listeners após verificação de autenticação
+    if (authChecked) {
+      setupListeners();
+    }
+    
     // Cleanup function
     return () => {
       if (unsubscribeRequisitions) {
@@ -208,7 +303,7 @@ const MaterialRequisitions: React.FC = () => {
         unsubscribeQuotations();
       }
     };
-  }, [companyId]);
+  }, [companyId, authChecked]);
 
   const handleAddRequisition = () => {
     setSelectedRequisition(null);
@@ -229,24 +324,24 @@ const MaterialRequisitions: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  // FUNÇÃO MODIFICADA PARA CORRIGIR PROBLEMAS DE SALVAMENTO
+  // FUNÇÃO REVISADA para salvar requisições
   const handleSaveRequisition = async (requisition: MaterialRequisition) => {
-    console.log('=== INÍCIO DO DEBUG DE SALVAMENTO ===');
-    console.log('[DEBUG] CompanyId:', companyId);
-    console.log('[DEBUG] Requisition completa:', requisition);
-    console.log('[DEBUG] Requisition ID:', requisition.id);
-    console.log('[DEBUG] É nova?', requisition.id === 'new');
+    logDebug('=== INÍCIO DO SALVAMENTO DE REQUISIÇÃO ===');
+    logDebug('CompanyId:', companyId);
+    logDebug('ID da requisição:', requisition.id);
+    logDebug('É nova requisição?', requisition.id === 'new');
     
+    // VERIFICAÇÃO CRÍTICA do companyId
     if (!companyId) {
-      console.error('[DEBUG] CompanyId não disponível!');
-      alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
+      logError('ERRO CRÍTICO: companyId indisponível no momento do salvamento');
+      alert('Erro: ID da empresa não disponível. Por favor, faça login novamente e tente salvar novamente.');
       return;
     }
 
     try {
       // Validar dados obrigatórios
       if (!requisition.orderId || !requisition.requestDate || !requisition.items || requisition.items.length === 0) {
-        console.error('[DEBUG] Dados obrigatórios faltando:', {
+        logError('Dados obrigatórios faltando:', {
           orderId: requisition.orderId,
           requestDate: requisition.requestDate,
           items: requisition.items?.length
@@ -255,14 +350,22 @@ const MaterialRequisitions: React.FC = () => {
         return;
       }
 
-      const collectionPath = getCompanyCollection('materialRequisitions', companyId);
-      console.log('[DEBUG] Path da coleção:', collectionPath);
+      // Obter caminho da coleção de forma segura
+      let collectionPath: string;
+      try {
+        collectionPath = getCompanyCollection('materialRequisitions', companyId);
+        logDebug('Path da coleção:', collectionPath);
+      } catch (error) {
+        logError('Erro ao obter path da coleção:', error);
+        alert('Erro ao determinar o local para salvar os dados. Por favor, faça login novamente.');
+        return;
+      }
 
-      // Preparar os dados para salvar, removendo campos problemáticos
+      // Preparar os dados para salvar
       const { id, ...requisitionData } = requisition;
       
-      // Um objeto simplificado para salvar, evitando problemas com estruturas complexas
-      let dataToSave: any = {
+      // Objeto simplificado para evitar problemas de serialização
+      const dataToSave = {
         orderId: requisitionData.orderId,
         orderNumber: requisitionData.orderNumber,
         customer: requisitionData.customer,
@@ -274,132 +377,188 @@ const MaterialRequisitions: React.FC = () => {
         notes: requisitionData.notes || '',
         items: requisitionData.items.map(item => ({
           id: item.id,
-          materialId: item.materialId,
-          description: item.description,
-          material: item.material,
-          quantity: item.quantity,
-          dimensions: item.dimensions,
+          materialId: item.materialId || '',
+          description: item.description || '',
+          material: item.material || '',
+          quantity: item.quantity || 0,
+          dimensions: item.dimensions || '',
           weight: item.weight || 0,
           pricePerKg: item.pricePerKg || 0,
           finalPrice: item.finalPrice || 0,
-          status: item.status,
+          status: item.status || 'pending',
           sentForQuotation: item.sentForQuotation || false,
           notes: item.notes || ''
         }))
       };
       
-      // Adicionar timestamps
+      // Adicionar timestamp
       const now = new Date().toISOString();
       
-      // Verificar se é uma nova requisição ou atualização
+      // LÓGICA PARA NOVA REQUISIÇÃO
       if (requisition.id === 'new') {
-        console.log('[DEBUG] === CRIANDO NOVA REQUISIÇÃO ===');
+        logDebug('=== CRIANDO NOVA REQUISIÇÃO ===');
         
         // Verificar se já existe uma requisição similar
-        const existingRequisitionsQuery = query(
-          collection(db, collectionPath),
-          where('orderId', '==', requisition.orderId),
-          where('requestDate', '==', requisition.requestDate)
-        );
-        
-        const existingRequisitions = await getDocs(existingRequisitionsQuery);
-        console.log('[DEBUG] Requisições existentes encontradas:', existingRequisitions.size);
-        
-        if (!existingRequisitions.empty) {
-          alert('Já existe uma requisição para este pedido na mesma data. Por favor, verifique.');
-          return;
+        try {
+          const existingRequisitionsQuery = query(
+            collection(db, collectionPath),
+            where('orderId', '==', requisition.orderId),
+            where('requestDate', '==', requisition.requestDate)
+          );
+          
+          const existingRequisitions = await getDocs(existingRequisitionsQuery);
+          logDebug('Requisições existentes encontradas:', existingRequisitions.size);
+          
+          if (!existingRequisitions.empty) {
+            alert('Já existe uma requisição para este pedido na mesma data. Por favor, verifique.');
+            return;
+          }
+        } catch (error) {
+          logError('Erro ao verificar requisições existentes:', error);
+          // Continua mesmo se não conseguir verificar duplicatas
         }
 
         // Adicionar timestamps para nova requisição
-        dataToSave.createdAt = now;
-        dataToSave.updatedAt = now;
+        const newRequisitionData = {
+          ...dataToSave,
+          createdAt: now,
+          updatedAt: now
+        };
         
-        console.log('[DEBUG] Dados finais para salvar (nova requisição):', dataToSave);
+        logDebug('Dados preparados para nova requisição:', newRequisitionData);
         
-        // Usar addDoc diretamente sem sanitização complexa
-        const docRef = await addDoc(collection(db, collectionPath), dataToSave);
-        
-        console.log('[DEBUG] ✅ Requisição criada com sucesso! ID:', docRef.id);
-        alert('Requisição criada com sucesso! ID: ' + docRef.id);
-        
-      } else {
-        console.log('[DEBUG] === ATUALIZANDO REQUISIÇÃO EXISTENTE ===');
-        console.log('[DEBUG] ID do documento:', requisition.id);
+        try {
+          // Usar addDoc com tratamento de erro aprimorado
+          const docRef = await safeFirestoreOperation(
+            () => addDoc(collection(db, collectionPath), newRequisitionData),
+            'Erro ao criar nova requisição'
+          );
+          
+          if (docRef) {
+            logDebug('✅ Requisição criada com sucesso! ID:', docRef.id);
+            alert(`Requisição criada com sucesso! ID: ${docRef.id}`);
+            
+            setIsModalOpen(false);
+            setSelectedRequisition(null);
+          } else {
+            throw new Error('Falha ao criar documento - referência nula retornada');
+          }
+        } catch (error) {
+          logError('Erro na criação do documento:', error);
+          alert(`Erro ao criar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+        }
+      } 
+      // LÓGICA PARA ATUALIZAÇÃO DE REQUISIÇÃO
+      else {
+        logDebug('=== ATUALIZANDO REQUISIÇÃO EXISTENTE ===');
+        logDebug('ID do documento a atualizar:', requisition.id);
         
         // Verificar se o documento existe
         const docRef = doc(db, collectionPath, requisition.id);
         
         try {
           const docSnap = await getDoc(docRef);
-          console.log('[DEBUG] Documento existe?', docSnap.exists());
+          logDebug('Documento existe?', docSnap.exists());
           
           if (!docSnap.exists()) {
-            console.error('[DEBUG] ❌ Documento não encontrado!');
+            logError('Documento não encontrado para atualização');
             alert('Erro: Documento não encontrado para atualização');
             return;
           }
-        } catch (getError) {
-          console.error('[DEBUG] Erro ao verificar documento:', getError);
-          alert(`Erro ao verificar documento: ${getError instanceof Error ? getError.message : 'Erro desconhecido'}`);
+        } catch (error) {
+          logError('Erro ao verificar documento:', error);
+          alert(`Erro ao verificar documento: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
           return;
         }
 
         // Adicionar timestamp de atualização
-        dataToSave.updatedAt = now;
+        const updateData = {
+          ...dataToSave,
+          updatedAt: now
+        };
         
-        console.log('[DEBUG] Dados finais para atualizar:', dataToSave);
+        logDebug('Dados preparados para atualização:', updateData);
         
-        // Usar updateDoc em vez de setDoc para atualizações
-        await updateDoc(doc(db, collectionPath, requisition.id), dataToSave);
-        
-        console.log('[DEBUG] ✅ Requisição atualizada com sucesso!');
-        alert('Requisição atualizada com sucesso!');
+        try {
+          // Usar updateDoc com tratamento de erro aprimorado
+          await safeFirestoreOperation(
+            () => updateDoc(docRef, updateData),
+            'Erro ao atualizar requisição'
+          );
+          
+          logDebug('✅ Requisição atualizada com sucesso!');
+          alert('Requisição atualizada com sucesso!');
+          
+          setIsModalOpen(false);
+          setSelectedRequisition(null);
+        } catch (error) {
+          logError('Erro na atualização do documento:', error);
+          alert(`Erro ao atualizar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+        }
       }
       
-      console.log('[DEBUG] === FIM DO PROCESSO DE SALVAMENTO ===');
-      setIsModalOpen(false);
-      setSelectedRequisition(null);
+      logDebug('=== FIM DO PROCESSO DE SALVAMENTO ===');
       
     } catch (error) {
-      console.error('[DEBUG] ❌ ERRO NO SALVAMENTO:', error);
-      
-      // Log detalhado do erro
-      if (error instanceof Error) {
-        console.error('[DEBUG] Detalhes do erro:', {
-          message: error.message,
-          stack: error.stack,
-          name: error.name
-        });
-      }
-      
-      // Se for erro do Firebase, mostrar código específico
-      if ((error as any).code) {
-        console.error('[DEBUG] Código do erro Firebase:', (error as any).code);
-      }
-      
-      alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      logError('ERRO GLOBAL NO PROCESSO DE SALVAMENTO:', error);
+      alert(`Erro ao processar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
 
+  // FUNÇÃO REVISADA para salvar cotações
   const handleCreateQuotation = (requisition: MaterialRequisition) => {
     setSelectedRequisition(requisition);
     setIsQuotationModalOpen(true);
   };
 
   const handleSaveQuotationRequest = async (quotation: QuotationRequest, itemIds: string[]) => {
+    logDebug('=== INÍCIO DO SALVAMENTO DE COTAÇÃO ===');
+    
     if (!companyId) {
+      logError('ERRO CRÍTICO: companyId indisponível ao salvar cotação');
       alert('Erro: ID da empresa não disponível. Por favor, faça login novamente.');
       return;
     }
+    
     try {
-      // Sanitize data for Firestore before saving
-      const sanitizedQuotation = sanitizeForFirestore(quotation);
-      // Add the quotation request
-      const docRef = await addDoc(
-        collection(db, getCompanyCollection('quotationRequests', companyId)),
-        sanitizedQuotation
+      // Preparar dados simplificados para evitar problemas de serialização
+      const quotationData = {
+        supplierId: quotation.supplierId,
+        requestDate: quotation.requestDate,
+        expirationDate: quotation.expirationDate,
+        status: quotation.status,
+        notes: quotation.notes || '',
+        items: quotation.items.map(item => ({
+          id: item.id,
+          description: item.description || '',
+          material: item.material || '',
+          quantity: item.quantity || 0,
+          dimensions: item.dimensions || '',
+          weight: item.weight || 0,
+          pricePerKg: item.pricePerKg || 0,
+          ipiPercentage: item.ipiPercentage || 0,
+          deliveryTime: item.deliveryTime || 0,
+          finalPrice: item.finalPrice || 0
+        })),
+        createdAt: new Date().toISOString()
+      };
+      
+      // Adicionar a cotação
+      const quotationsPath = getCompanyCollection('quotationRequests', companyId);
+      logDebug(`Salvando cotação em: ${quotationsPath}`);
+      
+      const docRef = await safeFirestoreOperation(
+        () => addDoc(collection(db, quotationsPath), quotationData),
+        'Erro ao salvar cotação'
       );
-      // Update the requisition items to mark them as sent for quotation
+      
+      if (!docRef) {
+        throw new Error('Falha ao criar documento de cotação');
+      }
+      
+      logDebug('Cotação criada com sucesso, ID:', docRef.id);
+      
+      // Atualizar os itens da requisição para marcá-los como enviados para cotação
       if (selectedRequisition) {
         const updatedItems = selectedRequisition.items.map(item => {
           if (itemIds.includes(item.id)) {
@@ -410,26 +569,37 @@ const MaterialRequisitions: React.FC = () => {
           }
           return item;
         });
-        const updateData = sanitizeForFirestore({
+        
+        const requisitionsPath = getCompanyCollection('materialRequisitions', companyId);
+        const updateData = {
           items: updatedItems,
-          lastUpdated: new Date().toISOString()
-        });
-        await updateDoc(
-          doc(db, getCompanyCollection('materialRequisitions', companyId), selectedRequisition.id),
-          updateData
+          updatedAt: new Date().toISOString()
+        };
+        
+        logDebug('Atualizando itens da requisição para marcar como enviados para cotação');
+        
+        await safeFirestoreOperation(
+          () => updateDoc(doc(db, requisitionsPath, selectedRequisition.id), updateData),
+          'Erro ao atualizar status dos itens da requisição'
         );
-        // Update local state
-        setRequisitions(requisitions.map(r =>
-          r.id === selectedRequisition.id
-            ? { ...r, items: updatedItems, lastUpdated: new Date().toISOString() }
-            : r
-        ));
+        
+        // Atualizar estado local
+        setRequisitions(prev => 
+          prev.map(r => 
+            r.id === selectedRequisition.id 
+              ? { ...r, items: updatedItems, updatedAt: new Date().toISOString() }
+              : r
+          )
+        );
       }
-      setQuotations([...quotations, { ...quotation, id: docRef.id }]);
+      
+      // Adicionar a nova cotação ao estado local
+      setQuotations(prev => [...prev, { ...quotation, id: docRef.id }]);
       setIsQuotationModalOpen(false);
       alert('Solicitação de cotação enviada com sucesso!');
+      
     } catch (error) {
-      console.error('Error saving quotation request:', error);
+      logError('Erro ao salvar solicitação de cotação:', error);
       alert(`Erro ao salvar solicitação de cotação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
@@ -487,6 +657,16 @@ const MaterialRequisitions: React.FC = () => {
   // Process orders for display
   const activeOrders = orders.filter(o => !o.deleted);
 
+  // Mostrar mensagem de carregamento enquanto verifica autenticação
+  if (!authChecked) {
+    return (
+      <div className="p-6 text-center">
+        <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+        <p className="mt-4 text-gray-600">Verificando autenticação...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -508,6 +688,13 @@ const MaterialRequisitions: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Status da Autenticação - NOVO */}
+      {companyId && (
+        <div className="mb-4 text-sm text-gray-500">
+          Empresa ID: {companyId.substring(0, 8)}...
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b mb-6">
@@ -579,7 +766,8 @@ const MaterialRequisitions: React.FC = () => {
           {/* Requisitions list */}
           {loading ? (
             <div className="text-center py-12">
-              <div className="text-lg text-gray-600">Carregando requisições...</div>
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+              <p className="mt-4 text-gray-600">Carregando requisições...</p>
             </div>
           ) : filteredRequisitions.length === 0 ? (
             <div className="bg-white rounded-lg shadow-lg p-12 text-center">
