@@ -990,6 +990,7 @@ const Kanban: React.FC = () => {
                     onEdit={() => handleEditColumn(column)}
                     onDelete={() => handleDeleteColumn(column.id)}
                     onOrderClick={handleOrderClick}
+                    onUpdateOrder={handleUpdateOrder} // NOVA PROP
                     highlightTerm={searchTerm}
                     compactView={compactView}
                     isManagingOrders={isManageOrdersModalOpen}
