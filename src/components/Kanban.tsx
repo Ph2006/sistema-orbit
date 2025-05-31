@@ -714,6 +714,22 @@ const Kanban: React.FC = () => {
           const dateB = new Date(b.deliveryDate);
           return dateA.getTime() - dateB.getTime();
         });
+    } else if (column.title === 'Pedidos expedidos') {
+      ordersForColumn = filteredOrders
+        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
+    } else {
+      ordersForColumn = filteredOrders
+        .filter(order => order.columnId === column.id && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
     }
     
     return {
@@ -1085,14 +1101,3 @@ const Kanban: React.FC = () => {
 };
 
 export default Kanban;
-    } else if (column.title === 'Pedidos expedidos') {
-      ordersForColumn = filteredOrders
-        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
-        .sort((a, b) => {
-          const dateA = new Date(a.deliveryDate);
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
-    } else {
-      ordersForColumn = filteredOrders
-        .filter(order => order.columnId === column.id && !order.deleted)
