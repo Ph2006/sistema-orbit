@@ -36,7 +36,6 @@ const statusLegend = [
 ];
 
 // Helper function to sanitize objects for Firestore
-// Replaces undefined values with null to prevent Firestore errors
 const sanitizeForFirestore = (obj: any): any => {
   if (obj === null || obj === undefined) return null;
   if (typeof obj !== 'object') return obj;
@@ -60,7 +59,6 @@ const sanitizeForFirestore = (obj: any): any => {
 };
 
 const getMonthlyOrderStats = (orders) => {
-  // Agrupa pedidos por mês de entrega (YYYY-MM)
   const stats = {};
   orders.forEach(order => {
     if (order.status === 'completed' || order.deleted) return;
@@ -126,16 +124,12 @@ const Kanban: React.FC = () => {
       try {
         console.log('🔍 Kanban: Iniciando inicialização...');
         
-        // Tentar inicializar colunas com tratamento específico de erro
         try {
           console.log('🔍 Kanban: Chamando initializeDefaultColumns...');
           await initializeDefaultColumns();
           console.log('✅ Kanban: Colunas padrão inicializadas com sucesso');
         } catch (columnError: any) {
           console.error('❌ Kanban: Erro ao inicializar colunas:', columnError);
-          console.error('❌ Código do erro:', columnError?.code);
-          console.error('❌ Mensagem do erro:', columnError?.message);
-          
           if (columnError?.code === 'permission-denied') {
             console.warn('⚠️ Permissão negada para colunas, continuando mesmo assim...');
           } else {
@@ -143,7 +137,6 @@ const Kanban: React.FC = () => {
           }
         }
         
-        // Subscrições em tempo real
         console.log('🔍 Kanban: Configurando subscrições...');
         const unsubscribeColumns = subscribeToColumns();
         const unsubscribeOrders = subscribeToOrders();
@@ -159,7 +152,6 @@ const Kanban: React.FC = () => {
         };
       } catch (error: any) {
         console.error('❌ Kanban: Erro crítico durante inicialização:', error);
-        console.error('❌ Detalhes do erro:', JSON.stringify(error, null, 2));
         setError('Erro ao carregar o quadro Kanban. Por favor, recarregue a página.');
       } finally {
         setIsLoading(false);
@@ -169,7 +161,6 @@ const Kanban: React.FC = () => {
     init();
   }, [initializeDefaultColumns, subscribeToColumns, subscribeToOrders, subscribeToProjects]);
 
-  // Coletar clientes e projetos disponíveis para filtragem
   useEffect(() => {
     console.log('📊 Kanban: Atualizando clientes e projetos disponíveis...');
     const uniqueCustomers = [...new Set(orders.map(order => order.customer))];
@@ -184,7 +175,6 @@ const Kanban: React.FC = () => {
     console.log('✅ Kanban: Clientes e projetos atualizados');
   }, [orders, projects]);
 
-  // Efeito para garantir que todos os pedidos tenham uma coluna válida
   useEffect(() => {
     const ensureOrdersHaveColumn = async () => {
       if (columns.length > 0 && orders.length > 0) {
@@ -216,7 +206,6 @@ const Kanban: React.FC = () => {
     ensureOrdersHaveColumn();
   }, [columns, orders, updateOrder]);
 
-  // Adicionar após o useEffect de ensureOrdersHaveColumn
   React.useEffect(() => {
     if (!columns.length || !orders.length) return;
     const expedidosColumn = columns.find(col => col.title.toLowerCase().includes('expedi'));
@@ -257,7 +246,6 @@ const Kanban: React.FC = () => {
     try {
       const { active, over } = event;
       
-      // Verificação básica de segurança
       if (!over || !active) {
         console.log('Drag end: No valid over or active element');
         setDraggedOrder(null);
@@ -270,7 +258,6 @@ const Kanban: React.FC = () => {
 
       console.log(`Movendo pedido ${activeOrderId} para coluna ${overColumnId}`);
 
-      // Verificação adicional de segurança - pedido existe?
       const order = orders.find(o => o.id === activeOrderId);
       if (!order) {
         console.error(`Pedido ${activeOrderId} não encontrado`);
@@ -279,7 +266,6 @@ const Kanban: React.FC = () => {
         return;
       }
 
-      // Verificação adicional - mesma coluna?
       if (order.columnId === overColumnId) {
         console.log('Pedido já está nesta coluna');
         setDraggedOrder(null);
@@ -287,8 +273,6 @@ const Kanban: React.FC = () => {
         return;
       }
 
-      // VERIFICAÇÃO CRÍTICA - a coluna de destino existe?
-      // Obter uma snapshot mais recente das colunas diretamente do estado
       const availableColumns = [...columns];
       
       if (availableColumns.length === 0) {
@@ -299,19 +283,14 @@ const Kanban: React.FC = () => {
         return;
       }
       
-      // Verificar se a coluna de destino existe
       const targetColumn = availableColumns.find(col => col.id === overColumnId);
       
       if (!targetColumn) {
         console.error(`Coluna de destino ${overColumnId} não encontrada.`);
-        
-        // Melhorar o logging para facilitar a depuração
         console.log('Colunas disponíveis:', availableColumns.map(c => `${c.id} - ${c.title}`));
         
-        // Fallback - mover para a primeira coluna disponível (preferencialmente "Pedidos em processo")
         const fallbackColumn = availableColumns.find(col => col.title === 'Pedidos em processo') || availableColumns[0];
         
-        // CORREÇÃO: verificação adicional para garantir que fallbackColumn não é undefined
         if (!fallbackColumn || typeof fallbackColumn.id !== 'string') {
           console.error('Erro crítico: Coluna fallback indefinida ou com ID inválido mesmo com colunas disponíveis');
           alert('Erro ao mover o pedido. Por favor, recarregue a página e tente novamente.');
@@ -328,10 +307,8 @@ const Kanban: React.FC = () => {
             columnId: fallbackColumn.id
           };
           
-          // Sanitizar para garantir que não há valores undefined
           const sanitizedOrder = sanitizeForFirestore(updatedOrder);
           
-          // Verificar novamente se columnId está definido
           if (!sanitizedOrder.columnId) {
             throw new Error('columnId é null ou undefined após sanitização');
           }
@@ -348,16 +325,12 @@ const Kanban: React.FC = () => {
         return;
       }
 
-      // Check if the column is "Pedidos expedidos"
       const isExpedited = targetColumn.title.toLowerCase().includes('expedi');
 
-      // Se chegou aqui, tudo está validado. Atualizar o pedido.
       const updatedOrder = {
         ...order,
         columnId: overColumnId,
-        // If moving to "Pedidos expedidos", update status to reflect this
         status: isExpedited ? 'waiting-docs' : order.status,
-        // Se movendo para pedidos expedidos, também registre a data de exportação
         lastExportDate: isExpedited ? new Date().toISOString() : order.lastExportDate
       };
 
@@ -384,10 +357,8 @@ const Kanban: React.FC = () => {
     }
 
     try {
-      // Encontrar os pedidos nesta coluna
       const ordersInColumn = orders.filter(order => order.columnId === columnId);
       
-      // Encontrar outra coluna para mover os pedidos (exceto a que será excluída)
       const alternativeColumn = columns.find(col => col.id !== columnId && col.title === 'Pedidos em processo') || 
                                columns.find(col => col.id !== columnId);
       
@@ -396,7 +367,6 @@ const Kanban: React.FC = () => {
           return;
         }
         
-        // Mover todos os pedidos para a coluna alternativa
         const movePromises = ordersInColumn.map(order => 
           updateOrder(sanitizeForFirestore({ ...order, columnId: alternativeColumn.id }))
         );
@@ -410,7 +380,6 @@ const Kanban: React.FC = () => {
     }
   };
 
-  // Adding the missing handleSaveColumn function
   const handleSaveColumn = async (column: Column) => {
     try {
       await updateColumn(sanitizeForFirestore(column));
@@ -433,15 +402,13 @@ const Kanban: React.FC = () => {
     }
 
     try {
-      // Remover os pedidos selecionados
       const updatePromises = orderIds.map(orderId => {
         const order = orders.find(o => o.id === orderId);
         if (order) {
-          // Marcar como excluído em vez de remover da coluna
           return updateOrder(sanitizeForFirestore({ 
             ...order, 
             deleted: true,
-            columnId: null // Definir como null para indicar que não está em nenhuma coluna
+            columnId: null
           }));
         }
         return Promise.resolve();
@@ -470,7 +437,7 @@ const Kanban: React.FC = () => {
   // NOVA FUNÇÃO: Para abrir o modal de edição do pedido
   const handleOrderEdit = (order: Order, e?: React.MouseEvent) => {
     if (e) {
-      e.stopPropagation(); // Evita que o card expanda quando clicar em editar
+      e.stopPropagation();
     }
     setSelectedOrder(order);
     setIsOrderModalOpen(true);
@@ -505,7 +472,7 @@ const Kanban: React.FC = () => {
           {
             status: order.status,
             date: new Date().toISOString(),
-            user: 'usuario@atual.com' // Idealmente, usar o usuário logado
+            user: 'usuario@atual.com'
           }
         ]
       });
@@ -517,33 +484,26 @@ const Kanban: React.FC = () => {
 
   const handleSaveOrder = async (order: Order) => {
     try {
-      // Make sure we have columns available
       if (columns.length === 0) {
         console.log("No columns available, initializing default columns...");
         try {
           await initializeDefaultColumns();
           
-          // Get fresh columns from the store after initialization
           const freshColumns = useColumnStore.getState().columns;
           
-          // If still no columns after initialization, show error
           if (freshColumns.length === 0) {
             throw new Error('No columns available');
           }
           
-          // Use the first column as default
           order.columnId = freshColumns[0].id;
         } catch (initError) {
           console.error('Error initializing columns:', initError);
           throw new Error('Unable to initialize columns');
         }
       } else if (!order.columnId || !columns.some(c => c.id === order.columnId)) {
-        // If order doesn't have a valid columnId, assign the first available column
         order.columnId = columns[0].id;
       }
       
-      // Sanitize the order object to replace undefined values with null
-      // This prevents Firestore from rejecting documents with undefined values
       const sanitizedOrder = sanitizeForFirestore({
         ...order,
         columnId: order.columnId
@@ -551,14 +511,11 @@ const Kanban: React.FC = () => {
       
       console.log('Saving order with columnId:', sanitizedOrder.columnId);
       
-      // Check if this is a new order or an existing order
       const isNewOrder = order.id === 'new' || !orders.some(o => o.id === order.id);
       
       if (isNewOrder) {
-        // Use addOrder for new orders
         await addOrder(sanitizedOrder);
       } else {
-        // Use updateOrder for existing orders
         await updateOrder(sanitizedOrder);
       }
       
@@ -570,23 +527,18 @@ const Kanban: React.FC = () => {
     }
   };
 
-  // Função para filtrar por status, data e termo de busca
   const getFilteredOrders = () => {
     return orders.filter(order => {
-      // Filtrar pedidos excluídos
       if (order.deleted) return false;
       
-      // Filtro por status
       if (filterByStatus.length > 0 && !filterByStatus.includes(order.status)) {
         return false;
       }
 
-      // Filtro por data
       const today = new Date();
       const deliveryDate = new Date(order.deliveryDate);
       
       if (filterByDeadline === 'late') {
-        // Check if the order is late (past delivery date and not completed)
         if (order.status === 'completed' || order.completedDate) return false;
         return isBefore(deliveryDate, today);
       } else if (filterByDeadline === 'today') {
@@ -598,7 +550,6 @@ const Kanban: React.FC = () => {
         }
       }
 
-      // Filtro por projeto
       if (filterByProject.length > 0 && !filterByProject.some(projectName => {
         const project = projects.find(p => p.name === projectName);
         return project && project.id === order.projectId;
@@ -606,12 +557,10 @@ const Kanban: React.FC = () => {
         return false;
       }
 
-      // Filtro por cliente
       if (filterByCustomer.length > 0 && !filterByCustomer.includes(order.customer)) {
         return false;
       }
 
-      // Filtro por termo de busca
       const searchLower = searchTerm.toLowerCase().trim();
       if (searchLower) {
         return (
@@ -627,7 +576,6 @@ const Kanban: React.FC = () => {
 
   const filteredOrders = getFilteredOrders();
   
-  // Montar columnsWithOrders respeitando o status do pedido
   const columnsWithOrders = columns.map(column => {
     let ordersForColumn = [];
     if (column.title === 'Pedidos em processo') {
@@ -635,7 +583,6 @@ const Kanban: React.FC = () => {
     } else if (column.title === 'Pedidos expedidos') {
       ordersForColumn = filteredOrders.filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted);
     } else {
-      // Outras colunas recebem pedidos pelo columnId
       ordersForColumn = filteredOrders.filter(order => order.columnId === column.id && !order.deleted);
     }
     return {
@@ -648,12 +595,10 @@ const Kanban: React.FC = () => {
     order => order.columnId === null || order.columnId === undefined || !columns.some(col => col.id === order.columnId)
   );
 
-  // Contagem total de pedidos visíveis
   const totalDisplayedOrders = columnsWithOrders.reduce(
     (total, column) => total + column.orders.length, 0
   ) + ordersWithoutColumn.length;
 
-  // Contagem de pedidos filtrados vs. total (para mostrar efetividade dos filtros)
   const activeFilters = (filterByCustomer.length > 0 ? 1 : 0) + 
                         (filterByStatus.length > 0 ? 1 : 0) +
                         (filterByProject.length > 0 ? 1 : 0) + 
@@ -668,7 +613,6 @@ const Kanban: React.FC = () => {
     setFilterByDeadline('all');
   };
 
-  // Marca se existem filtros ativos
   const hasActiveFilters = activeFilters > 0;
 
   const handleOrderSelect = (orderId: string) => {
@@ -680,7 +624,6 @@ const Kanban: React.FC = () => {
     });
   };
 
-  // LOG DE DEBUG para IDs de colunas e pedidos
   console.log('columns:', columns.map(c => ({ id: c.id, title: c.title })));
   console.log('orders:', filteredOrders.map(o => ({ id: o.id, columnId: o.columnId, deleted: o.deleted })));
 
@@ -717,4 +660,309 @@ const Kanban: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex flex-row w-full h-full">
-      {/* Kanban principal */
+      <div className="flex-1 overflow-x-auto">
+        <div className="max-w-[2000px] mx-auto mb-6">
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+              <h1 className="text-2xl font-bold text-white">Quadro de Produção</h1>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setActiveTab('kanban')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'kanban'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <LayoutGrid className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => setActiveTab('stages')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'stages'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <StagedList className="h-5 w-5" />
+                </button>
+                <button
+                  onClick={() => setActiveTab('occupation')}
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'occupation'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <BarChart className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
+              <div className="relative flex-1 lg:flex-none">
+                <input
+                  type="text"
+                  placeholder="Buscar pedidos..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full lg:w-64 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setFilterMenuOpen(!filterMenuOpen)}
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
+                    filterMenuOpen
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <Filter className="h-5 w-5" />
+                  <span className="hidden sm:inline">Filtros</span>
+                </button>
+
+                <button
+                  onClick={() => setCompactView(!compactView)}
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
+                    compactView
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <LayoutList className="h-5 w-5" />
+                  <span className="hidden sm:inline">Compacto</span>
+                </button>
+
+                <button
+                  onClick={() => setIsManageOrdersModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25 flex items-center gap-2"
+                >
+                  <Clipboard className="h-5 w-5" />
+                  <span className="hidden sm:inline">Gerenciar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {filterMenuOpen && (
+            <div className="mt-4 bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Cliente</label>
+                  <select
+                    multiple
+                    value={filterByCustomer}
+                    onChange={(e) => setFilterByCustomer(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {availableCustomers.map(customer => (
+                      <option key={customer} value={customer} className="py-1">
+                        {customer}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Status</label>
+                  <select
+                    multiple
+                    value={filterByStatus}
+                    onChange={(e) => setFilterByStatus(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {statusLegend.map(status => (
+                      <option key={status.status} value={status.status} className="py-1">
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Projeto</label>
+                  <select
+                    multiple
+                    value={filterByProject}
+                    onChange={(e) => setFilterByProject(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {availableProjects.map(project => (
+                      <option key={project} value={project} className="py-1">
+                        {project}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Prazo de Entrega</label>
+                  <select
+                    value={filterByDeadline}
+                    onChange={(e) => setFilterByDeadline(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="today">Hoje</option>
+                    <option value="week">Esta Semana</option>
+                    <option value="month">Este Mês</option>
+                    <option value="overdue">Atrasados</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  onClick={resetAllFilters}
+                  className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                >
+                  Limpar Filtros
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="max-w-[2000px] mx-auto">
+          {activeTab === 'kanban' && (
+            <DndContext
+              sensors={sensors}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                {columnsWithOrders.map(column => (
+                  <KanbanColumn
+                    key={column.id}
+                    column={column}
+                    onEdit={() => handleEditColumn(column)}
+                    onDelete={() => handleDeleteColumn(column.id)}
+                    onOrderClick={handleOrderClick}
+                    onOrderEdit={handleOrderEdit}
+                    highlightTerm={searchTerm}
+                    compactView={compactView}
+                    isManagingOrders={isManageOrdersModalOpen}
+                    selectedOrders={selectedOrders}
+                    customers={customers}
+                    expandedCards={expandedCards}
+                  />
+                ))}
+              </div>
+
+              <DragOverlay>
+                {draggedOrder && (
+                  <KanbanCard
+                    order={draggedOrder}
+                    isManaging={false}
+                    isSelected={false}
+                    highlight={false}
+                    compactView={compactView}
+                    isExpanded={false}
+                    onOrderClick={() => {}}
+                    onOrderEdit={() => {}}
+                  />
+                )}
+              </DragOverlay>
+            </DndContext>
+          )}
+
+          {activeTab === 'stages' && (
+            <ManufacturingStages />
+          )}
+
+          {activeTab === 'occupation' && (
+            <OccupationRateTab />
+          )}
+        </div>
+
+        {isColumnModalOpen && selectedColumn && (
+          <ColumnModal
+            column={selectedColumn}
+            onClose={() => {
+              setIsColumnModalOpen(false);
+              setSelectedColumn(null);
+            }}
+            onSave={handleSaveColumn}
+          />
+        )}
+
+        {isManageOrdersModalOpen && (
+          <ManageOrdersModal
+            onClose={() => setIsManageOrdersModalOpen(false)}
+            onDelete={handleDeleteSelectedOrders}
+            orders={orders.filter(order => selectedOrders.includes(order.id))}
+          />
+        )}
+
+        {isOrderModalOpen && selectedOrder && (
+          <OrderModal
+            order={selectedOrder}
+            onClose={() => {
+              setIsOrderModalOpen(false);
+              setSelectedOrder(null);
+            }}
+            onSave={handleSaveOrder}
+            projects={projects}
+          />
+        )}
+      </div>
+      
+      <div className="hidden lg:block w-72 min-w-[260px] max-w-xs bg-gray-900/80 border-l border-gray-800 p-4 text-white sticky top-0 h-[calc(100vh-64px)] overflow-y-auto">
+        <h3 className="text-lg font-bold mb-4">Resumo de Entregas</h3>
+        <div className="space-y-3">
+          {Object.entries(getMonthlyOrderStats(orders))
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([month, data]) => (
+              <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col">
+                <span className="font-semibold text-blue-300">{format(new Date(month + '-01'), 'MMMM/yyyy', { locale: ptBR })}</span>
+                <span className="text-sm mt-1">Pedidos: <span className="font-bold">{data.count}</span></span>
+                <span className="text-sm">Peso pendente: <span className="font-bold">{data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</span></span>
+              </div>
+            ))}
+          {Object.keys(getMonthlyOrderStats(orders)).length === 0 && (
+            <div className="text-gray-400 text-sm">Nenhum pedido pendente para os próximos meses.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const shouldHighlight = (order: Order, searchTerm: string) => {
+  if (!searchTerm) return false;
+  
+  const searchTermLower = searchTerm.toLowerCase().trim();
+  return (
+    order.orderNumber.toLowerCase().includes(searchTermLower) ||
+    order.customer.toLowerCase().includes(searchTermLower) ||
+    order.internalOrderNumber.toLowerCase().includes(searchTermLower)
+  );
+};
+
+const Briefcase = (props: any) => {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect width="20" height="14" x="2" y="7" rx="2" ry="2"></rect>
+      <path d="M16 21V5a2 12 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+    </svg>
+  );
+};
+
+export default Kanban;
