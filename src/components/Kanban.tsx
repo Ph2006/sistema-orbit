@@ -26,6 +26,15 @@ import { format, isAfter, isBefore, addDays, isToday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
 import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
+
+// Declaração para o TypeScript reconhecer o autoTable
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+    lastAutoTable: { finalY: number };
+  }
+}
 
 const statusLegend = [
   { status: 'in-progress', color: 'bg-orange-100/80', borderColor: 'border-orange-400', label: 'Em Processo' },
@@ -59,60 +68,120 @@ const sanitizeForFirestore = (obj: any): any => {
   return sanitized;
 };
 
-// Função para exportar PDF sem coluna de progresso
+// Função para exportar PDF sem coluna de progresso - INTEGRADA NO KANBAN
 const exportOrderToPDF = (order: Order) => {
   const doc = new jsPDF();
   
+  // Configurar fonte padrão
+  doc.setFont('helvetica');
+  
   // Cabeçalho do documento
   doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
   doc.text('ROMANEIO DE EMBARQUE', 105, 30, { align: 'center' });
   
   // Linha divisória
+  doc.setLineWidth(0.5);
   doc.line(20, 40, 190, 40);
   
   // Informações do pedido
   doc.setFontSize(12);
+  doc.setFont('helvetica', 'normal');
+  
+  // Primeira linha de informações
   doc.text(`Pedido: #${order.orderNumber}`, 20, 55);
-  doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 120, 55);
+  doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 120, 55);
+  
+  // Segunda linha de informações
   doc.text(`Cliente: ${order.customer}`, 20, 70);
   doc.text(`OS Interna: ${order.internalOrderNumber}`, 120, 70);
-  doc.text(`Data de Entrega: ${new Date(order.deliveryDate).toLocaleDateString('pt-BR')}`, 20, 85);
   
-  // Tabela de itens (SEM coluna de progresso)
+  // Terceira linha de informações
+  doc.text(`Data de Entrega: ${format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 85);
+  
+  // Preparar dados da tabela (SEM coluna de progresso)
   const tableData = order.items?.map((item, index) => [
-    index + 1,
+    (index + 1).toString(),
     item.code || '',
     item.description || item.name || '',
-    item.quantity || 0,
+    (item.quantity || 0).toString(),
     `${(item.unitWeight || 0).toFixed(3)} kg`,
     `${((item.quantity || 0) * (item.unitWeight || 0)).toFixed(3)} kg`
   ]) || [];
   
-  (doc as any).autoTable({
+  // Criar tabela sem coluna de progresso
+  doc.autoTable({
     head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
     body: tableData,
     startY: 100,
     theme: 'grid',
     styles: {
       fontSize: 10,
-      cellPadding: 3
+      cellPadding: 3,
+      halign: 'center',
+      valign: 'middle'
     },
     headStyles: {
-      fillColor: [52, 152, 219],
-      textColor: 255,
-      fontStyle: 'bold'
+      fillColor: [52, 152, 219], // Azul
+      textColor: 255, // Branco
+      fontStyle: 'bold',
+      halign: 'center'
+    },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 15 }, // Item
+      1: { halign: 'center', cellWidth: 30 }, // Código
+      2: { halign: 'left', cellWidth: 60 },   // Descrição
+      3: { halign: 'center', cellWidth: 20 }, // Qtd
+      4: { halign: 'right', cellWidth: 25 },  // Peso Unit.
+      5: { halign: 'right', cellWidth: 30 }   // Peso Total
+    },
+    alternateRowStyles: {
+      fillColor: [245, 245, 245] // Cinza claro para linhas alternadas
     }
   });
   
-  // Totais
-  const finalY = (doc as any).lastAutoTable.finalY + 20;
+  // Calcular totais
+  const totalItems = order.items?.length || 0;
+  const totalQuantity = order.items?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
+  const totalWeight = order.totalWeight || 0;
+  
+  // Posição Y após a tabela
+  const finalY = doc.lastAutoTable.finalY + 20;
+  
+  // Informações de totais
   doc.setFontSize(12);
-  doc.text(`Total de Itens: ${order.items?.length || 0}`, 20, finalY);
-  doc.text(`Quantidade Total: ${order.items?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0}`, 20, finalY + 15);
-  doc.text(`Peso Total: ${(order.totalWeight || 0).toFixed(3)} kg`, 20, finalY + 30);
+  doc.setFont('helvetica', 'bold');
+  
+  doc.text(`Total de Itens:`, 20, finalY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(totalItems.toString(), 80, finalY);
+  
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Quantidade Total:`, 20, finalY + 15);
+  doc.setFont('helvetica', 'normal');
+  doc.text(totalQuantity.toString(), 80, finalY + 15);
+  
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Peso Total:`, 20, finalY + 30);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${totalWeight.toFixed(3)} kg`, 80, finalY + 30);
+  
+  // Rodapé com data de geração
+  const pageHeight = doc.internal.pageSize.height;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'italic');
+  doc.text(
+    `Documento gerado em ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`,
+    105,
+    pageHeight - 10,
+    { align: 'center' }
+  );
   
   // Salvar o PDF
-  doc.save(`romaneio_pedido_${order.orderNumber}.pdf`);
+  const fileName = `romaneio_pedido_${order.orderNumber}_${format(new Date(), 'ddMMyyyy_HHmm')}.pdf`;
+  doc.save(fileName);
+  
+  return fileName;
 };
 
 const getMonthlyOrderStats = (orders) => {
@@ -809,6 +878,17 @@ const Kanban: React.FC = () => {
                   <Clipboard className="h-5 w-5" />
                   <span className="hidden sm:inline">Gerenciar</span>
                 </button>
+
+                {/* Botão para exportar PDF do pedido selecionado */}
+                {selectedOrder && (
+                  <button
+                    onClick={() => exportOrderToPDF(selectedOrder)}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-lg shadow-green-500/25 flex items-center gap-2"
+                  >
+                    <Download className="h-5 w-5" />
+                    <span className="hidden sm:inline">Exportar PDF</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
