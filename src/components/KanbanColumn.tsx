@@ -51,6 +51,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
 
   const handleOrderSelect = (orderId: string) => {
     // Esta função será implementada no componente pai
+    console.log('Selecting order:', orderId);
   };
 
   const handleViewHistory = (order: Order, e: React.MouseEvent) => {
