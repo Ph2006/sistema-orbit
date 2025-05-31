@@ -1,29 +1,33 @@
 import React from 'react';
 import { Order } from '../types/kanban';
-import { CheckCircle, Clock, AlertTriangle, Flag, Calendar, Package, Eye } from 'lucide-react';
+import { CheckCircle, Clock, AlertTriangle, Flag, Calendar, Package, Eye, User, ClipboardCheck } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 interface KanbanCardProps {
   order: Order;
   onOrderClick: (order: Order) => void;
-  onQualityControlClick: (order: Order) => void; // Nova prop
+  onQualityControlClick: (order: Order) => void;
+  onUpdateOrder: (order: Order) => void;
   isManaging: boolean;
   isSelected: boolean;
   highlight: boolean;
   compactView: boolean;
-  // ... outras props
+  customers: any[];
+  isExpanded: boolean;
 }
 
 const KanbanCard: React.FC<KanbanCardProps> = ({
   order,
   onOrderClick,
-  onQualityControlClick, // Nova prop
+  onQualityControlClick,
+  onUpdateOrder,
   isManaging,
   isSelected,
   highlight,
   compactView,
-  // ... outras props
+  customers,
+  isExpanded
 }) => {
   
   const handleQualityControlClick = (e: React.MouseEvent) => {
@@ -31,27 +35,53 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     onQualityControlClick(order);
   };
 
+  const handleCardClick = () => {
+    if (!isManaging) {
+      onOrderClick(order);
+    }
+  };
+
+  // Calcular progresso geral do pedido
+  const overallProgress = order.items && order.items.length > 0
+    ? Math.round(order.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / order.items.length)
+    : 0;
+
+  // Verificar se o pedido está atrasado
+  const isOverdue = new Date(order.deliveryDate) < new Date() && order.status !== 'completed';
+
   return (
     <div 
-      className={`bg-white rounded-lg shadow-sm border p-4 mb-3 cursor-pointer hover:shadow-md transition-shadow ${
-        isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-      } ${highlight ? 'ring-2 ring-yellow-400' : ''}`}
-      onClick={() => onOrderClick(order)}
+      className={`bg-gray-800/80 backdrop-blur-sm rounded-lg border p-4 mb-3 cursor-pointer hover:bg-gray-700/80 transition-all duration-200 ${
+        isSelected ? 'border-blue-400 bg-blue-900/30' : 'border-gray-600/50'
+      } ${highlight ? 'ring-2 ring-yellow-400' : ''} ${isOverdue ? 'border-l-4 border-l-red-500' : ''}`}
+      onClick={handleCardClick}
     >
       {/* Header do card */}
-      <div className="flex justify-between items-start mb-2">
-        <div>
-          <h4 className="font-semibold text-gray-900">#{order.orderNumber}</h4>
-          <p className="text-sm text-gray-600">{order.customer}</p>
+      <div className="flex justify-between items-start mb-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <h4 className="font-semibold text-white">#{order.orderNumber}</h4>
+            {isOverdue && (
+              <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
+                Atrasado
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-gray-300">{order.customer}</p>
+          <p className="text-xs text-gray-400">OS: {order.internalOrderNumber}</p>
         </div>
         
         {/* Status badge */}
-        <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-          order.status === 'completed' ? 'bg-green-100 text-green-800' :
-          order.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
-          order.status === 'delayed' ? 'bg-red-100 text-red-800' :
-          order.status === 'waiting-docs' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-gray-100 text-gray-800'
+        <div className={`px-2 py-1 rounded-full text-xs font-medium border ${
+          order.status === 'completed' 
+            ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+          order.status === 'in-progress' 
+            ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+          order.status === 'delayed' 
+            ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+          order.status === 'waiting-docs' 
+            ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+          'bg-gray-500/20 text-gray-400 border-gray-500/30'
         }`}>
           {order.status === 'completed' ? 'Concluído' :
            order.status === 'in-progress' ? 'Em Andamento' :
@@ -62,56 +92,75 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
       </div>
 
       {/* Informações do pedido */}
-      <div className="space-y-2 text-sm text-gray-600">
-        <div className="flex items-center">
-          <Calendar className="h-4 w-4 mr-2" />
+      <div className="space-y-2 text-sm">
+        <div className="flex items-center text-gray-300">
+          <Calendar className="h-4 w-4 mr-2 text-gray-400" />
           <span>Entrega: {format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}</span>
-        </div>
-        
-        <div className="flex items-center">
-          <Package className="h-4 w-4 mr-2" />
-          <span>OS: {order.internalOrderNumber}</span>
         </div>
 
         {order.totalWeight && (
-          <div className="flex items-center">
-            <span className="text-xs">Peso: {order.totalWeight.toFixed(2)} kg</span>
+          <div className="flex items-center text-gray-300">
+            <Package className="h-4 w-4 mr-2 text-gray-400" />
+            <span>Peso: {order.totalWeight.toFixed(2)} kg</span>
           </div>
         )}
-      </div>
 
-      {/* Botões de ação */}
-      <div className="mt-3 flex justify-between items-center">
-        <div className="flex space-x-2">
-          {/* Botão Controle de Qualidade */}
-          <button
-            onClick={handleQualityControlClick}
-            className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium hover:bg-purple-200 transition-colors flex items-center"
-            title="Controle de Qualidade"
-          >
-            <CheckCircle className="h-3 w-3 mr-1" />
-            Controle de Qualidade
-          </button>
-        </div>
-
-        {/* Indicador de progresso se existir */}
         {order.items && order.items.length > 0 && (
-          <div className="text-xs text-gray-500">
-            Progresso: {Math.round((order.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / order.items.length))}%
+          <div className="flex items-center text-gray-300">
+            <Flag className="h-4 w-4 mr-2 text-gray-400" />
+            <span>Progresso: {overallProgress}%</span>
           </div>
         )}
       </div>
 
-      {/* Barra de progresso visual se não for compactView */}
+      {/* Barra de progresso */}
       {!compactView && order.items && order.items.length > 0 && (
-        <div className="mt-2">
-          <div className="w-full bg-gray-200 rounded-full h-1">
+        <div className="mt-3">
+          <div className="w-full bg-gray-700/50 rounded-full h-2">
             <div 
-              className="bg-blue-600 h-1 rounded-full transition-all duration-300"
-              style={{ 
-                width: `${Math.round((order.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / order.items.length))}%` 
-              }}
+              className={`h-2 rounded-full transition-all duration-300 ${
+                overallProgress >= 100 ? 'bg-green-500' :
+                overallProgress >= 75 ? 'bg-blue-500' :
+                overallProgress >= 50 ? 'bg-yellow-500' :
+                overallProgress >= 25 ? 'bg-orange-500' :
+                'bg-red-500'
+              }`}
+              style={{ width: `${overallProgress}%` }}
             />
+          </div>
+          <div className="flex justify-between items-center mt-1 text-xs text-gray-400">
+            <span>Progresso</span>
+            <span>{overallProgress}%</span>
+          </div>
+        </div>
+      )}
+
+      {/* Botão Controle de Qualidade */}
+      <div className="mt-4 pt-3 border-t border-gray-600/30">
+        <button
+          onClick={handleQualityControlClick}
+          className="w-full px-3 py-2 bg-purple-600/20 text-purple-300 rounded-lg text-sm font-medium hover:bg-purple-600/30 transition-colors flex items-center justify-center border border-purple-500/30"
+          title="Controle de Qualidade"
+        >
+          <ClipboardCheck className="h-4 w-4 mr-2" />
+          Controle de Qualidade
+        </button>
+      </div>
+
+      {/* Informações extras no modo expandido */}
+      {isExpanded && !compactView && (
+        <div className="mt-3 pt-3 border-t border-gray-600/30">
+          <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
+            {order.items && (
+              <div>
+                <span className="font-medium">Itens:</span> {order.items.length}
+              </div>
+            )}
+            {order.projectId && (
+              <div>
+                <span className="font-medium">Projeto:</span> Sim
+              </div>
+            )}
           </div>
         </div>
       )}
