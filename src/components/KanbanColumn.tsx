@@ -43,12 +43,12 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   });
 
   return (
-    <div className="bg-gray-50 rounded-lg p-4 min-w-[300px] max-w-[350px] h-fit">
-      {/* Header da coluna - mantendo o visual original */}
+    <div className="bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50 min-w-[300px] max-w-[350px] h-fit">
+      {/* Header da coluna - tema escuro */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
-          <h3 className="font-semibold text-gray-800">{column.title}</h3>
-          <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded-full">
+          <h3 className="font-semibold text-white">{column.title}</h3>
+          <span className="bg-gray-700/50 text-gray-300 text-xs px-2 py-1 rounded-full">
             {column.orders.length}
           </span>
         </div>
@@ -56,28 +56,28 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
         <div className="flex items-center space-x-2">
           <button
             onClick={onEdit}
-            className="p-1 hover:bg-gray-200 rounded"
+            className="p-1 hover:bg-gray-700/50 rounded"
             title="Editar coluna"
           >
-            <Edit className="h-4 w-4 text-gray-600" />
+            <Edit className="h-4 w-4 text-gray-300" />
           </button>
           <button
             onClick={onDelete}
-            className="p-1 hover:bg-gray-200 rounded"
+            className="p-1 hover:bg-gray-700/50 rounded"
             title="Excluir coluna"
           >
-            <Trash2 className="h-4 w-4 text-gray-600" />
+            <Trash2 className="h-4 w-4 text-gray-300" />
           </button>
         </div>
       </div>
 
-      {/* Área dos cards - mantendo o visual original */}
+      {/* Área dos cards - tema escuro */}
       <div 
         ref={setNodeRef}
-        className={`space-y-3 min-h-[200px] ${isOver ? 'bg-blue-50 border-2 border-dashed border-blue-300 rounded-lg p-2' : ''}`}
+        className={`space-y-3 min-h-[200px] ${isOver ? 'bg-blue-900/30 border-2 border-dashed border-blue-400 rounded-lg p-2' : ''}`}
       >
         {column.orders.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-gray-400">
             <p className="text-sm">Nenhum pedido nesta coluna</p>
           </div>
         ) : (
