@@ -27,6 +27,7 @@ import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import { useNavigate } from 'react-router-dom';
 
 // Declaração para o TypeScript reconhecer o autoTable
 declare module 'jspdf' {
@@ -225,6 +226,7 @@ const Kanban: React.FC = () => {
   const { projects, subscribeToProjects } = useProjectStore();
   const { companyLogo } = useSettingsStore();
   const { customers, loadCustomers, subscribeToCustomers } = useCustomerStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const init = async () => {
@@ -771,6 +773,11 @@ const Kanban: React.FC = () => {
     });
   };
 
+  // Função para navegar para o controle de qualidade com o pedido selecionado
+  const handleQualityControlClick = (order: Order) => {
+    navigate(`/quality-control?orderId=${order.id}`);
+  };
+
   console.log('columns:', columns.map(c => ({ id: c.id, title: c.title })));
   console.log('orders:', filteredOrders.map(o => ({ id: o.id, columnId: o.columnId, deleted: o.deleted })));
 
@@ -1002,6 +1009,7 @@ const Kanban: React.FC = () => {
                     onDelete={() => handleDeleteColumn(column.id)}
                     onOrderClick={handleOrderClick}
                     onUpdateOrder={handleUpdateOrder}
+                    onQualityControlClick={handleQualityControlClick}
                     highlightTerm={searchTerm}
                     compactView={compactView}
                     isManagingOrders={isManageOrdersModalOpen}
