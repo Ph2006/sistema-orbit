@@ -86,20 +86,25 @@ const QualityControl: React.FC = () => {
     const params = new URLSearchParams(location.search);
     const orderId = params.get('orderId');
     
-    if (orderId) {
+    console.log('🔍 QualityControl: orderId from URL:', orderId);
+    console.log('🔍 QualityControl: Available orders:', orders.length);
+    
+    if (orderId && orders.length > 0) {
       const order = orders.find(o => o.id === orderId);
+      console.log('🔍 QualityControl: Found order:', order);
       if (order) {
         setSelectedOrder(order);
+        setActiveTab('documents'); // Ir direto para documentos quando selecionado via URL
+      } else {
+        console.warn('⚠️ QualityControl: Order not found for ID:', orderId);
       }
     }
-
-    if (!selectedOrder) {
-      setActiveTab('procedures');
-    }
-  }, [showTemplates, location, orders]);
+  }, [location.search, orders]); // Remover showTemplates das dependências
 
   useEffect(() => {
     if (selectedOrder) {
+      console.log('📊 QualityControl: Loading data for order:', selectedOrder.orderNumber);
+      
       // Load documents for selected order
       const documentsRef = collection(db, 'qualityDocuments');
       const q = query(documentsRef, where('orderId', '==', selectedOrder.id));
@@ -483,13 +488,14 @@ const QualityControl: React.FC = () => {
     reportType === 'dimensional' ? report.reportType === 'dimensional' :
     reportType === 'liquid-penetrant' ? report.reportType === 'liquid-penetrant' :
     reportType === 'visual-welding' ? report.reportType === 'visual-welding' :
-    report.reportType === 'ultrasonic'
+    reportType === 'ultrasonic' ? report.reportType === 'ultrasonic' :
+    report.reportType === 'painting'
   );
 
   // Render tabs
   const renderTabs = () => (
     <div className="flex border-b mb-6 overflow-x-auto">
-      {selectedOrder && (
+      {selectedOrder ? (
         <>
           <button
             onClick={() => setActiveTab('documents')}
@@ -539,6 +545,23 @@ const QualityControl: React.FC = () => {
           >
             <BookOpen className="h-5 w-5 inline-block mr-1" />
             Lições Aprendidas
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            onClick={() => setActiveTab('procedures')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'procedures' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <BookOpen className="h-5 w-5 inline-block mr-1" />
+            Procedimentos
+          </button>
+          <button
+            onClick={() => setActiveTab('calibration')}
+            className={`px-4 py-2 whitespace-nowrap font-medium ${activeTab === 'calibration' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <Settings className="h-5 w-5 inline-block mr-1" />
+            Calibração
           </button>
         </>
       )}
@@ -615,6 +638,7 @@ const QualityControl: React.FC = () => {
     }
   }
 
+  // Se não há pedido selecionado, mostrar seleção de pedidos OU tabs globais
   if (!selectedOrder) {
     return (
       <div className="bg-white rounded-lg shadow-lg p-6">
@@ -654,76 +678,71 @@ const QualityControl: React.FC = () => {
         {/* Tab selection */}
         {renderTabs()}
 
-        {/* Search bar for orders */}
-        <div className="relative mb-6">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar pedido por número, cliente ou OS..."
-            className="pl-10 w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
-          />
-        </div>
-
-        {/* Order selection grid */}
-        <div className="space-y-4">
-          <h4 className="text-lg font-medium">Selecione um pedido para gerenciar</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredOrders.map(order => (
-              <div
-                key={order.id}
-                onClick={() => setSelectedOrder(order)}
-                className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
-              >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="font-medium">Pedido #{order.orderNumber}</h4>
-                    <p className="text-sm text-gray-600">
-                      Cliente: {order.customer} | OS: {order.internalOrderNumber}
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedOrder(order);
-                    }}
-                    className="flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-lg hover:bg-blue-200"
-                  >
-                    <Layers className="h-4 w-4 mr-1" />
-                    Ver detalhes
-                  </button>
-                </div>
-              </div>
-            ))}
-            
-            {/* Show message when no orders match search */}
-            {filteredOrders.length === 0 && (
-              <div className="col-span-3 p-4 text-center text-gray-500 bg-gray-50 rounded-lg">
-                {searchTerm ? 'Nenhum pedido encontrado para esta busca.' : 'Nenhum pedido disponível.'}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // If no order is selected, render only procedures or calibration tab
-  if (!selectedOrder) {
-    return (
-      <div className="bg-white rounded-lg shadow-lg p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold">Controle de Qualidade - {activeTab === 'procedures' ? 'Procedimentos' : 'Calibração'}</h3>
-        </div>
-        {renderTabs()}
+        {/* Conteúdo baseado na tab ativa */}
         {activeTab === 'procedures' && <InternalProcedures />}
         {activeTab === 'calibration' && <QualityCalibration />}
+        
+        {/* Se não estiver nas tabs globais, mostrar seleção de pedidos */}
+        {!['procedures', 'calibration'].includes(activeTab) && (
+          <>
+            {/* Search bar for orders */}
+            <div className="relative mb-6">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar pedido por número, cliente ou OS..."
+                className="pl-10 w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200"
+              />
+            </div>
+
+            {/* Order selection grid */}
+            <div className="space-y-4">
+              <h4 className="text-lg font-medium">Selecione um pedido para gerenciar</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredOrders.map(order => (
+                  <div
+                    key={order.id}
+                    onClick={() => setSelectedOrder(order)}
+                    className="p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h4 className="font-medium">Pedido #{order.orderNumber}</h4>
+                        <p className="text-sm text-gray-600">
+                          Cliente: {order.customer} | OS: {order.internalOrderNumber}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedOrder(order);
+                        }}
+                        className="flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-lg hover:bg-blue-200"
+                      >
+                        <Layers className="h-4 w-4 mr-1" />
+                        Ver detalhes
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                
+                {/* Show message when no orders match search */}
+                {filteredOrders.length === 0 && (
+                  <div className="col-span-3 p-4 text-center text-gray-500 bg-gray-50 rounded-lg">
+                    {searchTerm ? 'Nenhum pedido encontrado para esta busca.' : 'Nenhum pedido disponível.'}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
-  // If an order is selected, render the full QC view with all tabs accessible
+  // Se um pedido está selecionado, renderizar a visualização completa do QC
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
       <div className="flex justify-between items-center mb-6">
@@ -750,7 +769,7 @@ const QualityControl: React.FC = () => {
                 setSelectedNonConformity({
                   id: 'new',
                   orderId: selectedOrder.id,
-                  itemId: selectedOrder.items[0]?.id || '',
+                  itemId: selectedOrder.items?.[0]?.id || '',
                   title: '',
                   description: '',
                   severity: 'medium',
@@ -822,7 +841,7 @@ const QualityControl: React.FC = () => {
                 setSelectedReport({
                   id: 'new',
                   orderId: selectedOrder.id,
-                  itemId: selectedOrder.items[0]?.id || '',
+                  itemId: selectedOrder.items?.[0]?.id || '',
                   reportType: reportType,
                   reportNumber: '',
                   inspector: '',
@@ -837,18 +856,6 @@ const QualityControl: React.FC = () => {
             >
               <Plus className="h-5 w-5 mr-2" />
               Novo Relatório
-            </button>
-          )}
-
-          {activeTab === 'procedures' && (
-            <button
-              onClick={() => {
-                // Add a way to create a new procedure
-              }}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <Plus className="h-5 w-5 mr-2" />
-              Novo Procedimento
             </button>
           )}
           
@@ -1219,18 +1226,18 @@ const QualityControl: React.FC = () => {
                     reportType === 'dimensional' ? 'inspeção dimensional' :
                     reportType === 'liquid-penetrant' ? 'líquido penetrante' :
                     reportType === 'visual-welding' ? 'inspeção visual de solda' :
-                    'ultrassom'
+                    reportType === 'ultrasonic' ? 'ultrassom' :
+                    'pintura'
                   } encontrado para este pedido.`}
                 </p>
                 <button
                   onClick={() => {
-                    // Create a new report with the selected type
                     const newReport = {
                       id: 'new',
                       orderId: selectedOrder.id,
-                      itemId: selectedOrder.items[0]?.id || '',
+                      itemId: selectedOrder.items?.[0]?.id || '',
                       reportType,
-                      reportNumber: '', // Will be generated in the form
+                      reportNumber: '',
                       inspector: '',
                       inspectionDate: new Date().toISOString().split('T')[0],
                       status: 'draft' as const,
@@ -1261,7 +1268,8 @@ const QualityControl: React.FC = () => {
                             report.reportType === 'dimensional' ? 'Inspeção Dimensional' :
                             report.reportType === 'liquid-penetrant' ? 'Ensaio por Líquido Penetrante' :
                             report.reportType === 'visual-welding' ? 'Inspeção Visual de Solda' :
-                            'Ensaio de Ultrassom'
+                            report.reportType === 'ultrasonic' ? 'Ensaio de Ultrassom' :
+                            'Relatório de Pintura'
                           }
                         </h4>
                         <div className="text-sm text-gray-500">
@@ -1315,14 +1323,6 @@ const QualityControl: React.FC = () => {
 
       {activeTab === 'lessons' && (
         <LessonsLearned order={selectedOrder} />
-      )}
-
-      {activeTab === 'procedures' && (
-        <InternalProcedures />
-      )}
-      
-      {activeTab === 'calibration' && (
-        <QualityCalibration />
       )}
     </div>
   );
