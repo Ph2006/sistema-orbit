@@ -112,14 +112,6 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
                 {Math.abs(daysUntilDelivery)}d atrasado
               </span>
             )}
-            {/* Botão de editar - SEMPRE visível mas pequeno */}
-            <button
-              onClick={handleEditClick}
-              className="opacity-60 hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all"
-              title="Editar pedido"
-            >
-              <Edit className="h-3 w-3 text-gray-400 hover:text-blue-400" />
-            </button>
           </div>
         </div>
         
