@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { X, Package, Calendar, User, Building, FileText, CheckCircle, Square, CheckSquare, BarChart, Edit, Trash2, Plus, Download, FileSpreadsheet } from 'lucide-react';
+import { X, Package, Calendar, User, Building, FileText, CheckCircle, Square, CheckSquare, BarChart, Edit, Trash2, Plus, Download, FileSpreadsheet, Save, Weight } from 'lucide-react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 // Tipos baseados no seu código
 interface OrderItem {
@@ -103,7 +105,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
       totalWeight: 0,
       unitPrice: 0,
       totalPrice: 0,
-      progress: {},
+      overallProgress: 0,
     };
 
     const updatedOrder = {
@@ -133,25 +135,193 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
       ...localOrder,
       items: localOrder.items.map(item => {
         if (item.id === itemId) {
-          return {
+          const updatedItem = {
             ...item,
             [field]: value
           };
+          
+          return updatedItem;
         }
         return item;
       })
     };
+
+    // Recalcular progresso geral do pedido se o progresso de um item mudou
+    if (field === 'overallProgress') {
+      const totalProgress = updatedOrder.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0);
+      updatedOrder.overallProgress = updatedOrder.items.length > 0 ? Math.round(totalProgress / updatedOrder.items.length) : 0;
+    }
+
     setLocalOrder(updatedOrder);
   };
 
-  // Gerar PDF com romaneio dos itens selecionados
+  // Função para atualizar progresso de um item
+  const updateItemProgress = (itemId: string, newProgress: number) => {
+    handleItemChange(itemId, 'overallProgress', newProgress);
+  };
+
+  // Gerar PDF com romaneio dos itens selecionados - IMPLEMENTAÇÃO FUNCIONAL
   const generateSelectedItemsPdf = () => {
     if (selectedItems.size === 0) {
       alert('Selecione pelo menos um item para exportar o romaneio.');
       return;
     }
 
-    alert('Funcionalidade de PDF em desenvolvimento. Para implementação completa, instale a biblioteca jsPDF.');
+    try {
+      const doc = new jsPDF();
+      
+      // Cabeçalho do documento
+      doc.setFontSize(20);
+      doc.setFont(undefined, 'bold');
+      doc.text('ROMANEIO DE EMBARQUE', 105, 20, { align: 'center' });
+      
+      // Linha divisória
+      doc.setLineWidth(0.5);
+      doc.line(20, 25, 190, 25);
+      
+      // Informações do pedido
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'normal');
+      
+      let yPosition = 35;
+      
+      // Dados do pedido em duas colunas
+      doc.text(`Pedido: #${localOrder.orderNumber}`, 20, yPosition);
+      doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 120, yPosition);
+      yPosition += 7;
+      
+      doc.text(`Cliente: ${localOrder.customer}`, 20, yPosition);
+      doc.text(`OS Interna: ${localOrder.internalOrderNumber}`, 120, yPosition);
+      yPosition += 7;
+      
+      if (localOrder.projectName) {
+        doc.text(`Projeto: ${localOrder.projectName}`, 20, yPosition);
+        yPosition += 7;
+      }
+      
+      doc.text(`Data de Entrega: ${new Date(localOrder.deliveryDate).toLocaleDateString('pt-BR')}`, 20, yPosition);
+      yPosition += 15;
+      
+      // Filtrar itens selecionados
+      const selectedItemsData = localOrder.items.filter(item => 
+        selectedItems.has(item.id)
+      );
+
+      // Calcular totais
+      const totalQuantity = selectedItemsData.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      const totalWeightSelected = selectedItemsData.reduce((sum, item) => sum + (item.totalWeight || (item.unitWeight * item.quantity)), 0);
+
+      // Preparar dados para a tabela
+      const tableData = selectedItemsData.map((item, index) => [
+        (index + 1).toString(),
+        item.code || '-',
+        item.description || 'Sem descrição',
+        (item.quantity || 0).toString(),
+        `${(item.unitWeight || 0).toFixed(3)} kg`,
+        `${(item.totalWeight || (item.unitWeight * item.quantity)).toFixed(3)} kg`,
+        `${item.overallProgress || 0}%`
+      ]);
+
+      // Adicionar tabela principal
+      (doc as any).autoTable({
+        startY: yPosition,
+        head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total', 'Progresso']],
+        body: tableData,
+        styles: { 
+          fontSize: 9,
+          cellPadding: 3
+        },
+        headStyles: { 
+          fillColor: [41, 128, 185],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold'
+        },
+        alternateRowStyles: { 
+          fillColor: [245, 245, 245] 
+        },
+        tableLineColor: [0, 0, 0],
+        tableLineWidth: 0.1,
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 15 }, // Item
+          1: { halign: 'center', cellWidth: 25 }, // Código
+          2: { halign: 'left', cellWidth: 60 },   // Descrição
+          3: { halign: 'center', cellWidth: 15 }, // Qtd
+          4: { halign: 'right', cellWidth: 25 },  // Peso Unit.
+          5: { halign: 'right', cellWidth: 25 },  // Peso Total
+          6: { halign: 'center', cellWidth: 20 }  // Progresso
+        }
+      });
+
+      // Posição após a tabela
+      const finalY = (doc as any).lastAutoTable.finalY || 100;
+      
+      // Tabela de resumo
+      const summaryData = [
+        ['Total de Itens:', selectedItemsData.length.toString()],
+        ['Quantidade Total:', totalQuantity.toString()],
+        ['Peso Total:', `${totalWeightSelected.toFixed(3)} kg`]
+      ];
+
+      (doc as any).autoTable({
+        startY: finalY + 10,
+        body: summaryData,
+        styles: { 
+          fontSize: 11,
+          cellPadding: 3
+        },
+        columnStyles: {
+          0: { fontStyle: 'bold', halign: 'left', cellWidth: 40 },
+          1: { fontStyle: 'bold', halign: 'right', cellWidth: 40 }
+        },
+        theme: 'plain'
+      });
+
+      // Rodapé com informações adicionais
+      const pageHeight = doc.internal.pageSize.height;
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      
+      // Status da documentação
+      let docStatus = '';
+      if (localOrder.checklist?.drawings) docStatus += 'Desenhos ✓ ';
+      if (localOrder.checklist?.inspectionTestPlan) docStatus += 'PIT ✓ ';
+      if (localOrder.checklist?.paintPlan) docStatus += 'Pintura ✓ ';
+      
+      if (docStatus) {
+        doc.text(`Documentação: ${docStatus}`, 20, pageHeight - 20);
+      }
+      
+      // Data e hora de geração
+      doc.text(
+        `Relatório gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`,
+        105, 
+        pageHeight - 10, 
+        { align: 'center' }
+      );
+
+      // Numeração de páginas
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.text(
+          `Página ${i} de ${totalPages}`,
+          190, 
+          pageHeight - 10, 
+          { align: 'right' }
+        );
+      }
+
+      // Salvar o PDF
+      const filename = `Romaneio_Pedido_${localOrder.orderNumber}_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.pdf`;
+      doc.save(filename);
+      
+      // Feedback visual
+      alert(`PDF "${filename}" gerado com sucesso!\n\nItens incluídos: ${selectedItemsData.length}\nPeso total: ${totalWeightSelected.toFixed(3)} kg`);
+      
+    } catch (error) {
+      console.error('Erro ao gerar PDF:', error);
+      alert('Erro ao gerar PDF. Verifique se as dependências jsPDF estão instaladas corretamente.');
+    }
   };
 
   // Gerar PDF com cronograma/progresso
@@ -199,7 +369,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
             <Package className="h-8 w-8 text-blue-600" />
             <div>
               <h2 className="text-2xl font-bold text-gray-900">
-                Itens do Pedido #{localOrder.orderNumber}
+                Detalhes do Pedido #{localOrder.orderNumber}
               </h2>
               <p className="text-sm text-gray-600">
                 {localOrder.customer} • {localOrder.projectName || 'Sem projeto'}
@@ -257,6 +427,22 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
                 <p className="text-xs text-gray-500">Peso Total</p>
                 <p className="font-semibold">{totalWeight.toFixed(2)} kg</p>
               </div>
+            </div>
+          </div>
+
+          {/* Progresso Geral */}
+          <div className="mt-6 p-4 bg-white rounded-lg border">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-lg font-semibold text-gray-900">Progresso Geral do Pedido</h3>
+              <span className="text-lg font-bold text-blue-600">{localOrder.overallProgress || 0}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-4">
+              <div 
+                className={`h-4 rounded-full transition-all duration-300 ${
+                  (localOrder.overallProgress || 0) === 100 ? 'bg-green-500' : 'bg-blue-500'
+                }`}
+                style={{ width: `${localOrder.overallProgress || 0}%` }}
+              />
             </div>
           </div>
 
@@ -455,52 +641,69 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
                         />
                       </td>
                       <td className="px-3 py-4 whitespace-nowrap">
-                        <input
-                          type="number"
-                          value={item.quantity}
-                          onChange={(e) => handleItemChange(item.id, 'quantity', Number(e.target.value))}
-                          className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                          min="1"
-                        />
+                        {/* QUANTIDADE - SOMENTE LEITURA */}
+                        <div className="w-full px-2 py-1 bg-gray-100 border border-gray-300 rounded text-sm text-gray-600 cursor-not-allowed">
+                          {item.quantity}
+                        </div>
                       </td>
                       <td className="px-3 py-4 whitespace-nowrap">
-                        <input
-                          type="number"
-                          value={item.unitWeight || ''}
-                          onChange={(e) => handleItemChange(item.id, 'unitWeight', Number(e.target.value))}
-                          className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                          min="0"
-                          step="0.01"
-                          placeholder="0.00"
-                        />
+                        {/* PESO UNITÁRIO - SOMENTE LEITURA */}
+                        <div className="w-full px-2 py-1 bg-gray-100 border border-gray-300 rounded text-sm text-gray-600 cursor-not-allowed">
+                          {(item.unitWeight || 0).toFixed(3)}
+                        </div>
                       </td>
                       <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">
                         {(item.totalWeight || (item.unitWeight * item.quantity)).toFixed(2)}
                       </td>
                       <td className="px-3 py-4 whitespace-nowrap">
+                        {/* CONTROLE DE PROGRESSO INTERATIVO */}
                         <div className="flex items-center space-x-2">
-                          <div className="w-20 bg-gray-200 rounded-full h-2">
-                            <div 
-                              className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
-                              style={{ width: `${item.overallProgress || 0}%` }}
-                            ></div>
+                          <div className="flex-1">
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={item.overallProgress || 0}
+                              onChange={(e) => updateItemProgress(item.id, parseInt(e.target.value))}
+                              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                              style={{
+                                background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${item.overallProgress || 0}%, #e5e7eb ${item.overallProgress || 0}%, #e5e7eb 100%)`
+                              }}
+                            />
                           </div>
-                          <span className="text-xs text-gray-600 min-w-[35px]">
-                            {item.overallProgress ? Math.round(item.overallProgress) : 0}%
-                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={item.overallProgress || 0}
+                            onChange={(e) => updateItemProgress(item.id, parseInt(e.target.value) || 0)}
+                            className="w-16 px-1 py-1 border border-gray-300 rounded text-sm text-center"
+                          />
+                          <span className="text-xs text-gray-600">%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+                          <div 
+                            className={`h-1 rounded-full transition-all duration-300 ${
+                              (item.overallProgress || 0) === 100 ? 'bg-green-500' :
+                              (item.overallProgress || 0) >= 70 ? 'bg-blue-500' :
+                              (item.overallProgress || 0) >= 30 ? 'bg-yellow-500' :
+                              'bg-red-500'
+                            }`}
+                            style={{ width: `${item.overallProgress || 0}%` }}
+                          />
                         </div>
                       </td>
                       <td className="px-3 py-4 whitespace-nowrap text-sm font-medium">
                         <div className="flex space-x-1">
                           <button
-                            onClick={() => alert('Funcionalidade de progresso em desenvolvimento')}
+                            onClick={() => alert('Funcionalidade de progresso detalhado em desenvolvimento')}
                             className="text-blue-600 hover:text-blue-900 p-1 hover:bg-blue-100 rounded transition-colors"
-                            title="Atualizar Progresso"
+                            title="Atualizar Progresso Detalhado"
                           >
                             <BarChart className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => alert('Funcionalidade de edição em desenvolvimento')}
+                            onClick={() => alert('Funcionalidade de edição detalhada em desenvolvimento')}
                             className="text-yellow-600 hover:text-yellow-900 p-1 hover:bg-yellow-100 rounded transition-colors"
                             title="Editar Item"
                           >
@@ -580,7 +783,8 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
         <div className="px-6 py-4 bg-gray-50 border-t flex justify-between items-center">
           <div className="text-sm text-gray-600">
             <strong>Total:</strong> {localOrder.items.length} {localOrder.items.length === 1 ? 'item' : 'itens'} • 
-            <strong> Peso:</strong> {totalWeight.toFixed(2)} kg
+            <strong> Peso:</strong> {totalWeight.toFixed(2)} kg •
+            <strong> Progresso Geral:</strong> {localOrder.overallProgress || 0}%
           </div>
           <div className="flex space-x-3">
             <button
@@ -591,12 +795,37 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
             </button>
             <button
               onClick={handleSave}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2"
             >
+              <Save className="h-4 w-4" />
               Salvar Alterações
             </button>
           </div>
         </div>
+
+        {/* Estilos CSS para o slider */}
+        <style jsx>{`
+          input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: 2px solid #ffffff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+          }
+
+          input[type="range"]::-moz-range-thumb {
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: 2px solid #ffffff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+          }
+        `}</style>
       </div>
     </div>
   );
