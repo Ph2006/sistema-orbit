@@ -1,539 +1,243 @@
 import React from 'react';
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { Order } from '../types/kanban';
-import { format, isPast, differenceInDays } from 'date-fns';
+import { format, isBefore, isAfter, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { calculateOrderProgress } from '../utils/progress';
-import { FileText, FileCheck, Brush, Briefcase, CheckCircle, Clock, ClipboardCheck, Calendar, Package, AlertTriangle, CheckCircle2, Plus, Minus } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { formatDate, formatNumber } from '../utils/format';
-import OrderItemsList from './OrderItemsList';
+import { Edit, Trash2, History, Clock, Package, User, Calendar, Weight, CheckCircle, AlertTriangle, Circle } from 'lucide-react';
+import { Order } from '../types/kanban';
 
 interface KanbanCardProps {
   order: Order;
-  overlay?: boolean;
   isManaging?: boolean;
   isSelected?: boolean;
   highlight?: boolean;
   compactView?: boolean;
-  columnTitle?: string;
-  onClick?: () => void;
-  customers?: any[];
+  isExpanded?: boolean;
+  onOrderClick?: (order: Order) => void;
+  onOrderEdit?: (order: Order, e?: React.MouseEvent) => void;
+  onSelect?: (orderId: string) => void;
+  onViewHistory?: (order: Order, e: React.MouseEvent) => void;
+  onDelete?: (order: Order, e: React.MouseEvent) => void;
+  onStatusChange?: (order: Order, newStatus: string, e: React.MouseEvent) => void;
 }
 
-// Função para formatar datas com segurança
-const formatDateSafe = (date: any): string => {
-  try {
-    if (!date) return 'Sem data';
-    
-    let dateObj: Date;
-    
-    if (typeof date === 'string') {
-      if (date.trim() === '') return 'Sem data';
-      dateObj = new Date(date);
-    } else if (date instanceof Date) {
-      dateObj = date;
-    } else if (date && typeof date === 'object') {
-      if (date.toDate && typeof date.toDate === 'function') {
-        dateObj = date.toDate();
-      } else if (date.seconds && typeof date.seconds === 'number') {
-        dateObj = new Date(date.seconds * 1000);
-      } else {
-        return 'Data inválida';
-      }
-    } else {
-      return 'Data inválida';
-    }
-    
-    if (isNaN(dateObj.getTime())) {
-      return 'Data inválida';
-    }
-    
-    return dateObj.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-    
-  } catch (error) {
-    console.error('Erro ao formatar data:', error);
-    return 'Data inválida';
-  }
-};
-
-const KanbanCard: React.FC<KanbanCardProps> = ({ 
-  order, 
-  overlay, 
+const KanbanCard: React.FC<KanbanCardProps> = ({
+  order,
   isManaging = false,
   isSelected = false,
   highlight = false,
   compactView = false,
-  columnTitle,
-  onClick,
-  customers
+  isExpanded = false,
+  onOrderClick,
+  onOrderEdit,
+  onSelect,
+  onViewHistory,
+  onDelete,
+  onStatusChange,
 }) => {
-  const [showItems, setShowItems] = React.useState(false);
-  const [showItemsList, setShowItemsList] = React.useState(false);
-  
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-  } = useSortable({ id: order.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
-  // Check if order is completed
-  const isCompleted = order.status === 'completed' || order.completedDate;
-
-  // Calculate delivery date metrics
-  const now = new Date();
+  const today = new Date();
   const deliveryDate = new Date(order.deliveryDate);
-  const completionDate = order.completedDate ? new Date(order.completedDate) : null;
-  
-  // Only consider it overdue if not completed and delivery date is in the past
-  const isOverdue = !isCompleted && isPast(deliveryDate);
-  
-  // For completed orders, calculate days difference between completed and delivery date
-  const completionDiff = completionDate && deliveryDate 
-    ? differenceInDays(completionDate, deliveryDate) 
-    : null;
-  
-  const isEarly = completionDiff !== null && completionDiff < 0;
-  const isLate = completionDiff !== null && completionDiff > 0;
-  const isOnTime = completionDiff !== null && completionDiff === 0;
+  const isOverdue = isBefore(deliveryDate, today) && order.status !== 'completed';
+  const daysUntilDelivery = differenceInDays(deliveryDate, today);
 
-  // Check if the order is in the expedited column
-  const isExpedited = columnTitle?.toLowerCase().includes('expedi');
-
-  // Map status to background and border colors
-  const getStatusColors = (status: string) => {
-    // For completed orders, use green
-    if (isCompleted) {
-      return 'bg-green-100/80 border-green-400';
-    }
+  const getStatusColor = () => {
+    if (isOverdue) return 'border-l-red-500 bg-red-50/10';
     
-    // Override with yellow if in expedited column regardless of status
-    if (isExpedited) {
-      return 'bg-yellow-100/80 border-yellow-400';
-    }
-    
-    // Override with red if delivery date is past and not completed
-    if (isOverdue) {
-      return 'bg-red-100/80 border-red-400';
-    }
-    
-    switch (status) {
+    switch (order.status) {
       case 'in-progress':
-        return 'bg-orange-100/80 border-orange-400';
-      case 'delayed':
-        return 'bg-red-100/80 border-red-400';
+        return 'border-l-orange-500 bg-orange-50/10';
       case 'waiting-docs':
-        return 'bg-yellow-100/80 border-yellow-400';
+        return 'border-l-yellow-500 bg-yellow-50/10';
       case 'completed':
-        return 'bg-green-100/80 border-green-400';
+        return 'border-l-green-500 bg-green-50/10';
       case 'ready':
-        return 'bg-blue-100/80 border-blue-400';
+        return 'border-l-blue-500 bg-blue-50/10';
       case 'urgent':
-        return 'bg-purple-100/80 border-purple-400';
+        return 'border-l-purple-500 bg-purple-50/10';
       default:
-        return 'bg-gray-100/80 border-gray-400';
+        return 'border-l-gray-500 bg-gray-50/10';
     }
   };
-
-  // Calculate days until delivery for in-progress orders
-  const calculateDeliveryStatus = () => {
-    if (isCompleted && completionDate) {
-      return differenceInDays(completionDate, deliveryDate);
-    } else {
-      const diffTime = deliveryDate.getTime() - now.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    }
-  };
-
-  const deliveryStatus = calculateDeliveryStatus();
-  const isDueToday = !isCompleted && deliveryStatus === 0;
 
   const getStatusIcon = () => {
-    if (isCompleted) return <CheckCircle2 className="h-4 w-4 text-green-400" />;
-    if (isLate) return <AlertTriangle className="h-4 w-4 text-red-400" />;
-    if (isOverdue) return <Clock className="h-4 w-4 text-yellow-400" />;
-    return <Package className="h-4 w-4 text-blue-400" />;
+    switch (order.status) {
+      case 'completed':
+        return <CheckCircle className="h-4 w-4 text-green-400" />;
+      case 'urgent':
+        return <AlertTriangle className="h-4 w-4 text-purple-400" />;
+      case 'waiting-docs':
+        return <Clock className="h-4 w-4 text-yellow-400" />;
+      default:
+        return <Circle className="h-4 w-4 text-orange-400" />;
+    }
   };
 
-  // Função para obter os itens do pedido de forma mais robusta
-  const getOrderItems = () => {
-    // Verificar múltiplas possibilidades de estrutura
-    if (order.items && Array.isArray(order.items)) {
-      return order.items;
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (isManaging) {
+      e.stopPropagation();
+      onSelect?.(order.id);
+      return;
     }
-    if (order.orderItems && Array.isArray(order.orderItems)) {
-      return order.orderItems;
-    }
-    if (order.products && Array.isArray(order.products)) {
-      return order.products;
-    }
-    if (order.components && Array.isArray(order.components)) {
-      return order.components;
-    }
-    return [];
+    onOrderClick?.(order);
   };
 
-  const orderItems = getOrderItems();
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onOrderEdit?.(order, e);
+  };
 
-  const cardClasses = `
-    border-2 backdrop-blur-sm ${getStatusColors(order.status)}
-    ${overlay ? 'shadow-lg' : 'shadow-sm'}
-    ${isSelected ? 'ring-2 ring-blue-500' : ''}
-    ${isManaging ? 'ml-1' : ''}
-    ${highlight ? 'animate-pulse bg-opacity-90' : ''}
-    cursor-grab hover:shadow-md transition-all hover:scale-[1.005]
-    p-1.5 sm:p-2 rounded sm:rounded-md
-    text-[11px] sm:text-xs
-    leading-tight
-  `;
-
-  if (compactView) {
-    return (
-      <>
-        <div
-          ref={setNodeRef}
-          style={style}
-          className={cardClasses}
-          onClick={!isManaging && onClick ? onClick : undefined}
-          {...(!isManaging ? { ...attributes, ...listeners } : {})}
-        >
-          <div className="space-y-1">
-            <div className="flex justify-between items-start">
-              <span className="font-medium text-sm">#{order.orderNumber}</span>
-              {isCompleted ? (
-                <span className={`px-1 py-0.5 text-xs rounded flex items-center ${
-                  isEarly ? 'bg-green-200 text-green-800' : 
-                  isLate ? 'bg-orange-200 text-orange-800' : 
-                  'bg-blue-200 text-blue-800'
-                }`}>
-                  {getStatusIcon()}
-                  {isEarly ? `${Math.abs(completionDiff!)}d antes` : 
-                   isLate ? `${completionDiff}d após` : 
-                   'No prazo'}
-                </span>
-              ) : (isDueToday || isOverdue) && (
-                <span className={`px-1 py-0.5 text-xs rounded ${
-                  isOverdue ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800'
-                }`}>
-                  {isOverdue ? `${Math.abs(deliveryStatus)}d atrasado` : 'Hoje!'}
-                </span>
-              )}
-            </div>
-            
-            <div className="text-xs text-gray-600">
-              <div className="truncate">{(() => {
-                if (customers && customers.length > 0) {
-                  const found = customers.find(c => c.id === order.customer);
-                  return found ? found.name : order.customer;
-                }
-                return order.customerName || order.customer;
-              })()}</div>
-            </div>
-            
-            {/* Project display in compact view */}
-            {order.projectName && (
-              <div className="flex items-center text-xs text-gray-600">
-                <Briefcase className="h-3 w-3 mr-1" />
-                <span className="truncate">{order.projectName}</span>
-              </div>
-            )}
-
-            {/* Itens do Pedido - Vista Compacta */}
-            {orderItems.length > 0 && (
-              <div className="mt-2 p-2 bg-white/50 rounded border">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-medium">Itens ({orderItems.length})</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowItemsList(true);
-                    }}
-                    className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                  >
-                    Mostrar
-                  </button>
-                </div>
-                
-                {showItems && (
-                  <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                    {orderItems.slice(0, 3).map((item, index) => (
-                      <div key={item.id || index} className="text-xs text-gray-700 p-1 bg-white/70 rounded">
-                        <div className="font-medium truncate">
-                          {item.description || item.name || `Item ${index + 1}`}
-                        </div>
-                        <div className="text-gray-500">
-                          {item.quantity || item.qty || 0} {item.unit || 'un'} • 
-                          {item.material || item.type || 'N/A'}
-                        </div>
-                      </div>
-                    ))}
-                    {orderItems.length > 3 && (
-                      <div className="text-xs text-gray-500 text-center py-1">
-                        +{orderItems.length - 3} mais itens
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Barra de progresso compacta */}
-            <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all ${
-                  (order.overallProgress ?? 0) === 100 ? 'bg-green-500' :
-                  (order.overallProgress ?? 0) >= 70 ? 'bg-blue-500' :
-                  (order.overallProgress ?? 0) >= 30 ? 'bg-yellow-500' :
-                  'bg-red-500'
-                }`}
-                style={{ width: `${order.overallProgress ?? 0}%` }}
-              />
-            </div>
-            
-            {/* Quality control link in compact view */}
-            <Link 
-              to={`/quality?orderId=${order.id}`} 
-              onClick={(e) => e.stopPropagation()} 
-              className="block mt-1.5 bg-purple-100 hover:bg-purple-200 text-purple-800 text-center px-2 py-1 rounded text-xs font-medium"
-            >
-              <ClipboardCheck className="h-3 w-3 inline-block mr-1" />
-              Controle de Qualidade
-            </Link>
-
-            {/* Checklist icons in compact view */}
-            <div className="flex justify-between items-center mt-1">
-              <div className="flex items-center space-x-1">
-                {order.checklist && (
-                  <>
-                    <span className={`${order.checklist.drawings ? 'text-blue-600' : 'text-gray-400'}`}>
-                      <FileText className="h-3 w-3" />
-                    </span>
-                    <span className={`${order.checklist.inspectionTestPlan ? 'text-blue-600' : 'text-gray-400'}`}>
-                      <FileCheck className="h-3 w-3" />
-                    </span>
-                    <span className={`${order.checklist.paintPlan ? 'text-blue-600' : 'text-gray-400'}`}>
-                      <Brush className="h-3 w-3" />
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Completed date indicator for compact view */}
-            {isCompleted && (
-              <div className="flex items-center text-xs text-green-600">
-                <CheckCircle className="h-3 w-3 mr-0.5" />
-                <span>Concluído: {formatDateSafe(order.completedDate || '')}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Modal da lista de itens */}
-        {showItemsList && (
-          <OrderItemsList
-            order={order}
-            onClose={() => setShowItemsList(false)}
-            onUpdateOrder={(updatedOrder) => {
-              console.log('Pedido atualizado:', updatedOrder);
-              setShowItemsList(false);
-            }}
-          />
-        )}
-      </>
-    );
-  }
+  const progressPercentage = order.progress || 0;
 
   return (
-    <>
-      <div
-        ref={setNodeRef}
-        style={style}
-        className={cardClasses}
-        onClick={!isManaging && onClick ? onClick : undefined}
-        {...(!isManaging ? { ...attributes, ...listeners } : {})}
-      >
-        <div className="space-y-2">
-          <div className="flex justify-between items-start">
-            <span className="font-semibold">#{order.orderNumber}</span>
-            {isCompleted ? (
-              <span className={`px-2 py-1 text-xs rounded flex items-center ${
-                isEarly ? 'bg-green-200 text-green-800' : 
-                isLate ? 'bg-orange-200 text-orange-800' : 
-                'bg-blue-200 text-blue-800'
-              }`}>
-                {getStatusIcon()}
-                {isEarly ? `${Math.abs(completionDiff!)}d antes` : 
-                 isLate ? `${completionDiff}d após` : 
-                 'No prazo'}
-              </span>
-            ) : (isDueToday || isOverdue) && (
-              <span className={`px-2 py-1 text-xs rounded ${
-                isOverdue ? 'bg-red-200 text-red-800' : 'bg-yellow-200 text-yellow-800'
-              }`}>
-                {isOverdue ? `${Math.abs(deliveryStatus)}d atrasado` : 'Hoje!'}
+    <div
+      className={`
+        border-l-4 rounded-lg p-4 mb-3 shadow-sm cursor-pointer
+        transition-all duration-200 hover:shadow-md hover:scale-[1.02]
+        ${getStatusColor()}
+        ${highlight ? 'ring-2 ring-blue-500 ring-opacity-50' : ''}
+        ${isSelected ? 'ring-2 ring-purple-500' : ''}
+        ${compactView ? 'p-3' : 'p-4'}
+        bg-gray-800/50 border-gray-700
+      `}
+      onClick={handleCardClick}
+    >
+      {/* Header do Card */}
+      <div className={`${compactView ? 'mb-2' : 'mb-3'}`}>
+        <div className="flex justify-between items-start mb-2">
+          <h3 className="font-semibold text-gray-100 text-sm">
+            #{order.orderNumber}
+          </h3>
+          <div className="flex items-center gap-2">
+            {getStatusIcon()}
+            {isOverdue && (
+              <span className="bg-red-500 text-white text-xs px-2 py-1 rounded">
+                {Math.abs(daysUntilDelivery)}d atrasado
               </span>
             )}
+            {/* Botão de editar - SEMPRE visível mas pequeno */}
+            <button
+              onClick={handleEditClick}
+              className="opacity-60 hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all"
+              title="Editar pedido"
+            >
+              <Edit className="h-3 w-3 text-gray-400 hover:text-blue-400" />
+            </button>
+          </div>
+        </div>
+        
+        <div className={`text-xs text-gray-300 space-y-1 ${compactView ? 'space-y-0.5' : 'space-y-1'}`}>
+          <div className="flex items-center gap-1">
+            <User className="h-3 w-3 text-gray-500" />
+            <span className="truncate">{order.customer}</span>
           </div>
           
-          <div className="text-sm text-gray-600">
-            <div>Cliente: {(() => {
-              if (customers && customers.length > 0) {
-                const found = customers.find(c => c.id === order.customer);
-                return found ? found.name : order.customer;
-              }
-              return order.customerName || order.customer;
-            })()}</div>
-            <div>OS: {order.internalOrderNumber}</div>
-            <div>Início: {formatDateSafe(order.startDate)}</div>
-            <div>Entrega: {formatDateSafe(order.deliveryDate)}</div>
-            
-            {/* Project display */}
-            {order.projectName && (
-              <div className="text-sm flex items-center text-gray-700">
-                <Briefcase className="h-4 w-4 mr-1 text-gray-500" />
-                <span className="font-medium">{order.projectName}</span>
+          {!compactView && (
+            <>
+              <div className="flex items-center gap-1">
+                <Package className="h-3 w-3 text-gray-500" />
+                <span>OS: {order.internalOrderNumber}</span>
               </div>
-            )}
-            
-            <div className="font-medium">
-              Peso Total: {formatNumber(order.totalWeight)} kg
-            </div>
-
-            {/* Itens do Pedido - Vista Expandida */}
-            {orderItems.length > 0 && (
-              <div className="mt-3 p-3 bg-white/50 rounded border">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium">Itens do Pedido ({orderItems.length})</span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowItemsList(true);
-                    }}
-                    className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-                  >
-                    Ver Detalhes
-                  </button>
-                </div>
-                
-                {showItems && (
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {orderItems.map((item, index) => (
-                      <div key={item.id || index} className="text-xs bg-white/70 p-2 rounded border">
-                        <div className="font-medium text-gray-900">
-                          {item.description || item.name || `Item ${index + 1}`}
-                        </div>
-                        <div className="text-gray-600 mt-1">
-                          <span>Material: {item.material || item.type || 'N/A'}</span> • 
-                          <span>Qtd: {item.quantity || item.qty || 0} {item.unit || 'un'}</span>
-                        </div>
-                        {(item.dimensions || item.weight) && (
-                          <div className="text-gray-500 mt-1">
-                            {item.dimensions && <span>Dim: {item.dimensions}</span>}
-                            {item.dimensions && item.weight && ' • '}
-                            {item.weight && <span>Peso: {item.weight} kg</span>}
-                          </div>
-                        )}
-                        {item.progress !== undefined && (
-                          <div className="mt-1">
-                            <div className="flex justify-between text-xs">
-                              <span>Progresso:</span>
-                              <span>{item.progress}%</span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
-                              <div
-                                className={`h-1 rounded-full ${
-                                  item.progress === 100 ? 'bg-green-500' :
-                                  item.progress >= 70 ? 'bg-blue-500' :
-                                  item.progress >= 30 ? 'bg-yellow-500' :
-                                  'bg-red-500'
-                                }`}
-                                style={{ width: `${item.progress}%` }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <div className="flex items-center gap-1">
+                <Calendar className="h-3 w-3 text-gray-500" />
+                <span>Entrega: {format(deliveryDate, 'dd/MM/yyyy', { locale: ptBR })}</span>
               </div>
-            )}
-
-            {/* Quality Control Link - More prominent and repositioned */}
-            <Link 
-              to={`/quality?orderId=${order.id}`} 
-              onClick={(e) => e.stopPropagation()} 
-              className="flex items-center bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-1.5 rounded-lg text-sm mt-2 w-full justify-center font-medium"
-            >
-              <ClipboardCheck className="h-4 w-4 mr-2" />
-              Controle de Qualidade
-            </Link>
-
-            {/* Checklist status indicators */}
-            {order.checklist && (
-              <div className="flex space-x-4 mt-1 text-sm">
-                <div className={`flex items-center ${order.checklist.drawings ? 'text-blue-600' : 'text-gray-400'}`}>
-                  <FileText className="h-4 w-4 mr-1" />
-                  <span>Desenhos</span>
-                </div>
-                <div className={`flex items-center ${order.checklist.inspectionTestPlan ? 'text-blue-600' : 'text-gray-400'}`}>
-                  <FileCheck className="h-4 w-4 mr-1" />
-                  <span>PIT</span>
-                </div>
-                <div className={`flex items-center ${order.checklist.paintPlan ? 'text-blue-600' : 'text-gray-400'}`}>
-                  <Brush className="h-4 w-4 mr-1" />
-                  <span>Pintura</span>
-                </div>
+              <div className="flex items-center gap-1">
+                <Weight className="h-3 w-3 text-gray-500" />
+                <span>Peso: {(order.totalWeight || 0).toFixed(2)} kg</span>
               </div>
-            )}
-
-            {/* Progress bar */}
-            <div className="mt-2">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Progresso</span>
-                <span className="text-gray-600">{order.overallProgress ?? 0}%</span>
-              </div>
-              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className={`h-full transition-all ${
-                    (order.overallProgress ?? 0) === 100 ? 'bg-green-500' :
-                    (order.overallProgress ?? 0) >= 70 ? 'bg-blue-500' :
-                    (order.overallProgress ?? 0) >= 30 ? 'bg-yellow-500' :
-                    'bg-red-500'
-                  }`}
-                  style={{ width: `${order.overallProgress ?? 0}%` }}
-                />
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Modal da lista de itens */}
-      {showItemsList && (
-        <OrderItemsList
-          order={order}
-          onClose={() => setShowItemsList(false)}
-          onUpdateOrder={(updatedOrder) => {
-            console.log('Pedido atualizado:', updatedOrder);
-            setShowItemsList(false);
-          }}
-        />
+      {/* Itens do Pedido - Mostrar quando expandido */}
+      {isExpanded && order.items && order.items.length > 0 && (
+        <div className="border-t border-gray-700 pt-3 mb-3">
+          <h4 className="font-medium text-gray-300 mb-2 text-sm flex items-center gap-1">
+            <Package className="h-4 w-4" />
+            Itens do Pedido ({order.items.length})
+          </h4>
+          <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
+            {order.items.map((item, index) => (
+              <div 
+                key={item.id || index} 
+                className="bg-gray-700/30 p-2 rounded border border-gray-600 text-xs"
+              >
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-200 truncate">{item.description || item.name}</span>
+                  <span className="text-gray-400 ml-2 flex-shrink-0">
+                    Qtd: {item.quantity}
+                  </span>
+                </div>
+                {item.specifications && (
+                  <div className="text-gray-500 mt-1 truncate">
+                    {item.specifications}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
-    </>
+
+      {/* Controle de Qualidade - apenas para pedidos expedidos */}
+      {(order.status === 'waiting-docs' || order.status === 'completed') && (
+        <div className="border-t border-gray-700 pt-3 mb-3">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onStatusChange?.(order, 'quality-control', e);
+            }}
+            className="w-full bg-purple-700/30 text-purple-300 py-2 px-3 rounded text-sm font-medium hover:bg-purple-700/50 transition-colors border border-purple-600/30"
+          >
+            🔍 Controle de Qualidade
+          </button>
+        </div>
+      )}
+
+      {/* Barra de Progresso */}
+      <div className="border-t border-gray-700 pt-3">
+        <div className="flex justify-between text-xs text-gray-400 mb-1">
+          <span>Progresso</span>
+          <span>{progressPercentage}%</span>
+        </div>
+        <div className="w-full bg-gray-700 rounded-full h-2">
+          <div 
+            className={`h-2 rounded-full transition-all duration-300 ${
+              progressPercentage === 100 ? 'bg-green-500' : 'bg-blue-500'
+            }`}
+            style={{ width: `${progressPercentage}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Indicador de clique */}
+      {!isManaging && (
+        <div className="flex justify-center mt-2">
+          <span className="text-xs text-gray-500">
+            {isExpanded ? '▲ Clique para recolher' : '▼ Clique para ver itens'}
+          </span>
+        </div>
+      )}
+
+      {/* Ações Administrativas - visíveis apenas quando em modo gerenciamento */}
+      {isManaging && (
+        <div className="border-t border-gray-700 pt-3 mt-3 flex gap-2">
+          <button
+            onClick={(e) => onViewHistory?.(order, e)}
+            className="flex-1 bg-blue-700/30 text-blue-300 py-1 px-2 rounded text-xs hover:bg-blue-700/50 transition-colors flex items-center gap-1 justify-center"
+          >
+            <History className="h-3 w-3" />
+            Histórico
+          </button>
+          <button
+            onClick={(e) => onDelete?.(order, e)}
+            className="flex-1 bg-red-700/30 text-red-300 py-1 px-2 rounded text-xs hover:bg-red-700/50 transition-colors flex items-center gap-1 justify-center"
+          >
+            <Trash2 className="h-3 w-3" />
+            Excluir
+          </button>
+        </div>
+      )}
+    </div>
   );
 };
 
