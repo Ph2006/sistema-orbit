@@ -68,38 +68,27 @@ const sanitizeForFirestore = (obj: any): any => {
   return sanitized;
 };
 
-// Função para exportar PDF sem coluna de progresso - INTEGRADA NO KANBAN
+// Função para exportar PDF sem coluna de progresso
 const exportOrderToPDF = (order: Order) => {
   const doc = new jsPDF();
   
-  // Configurar fonte padrão
   doc.setFont('helvetica');
-  
-  // Cabeçalho do documento
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
   doc.text('ROMANEIO DE EMBARQUE', 105, 30, { align: 'center' });
   
-  // Linha divisória
   doc.setLineWidth(0.5);
   doc.line(20, 40, 190, 40);
   
-  // Informações do pedido
   doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
   
-  // Primeira linha de informações
   doc.text(`Pedido: #${order.orderNumber}`, 20, 55);
   doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 120, 55);
-  
-  // Segunda linha de informações
   doc.text(`Cliente: ${order.customer}`, 20, 70);
   doc.text(`OS Interna: ${order.internalOrderNumber}`, 120, 70);
-  
-  // Terceira linha de informações
   doc.text(`Data de Entrega: ${format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 85);
   
-  // Preparar dados da tabela (SEM coluna de progresso)
   const tableData = order.items?.map((item, index) => [
     (index + 1).toString(),
     item.code || '',
@@ -109,7 +98,6 @@ const exportOrderToPDF = (order: Order) => {
     `${((item.quantity || 0) * (item.unitWeight || 0)).toFixed(3)} kg`
   ]) || [];
   
-  // Criar tabela sem coluna de progresso
   doc.autoTable({
     head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
     body: tableData,
@@ -122,33 +110,30 @@ const exportOrderToPDF = (order: Order) => {
       valign: 'middle'
     },
     headStyles: {
-      fillColor: [52, 152, 219], // Azul
-      textColor: 255, // Branco
+      fillColor: [52, 152, 219],
+      textColor: 255,
       fontStyle: 'bold',
       halign: 'center'
     },
     columnStyles: {
-      0: { halign: 'center', cellWidth: 15 }, // Item
-      1: { halign: 'center', cellWidth: 30 }, // Código
-      2: { halign: 'left', cellWidth: 60 },   // Descrição
-      3: { halign: 'center', cellWidth: 20 }, // Qtd
-      4: { halign: 'right', cellWidth: 25 },  // Peso Unit.
-      5: { halign: 'right', cellWidth: 30 }   // Peso Total
+      0: { halign: 'center', cellWidth: 15 },
+      1: { halign: 'center', cellWidth: 30 },
+      2: { halign: 'left', cellWidth: 60 },
+      3: { halign: 'center', cellWidth: 20 },
+      4: { halign: 'right', cellWidth: 25 },
+      5: { halign: 'right', cellWidth: 30 }
     },
     alternateRowStyles: {
-      fillColor: [245, 245, 245] // Cinza claro para linhas alternadas
+      fillColor: [245, 245, 245]
     }
   });
   
-  // Calcular totais
   const totalItems = order.items?.length || 0;
   const totalQuantity = order.items?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
   const totalWeight = order.totalWeight || 0;
   
-  // Posição Y após a tabela
   const finalY = doc.lastAutoTable.finalY + 20;
   
-  // Informações de totais
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
   
@@ -166,7 +151,6 @@ const exportOrderToPDF = (order: Order) => {
   doc.setFont('helvetica', 'normal');
   doc.text(`${totalWeight.toFixed(3)} kg`, 80, finalY + 30);
   
-  // Rodapé com data de geração
   const pageHeight = doc.internal.pageSize.height;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
@@ -177,7 +161,6 @@ const exportOrderToPDF = (order: Order) => {
     { align: 'center' }
   );
   
-  // Salvar o PDF
   const fileName = `romaneio_pedido_${order.orderNumber}_${format(new Date(), 'ddMMyyyy_HHmm')}.pdf`;
   doc.save(fileName);
   
@@ -228,7 +211,7 @@ const Kanban: React.FC = () => {
   // Estado para tabs da interface
   const [activeTab, setActiveTab] = useState<'kanban' | 'stages' | 'occupation'>('kanban');
 
-  // NOVO ESTADO: Para controlar cards expandidos
+  // Estado para controlar cards expandidos
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
 
   const { orders, subscribeToOrders, updateOrder, addOrder, deleteOrder } = useOrderStore();
@@ -548,16 +531,82 @@ const Kanban: React.FC = () => {
     }
   };
 
-  // FUNÇÃO MODIFICADA: Agora abre modal de lista de itens ao invés de modal de edição
   const handleOrderClick = (order: Order) => {
     setSelectedOrder(order);
     setIsOrderItemsListOpen(true);
   };
 
-  // FUNÇÃO MODIFICADA: Agora abre modal de lista de itens ao invés de modal de edição
-  const handleOrderClick = (order: Order) => {
-    setSelectedOrder(order);
-    setIsOrderItemsListOpen(true);
+  const handleViewHistory = (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+  };
+
+  const handleDeleteOrder = async (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm('Tem certeza que deseja excluir este pedido?')) {
+      try {
+        await deleteOrder(order.id);
+      } catch (error) {
+        console.error('Error deleting order:', error);
+        alert('Erro ao excluir pedido. Por favor, tente novamente.');
+      }
+    }
+  };
+
+  const handleStatusChange = async (order: Order, newStatus: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await updateOrder({
+        ...order,
+        status: newStatus as any,
+        statusChangedAt: new Date().toISOString(),
+        statusHistory: [
+          ...((order.statusHistory || []) as any[]),
+          {
+            status: order.status,
+            date: new Date().toISOString(),
+            user: 'usuario@atual.com'
+          }
+        ]
+      });
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      alert('Erro ao atualizar status. Por favor, tente novamente.');
+    }
+  };
+
+  const handleUpdateOrder = async (updatedOrder: Order) => {
+    try {
+      if (updatedOrder.items && updatedOrder.items.length > 0) {
+        const completedItems = updatedOrder.items.filter(item => 
+          item.overallProgress === 100 && item.actualDeliveryDate
+        );
+        
+        if (completedItems.length > 0) {
+          const latestDeliveryDate = completedItems
+            .map(item => new Date(item.actualDeliveryDate!))
+            .sort((a, b) => b.getTime() - a.getTime())[0];
+          
+          updatedOrder.actualDeliveryDate = latestDeliveryDate.toISOString().split('T')[0];
+          
+          if (updatedOrder.startDate) {
+            const startDate = new Date(updatedOrder.startDate);
+            const plannedDeliveryDate = new Date(updatedOrder.deliveryDate);
+            const actualDeliveryDate = new Date(updatedOrder.actualDeliveryDate);
+            
+            const plannedDuration = Math.ceil((plannedDeliveryDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+            const actualDuration = Math.ceil((actualDeliveryDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+            
+            updatedOrder.actualDuration = actualDuration;
+            updatedOrder.estimatedDuration = plannedDuration;
+          }
+        }
+      }
+
+      await updateOrder(sanitizeForFirestore(updatedOrder));
+    } catch (error) {
+      console.error('Error updating order:', error);
+      alert('Erro ao atualizar pedido. Por favor, tente novamente.');
+    }
   };
 
   const handleSaveOrder = async (order: Order) => {
@@ -654,7 +703,6 @@ const Kanban: React.FC = () => {
 
   const filteredOrders = getFilteredOrders();
   
-  // CORREÇÃO: Adicionada ordenação por data de entrega crescente
   const columnsWithOrders = columns.map(column => {
     let ordersForColumn = [];
     
@@ -662,25 +710,6 @@ const Kanban: React.FC = () => {
       ordersForColumn = filteredOrders
         .filter(order => order.status === 'in-progress' && !order.deleted)
         .sort((a, b) => {
-          // Ordenar por data de entrega (crescente)
-          const dateA = new Date(a.deliveryDate);
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
-    } else if (column.title === 'Pedidos expedidos') {
-      ordersForColumn = filteredOrders
-        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
-        .sort((a, b) => {
-          // Ordenar por data de entrega (crescente)
-          const dateA = new Date(a.deliveryDate);
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
-    } else {
-      ordersForColumn = filteredOrders
-        .filter(order => order.columnId === column.id && !order.deleted)
-        .sort((a, b) => {
-          // Ordenar por data de entrega (crescente)
           const dateA = new Date(a.deliveryDate);
           const dateB = new Date(b.deliveryDate);
           return dateA.getTime() - dateB.getTime();
@@ -846,7 +875,6 @@ const Kanban: React.FC = () => {
                   <span className="hidden sm:inline">Gerenciar</span>
                 </button>
 
-                {/* Botão para exportar PDF do pedido selecionado */}
                 {selectedOrder && (
                   <button
                     onClick={() => exportOrderToPDF(selectedOrder)}
@@ -957,7 +985,7 @@ const Kanban: React.FC = () => {
                     onEdit={() => handleEditColumn(column)}
                     onDelete={() => handleDeleteColumn(column.id)}
                     onOrderClick={handleOrderClick}
-                    onUpdateOrder={handleUpdateOrder} // NOVA PROP
+                    onUpdateOrder={handleUpdateOrder}
                     highlightTerm={searchTerm}
                     compactView={compactView}
                     isManagingOrders={isManageOrdersModalOpen}
@@ -1056,35 +1084,15 @@ const Kanban: React.FC = () => {
   );
 };
 
-const shouldHighlight = (order: Order, searchTerm: string) => {
-  if (!searchTerm) return false;
-  
-  const searchTermLower = searchTerm.toLowerCase().trim();
-  return (
-    order.orderNumber.toLowerCase().includes(searchTermLower) ||
-    order.customer.toLowerCase().includes(searchTermLower) ||
-    order.internalOrderNumber.toLowerCase().includes(searchTermLower)
-  );
-};
-
-const Briefcase = (props: any) => {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect width="20" height="14" x="2" y="7" rx="2" ry="2"></rect>
-      <path d="M16 21V5a2 12 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
-    </svg>
-  );
-};
-
 export default Kanban;
+    } else if (column.title === 'Pedidos expedidos') {
+      ordersForColumn = filteredOrders
+        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
+    } else {
+      ordersForColumn = filteredOrders
+        .filter(order => order.columnId === column.id && !order.deleted)
