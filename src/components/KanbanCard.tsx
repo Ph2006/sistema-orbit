@@ -5,7 +5,7 @@ import { Order } from '../types/kanban';
 import { format, isPast, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { calculateOrderProgress } from '../utils/progress';
-import { FileText, FileCheck, Brush, Briefcase, CheckCircle, Clock, ClipboardCheck, Calendar, Package, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { FileText, FileCheck, Brush, Briefcase, CheckCircle, Clock, ClipboardCheck, Calendar, Package, AlertTriangle, CheckCircle2, Plus, Minus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { formatDate, formatNumber } from '../utils/format';
 
@@ -21,6 +21,46 @@ interface KanbanCardProps {
   customers?: any[];
 }
 
+// Função para formatar datas com segurança
+const formatDateSafe = (date: any): string => {
+  try {
+    if (!date) return 'Sem data';
+    
+    let dateObj: Date;
+    
+    if (typeof date === 'string') {
+      if (date.trim() === '') return 'Sem data';
+      dateObj = new Date(date);
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else if (date && typeof date === 'object') {
+      if (date.toDate && typeof date.toDate === 'function') {
+        dateObj = date.toDate();
+      } else if (date.seconds && typeof date.seconds === 'number') {
+        dateObj = new Date(date.seconds * 1000);
+      } else {
+        return 'Data inválida';
+      }
+    } else {
+      return 'Data inválida';
+    }
+    
+    if (isNaN(dateObj.getTime())) {
+      return 'Data inválida';
+    }
+    
+    return dateObj.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+    
+  } catch (error) {
+    console.error('Erro ao formatar data:', error);
+    return 'Data inválida';
+  }
+};
+
 const KanbanCard: React.FC<KanbanCardProps> = ({ 
   order, 
   overlay, 
@@ -32,6 +72,8 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   onClick,
   customers
 }) => {
+  const [showItems, setShowItems] = React.useState(false);
+  
   const {
     attributes,
     listeners,
@@ -103,25 +145,45 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     }
   };
 
-  // Sincronizar status baseado na coluna e situação
-  const syncStatus = () => {
-    // Se está na coluna de expedidos, deve ser waiting-docs
-    if (isExpedited && order.status !== 'waiting-docs' && order.status !== 'completed') {
-      return 'waiting-docs';
+  // Calculate days until delivery for in-progress orders
+  const calculateDeliveryStatus = () => {
+    if (isCompleted && completionDate) {
+      return differenceInDays(completionDate, deliveryDate);
+    } else {
+      const diffTime = deliveryDate.getTime() - now.getTime();
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     }
-    
-    // Se tem data de conclusão, deve ser completed
-    if (order.completedDate && order.status !== 'completed') {
-      return 'completed';
-    }
-    
-    // Se está atrasado e não está marcado como atrasado
-    if (isOverdue && order.status !== 'delayed') {
-      return 'delayed';
-    }
-    
-    return order.status;
   };
+
+  const deliveryStatus = calculateDeliveryStatus();
+  const isDueToday = !isCompleted && deliveryStatus === 0;
+
+  const getStatusIcon = () => {
+    if (isCompleted) return <CheckCircle2 className="h-4 w-4 text-green-400" />;
+    if (isLate) return <AlertTriangle className="h-4 w-4 text-red-400" />;
+    if (isOverdue) return <Clock className="h-4 w-4 text-yellow-400" />;
+    return <Package className="h-4 w-4 text-blue-400" />;
+  };
+
+  // Função para obter os itens do pedido de forma mais robusta
+  const getOrderItems = () => {
+    // Verificar múltiplas possibilidades de estrutura
+    if (order.items && Array.isArray(order.items)) {
+      return order.items;
+    }
+    if (order.orderItems && Array.isArray(order.orderItems)) {
+      return order.orderItems;
+    }
+    if (order.products && Array.isArray(order.products)) {
+      return order.products;
+    }
+    if (order.components && Array.isArray(order.components)) {
+      return order.components;
+    }
+    return [];
+  };
+
+  const orderItems = getOrderItems();
 
   const cardClasses = `
     border-2 backdrop-blur-sm ${getStatusColors(order.status)}
@@ -134,36 +196,6 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     text-[11px] sm:text-xs
     leading-tight
   `;
-
-  // Calculate days until delivery for in-progress orders
-  // or days relative to deadline for completed orders
-  const calculateDeliveryStatus = () => {
-    if (isCompleted && completionDate) {
-      // Return days relative to deadline for completed orders
-      return differenceInDays(completionDate, deliveryDate);
-    } else {
-      // For in-progress orders, return days until deadline
-      const diffTime = deliveryDate.getTime() - now.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    }
-  };
-
-  const deliveryStatus = calculateDeliveryStatus();
-  const isDueToday = !isCompleted && deliveryStatus === 0;
-
-  const getStatusColor = () => {
-    if (isCompleted) return 'bg-green-500/20 border-green-500/30';
-    if (isLate) return 'bg-red-500/20 border-red-500/30';
-    if (isOverdue) return 'bg-yellow-500/20 border-yellow-500/30';
-    return 'bg-blue-500/20 border-blue-500/30';
-  };
-
-  const getStatusIcon = () => {
-    if (isCompleted) return <CheckCircle2 className="h-4 w-4 text-green-400" />;
-    if (isLate) return <AlertTriangle className="h-4 w-4 text-red-400" />;
-    if (isOverdue) return <Clock className="h-4 w-4 text-yellow-400" />;
-    return <Package className="h-4 w-4 text-blue-400" />;
-  };
 
   if (compactView) {
     return (
@@ -196,6 +228,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
               </span>
             )}
           </div>
+          
           <div className="text-xs text-gray-600">
             <div className="truncate">{(() => {
               if (customers && customers.length > 0) {
@@ -205,11 +238,51 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
               return order.customerName || order.customer;
             })()}</div>
           </div>
+          
           {/* Project display in compact view */}
           {order.projectName && (
             <div className="flex items-center text-xs text-gray-600">
               <Briefcase className="h-3 w-3 mr-1" />
               <span className="truncate">{order.projectName}</span>
+            </div>
+          )}
+
+          {/* Itens do Pedido - Vista Compacta */}
+          {orderItems.length > 0 && (
+            <div className="mt-2 p-2 bg-white/50 rounded border">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-medium">Itens ({orderItems.length})</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowItems(!showItems);
+                  }}
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  {showItems ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                </button>
+              </div>
+              
+              {showItems && (
+                <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                  {orderItems.slice(0, 3).map((item, index) => (
+                    <div key={item.id || index} className="text-xs text-gray-700 p-1 bg-white/70 rounded">
+                      <div className="font-medium truncate">
+                        {item.description || item.name || `Item ${index + 1}`}
+                      </div>
+                      <div className="text-gray-500">
+                        {item.quantity || item.qty || 0} {item.unit || 'un'} • 
+                        {item.material || item.type || 'N/A'}
+                      </div>
+                    </div>
+                  ))}
+                  {orderItems.length > 3 && (
+                    <div className="text-xs text-gray-500 text-center py-1">
+                      +{orderItems.length - 3} mais itens
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -226,7 +299,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
             />
           </div>
           
-          {/* Quality control link in compact view - repositioned as a button */}
+          {/* Quality control link in compact view */}
           <Link 
             to={`/quality?orderId=${order.id}`} 
             onClick={(e) => e.stopPropagation()} 
@@ -259,7 +332,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           {isCompleted && (
             <div className="flex items-center text-xs text-green-600">
               <CheckCircle className="h-3 w-3 mr-0.5" />
-              <span>Concluído: {formatDate(order.completedDate || '')}</span>
+              <span>Concluído: {formatDateSafe(order.completedDate || '')}</span>
             </div>
           )}
         </div>
@@ -297,6 +370,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
             </span>
           )}
         </div>
+        
         <div className="text-sm text-gray-600">
           <div>Cliente: {(() => {
             if (customers && customers.length > 0) {
@@ -306,8 +380,9 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
             return order.customerName || order.customer;
           })()}</div>
           <div>OS: {order.internalOrderNumber}</div>
-          <div>Início: {formatDate(order.startDate)}</div>
-          <div>Entrega: {formatDate(order.deliveryDate)}</div>
+          <div>Início: {formatDateSafe(order.startDate)}</div>
+          <div>Entrega: {formatDateSafe(order.deliveryDate)}</div>
+          
           {/* Project display */}
           {order.projectName && (
             <div className="text-sm flex items-center text-gray-700">
@@ -319,6 +394,66 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <div className="font-medium">
             Peso Total: {formatNumber(order.totalWeight)} kg
           </div>
+
+          {/* Itens do Pedido - Vista Expandida */}
+          {orderItems.length > 0 && (
+            <div className="mt-3 p-3 bg-white/50 rounded border">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium">Itens do Pedido ({orderItems.length})</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowItems(!showItems);
+                  }}
+                  className="text-blue-600 hover:text-blue-800 text-sm"
+                >
+                  {showItems ? 'Ocultar' : 'Mostrar'}
+                </button>
+              </div>
+              
+              {showItems && (
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {orderItems.map((item, index) => (
+                    <div key={item.id || index} className="text-xs bg-white/70 p-2 rounded border">
+                      <div className="font-medium text-gray-900">
+                        {item.description || item.name || `Item ${index + 1}`}
+                      </div>
+                      <div className="text-gray-600 mt-1">
+                        <span>Material: {item.material || item.type || 'N/A'}</span> • 
+                        <span>Qtd: {item.quantity || item.qty || 0} {item.unit || 'un'}</span>
+                      </div>
+                      {(item.dimensions || item.weight) && (
+                        <div className="text-gray-500 mt-1">
+                          {item.dimensions && <span>Dim: {item.dimensions}</span>}
+                          {item.dimensions && item.weight && ' • '}
+                          {item.weight && <span>Peso: {item.weight} kg</span>}
+                        </div>
+                      )}
+                      {item.progress !== undefined && (
+                        <div className="mt-1">
+                          <div className="flex justify-between text-xs">
+                            <span>Progresso:</span>
+                            <span>{item.progress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-1 mt-1">
+                            <div
+                              className={`h-1 rounded-full ${
+                                item.progress === 100 ? 'bg-green-500' :
+                                item.progress >= 70 ? 'bg-blue-500' :
+                                item.progress >= 30 ? 'bg-yellow-500' :
+                                'bg-red-500'
+                              }`}
+                              style={{ width: `${item.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Quality Control Link - More prominent and repositioned */}
           <Link 
