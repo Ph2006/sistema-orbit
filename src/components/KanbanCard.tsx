@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Order } from '../types/kanban';
-import { CheckCircle, Clock, AlertTriangle, Flag, Calendar, Package, Eye, User, ClipboardCheck } from 'lucide-react';
+import { CheckCircle, Clock, AlertTriangle, Flag, Calendar, Package, Eye, User, ClipboardCheck, Truck, FileText, Send } from 'lucide-react';
 import { format, isBefore } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -30,6 +30,13 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   isExpanded
 }) => {
   
+  const [showShippingFields, setShowShippingFields] = useState(false);
+  const [shippingData, setShippingData] = useState({
+    le: order.le || '',
+    nf: order.nf || '',
+    shippingDate: order.shippingDate || ''
+  });
+
   const handleQualityControlClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onQualityControlClick(order);
@@ -41,21 +48,42 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     }
   };
 
+  const handleShippingDataUpdate = (field: string, value: string) => {
+    const updatedData = { ...shippingData, [field]: value };
+    setShippingData(updatedData);
+    
+    // Auto-save quando todos os campos estão preenchidos
+    if (updatedData.le && updatedData.nf && updatedData.shippingDate) {
+      const updatedOrder = {
+        ...order,
+        le: updatedData.le,
+        nf: updatedData.nf,
+        shippingDate: updatedData.shippingDate,
+        status: 'ready' // Atualiza status para "Pronto para embarque"
+      };
+      onUpdateOrder(updatedOrder);
+    }
+  };
+
   // Calcular progresso geral do pedido
   const overallProgress = order.items && order.items.length > 0
     ? Math.round(order.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / order.items.length)
     : 0;
 
-  // Verificar se o pedido está atrasado (apenas uma verificação)
+  // Verificar se o pedido está atrasado
   const today = new Date();
   const deliveryDate = new Date(order.deliveryDate);
   const isOverdue = isBefore(deliveryDate, today) && order.status !== 'completed';
+
+  // Verificar se todos os itens estão 100% concluídos
+  const allItemsCompleted = order.items && order.items.length > 0 && 
+    order.items.every(item => (item.overallProgress || 0) >= 100);
 
   return (
     <div 
       className={`bg-gray-800/80 backdrop-blur-sm rounded-lg border p-4 mb-3 cursor-pointer hover:bg-gray-700/80 transition-all duration-200 ${
         isSelected ? 'border-blue-400 bg-blue-900/30' : 'border-gray-600/50'
-      } ${highlight ? 'ring-2 ring-yellow-400' : ''} ${isOverdue ? 'border-l-4 border-l-red-500' : ''}`}
+      } ${highlight ? 'ring-2 ring-yellow-400' : ''} ${isOverdue ? 'border-l-4 border-l-red-500' : ''} ${allItemsCompleted ? 'border-l-4 border-l-green-500' : ''}`}
       onClick={handleCardClick}
     >
       {/* Header do card */}
@@ -63,10 +91,15 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <h4 className="font-semibold text-white">#{order.orderNumber}</h4>
-            {/* Mostrar badge de atrasado apenas uma vez e somente se realmente estiver atrasado */}
+            {/* Badge de status */}
             {isOverdue && (
               <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
                 Atrasado
+              </span>
+            )}
+            {allItemsCompleted && (
+              <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full border border-green-500/30">
+                Concluído
               </span>
             )}
           </div>
@@ -74,7 +107,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <p className="text-xs text-gray-400">OS: {order.internalOrderNumber}</p>
         </div>
         
-        {/* Status badge - não duplicar informação de atraso */}
+        {/* Status badge */}
         <div className={`px-2 py-1 rounded-full text-xs font-medium border ${
           order.status === 'completed' 
             ? 'bg-green-500/20 text-green-400 border-green-500/30' :
@@ -94,7 +127,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </div>
       </div>
 
-      {/* Informações do pedido - sem duplicação */}
+      {/* Informações do pedido */}
       <div className="space-y-2 text-sm">
         <div className="flex items-center text-gray-300">
           <Calendar className="h-4 w-4 mr-2 text-gray-400" />
@@ -116,7 +149,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         )}
       </div>
 
-      {/* Barra de progresso - uma única vez */}
+      {/* Barra de progresso */}
       {!compactView && order.items && order.items.length > 0 && (
         <div className="mt-3">
           <div className="w-full bg-gray-700/50 rounded-full h-2">
@@ -138,7 +171,82 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </div>
       )}
 
-      {/* Botão Controle de Qualidade - uma única vez */}
+      {/* Campos de Expedição - Aparecem quando todos os itens estão 100% */}
+      {allItemsCompleted && (
+        <div className="mt-4 pt-3 border-t border-gray-600/30">
+          <div className="flex items-center justify-between mb-2">
+            <h5 className="text-sm font-medium text-gray-300 flex items-center">
+              <Truck className="h-4 w-4 mr-2" />
+              Expedição
+            </h5>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowShippingFields(!showShippingFields);
+              }}
+              className="text-xs text-blue-400 hover:text-blue-300"
+            >
+              {showShippingFields ? 'Ocultar' : 'Mostrar'}
+            </button>
+          </div>
+          
+          {showShippingFields && (
+            <div className="space-y-2 text-xs">
+              <div>
+                <label className="block text-gray-400 mb-1">LE (Lista de Embarque)</label>
+                <input
+                  type="text"
+                  value={shippingData.le}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    handleShippingDataUpdate('le', e.target.value);
+                  }}
+                  className="w-full px-2 py-1 bg-gray-700/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
+                  placeholder="Digite o número da LE"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-gray-400 mb-1">NF (Nota Fiscal)</label>
+                <input
+                  type="text"
+                  value={shippingData.nf}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    handleShippingDataUpdate('nf', e.target.value);
+                  }}
+                  className="w-full px-2 py-1 bg-gray-700/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
+                  placeholder="Digite o número da NF"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-gray-400 mb-1">Data de Envio</label>
+                <input
+                  type="date"
+                  value={shippingData.shippingDate}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    handleShippingDataUpdate('shippingDate', e.target.value);
+                  }}
+                  className="w-full px-2 py-1 bg-gray-700/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+          )}
+          
+          {/* Mostrar dados preenchidos de forma compacta */}
+          {!showShippingFields && (order.le || order.nf || order.shippingDate) && (
+            <div className="text-xs text-gray-400 space-y-1">
+              {order.le && <div>LE: {order.le}</div>}
+              {order.nf && <div>NF: {order.nf}</div>}
+              {order.shippingDate && <div>Envio: {format(new Date(order.shippingDate), 'dd/MM/yyyy', { locale: ptBR })}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Botão Controle de Qualidade */}
       <div className="mt-4 pt-3 border-t border-gray-600/30">
         <button
           onClick={handleQualityControlClick}
@@ -150,7 +258,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </button>
       </div>
 
-      {/* Informações extras no modo expandido - evitar duplicação */}
+      {/* Informações extras no modo expandido */}
       {isExpanded && !compactView && (
         <div className="mt-3 pt-3 border-t border-gray-600/30">
           <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
