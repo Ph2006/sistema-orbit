@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
@@ -17,7 +17,8 @@ import {
   TrendingUp,
   TrendingDown,
   BarChart,
-  Search as SearchIcon
+  Search as SearchIcon,
+  AlertTriangle
 } from 'lucide-react';
 import { format, parse, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -73,61 +74,90 @@ const CostCenter: React.FC = () => {
   const [supplierFilter, setSupplierFilter] = useState<string>('');
   const [orderNumberFilter, setOrderNumberFilter] = useState<string>('');
   
-  // Load data
+  // Load data - usando useEffect com cleanup adequado para evitar duplicações
   useEffect(() => {
-    const unsubscribeCosts = subscribeToCosts();
-    const unsubscribeOrders = subscribeToOrders();
+    let unsubscribeCosts: (() => void) | undefined;
+    let unsubscribeOrders: (() => void) | undefined;
     
+    const initializeSubscriptions = async () => {
+      try {
+        unsubscribeCosts = subscribeToCosts();
+        unsubscribeOrders = subscribeToOrders();
+      } catch (error) {
+        console.error('Error initializing subscriptions:', error);
+      }
+    };
+    
+    initializeSubscriptions();
+    
+    // Cleanup function para evitar múltiplas subscriptions
     return () => {
-      unsubscribeCosts();
-      unsubscribeOrders();
+      if (unsubscribeCosts) {
+        unsubscribeCosts();
+      }
+      if (unsubscribeOrders) {
+        unsubscribeOrders();
+      }
     };
-  }, [subscribeToCosts, subscribeToOrders]);
+  }, []); // Array de dependências vazio para executar apenas uma vez
   
-  // Apply search filtering
+  // Apply filters - usando useMemo para otimizar e evitar aplicações desnecessárias
+  const currentFilter = useMemo(() => ({
+    category: categoryFilter || undefined,
+    dateFrom: dateFromFilter || undefined,
+    dateTo: dateToFilter || undefined,
+    supplier: supplierFilter || undefined,
+    orderNumber: orderNumberFilter || undefined
+  }), [categoryFilter, dateFromFilter, dateToFilter, supplierFilter, orderNumberFilter]);
+  
   useEffect(() => {
-    const filter: CostCenterFilter = {
-      category: categoryFilter || undefined,
-      dateFrom: dateFromFilter || undefined,
-      dateTo: dateToFilter || undefined,
-      supplier: supplierFilter || undefined,
-      orderNumber: orderNumberFilter || undefined
-    };
+    applyFilter(currentFilter);
+  }, [currentFilter, applyFilter]);
+  
+  // Search within filtered results - usando useMemo para evitar recálculos desnecessários
+  const searchFilteredCosts = useMemo(() => {
+    if (!searchTerm.trim()) {
+      return filteredCosts;
+    }
     
-    applyFilter(filter);
-  }, [categoryFilter, dateFromFilter, dateToFilter, supplierFilter, orderNumberFilter, applyFilter]);
-  
-  // Search within filtered results
-  const searchFilteredCosts = searchTerm
-    ? filteredCosts.filter(
-        cost =>
-          cost.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          cost.purchaseOrderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          cost.supplierName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          cost.orderNumber.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    : filteredCosts;
+    const searchLower = searchTerm.toLowerCase();
+    return filteredCosts.filter(cost =>
+      cost.description.toLowerCase().includes(searchLower) ||
+      cost.purchaseOrderNumber.toLowerCase().includes(searchLower) ||
+      cost.supplierName.toLowerCase().includes(searchLower) ||
+      cost.orderNumber.toLowerCase().includes(searchLower)
+    );
+  }, [filteredCosts, searchTerm]);
     
-  // Unique suppliers for the filter
-  const uniqueSuppliers = [...new Set(costs.map(cost => cost.supplierName))].sort();
+  // Unique suppliers and order numbers - usando useMemo para evitar recálculos
+  const uniqueSuppliers = useMemo(() => {
+    const suppliers = [...new Set(costs.map(cost => cost.supplierName))];
+    return suppliers.sort();
+  }, [costs]);
   
-  // Unique order numbers for the filter
-  const uniqueOrderNumbers = [...new Set(costs.map(cost => cost.orderNumber))].sort();
+  const uniqueOrderNumbers = useMemo(() => {
+    const orderNumbers = [...new Set(costs.map(cost => cost.orderNumber))];
+    return orderNumbers.sort();
+  }, [costs]);
   
-  // Calculate total cost and budget
-  const totalCost = filteredCosts.reduce((sum, cost) => sum + cost.amount, 0);
-  const totalBudget = orderSummaries.reduce((sum, summary) => sum + summary.totalBudget, 0);
-  const totalMargin = totalBudget - totalCost;
-  const marginPercentage = totalBudget > 0 ? (totalMargin / totalBudget) * 100 : 0;
+  // Calculate totals - usando useMemo para otimizar cálculos
+  const totals = useMemo(() => {
+    const totalCost = filteredCosts.reduce((sum, cost) => sum + cost.amount, 0);
+    const totalBudget = orderSummaries.reduce((sum, summary) => sum + summary.totalBudget, 0);
+    const totalMargin = totalBudget - totalCost;
+    const marginPercentage = totalBudget > 0 ? (totalMargin / totalBudget) * 100 : 0;
+    
+    return { totalCost, totalBudget, totalMargin, marginPercentage };
+  }, [filteredCosts, orderSummaries]);
   
-  // Group costs by category for the dashboard
-  const costsByCategory = {
+  // Group costs by category - usando useMemo
+  const costsByCategory = useMemo(() => ({
     material: filteredCosts.filter(cost => cost.category === 'material').reduce((sum, cost) => sum + cost.amount, 0),
     service: filteredCosts.filter(cost => cost.category === 'service').reduce((sum, cost) => sum + cost.amount, 0),
     labor: filteredCosts.filter(cost => cost.category === 'labor').reduce((sum, cost) => sum + cost.amount, 0),
     logistics: filteredCosts.filter(cost => cost.category === 'logistics').reduce((sum, cost) => sum + cost.amount, 0),
     other: filteredCosts.filter(cost => cost.category === 'other').reduce((sum, cost) => sum + cost.amount, 0),
-  };
+  }), [filteredCosts]);
   
   // Handler to view order details
   const handleViewOrderDetails = (orderId: string) => {
@@ -196,11 +226,11 @@ const CostCenter: React.FC = () => {
     
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
-    doc.text(`Total de Custos: ${formatCurrency(totalCost)}`, 15, y);
+    doc.text(`Total de Custos: ${formatCurrency(totals.totalCost)}`, 15, y);
     y += 7;
-    doc.text(`Total de Faturamento: ${formatCurrency(totalBudget)}`, 15, y);
+    doc.text(`Total de Faturamento: ${formatCurrency(totals.totalBudget)}`, 15, y);
     y += 7;
-    doc.text(`Margem: ${formatCurrency(totalMargin)} (${marginPercentage.toFixed(2)}%)`, 15, y);
+    doc.text(`Margem: ${formatCurrency(totals.totalMargin)} (${totals.marginPercentage.toFixed(2)}%)`, 15, y);
     y += 15;
     
     // Costs by category
@@ -248,7 +278,7 @@ const CostCenter: React.FC = () => {
         fontStyle: 'bold'
       },
       foot: [
-        ['Total', '', '', '', '', formatCurrency(totalCost)]
+        ['Total', '', '', '', '', formatCurrency(totals.totalCost)]
       ]
     });
     
@@ -558,7 +588,7 @@ const CostCenter: React.FC = () => {
             <div className="flex justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Faturamento Total</p>
-                <p className="text-2xl font-bold text-gray-900 mt-2">{formatCurrency(totalBudget)}</p>
+                <p className="text-2xl font-bold text-gray-900 mt-2">{formatCurrency(totals.totalBudget)}</p>
               </div>
               <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
                 <TrendingUp className="h-6 w-6" />
@@ -570,7 +600,7 @@ const CostCenter: React.FC = () => {
             <div className="flex justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Custos Totais</p>
-                <p className="text-2xl font-bold text-gray-900 mt-2">{formatCurrency(totalCost)}</p>
+                <p className="text-2xl font-bold text-gray-900 mt-2">{formatCurrency(totals.totalCost)}</p>
               </div>
               <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center text-red-600">
                 <ShoppingBag className="h-6 w-6" />
@@ -582,15 +612,15 @@ const CostCenter: React.FC = () => {
             <div className="flex justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Margem</p>
-                <p className={`text-2xl font-bold mt-2 ${totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatCurrency(totalMargin)}
+                <p className={`text-2xl font-bold mt-2 ${totals.totalMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatCurrency(totals.totalMargin)}
                 </p>
                 <p className="text-sm text-gray-500 mt-1">
-                  {marginPercentage.toFixed(1)}% de margem
+                  {totals.marginPercentage.toFixed(1)}% de margem
                 </p>
               </div>
-              <div className={`h-10 w-10 rounded-full flex items-center justify-center ${totalMargin >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                {totalMargin >= 0 ? (
+              <div className={`h-10 w-10 rounded-full flex items-center justify-center ${totals.totalMargin >= 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                {totals.totalMargin >= 0 ? (
                   <TrendingUp className="h-6 w-6" />
                 ) : (
                   <TrendingDown className="h-6 w-6" />
@@ -625,7 +655,7 @@ const CostCenter: React.FC = () => {
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div 
                   className="bg-blue-600 h-2 rounded-full" 
-                  style={{ width: `${totalCost > 0 ? (costsByCategory.material / totalCost) * 100 : 0}%` }}
+                  style={{ width: `${totals.totalCost > 0 ? (costsByCategory.material / totals.totalCost) * 100 : 0}%` }}
                 ></div>
               </div>
               
@@ -636,7 +666,7 @@ const CostCenter: React.FC = () => {
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div 
                   className="bg-green-600 h-2 rounded-full" 
-                  style={{ width: `${totalCost > 0 ? (costsByCategory.service / totalCost) * 100 : 0}%` }}
+                  style={{ width: `${totals.totalCost > 0 ? (costsByCategory.service / totals.totalCost) * 100 : 0}%` }}
                 ></div>
               </div>
               
@@ -647,7 +677,7 @@ const CostCenter: React.FC = () => {
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div 
                   className="bg-purple-600 h-2 rounded-full" 
-                  style={{ width: `${totalCost > 0 ? (costsByCategory.labor / totalCost) * 100 : 0}%` }}
+                  style={{ width: `${totals.totalCost > 0 ? (costsByCategory.labor / totals.totalCost) * 100 : 0}%` }}
                 ></div>
               </div>
               
@@ -658,7 +688,7 @@ const CostCenter: React.FC = () => {
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div 
                   className="bg-yellow-600 h-2 rounded-full" 
-                  style={{ width: `${totalCost > 0 ? (costsByCategory.logistics / totalCost) * 100 : 0}%` }}
+                  style={{ width: `${totals.totalCost > 0 ? (costsByCategory.logistics / totals.totalCost) * 100 : 0}%` }}
                 ></div>
               </div>
               
@@ -669,7 +699,7 @@ const CostCenter: React.FC = () => {
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div 
                   className="bg-gray-600 h-2 rounded-full" 
-                  style={{ width: `${totalCost > 0 ? (costsByCategory.other / totalCost) * 100 : 0}%` }}
+                  style={{ width: `${totals.totalCost > 0 ? (costsByCategory.other / totals.totalCost) * 100 : 0}%` }}
                 ></div>
               </div>
             </div>
@@ -943,6 +973,16 @@ const CostCenter: React.FC = () => {
     );
   };
 
+  // Reset filters function
+  const resetFilters = () => {
+    setCategoryFilter('');
+    setDateFromFilter(format(subMonths(new Date(), 1), 'yyyy-MM-dd'));
+    setDateToFilter(format(new Date(), 'yyyy-MM-dd'));
+    setSupplierFilter('');
+    setOrderNumberFilter('');
+    setSearchTerm('');
+  };
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -1107,14 +1147,7 @@ const CostCenter: React.FC = () => {
               
               <div className="md:col-span-3">
                 <button
-                  onClick={() => {
-                    setCategoryFilter('');
-                    setDateFromFilter(format(subMonths(new Date(), 1), 'yyyy-MM-dd'));
-                    setDateToFilter(format(new Date(), 'yyyy-MM-dd'));
-                    setSupplierFilter('');
-                    setOrderNumberFilter('');
-                    setSearchTerm('');
-                  }}
+                  onClick={resetFilters}
                   className="text-blue-600 hover:text-blue-800"
                 >
                   Limpar filtros
