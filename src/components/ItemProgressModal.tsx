@@ -371,6 +371,7 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
     });
   };
 
+  // CORREÇÃO: Função de cópia de progresso corrigida
   const handleCopyProgress = () => {
     if (!selectedSourceItemId) return;
     
@@ -379,66 +380,81 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
     if (!sourceItem || !sourceItem.progress) return;
     
     // Copy progress data
-    setProgress(sourceItem.progress);
+    setProgress({ ...sourceItem.progress });
     
     // Also copy stage planning if available
     if (sourceItem.stagePlanning) {
-      // Update stages with plans from source item
-      setStages(prev => {
-        const updatedStages = prev.map(stage => {
-          const sourceStagePlan = sourceItem.stagePlanning?.[stage.name];
-          
-          if (sourceStagePlan) {
-            return {
-              ...stage,
-              enabled: true,
-              days: sourceStagePlan.days,
-              startDate: sourceStagePlan.startDate,
-              endDate: sourceStagePlan.endDate,
-              responsible: sourceStagePlan.responsible
-            };
-          }
-          return stage;
-        });
+      // Create new stages array with source item data
+      const updatedStages = stages.map(stage => {
+        const sourceStagePlan = sourceItem.stagePlanning?.[stage.name];
         
-        return updatedStages;
+        if (sourceStagePlan) {
+          return {
+            ...stage,
+            enabled: true,
+            days: sourceStagePlan.days,
+            startDate: sourceStagePlan.startDate,
+            endDate: sourceStagePlan.endDate,
+            responsible: sourceStagePlan.responsible
+          };
+        }
+        return stage;
       });
+      
+      setStages(updatedStages);
     }
     
     // Close the copy modal
     setShowCopyProgressModal(false);
   };
 
+  // CORREÇÃO: Função de submit corrigida
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Convert progress to final format, including only enabled stages
-    const finalProgress = stages.reduce((acc, stage) => {
-      if (stage.enabled) {
-        acc[stage.name] = progress[stage.name] || 0;
-      }
-      return acc;
-    }, {} as Record<string, number>);
+    try {
+      // Convert progress to final format, including only enabled stages
+      const finalProgress = stages.reduce((acc, stage) => {
+        if (stage.enabled) {
+          acc[stage.name] = progress[stage.name] || 0;
+        }
+        return acc;
+      }, {} as Record<string, number>);
 
-    // Include stage planning data
-    const stagePlanning = stages.reduce((acc, stage) => {
-      if (stage.enabled) {
-        acc[stage.name] = {
-          days: stage.days,
-          startDate: stage.startDate,
-          endDate: stage.endDate,
-          responsible: stage.responsible
-        };
-      }
-      return acc;
-    }, {} as Record<string, any>);
+      // Include stage planning data
+      const stagePlanning = stages.reduce((acc, stage) => {
+        if (stage.enabled) {
+          acc[stage.name] = {
+            days: stage.days,
+            startDate: stage.startDate,
+            endDate: stage.endDate,
+            responsible: stage.responsible
+          };
+        }
+        return acc;
+      }, {} as Record<string, any>);
 
-    onSave({
-      ...item,
-      progress: finalProgress,
-      stagePlanning,
-      overallProgress: calculateOverallProgress()
-    });
+      // Calculate overall progress
+      const overallProgress = calculateOverallProgress();
+
+      // Update the item with new data
+      const updatedItem = {
+        ...item,
+        progress: finalProgress,
+        stagePlanning,
+        overallProgress
+      };
+
+      console.log('Salvando item com progresso:', updatedItem);
+      
+      // Call the save function
+      await onSave(updatedItem);
+      
+      console.log('Item salvo com sucesso');
+    } catch (error) {
+      console.error('Erro ao salvar progresso do item:', error);
+      alert('Erro ao salvar progresso. Tente novamente.');
+    }
   };
 
   const handleSaveStages = () => {
@@ -931,7 +947,7 @@ const ItemProgressModal: React.FC<ItemProgressModalProps> = ({
   );
 };
 
-// Helper function to calculate overall progress for an item
+// CORREÇÃO: Helper function to calculate overall progress for an item
 const calculateOverallProgresso = (progress?: Record<string, number>): number => {
   if (!progress || Object.keys(progress).length === 0) return 0;
   const values = Object.values(progress);
