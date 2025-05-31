@@ -72,6 +72,12 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
     console.log('Mudar status do pedido:', order.id, 'para:', newStatus);
   };
 
+  const handleUpdateOrderLocal = (updatedOrder: Order) => {
+    if (onUpdateOrder) {
+      onUpdateOrder(updatedOrder);
+    }
+  };
+
   return (
     <div className="flex-shrink-0 w-80 bg-gray-800/30 rounded-lg border border-gray-700/50">
       <div className="bg-blue-600 text-white p-4 rounded-t-lg">
@@ -121,7 +127,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
               isExpanded={expandedCards.has(order.id)}
               onOrderClick={onOrderClick}
               onOrderEdit={onOrderEdit}
-              onUpdateOrder={onUpdateOrder}
+              onUpdateOrder={handleUpdateOrderLocal}
               onSelect={handleOrderSelect}
               onViewHistory={handleViewHistory}
               onDelete={handleDeleteOrder}
