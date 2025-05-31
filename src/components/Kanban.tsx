@@ -19,7 +19,7 @@ import KanbanCard from './KanbanCard';
 import ColumnModal from './ColumnModal';
 import ManageOrdersModal from './ManageOrdersModal';
 import OrderModal from './OrderModal';
-import OrderDetailsModal from './OrderDetailsModal';
+import OrderItemsList from './OrderItemsList';
 import ManufacturingStages from './ManufacturingStages';
 import OccupationRateTab from './OccupationRateTab';
 import { format, isAfter, isBefore, addDays, isToday } from 'date-fns';
@@ -83,7 +83,7 @@ const Kanban: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
-  const [isOrderDetailsModalOpen, setIsOrderDetailsModalOpen] = useState(false);
+  const [isOrderItemsListOpen, setIsOrderItemsListOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isManufacturingStagesOpen, setIsManufacturingStagesOpen] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
@@ -423,10 +423,10 @@ const Kanban: React.FC = () => {
     }
   };
 
-  // FUNÇÃO MODIFICADA: Agora abre modal de detalhes ao invés de modal de edição
+  // FUNÇÃO MODIFICADA: Agora abre modal de lista de itens ao invés de modal de edição
   const handleOrderClick = (order: Order) => {
     setSelectedOrder(order);
-    setIsOrderDetailsModalOpen(true);
+    setIsOrderItemsListOpen(true);
   };
 
   // FUNÇÃO REMOVIDA: handleOrderEdit - agora o clique principal abre o modal
@@ -891,15 +891,14 @@ const Kanban: React.FC = () => {
           />
         )}
 
-        {isOrderDetailsModalOpen && selectedOrder && (
-          <OrderDetailsModal
+        {isOrderItemsListOpen && selectedOrder && (
+          <OrderItemsList
             order={selectedOrder}
             onClose={() => {
-              setIsOrderDetailsModalOpen(false);
+              setIsOrderItemsListOpen(false);
               setSelectedOrder(null);
             }}
-            onSave={handleSaveOrder}
-            customers={customers}
+            onUpdateOrder={handleSaveOrder}
           />
         )}
 
