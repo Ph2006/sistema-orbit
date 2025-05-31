@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Order } from '../types/kanban';
-import { CheckCircle, Clock, AlertTriangle, Flag, Calendar, Package, Eye, User, ClipboardCheck, Truck, FileText, Send } from 'lucide-react';
+import { CheckCircle, Clock, AlertTriangle, Flag, Calendar, Package, Eye, User, ClipboardCheck, Truck, FileText, Send, ChevronDown, ChevronUp } from 'lucide-react';
 import { format, isBefore } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -30,12 +30,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   isExpanded
 }) => {
   
-  const [showShippingFields, setShowShippingFields] = useState(false);
-  const [shippingData, setShippingData] = useState({
-    le: order.le || '',
-    nf: order.nf || '',
-    shippingDate: order.shippingDate || ''
-  });
+  const [showItemDetails, setShowItemDetails] = useState(false);
 
   const handleQualityControlClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -48,21 +43,24 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     }
   };
 
-  const handleShippingDataUpdate = (field: string, value: string) => {
-    const updatedData = { ...shippingData, [field]: value };
-    setShippingData(updatedData);
+  // Atualizar dados de expedição de um item específico
+  const handleItemShippingUpdate = (itemId: string, field: string, value: string) => {
+    const updatedItems = order.items?.map(item => {
+      if (item.id === itemId) {
+        return {
+          ...item,
+          [field]: value
+        };
+      }
+      return item;
+    });
+
+    const updatedOrder = {
+      ...order,
+      items: updatedItems
+    };
     
-    // Auto-save quando todos os campos estão preenchidos
-    if (updatedData.le && updatedData.nf && updatedData.shippingDate) {
-      const updatedOrder = {
-        ...order,
-        le: updatedData.le,
-        nf: updatedData.nf,
-        shippingDate: updatedData.shippingDate,
-        status: 'ready' // Atualiza status para "Pronto para embarque"
-      };
-      onUpdateOrder(updatedOrder);
-    }
+    onUpdateOrder(updatedOrder);
   };
 
   // Calcular progresso geral do pedido
@@ -75,15 +73,15 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   const deliveryDate = new Date(order.deliveryDate);
   const isOverdue = isBefore(deliveryDate, today) && order.status !== 'completed';
 
-  // Verificar se todos os itens estão 100% concluídos
-  const allItemsCompleted = order.items && order.items.length > 0 && 
-    order.items.every(item => (item.overallProgress || 0) >= 100);
+  // Verificar quantos itens estão 100% concluídos
+  const completedItems = order.items?.filter(item => (item.overallProgress || 0) >= 100) || [];
+  const hasCompletedItems = completedItems.length > 0;
 
   return (
     <div 
       className={`bg-gray-800/80 backdrop-blur-sm rounded-lg border p-4 mb-3 cursor-pointer hover:bg-gray-700/80 transition-all duration-200 ${
         isSelected ? 'border-blue-400 bg-blue-900/30' : 'border-gray-600/50'
-      } ${highlight ? 'ring-2 ring-yellow-400' : ''} ${isOverdue ? 'border-l-4 border-l-red-500' : ''} ${allItemsCompleted ? 'border-l-4 border-l-green-500' : ''}`}
+      } ${highlight ? 'ring-2 ring-yellow-400' : ''} ${isOverdue ? 'border-l-4 border-l-red-500' : ''} ${hasCompletedItems ? 'border-l-4 border-l-green-500' : ''}`}
       onClick={handleCardClick}
     >
       {/* Header do card */}
@@ -91,15 +89,10 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <h4 className="font-semibold text-white">#{order.orderNumber}</h4>
-            {/* Badge de status */}
+            {/* Mostrar badge de atrasado apenas se atrasado */}
             {isOverdue && (
               <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
                 Atrasado
-              </span>
-            )}
-            {allItemsCompleted && (
-              <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full border border-green-500/30">
-                Concluído
               </span>
             )}
           </div>
@@ -107,7 +100,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <p className="text-xs text-gray-400">OS: {order.internalOrderNumber}</p>
         </div>
         
-        {/* Status badge */}
+        {/* Status badge - sem duplicação */}
         <div className={`px-2 py-1 rounded-full text-xs font-medium border ${
           order.status === 'completed' 
             ? 'bg-green-500/20 text-green-400 border-green-500/30' :
@@ -142,9 +135,23 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         )}
 
         {order.items && order.items.length > 0 && (
-          <div className="flex items-center text-gray-300">
-            <Flag className="h-4 w-4 mr-2 text-gray-400" />
-            <span>Progresso: {overallProgress}%</span>
+          <div className="flex items-center justify-between text-gray-300">
+            <div className="flex items-center">
+              <Flag className="h-4 w-4 mr-2 text-gray-400" />
+              <span>Progresso: {overallProgress}%</span>
+            </div>
+            {hasCompletedItems && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowItemDetails(!showItemDetails);
+                }}
+                className="text-xs text-green-400 hover:text-green-300 flex items-center"
+              >
+                {completedItems.length} item(s) concluído(s)
+                {showItemDetails ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -171,78 +178,79 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </div>
       )}
 
-      {/* Campos de Expedição - Aparecem quando todos os itens estão 100% */}
-      {allItemsCompleted && (
+      {/* Detalhes dos itens concluídos com campos de expedição */}
+      {showItemDetails && hasCompletedItems && (
         <div className="mt-4 pt-3 border-t border-gray-600/30">
-          <div className="flex items-center justify-between mb-2">
-            <h5 className="text-sm font-medium text-gray-300 flex items-center">
-              <Truck className="h-4 w-4 mr-2" />
-              Expedição
-            </h5>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowShippingFields(!showShippingFields);
-              }}
-              className="text-xs text-blue-400 hover:text-blue-300"
-            >
-              {showShippingFields ? 'Ocultar' : 'Mostrar'}
-            </button>
+          <h5 className="text-sm font-medium text-gray-300 mb-3 flex items-center">
+            <Truck className="h-4 w-4 mr-2" />
+            Itens Prontos para Expedição
+          </h5>
+          
+          <div className="space-y-3">
+            {completedItems.map((item, index) => (
+              <div key={item.id || index} className="bg-gray-700/30 rounded-lg p-3 border border-gray-600/30">
+                <div className="text-xs text-gray-300 mb-2">
+                  <div className="font-medium">{item.description || item.name}</div>
+                  <div className="text-gray-400">Código: {item.code} | Qtd: {item.quantity}</div>
+                </div>
+                
+                {/* Campos de expedição por item */}
+                <div className="grid grid-cols-1 gap-2 text-xs">
+                  <div>
+                    <label className="block text-gray-400 mb-1">LE (Lista de Embarque)</label>
+                    <input
+                      type="text"
+                      value={item.le || ''}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleItemShippingUpdate(item.id, 'le', e.target.value);
+                      }}
+                      className="w-full px-2 py-1 bg-gray-800/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
+                      placeholder="Digite o número da LE"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-gray-400 mb-1">NF (Nota Fiscal)</label>
+                    <input
+                      type="text"
+                      value={item.nf || ''}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleItemShippingUpdate(item.id, 'nf', e.target.value);
+                      }}
+                      className="w-full px-2 py-1 bg-gray-800/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
+                      placeholder="Digite o número da NF"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-gray-400 mb-1">Data de Envio</label>
+                    <input
+                      type="date"
+                      value={item.shippingDate || ''}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleItemShippingUpdate(item.id, 'shippingDate', e.target.value);
+                      }}
+                      className="w-full px-2 py-1 bg-gray-800/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Status da expedição do item */}
+                {(item.le || item.nf || item.shippingDate) && (
+                  <div className="mt-2 pt-2 border-t border-gray-600/30">
+                    <div className="text-xs text-gray-400">
+                      {item.le && <div>LE: {item.le}</div>}
+                      {item.nf && <div>NF: {item.nf}</div>}
+                      {item.shippingDate && <div>Envio: {format(new Date(item.shippingDate), 'dd/MM/yyyy', { locale: ptBR })}</div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-          
-          {showShippingFields && (
-            <div className="space-y-2 text-xs">
-              <div>
-                <label className="block text-gray-400 mb-1">LE (Lista de Embarque)</label>
-                <input
-                  type="text"
-                  value={shippingData.le}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    handleShippingDataUpdate('le', e.target.value);
-                  }}
-                  className="w-full px-2 py-1 bg-gray-700/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
-                  placeholder="Digite o número da LE"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-gray-400 mb-1">NF (Nota Fiscal)</label>
-                <input
-                  type="text"
-                  value={shippingData.nf}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    handleShippingDataUpdate('nf', e.target.value);
-                  }}
-                  className="w-full px-2 py-1 bg-gray-700/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
-                  placeholder="Digite o número da NF"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-gray-400 mb-1">Data de Envio</label>
-                <input
-                  type="date"
-                  value={shippingData.shippingDate}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    handleShippingDataUpdate('shippingDate', e.target.value);
-                  }}
-                  className="w-full px-2 py-1 bg-gray-700/50 border border-gray-600 rounded text-white text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-          )}
-          
-          {/* Mostrar dados preenchidos de forma compacta */}
-          {!showShippingFields && (order.le || order.nf || order.shippingDate) && (
-            <div className="text-xs text-gray-400 space-y-1">
-              {order.le && <div>LE: {order.le}</div>}
-              {order.nf && <div>NF: {order.nf}</div>}
-              {order.shippingDate && <div>Envio: {format(new Date(order.shippingDate), 'dd/MM/yyyy', { locale: ptBR })}</div>}
-            </div>
-          )}
         </div>
       )}
 
