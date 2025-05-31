@@ -19,6 +19,7 @@ import KanbanCard from './KanbanCard';
 import ColumnModal from './ColumnModal';
 import ManageOrdersModal from './ManageOrdersModal';
 import OrderModal from './OrderModal';
+import OrderDetailsModal from './OrderDetailsModal';
 import ManufacturingStages from './ManufacturingStages';
 import OccupationRateTab from './OccupationRateTab';
 import { format, isAfter, isBefore, addDays, isToday } from 'date-fns';
@@ -82,6 +83,7 @@ const Kanban: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+  const [isOrderDetailsModalOpen, setIsOrderDetailsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isManufacturingStagesOpen, setIsManufacturingStagesOpen] = useState(false);
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
@@ -421,27 +423,20 @@ const Kanban: React.FC = () => {
     }
   };
 
-  // FUNÇÃO MODIFICADA: Agora controla a expansão dos cards
+  // FUNÇÃO MODIFICADA: Agora abre modal de detalhes ao invés de modal de edição
   const handleOrderClick = (order: Order) => {
-    setExpandedCards(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(order.id)) {
-        newSet.delete(order.id);
-      } else {
-        newSet.add(order.id);
-      }
-      return newSet;
-    });
+    setSelectedOrder(order);
+    setIsOrderDetailsModalOpen(true);
   };
 
-  // NOVA FUNÇÃO: Para abrir o modal de edição do pedido
-  const handleOrderEdit = (order: Order, e?: React.MouseEvent) => {
-    if (e) {
-      e.stopPropagation();
-    }
-    setSelectedOrder(order);
-    setIsOrderModalOpen(true);
-  };
+  // FUNÇÃO REMOVIDA: handleOrderEdit - agora o clique principal abre o modal
+  // const handleOrderEdit = (order: Order, e?: React.MouseEvent) => {
+  //   if (e) {
+  //     e.stopPropagation();
+  //   }
+  //   setSelectedOrder(order);
+  //   setIsOrderModalOpen(true);
+  // };
 
   const handleViewHistory = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -844,13 +839,11 @@ const Kanban: React.FC = () => {
                     onEdit={() => handleEditColumn(column)}
                     onDelete={() => handleDeleteColumn(column.id)}
                     onOrderClick={handleOrderClick}
-                    onOrderEdit={handleOrderEdit}
                     highlightTerm={searchTerm}
                     compactView={compactView}
                     isManagingOrders={isManageOrdersModalOpen}
                     selectedOrders={selectedOrders}
                     customers={customers}
-                    expandedCards={expandedCards}
                   />
                 ))}
               </div>
@@ -863,9 +856,7 @@ const Kanban: React.FC = () => {
                     isSelected={false}
                     highlight={false}
                     compactView={compactView}
-                    isExpanded={false}
                     onOrderClick={() => {}}
-                    onOrderEdit={() => {}}
                   />
                 )}
               </DragOverlay>
@@ -897,6 +888,18 @@ const Kanban: React.FC = () => {
             onClose={() => setIsManageOrdersModalOpen(false)}
             onDelete={handleDeleteSelectedOrders}
             orders={orders.filter(order => selectedOrders.includes(order.id))}
+          />
+        )}
+
+        {isOrderDetailsModalOpen && selectedOrder && (
+          <OrderDetailsModal
+            order={selectedOrder}
+            onClose={() => {
+              setIsOrderDetailsModalOpen(false);
+              setSelectedOrder(null);
+            }}
+            onSave={handleSaveOrder}
+            customers={customers}
           />
         )}
 
