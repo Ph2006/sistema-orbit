@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Package, Calendar, User, Building, FileText, CheckCircle, Square, CheckSquare, BarChart, Edit, Trash2, Plus, Download, Printer } from 'lucide-react';
+import { X, Package, Calendar, User, Building, FileText, CheckCircle, Square, CheckSquare, BarChart, Edit, Trash2, Plus, Download, FileSpreadsheet } from 'lucide-react';
 
 // Tipos baseados no seu código
 interface OrderItem {
@@ -58,7 +58,7 @@ interface OrderItemsListProps {
 const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdateOrder }) => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [localOrder, setLocalOrder] = useState<Order>(order);
-  
+
   // Logo da empresa em base64 (exemplo)
   const companyLogo = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjQwIiB2aWV3Qm94PSIwIDAgMTAwIDQwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjMjU2M2ViIi8+Cjx0ZXh0IHg9IjUwIiB5PSIyNSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TUlOSEEgRU1QUkVTQTwvdGV4dD4KPHN2Zz4K";
 
@@ -152,6 +152,11 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
     }
 
     alert('Funcionalidade de PDF em desenvolvimento. Para implementação completa, instale a biblioteca jsPDF.');
+  };
+
+  // Gerar PDF com cronograma/progresso
+  const generateProgressPdf = () => {
+    alert('Funcionalidade de cronograma em desenvolvimento. Para implementação completa, instale a biblioteca jsPDF.');
   };
 
   const handleSave = () => {
@@ -349,6 +354,14 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
                 <span>Exportar Romaneio ({selectedItems.size})</span>
               </button>
               <button
+                onClick={generateProgressPdf}
+                className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2"
+                title="Exportar Cronograma de Progresso"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>Exportar Cronograma</span>
+              </button>
+              <button
                 onClick={handleAddItem}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
               >
@@ -377,10 +390,10 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                     Nº Item
                   </th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
                     Código
                   </th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px]">
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[350px]">
                     Descrição
                   </th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
@@ -436,7 +449,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({ order, onClose, onUpdat
                         <textarea
                           value={item.description}
                           onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                          className="w-full min-w-[280px] px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none"
+                          className="w-full min-w-[320px] px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none"
                           placeholder="Descrição completa do item"
                           rows={2}
                         />
