@@ -59,6 +59,62 @@ const sanitizeForFirestore = (obj: any): any => {
   return sanitized;
 };
 
+// Função para exportar PDF sem coluna de progresso
+const exportOrderToPDF = (order: Order) => {
+  const doc = new jsPDF();
+  
+  // Cabeçalho do documento
+  doc.setFontSize(20);
+  doc.text('ROMANEIO DE EMBARQUE', 105, 30, { align: 'center' });
+  
+  // Linha divisória
+  doc.line(20, 40, 190, 40);
+  
+  // Informações do pedido
+  doc.setFontSize(12);
+  doc.text(`Pedido: #${order.orderNumber}`, 20, 55);
+  doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 120, 55);
+  doc.text(`Cliente: ${order.customer}`, 20, 70);
+  doc.text(`OS Interna: ${order.internalOrderNumber}`, 120, 70);
+  doc.text(`Data de Entrega: ${new Date(order.deliveryDate).toLocaleDateString('pt-BR')}`, 20, 85);
+  
+  // Tabela de itens (SEM coluna de progresso)
+  const tableData = order.items?.map((item, index) => [
+    index + 1,
+    item.code || '',
+    item.description || item.name || '',
+    item.quantity || 0,
+    `${(item.unitWeight || 0).toFixed(3)} kg`,
+    `${((item.quantity || 0) * (item.unitWeight || 0)).toFixed(3)} kg`
+  ]) || [];
+  
+  (doc as any).autoTable({
+    head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
+    body: tableData,
+    startY: 100,
+    theme: 'grid',
+    styles: {
+      fontSize: 10,
+      cellPadding: 3
+    },
+    headStyles: {
+      fillColor: [52, 152, 219],
+      textColor: 255,
+      fontStyle: 'bold'
+    }
+  });
+  
+  // Totais
+  const finalY = (doc as any).lastAutoTable.finalY + 20;
+  doc.setFontSize(12);
+  doc.text(`Total de Itens: ${order.items?.length || 0}`, 20, finalY);
+  doc.text(`Quantidade Total: ${order.items?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0}`, 20, finalY + 15);
+  doc.text(`Peso Total: ${(order.totalWeight || 0).toFixed(3)} kg`, 20, finalY + 30);
+  
+  // Salvar o PDF
+  doc.save(`romaneio_pedido_${order.orderNumber}.pdf`);
+};
+
 const getMonthlyOrderStats = (orders) => {
   const stats = {};
   orders.forEach(order => {
@@ -429,15 +485,6 @@ const Kanban: React.FC = () => {
     setIsOrderItemsListOpen(true);
   };
 
-  // FUNÇÃO REMOVIDA: handleOrderEdit - agora o clique principal abre o modal
-  // const handleOrderEdit = (order: Order, e?: React.MouseEvent) => {
-  //   if (e) {
-  //     e.stopPropagation();
-  //   }
-  //   setSelectedOrder(order);
-  //   setIsOrderModalOpen(true);
-  // };
-
   const handleViewHistory = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     // Implementation for viewing order history
@@ -571,15 +618,39 @@ const Kanban: React.FC = () => {
 
   const filteredOrders = getFilteredOrders();
   
+  // CORREÇÃO: Adicionada ordenação por data de entrega crescente
   const columnsWithOrders = columns.map(column => {
     let ordersForColumn = [];
+    
     if (column.title === 'Pedidos em processo') {
-      ordersForColumn = filteredOrders.filter(order => order.status === 'in-progress' && !order.deleted);
+      ordersForColumn = filteredOrders
+        .filter(order => order.status === 'in-progress' && !order.deleted)
+        .sort((a, b) => {
+          // Ordenar por data de entrega (crescente)
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
     } else if (column.title === 'Pedidos expedidos') {
-      ordersForColumn = filteredOrders.filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted);
+      ordersForColumn = filteredOrders
+        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
+        .sort((a, b) => {
+          // Ordenar por data de entrega (crescente)
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
     } else {
-      ordersForColumn = filteredOrders.filter(order => order.columnId === column.id && !order.deleted);
+      ordersForColumn = filteredOrders
+        .filter(order => order.columnId === column.id && !order.deleted)
+        .sort((a, b) => {
+          // Ordenar por data de entrega (crescente)
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
     }
+    
     return {
       ...column,
       orders: ordersForColumn
@@ -844,6 +915,7 @@ const Kanban: React.FC = () => {
                     isManagingOrders={isManageOrdersModalOpen}
                     selectedOrders={selectedOrders}
                     customers={customers}
+                    expandedCards={expandedCards}
                   />
                 ))}
               </div>
