@@ -1,7 +1,7 @@
 import React from 'react';
 import { Order } from '../types/kanban';
 import { CheckCircle, Clock, AlertTriangle, Flag, Calendar, Package, Eye, User, ClipboardCheck } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isBefore } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 interface KanbanCardProps {
@@ -31,7 +31,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
 }) => {
   
   const handleQualityControlClick = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Evita que o click do card seja acionado
+    e.stopPropagation();
     onQualityControlClick(order);
   };
 
@@ -46,8 +46,10 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     ? Math.round(order.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / order.items.length)
     : 0;
 
-  // Verificar se o pedido está atrasado
-  const isOverdue = new Date(order.deliveryDate) < new Date() && order.status !== 'completed';
+  // Verificar se o pedido está atrasado (apenas uma verificação)
+  const today = new Date();
+  const deliveryDate = new Date(order.deliveryDate);
+  const isOverdue = isBefore(deliveryDate, today) && order.status !== 'completed';
 
   return (
     <div 
@@ -61,6 +63,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <h4 className="font-semibold text-white">#{order.orderNumber}</h4>
+            {/* Mostrar badge de atrasado apenas uma vez e somente se realmente estiver atrasado */}
             {isOverdue && (
               <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
                 Atrasado
@@ -71,31 +74,31 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <p className="text-xs text-gray-400">OS: {order.internalOrderNumber}</p>
         </div>
         
-        {/* Status badge */}
+        {/* Status badge - não duplicar informação de atraso */}
         <div className={`px-2 py-1 rounded-full text-xs font-medium border ${
           order.status === 'completed' 
             ? 'bg-green-500/20 text-green-400 border-green-500/30' :
           order.status === 'in-progress' 
             ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
-          order.status === 'delayed' 
-            ? 'bg-red-500/20 text-red-400 border-red-500/30' :
           order.status === 'waiting-docs' 
             ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' :
+          order.status === 'ready'
+            ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' :
           'bg-gray-500/20 text-gray-400 border-gray-500/30'
         }`}>
           {order.status === 'completed' ? 'Concluído' :
-           order.status === 'in-progress' ? 'Em Andamento' :
-           order.status === 'delayed' ? 'Atrasado' :
+           order.status === 'in-progress' ? 'Em Processo' :
            order.status === 'waiting-docs' ? 'Aguard. Docs' :
+           order.status === 'ready' ? 'Pronto' :
            'Pendente'}
         </div>
       </div>
 
-      {/* Informações do pedido */}
+      {/* Informações do pedido - sem duplicação */}
       <div className="space-y-2 text-sm">
         <div className="flex items-center text-gray-300">
           <Calendar className="h-4 w-4 mr-2 text-gray-400" />
-          <span>Entrega: {format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}</span>
+          <span>Entrega: {format(deliveryDate, 'dd/MM/yyyy', { locale: ptBR })}</span>
         </div>
 
         {order.totalWeight && (
@@ -113,7 +116,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         )}
       </div>
 
-      {/* Barra de progresso */}
+      {/* Barra de progresso - uma única vez */}
       {!compactView && order.items && order.items.length > 0 && (
         <div className="mt-3">
           <div className="w-full bg-gray-700/50 rounded-full h-2">
@@ -135,7 +138,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </div>
       )}
 
-      {/* Botão Controle de Qualidade */}
+      {/* Botão Controle de Qualidade - uma única vez */}
       <div className="mt-4 pt-3 border-t border-gray-600/30">
         <button
           onClick={handleQualityControlClick}
@@ -147,7 +150,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </button>
       </div>
 
-      {/* Informações extras no modo expandido */}
+      {/* Informações extras no modo expandido - evitar duplicação */}
       {isExpanded && !compactView && (
         <div className="mt-3 pt-3 border-t border-gray-600/30">
           <div className="grid grid-cols-2 gap-2 text-xs text-gray-400">
