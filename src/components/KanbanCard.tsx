@@ -170,8 +170,8 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </div>
       )}
 
-      {/* Controle de Qualidade - apenas para pedidos expedidos */}
-      {(order.status === 'waiting-docs' || order.status === 'completed') && (
+      {/* CORREÇÃO: Controle de Qualidade - agora para todos os pedidos */}
+      {!isManaging && (
         <div className="border-t border-gray-700 pt-3 mb-3">
           <button
             onClick={(e) => {
