@@ -554,43 +554,10 @@ const Kanban: React.FC = () => {
     setIsOrderItemsListOpen(true);
   };
 
-  const handleViewHistory = (order: Order, e: React.MouseEvent) => {
-    e.stopPropagation();
-    // Implementation for viewing order history
-  };
-
-  const handleDeleteOrder = async (order: Order, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm('Tem certeza que deseja excluir este pedido?')) {
-      try {
-        await deleteOrder(order.id);
-      } catch (error) {
-        console.error('Error deleting order:', error);
-        alert('Erro ao excluir pedido. Por favor, tente novamente.');
-      }
-    }
-  };
-
-  const handleStatusChange = async (order: Order, newStatus: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await updateOrder({
-        ...order,
-        status: newStatus as any,
-        statusChangedAt: new Date().toISOString(),
-        statusHistory: [
-          ...((order.statusHistory || []) as any[]),
-          {
-            status: order.status,
-            date: new Date().toISOString(),
-            user: 'usuario@atual.com'
-          }
-        ]
-      });
-    } catch (error) {
-      console.error('Error updating order status:', error);
-      alert('Erro ao atualizar status. Por favor, tente novamente.');
-    }
+  // FUNÇÃO MODIFICADA: Agora abre modal de lista de itens ao invés de modal de edição
+  const handleOrderClick = (order: Order) => {
+    setSelectedOrder(order);
+    setIsOrderItemsListOpen(true);
   };
 
   const handleSaveOrder = async (order: Order) => {
