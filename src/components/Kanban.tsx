@@ -775,8 +775,8 @@ const Kanban: React.FC = () => {
 
   // Função para navegar para o controle de qualidade com o pedido selecionado
   const handleQualityControlClick = (order: Order) => {
-    // Tenta diferentes rotas possíveis
-    navigate(`/controle-de-qualidade?orderId=${order.id}`);
+    // Usar a rota exata que vemos na imagem 4
+    window.location.href = `/controle-de-qualidade?orderId=${order.id}`;
   };
 
   console.log('columns:', columns.map(c => ({ id: c.id, title: c.title })));
