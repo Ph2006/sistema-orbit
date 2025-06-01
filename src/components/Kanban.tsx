@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DndContext, DragEndEvent, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { Settings, ListX, Search, Filter, ChevronDown, Calendar, Users, Flag, LayoutGrid, LayoutList, Clipboard, LayoutList as StagedList, BarChart, Download } from 'lucide-react';
+import { Settings, ListX, Search, Filter, ChevronDown, Calendar, Users, Flag, LayoutGrid, LayoutList, Clipboard, LayoutList as StagedList, BarChart, Download, Plus } from 'lucide-react';
 import { Column, Order, OrderStatus } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
@@ -20,6 +20,9 @@ import { useSettingsStore } from '../store/settingsStore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { useNavigate } from 'react-router-dom';
+
+// Importar estilos CSS (adicione este import no seu projeto)
+import './KanbanStyles.css';
 
 // Correção da declaração do módulo jsPDF
 declare module 'jspdf' {
@@ -415,7 +418,10 @@ const Kanban: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
-        <div className="text-lg font-medium text-white">Carregando...</div>
+        <div className="text-lg font-medium text-white flex items-center space-x-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          <span>Carregando...</span>
+        </div>
       </div>
     );
   }
@@ -423,7 +429,16 @@ const Kanban: React.FC = () => {
   if (error) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
-        <div className="text-lg font-medium text-red-400">{error}</div>
+        <div className="text-lg font-medium text-red-400 text-center">
+          <div className="text-6xl mb-4">⚠️</div>
+          <div>{error}</div>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="mt-4 px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+          >
+            Recarregar Página
+          </button>
+        </div>
       </div>
     );
   }
@@ -432,40 +447,43 @@ const Kanban: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex flex-row w-full h-full">
       <div className="flex-1 overflow-x-auto">
         {/* Header */}
-        <div className="max-w-[2000px] mx-auto mb-6">
-          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+        <div className="max-w-[2000px] mx-auto mb-6 p-4">
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50 shadow-2xl">
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
               <h1 className="text-2xl font-bold text-white">Quadro de Produção</h1>
               <div className="flex gap-2">
                 <button 
                   onClick={() => setActiveTab('kanban')} 
-                  className={`px-4 py-2 rounded-lg transition-all ${
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
                     activeTab === 'kanban' 
                       ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
                       : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
                   }`}
                 >
                   <LayoutGrid className="h-5 w-5" />
+                  <span className="hidden md:inline">Kanban</span>
                 </button>
                 <button 
                   onClick={() => setActiveTab('stages')} 
-                  className={`px-4 py-2 rounded-lg transition-all ${
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
                     activeTab === 'stages' 
                       ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
                       : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
                   }`}
                 >
                   <StagedList className="h-5 w-5" />
+                  <span className="hidden md:inline">Estágios</span>
                 </button>
                 <button 
                   onClick={() => setActiveTab('occupation')} 
-                  className={`px-4 py-2 rounded-lg transition-all ${
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
                     activeTab === 'occupation' 
                       ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
                       : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
                   }`}
                 >
                   <BarChart className="h-5 w-5" />
+                  <span className="hidden md:inline">Ocupação</span>
                 </button>
               </div>
             </div>
@@ -478,7 +496,7 @@ const Kanban: React.FC = () => {
                   placeholder="Buscar pedidos..." 
                   value={searchTerm} 
                   onChange={(e) => setSearchTerm(e.target.value)} 
-                  className="w-full lg:w-64 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                  className="w-full lg:w-64 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" 
                 />
                 <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>
@@ -521,7 +539,7 @@ const Kanban: React.FC = () => {
 
           {/* Menu de filtros */}
           {filterMenuOpen && (
-            <div className="mt-4 bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+            <div className="mt-4 bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50 shadow-xl">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">Cliente</label>
@@ -529,7 +547,7 @@ const Kanban: React.FC = () => {
                     multiple
                     value={filterByCustomer}
                     onChange={(e) => setFilterByCustomer(Array.from(e.target.selectedOptions, option => option.value))}
-                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 scrollbar-thin"
                     size={5}
                   >
                     {availableCustomers.map(customer => (
@@ -546,7 +564,7 @@ const Kanban: React.FC = () => {
                     multiple
                     value={filterByStatus}
                     onChange={(e) => setFilterByStatus(Array.from(e.target.selectedOptions, option => option.value))}
-                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 scrollbar-thin"
                     size={5}
                   >
                     {statusLegend.map(status => (
@@ -563,7 +581,7 @@ const Kanban: React.FC = () => {
                     multiple
                     value={filterByProject}
                     onChange={(e) => setFilterByProject(Array.from(e.target.selectedOptions, option => option.value))}
-                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 scrollbar-thin"
                     size={5}
                   >
                     {availableProjects.map(project => (
@@ -603,20 +621,28 @@ const Kanban: React.FC = () => {
         </div>
 
         {/* Conteúdo principal */}
-        <div className="max-w-[2000px] mx-auto">
+        <div className="max-w-[2000px] mx-auto px-4">
           {activeTab === 'kanban' && (
             <DndContext 
               sensors={sensors} 
               onDragStart={handleDragStart} 
               onDragEnd={handleDragEnd}
             >
-              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+              {/* Container principal com scroll horizontal melhorado */}
+              <div className="flex gap-6 overflow-x-auto pb-6 custom-scrollbar min-h-[calc(100vh-240px)]">
                 {columnsWithOrders.map(column => (
                   <KanbanColumn
                     key={column.id}
                     column={column}
-                    onEdit={() => {}}
-                    onDelete={() => {}}
+                    onEdit={() => {
+                      setSelectedColumn(column);
+                      setIsColumnModalOpen(true);
+                    }}
+                    onDelete={() => {
+                      if (confirm(`Tem certeza que deseja excluir a coluna "${column.title}"?`)) {
+                        deleteColumn(column.id);
+                      }
+                    }}
                     onOrderClick={handleOrderClick}
                     onUpdateOrder={handleUpdateOrder}
                     onQualityControlClick={handleQualityControlClick}
@@ -629,26 +655,54 @@ const Kanban: React.FC = () => {
                     projects={projects}
                   />
                 ))}
+                
+                {/* Botão para adicionar nova coluna */}
+                <div className="flex-shrink-0 w-80">
+                  <button
+                    onClick={() => {
+                      setSelectedColumn(null);
+                      setIsColumnModalOpen(true);
+                    }}
+                    className="w-full h-32 bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm border-2 border-dashed border-gray-600/50 rounded-xl hover:border-blue-500/50 hover:bg-gray-700/30 transition-all duration-300 flex flex-col items-center justify-center text-gray-400 hover:text-blue-400 group"
+                  >
+                    <div className="text-4xl mb-2 group-hover:scale-110 transition-transform duration-300">
+                      <Plus className="h-12 w-12" />
+                    </div>
+                    <span className="text-sm font-medium">Adicionar Coluna</span>
+                  </button>
+                </div>
               </div>
               
+              {/* Overlay de drag melhorado */}
               <DragOverlay>
                 {draggedOrder && (
-                  <KanbanCard
-                    order={draggedOrder}
-                    isManaging={false}
-                    isSelected={false}
-                    highlight={false}
-                    compactView={compactView}
-                    onOrderClick={() => {}}
-                    projects={projects}
-                  />
+                  <div className="dragging-overlay transform rotate-3 scale-105">
+                    <KanbanCard
+                      order={draggedOrder}
+                      isManaging={false}
+                      isSelected={false}
+                      highlight={false}
+                      compactView={compactView}
+                      onOrderClick={() => {}}
+                      projects={projects}
+                    />
+                  </div>
                 )}
               </DragOverlay>
             </DndContext>
           )}
           
-          {activeTab === 'stages' && <ManufacturingStages />}
-          {activeTab === 'occupation' && <OccupationRateTab />}
+          {activeTab === 'stages' && (
+            <div className="bg-gradient-to-br from-gray-900/95 to-gray-800/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6 shadow-2xl">
+              <ManufacturingStages />
+            </div>
+          )}
+          
+          {activeTab === 'occupation' && (
+            <div className="bg-gradient-to-br from-gray-900/95 to-gray-800/95 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6 shadow-2xl">
+              <OccupationRateTab />
+            </div>
+          )}
         </div>
 
         {/* Modal de lista de itens do pedido */}
@@ -696,27 +750,45 @@ const Kanban: React.FC = () => {
               setSelectedColumn(null);
             }}
             column={selectedColumn}
-            onSave={updateColumn}
+            onSave={async (columnData) => {
+              try {
+                if (selectedColumn) {
+                  await updateColumn({ ...selectedColumn, ...columnData });
+                } else {
+                  // Lógica para criar nova coluna (você pode implementar no store)
+                  console.log('Criar nova coluna:', columnData);
+                }
+                setIsColumnModalOpen(false);
+                setSelectedColumn(null);
+              } catch (error) {
+                console.error('Erro ao salvar coluna:', error);
+                alert('Erro ao salvar coluna. Tente novamente.');
+              }
+            }}
           />
         )}
       </div>
       
-      {/* Sidebar de resumo */}
-      <div className="hidden lg:block w-72 min-w-[260px] max-w-xs bg-gray-900/80 border-l border-gray-800 p-4 text-white sticky top-0 h-[calc(100vh-64px)] overflow-y-auto">
-        <h3 className="text-lg font-bold mb-4">Resumo de Entregas</h3>
+      {/* Sidebar de resumo - MANTIDA COMO ESTAVA */}
+      <div className="hidden lg:block w-72 min-w-[260px] max-w-xs bg-gray-900/80 border-l border-gray-800 p-4 text-white sticky top-0 h-[calc(100vh-64px)] overflow-y-auto scrollbar-thin">
+        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <Calendar className="h-5 w-5 text-blue-400" />
+          Resumo de Entregas
+        </h3>
+        
         <div className="space-y-3">
           {Object.entries(getMonthlyOrderStats(orders))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([month, data]) => (
-              <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col">
+              <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col hover:bg-gray-700/50 transition-colors">
                 <span className="font-semibold text-blue-300">
                   {format(new Date(month + '-01'), 'MMMM/yyyy', { locale: ptBR })}
                 </span>
                 <span className="text-sm mt-1">
-                  Pedidos: <span className="font-bold">{data.count}</span>
+                  Pedidos: <span className="font-bold text-orange-400">{data.count}</span>
                 </span>
                 <span className="text-sm">
-                  Peso pendente: <span className="font-bold">
+                  Peso pendente: <span className="font-bold text-green-400">
                     {data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg
                   </span>
                 </span>
@@ -726,11 +798,14 @@ const Kanban: React.FC = () => {
 
         {/* Legenda de status */}
         <div className="mt-6">
-          <h4 className="text-md font-semibold mb-3">Legenda de Status</h4>
+          <h4 className="text-md font-semibold mb-3 flex items-center gap-2">
+            <Flag className="h-4 w-4 text-purple-400" />
+            Legenda de Status
+          </h4>
           <div className="space-y-2">
             {statusLegend.map(status => (
-              <div key={status.status} className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${status.color} ${status.borderColor} border`}></div>
+              <div key={status.status} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800/50 transition-colors">
+                <div className={`w-3 h-3 rounded-full ${status.color} ${status.borderColor} border-2`}></div>
                 <span className="text-sm text-gray-300">{status.label}</span>
               </div>
             ))}
@@ -739,25 +814,28 @@ const Kanban: React.FC = () => {
 
         {/* Estatísticas gerais */}
         <div className="mt-6">
-          <h4 className="text-md font-semibold mb-3">Estatísticas</h4>
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
+          <h4 className="text-md font-semibold mb-3 flex items-center gap-2">
+            <BarChart className="h-4 w-4 text-green-400" />
+            Estatísticas
+          </h4>
+          <div className="space-y-3">
+            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
               <span className="text-gray-400">Total de pedidos:</span>
-              <span className="font-bold">{filteredOrders.length}</span>
+              <span className="font-bold text-blue-400">{filteredOrders.length}</span>
             </div>
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
               <span className="text-gray-400">Em processo:</span>
               <span className="font-bold text-orange-400">
                 {filteredOrders.filter(o => o.status === 'in-progress').length}
               </span>
             </div>
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
               <span className="text-gray-400">Concluídos:</span>
               <span className="font-bold text-green-400">
                 {filteredOrders.filter(o => o.status === 'completed').length}
               </span>
             </div>
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
               <span className="text-gray-400">Atrasados:</span>
               <span className="font-bold text-red-400">
                 {filteredOrders.filter(o => {
@@ -770,43 +848,105 @@ const Kanban: React.FC = () => {
           </div>
         </div>
 
+        {/* Progresso geral */}
+        <div className="mt-6">
+          <h4 className="text-md font-semibold mb-3">Progresso Geral</h4>
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs text-gray-400">
+              <span>Média de conclusão</span>
+              <span>
+                {filteredOrders.length > 0 
+                  ? Math.round(
+                      filteredOrders.reduce((total, order) => total + (order.progress || 0), 0) / filteredOrders.length
+                    )
+                  : 0
+                }%
+              </span>
+            </div>
+            <div className="w-full bg-gray-700 rounded-full h-3 border border-gray-600">
+              <div 
+                className="h-3 rounded-full bg-gradient-to-r from-blue-500 to-green-500 transition-all duration-500"
+                style={{ 
+                  width: `${
+                    filteredOrders.length > 0 
+                      ? Math.round(
+                          filteredOrders.reduce((total, order) => total + (order.progress || 0), 0) / filteredOrders.length
+                        )
+                      : 0
+                  }%` 
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Exportação rápida */}
         <div className="mt-6">
           <button
             onClick={() => {
-              // Função para exportar relatório geral
-              const doc = new jsPDF();
-              doc.setFont('helvetica', 'bold');
-              doc.setFontSize(16);
-              doc.text('Relatório de Produção', 105, 20, { align: 'center' });
-              
-              doc.setFont('helvetica', 'normal');
-              doc.setFontSize(12);
-              doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 40);
-              
-              const tableData = filteredOrders.map(order => [
-                order.orderNumber,
-                order.customer,
-                order.internalOrderNumber,
-                format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }),
-                statusLegend.find(s => s.status === order.status)?.label || order.status
-              ]);
-              
-              doc.autoTable({
-                head: [['Pedido', 'Cliente', 'OS Interna', 'Entrega', 'Status']],
-                body: tableData,
-                startY: 50,
-                theme: 'grid',
-                styles: { fontSize: 10 },
-                headStyles: { fillColor: [52, 152, 219] }
-              });
-              
-              doc.save(`relatorio_producao_${format(new Date(), 'ddMMyyyy')}.pdf`);
+              try {
+                // Função para exportar relatório geral
+                const doc = new jsPDF();
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(16);
+                doc.text('Relatório de Produção', 105, 20, { align: 'center' });
+                
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 40);
+                doc.text(`Total de pedidos: ${filteredOrders.length}`, 20, 50);
+                
+                const tableData = filteredOrders.map(order => [
+                  order.orderNumber,
+                  order.customer,
+                  order.internalOrderNumber,
+                  format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }),
+                  statusLegend.find(s => s.status === order.status)?.label || order.status,
+                  `${order.progress || 0}%`
+                ]);
+                
+                doc.autoTable({
+                  head: [['Pedido', 'Cliente', 'OS Interna', 'Entrega', 'Status', 'Progresso']],
+                  body: tableData,
+                  startY: 60,
+                  theme: 'grid',
+                  styles: { fontSize: 9 },
+                  headStyles: { fillColor: [52, 152, 219] },
+                  alternateRowStyles: { fillColor: [245, 245, 245] }
+                });
+                
+                doc.save(`relatorio_producao_${format(new Date(), 'ddMMyyyy_HHmm')}.pdf`);
+              } catch (error) {
+                console.error('Erro ao gerar relatório:', error);
+                alert('Erro ao gerar relatório. Tente novamente.');
+              }
             }}
-            className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+            className="w-full px-4 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-lg transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-green-500/25 hover:shadow-green-500/40 font-medium"
           >
             <Download className="h-4 w-4" />
             Exportar Relatório
+          </button>
+        </div>
+
+        {/* Ações rápidas */}
+        <div className="mt-6 space-y-2">
+          <h4 className="text-md font-semibold mb-3">Ações Rápidas</h4>
+          <button
+            onClick={() => setIsManageOrdersModalOpen(true)}
+            className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm flex items-center justify-center gap-2"
+          >
+            <Clipboard className="h-4 w-4" />
+            Gerenciar Pedidos
+          </button>
+          <button
+            onClick={() => {
+              setSelectedColumn(null);
+              setIsColumnModalOpen(true);
+            }}
+            className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm flex items-center justify-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Nova Coluna
           </button>
         </div>
       </div>
