@@ -1,239 +1,194 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, User, Building, FileText, Package, CheckCircle } from 'lucide-react';
-import { Order } from '../types/kanban';
-import { Project } from '../types/project';
+import { Order, OrderItem } from '../types/kanban';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { X, Save, Trash, FileText, Plus } from 'lucide-react';
 
 interface OrderModalProps {
   order: Order;
   onClose: () => void;
-  onSave: (order: Order) => void;
-  projects: Project[];
+  onUpdateOrder: (order: Order) => void;
+  onDeleteOrder: (orderId: string) => void;
+  generateReport?: () => void;
+  customers: any[];
+  projects: any[];
 }
-
-// Função para formatar data para input
-const formatDateForInput = (date: any): string => {
-  try {
-    if (!date) return '';
-    
-    let dateObj: Date;
-    if (typeof date === 'string') {
-      dateObj = new Date(date);
-    } else if (date instanceof Date) {
-      dateObj = date;
-    } else if (date && typeof date.toDate === 'function') {
-      dateObj = date.toDate();
-    } else if (date && typeof date.seconds === 'number') {
-      dateObj = new Date(date.seconds * 1000);
-    } else {
-      return '';
-    }
-    
-    if (isNaN(dateObj.getTime())) return '';
-    
-    return dateObj.toISOString().split('T')[0];
-  } catch (error) {
-    console.error('Erro ao formatar data para input:', error);
-    return '';
-  }
-};
 
 const OrderModal: React.FC<OrderModalProps> = ({
   order,
   onClose,
-  onSave,
+  onUpdateOrder,
+  onDeleteOrder,
+  generateReport,
+  customers,
   projects
 }) => {
-  const [formData, setFormData] = useState<Order>({
-    ...order,
-    orderNumber: order.orderNumber || '',
-    internalOrderNumber: order.internalOrderNumber || '',
-    customer: order.customer || '',
-    customerName: order.customerName || '',
-    projectId: order.projectId || '',
-    projectName: order.projectName || '',
-    startDate: order.startDate || new Date().toISOString(),
-    deliveryDate: order.deliveryDate || '',
-    completedDate: order.completedDate || null,
-    status: order.status || 'in-progress',
-    totalWeight: order.totalWeight || 0,
-    description: order.description || '',
-    notes: order.notes || '',
-    checklist: order.checklist || {
-      drawings: false,
-      inspectionTestPlan: false,
-      paintPlan: false
-    },
-    items: order.items || [],
-    overallProgress: order.overallProgress || 0,
-    columnId: order.columnId || null,
-    createdAt: order.createdAt || new Date().toISOString(),
-    updatedAt: order.updatedAt || new Date().toISOString(),
-    deleted: order.deleted || false,
-    statusHistory: order.statusHistory || [],
-    lastExportDate: order.lastExportDate || null
+  const [editedOrder, setEditedOrder] = useState<Order>({ ...order });
+  const [isEditing, setIsEditing] = useState(false);
+  const [showItemsSection, setShowItemsSection] = useState(true);
+  const [newItem, setNewItem] = useState<OrderItem>({
+    id: '',
+    code: '',
+    description: '',
+    quantity: 1,
+    unitWeight: 0,
+    overallProgress: 0
   });
-
+  
   useEffect(() => {
-    if (formData.projectId) {
-      const selectedProject = projects.find(p => p.id === formData.projectId);
-      if (selectedProject) {
-        setFormData(prev => ({
-          ...prev,
-          projectName: selectedProject.name
-        }));
-      }
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        projectName: ''
-      }));
-    }
-  }, [formData.projectId, projects]);
-
-  const handleInputChange = (field: keyof Order, value: any) => {
-    setFormData(prev => ({
+    setEditedOrder({ ...order });
+  }, [order]);
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setEditedOrder(prev => ({
       ...prev,
-      [field]: value
+      [name]: value
     }));
   };
-
-  const handleChecklistChange = (field: string, checked: boolean) => {
-    setFormData(prev => ({
-      ...prev,
-      checklist: {
-        ...prev.checklist,
-        [field]: checked
-      }
-    }));
+  
+  const handleSave = () => {
+    onUpdateOrder(editedOrder);
+    onClose();
   };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.orderNumber.trim()) {
-      alert('Número do pedido é obrigatório');
-      return;
+  
+  const handleDelete = () => {
+    if (window.confirm("Tem certeza que deseja excluir este pedido?")) {
+      onDeleteOrder(order.id);
+      onClose();
     }
+  };
+  
+  const handleAddItem = () => {
+    if (!newItem.code) return;
     
-    if (!formData.customer.trim()) {
-      alert('Cliente é obrigatório');
-      return;
-    }
-    
-    if (!formData.deliveryDate) {
-      alert('Data de entrega é obrigatória');
-      return;
-    }
-
-    const orderToSave: Order = {
-      ...formData,
-      startDate: formData.startDate || new Date().toISOString(),
-      deliveryDate: formData.deliveryDate || '',
-      completedDate: formData.completedDate || null,
-      updatedAt: new Date().toISOString()
+    const newItemWithId = {
+      ...newItem,
+      id: Date.now().toString()
     };
-
-    onSave(orderToSave);
+    
+    setEditedOrder(prev => ({
+      ...prev,
+      items: [...(prev.items || []), newItemWithId]
+    }));
+    
+    setNewItem({
+      id: '',
+      code: '',
+      description: '',
+      quantity: 1,
+      unitWeight: 0,
+      overallProgress: 0
+    });
   };
-
-  const statusOptions = [
-    { value: 'in-progress', label: 'Em Andamento' },
-    { value: 'delayed', label: 'Atrasado' },
-    { value: 'waiting-docs', label: 'Aguardando Documentação' },
-    { value: 'completed', label: 'Completo' },
-    { value: 'ready', label: 'Pronto para Embarque' },
-    { value: 'urgent', label: 'Urgente' }
-  ];
-
+  
+  const handleRemoveItem = (itemId: string) => {
+    setEditedOrder(prev => ({
+      ...prev,
+      items: (prev.items || []).filter(item => item.id !== itemId)
+    }));
+  };
+  
+  const handleItemChange = (itemId: string, field: keyof OrderItem, value: any) => {
+    setEditedOrder(prev => ({
+      ...prev,
+      items: (prev.items || []).map(item => 
+        item.id === itemId ? { ...item, [field]: value } : item
+      )
+    }));
+  };
+  
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-6 border-b border-gray-200">
-          <h2 className="text-2xl font-bold text-gray-900">
-            {order.id === 'new' ? 'Novo Pedido' : `Pedido #${formData.orderNumber}`}
-          </h2>
-          <button
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center overflow-y-auto pt-10 pb-10">
+      <div className="bg-gray-800 w-full max-w-3xl rounded-lg shadow-2xl border border-gray-700 overflow-hidden">
+        {/* Cabeçalho */}
+        <div className="bg-gray-700 px-6 py-4 flex justify-between items-center border-b border-gray-600">
+          <h2 className="text-xl font-bold text-white">Pedido #{editedOrder.orderNumber}</h2>
+          <button 
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 transition-colors"
+            className="text-gray-400 hover:text-white transition-colors"
           >
-            <X className="h-6 w-6" />
+            <X className="h-5 w-5" />
           </button>
         </div>
-
-        <form onSubmit={handleSubmit} className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
+        
+        {/* Corpo do modal */}
+        <div className="px-6 py-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Número do Pedido */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <Package className="h-4 w-4 inline-block mr-1" />
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Número do Pedido *
               </label>
-              <input
+              <input 
                 type="text"
-                value={formData.orderNumber}
-                onChange={(e) => handleInputChange('orderNumber', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Ex: 4500202310"
-                required
+                name="orderNumber"
+                value={editedOrder.orderNumber || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
+            
+            {/* OS Interna */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <FileText className="h-4 w-4 inline-block mr-1" />
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 OS Interna *
               </label>
-              <input
+              <input 
                 type="text"
-                value={formData.internalOrderNumber}
-                onChange={(e) => handleInputChange('internalOrderNumber', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Ex: 774/25"
-                required
+                name="internalOrderNumber"
+                value={editedOrder.internalOrderNumber || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
+            
+            {/* Cliente */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <User className="h-4 w-4 inline-block mr-1" />
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Cliente *
               </label>
-              <input
+              <input 
                 type="text"
-                value={formData.customer}
-                onChange={(e) => handleInputChange('customer', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Nome do cliente"
-                required
+                name="customer"
+                value={editedOrder.customer || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
+            
+            {/* Status */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Status
               </label>
               <select
-                value={formData.status}
-                onChange={(e) => handleInputChange('status', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                name="status"
+                value={editedOrder.status || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {statusOptions.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
+                <option value="waiting">Aguardando</option>
+                <option value="in-progress">Em Processo</option>
+                <option value="delayed">Atrasado</option>
+                <option value="completed">Concluído</option>
+                <option value="urgent">Urgente</option>
+                <option value="on-hold">Em Espera</option>
+                <option value="waiting-docs">Aguardando Docs</option>
+                <option value="ready">Pronto</option>
               </select>
             </div>
-
+            
+            {/* Projeto */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <Building className="h-4 w-4 inline-block mr-1" />
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Projeto do Cliente
               </label>
               <select
-                value={formData.projectId || ''}
-                onChange={(e) => handleInputChange('projectId', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                name="projectId"
+                value={editedOrder.projectId || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Selecione um projeto</option>
                 {projects.map(project => (
@@ -243,145 +198,341 @@ const OrderModal: React.FC<OrderModalProps> = ({
                 ))}
               </select>
             </div>
-
+            
+            {/* Peso Total */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Peso Total (kg)
               </label>
-              <input
+              <input 
                 type="number"
-                step="0.01"
-                value={formData.totalWeight || ''}
-                onChange={(e) => handleInputChange('totalWeight', parseFloat(e.target.value) || 0)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="0.00"
+                step="0.1"
+                name="totalWeight"
+                value={editedOrder.totalWeight || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
+            
+            {/* Data de Início */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <Calendar className="h-4 w-4 inline-block mr-1" />
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Data de Início *
               </label>
-              <input
+              <input 
                 type="date"
-                value={formatDateForInput(formData.startDate)}
-                onChange={(e) => handleInputChange('startDate', e.target.value ? new Date(e.target.value).toISOString() : '')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
+                name="startDate"
+                value={editedOrder.startDate || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
+            
+            {/* Data de Entrega */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <Calendar className="h-4 w-4 inline-block mr-1" />
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Data de Entrega *
               </label>
-              <input
+              <input 
                 type="date"
-                value={formatDateForInput(formData.deliveryDate)}
-                onChange={(e) => handleInputChange('deliveryDate', e.target.value ? new Date(e.target.value).toISOString() : '')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
+                name="deliveryDate"
+                value={editedOrder.deliveryDate || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                <CheckCircle className="h-4 w-4 inline-block mr-1" />
+            
+            {/* Data de Conclusão */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
                 Data de Conclusão
               </label>
-              <input
+              <input 
                 type="date"
-                value={formatDateForInput(formData.completedDate)}
-                onChange={(e) => handleInputChange('completedDate', e.target.value ? new Date(e.target.value).toISOString() : null)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                name="completionDate"
+                value={editedOrder.completionDate || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Pode ser antes ou depois da data de entrega programada
-              </p>
             </div>
           </div>
-
-          <div className="mt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          
+          {/* Descrição */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
               Descrição
             </label>
-            <textarea
-              value={formData.description || ''}
-              onChange={(e) => handleInputChange('description', e.target.value)}
+            <textarea 
+              name="notes"
+              value={editedOrder.notes || ''}
+              onChange={handleChange}
               rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Descrição do pedido..."
             />
           </div>
-
-          <div className="mt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          
+          {/* Observações */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
               Observações
             </label>
-            <textarea
-              value={formData.notes || ''}
-              onChange={(e) => handleInputChange('notes', e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            <textarea 
+              name="observations"
+              value={editedOrder.observations || ''}
+              onChange={handleChange}
+              rows={2}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Observações adicionais..."
             />
           </div>
-
-          <div className="mt-6">
-            <label className="block text-sm font-medium text-gray-700 mb-3">
-              Checklist de Documentação
-            </label>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <label className="flex items-center">
+          
+          {/* Seção de Itens */}
+          <div className="mb-6 border border-gray-600 rounded-lg p-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-white flex items-center">
+                <span className="mr-2">📦</span> Itens do Pedido
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowItemsSection(!showItemsSection)}
+                className="text-gray-400 hover:text-white transition-colors text-sm"
+              >
+                {showItemsSection ? 'Ocultar' : 'Mostrar'}
+              </button>
+            </div>
+            
+            {showItemsSection && (
+              <>
+                {/* Lista de itens existentes */}
+                <div className="mb-4 max-h-64 overflow-y-auto bg-gray-700/50 rounded-lg p-2">
+                  {editedOrder.items && editedOrder.items.length > 0 ? (
+                    <div className="space-y-2">
+                      {editedOrder.items.map((item, index) => (
+                        <div 
+                          key={item.id || index} 
+                          className="bg-gray-700 border border-gray-600 rounded-lg p-3 flex flex-col"
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <div className="font-medium text-white">{item.code || `Item ${index + 1}`}</div>
+                              <div className="text-sm text-gray-300 truncate max-w-xs">{item.description}</div>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveItem(item.id)}
+                              className="text-red-400 hover:text-red-300 transition-colors"
+                              title="Remover item"
+                            >
+                              <Trash className="h-4 w-4" />
+                            </button>
+                          </div>
+                          
+                          <div className="grid grid-cols-3 gap-2 mt-2">
+                            <div>
+                              <div className="text-xs text-gray-400">Quantidade</div>
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantity || 1}
+                                onChange={(e) => handleItemChange(item.id, 'quantity', parseInt(e.target.value) || 1)}
+                                className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm text-white"
+                              />
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-400">Peso Unitário (kg)</div>
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={item.unitWeight || 0}
+                                onChange={(e) => handleItemChange(item.id, 'unitWeight', parseFloat(e.target.value) || 0)}
+                                className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm text-white"
+                              />
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-400">Progresso (%)</div>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={item.overallProgress || 0}
+                                onChange={(e) => handleItemChange(item.id, 'overallProgress', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
+                                className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm text-white"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-400">
+                      Nenhum item cadastrado para este pedido
+                    </div>
+                  )}
+                </div>
+                
+                {/* Formulário para adicionar novo item */}
+                <div className="p-3 bg-gray-700 rounded-lg mb-2">
+                  <div className="text-sm font-medium text-white mb-2">Adicionar Novo Item</div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <input
+                      type="text"
+                      placeholder="Código"
+                      value={newItem.code}
+                      onChange={e => setNewItem({...newItem, code: e.target.value})}
+                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Descrição"
+                      value={newItem.description}
+                      onChange={e => setNewItem({...newItem, description: e.target.value})}
+                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mb-2">
+                    <input
+                      type="number"
+                      placeholder="Quantidade"
+                      min="1"
+                      value={newItem.quantity}
+                      onChange={e => setNewItem({...newItem, quantity: parseInt(e.target.value) || 1})}
+                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Peso Unit. (kg)"
+                      step="0.1"
+                      value={newItem.unitWeight}
+                      onChange={e => setNewItem({...newItem, unitWeight: parseFloat(e.target.value) || 0})}
+                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Progresso (%)"
+                      min="0"
+                      max="100"
+                      value={newItem.overallProgress}
+                      onChange={e => setNewItem({...newItem, overallProgress: Math.min(100, Math.max(0, parseInt(e.target.value) || 0))})}
+                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddItem}
+                    disabled={!newItem.code}
+                    className={`w-full flex items-center justify-center gap-2 py-1.5 text-sm rounded
+                      ${newItem.code 
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                        : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Adicionar Item
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          
+          {/* Checklist de Documentação */}
+          <div className="mb-6">
+            <h3 className="text-lg font-medium text-white mb-3 flex items-center">
+              <span className="mr-2">📄</span> Checklist de Documentação
+            </h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="flex items-center">
                 <input
                   type="checkbox"
-                  checked={formData.checklist?.drawings || false}
-                  onChange={(e) => handleChecklistChange('drawings', e.target.checked)}
-                  className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  id="drawings"
+                  checked={editedOrder.documentation?.drawings || false}
+                  onChange={(e) => setEditedOrder({
+                    ...editedOrder,
+                    documentation: {
+                      ...(editedOrder.documentation || {}),
+                      drawings: e.target.checked
+                    }
+                  })}
+                  className="w-4 h-4 rounded text-blue-500 bg-gray-700 border-gray-500 focus:ring-blue-500 focus:ring-2"
                 />
-                <span className="text-sm text-gray-700">Desenhos</span>
-              </label>
-              
-              <label className="flex items-center">
+                <label htmlFor="drawings" className="ml-2 text-sm text-gray-300">
+                  Desenhos
+                </label>
+              </div>
+              <div className="flex items-center">
                 <input
                   type="checkbox"
-                  checked={formData.checklist?.inspectionTestPlan || false}
-                  onChange={(e) => handleChecklistChange('inspectionTestPlan', e.target.checked)}
-                  className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  id="inspectionPlan"
+                  checked={editedOrder.documentation?.inspectionPlan || false}
+                  onChange={(e) => setEditedOrder({
+                    ...editedOrder,
+                    documentation: {
+                      ...(editedOrder.documentation || {}),
+                      inspectionPlan: e.target.checked
+                    }
+                  })}
+                  className="w-4 h-4 rounded text-blue-500 bg-gray-700 border-gray-500 focus:ring-blue-500 focus:ring-2"
                 />
-                <span className="text-sm text-gray-700">Plano de Inspeção</span>
-              </label>
-              
-              <label className="flex items-center">
+                <label htmlFor="inspectionPlan" className="ml-2 text-sm text-gray-300">
+                  Plano de Inspeção
+                </label>
+              </div>
+              <div className="flex items-center">
                 <input
                   type="checkbox"
-                  checked={formData.checklist?.paintPlan || false}
-                  onChange={(e) => handleChecklistChange('paintPlan', e.target.checked)}
-                  className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  id="paintingPlan"
+                  checked={editedOrder.documentation?.paintingPlan || false}
+                  onChange={(e) => setEditedOrder({
+                    ...editedOrder,
+                    documentation: {
+                      ...(editedOrder.documentation || {}),
+                      paintingPlan: e.target.checked
+                    }
+                  })}
+                  className="w-4 h-4 rounded text-blue-500 bg-gray-700 border-gray-500 focus:ring-blue-500 focus:ring-2"
                 />
-                <span className="text-sm text-gray-700">Plano de Pintura</span>
-              </label>
+                <label htmlFor="paintingPlan" className="ml-2 text-sm text-gray-300">
+                  Plano de Pintura
+                </label>
+              </div>
             </div>
           </div>
-
-          <div className="mt-8 flex justify-end space-x-4">
+        </div>
+        
+        {/* Rodapé com ações */}
+        <div className="bg-gray-700 px-6 py-4 flex justify-between border-t border-gray-600">
+          <div>
             <button
-              type="button"
+              onClick={handleDelete}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors mr-2"
+            >
+              Excluir Pedido
+            </button>
+            {generateReport && (
+              <button
+                onClick={generateReport}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Gerar Relatório
+                </span>
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
               onClick={onClose}
-              className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors"
             >
               Cancelar
             </button>
             <button
-              type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              onClick={handleSave}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2"
             >
-              {order.id === 'new' ? 'Criar Pedido' : 'Salvar Alterações'}
+              <Save className="h-4 w-4" />
+              Salvar Alterações
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
