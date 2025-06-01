@@ -81,7 +81,12 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
 
   const statusInfo = getStatusInfo(order.status);
   const isOverdue = new Date(order.deliveryDate) < new Date();
-  const progress = Math.min(((order.items?.length || 0) / Math.max(order.items?.length || 1, 1)) * 100, 100);
+  
+  // Correção: Usar a propriedade progress diretamente se disponível, ou calcular baseado nos itens concluídos
+  const progress = order.progress !== undefined ? order.progress : 
+    (order.items && order.items.length > 0) ? 
+      order.items.reduce((acc, item) => acc + (item.overallProgress || 0), 0) / order.items.length : 
+      0;
 
   return (
     <div
