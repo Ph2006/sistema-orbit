@@ -13,136 +13,12 @@ import ManageOrdersModal from './ManageOrdersModal';
 import OrderModal from './OrderModal';
 import OrderItemsList from './OrderItemsList';
 import ManufacturingStages from './ManufacturingStages';
-import OccupationRateTab from './OccupationRateTab';
-import { format, isAfter, isBefore, addDays, isToday } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useSettingsStore } from '../store/settingsStore';
-import { jsPDF } from 'jspdf';
+import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { useNavigate } from 'react-router-dom';
-
-// Importar estilos CSS (adicione este import no seu projeto)
-import './KanbanStyles.css';
-
-// Correção da declaração do módulo jsPDF
-declare module 'jspdf' {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF;
-    lastAutoTable: { finalY: number };
-  }
-}
-
-const statusLegend = [
-  { status: 'in-progress', color: 'bg-orange-100/80', borderColor: 'border-orange-400', label: 'Em Processo' },
-  { status: 'delayed', color: 'bg-red-100/80', borderColor: 'border-red-400', label: 'Atrasado' },
-  { status: 'waiting-docs', color: 'bg-yellow-100/80', borderColor: 'border-yellow-400', label: 'Aguardando Validação de Documentação' },
-  { status: 'completed', color: 'bg-green-100/80', borderColor: 'border-green-400', label: 'Documentação Validada' },
-  { status: 'ready', color: 'bg-blue-100/80', borderColor: 'border-blue-400', label: 'Aguardando Embarque' },
-  { status: 'urgent', color: 'bg-purple-100/80', borderColor: 'border-purple-400', label: 'Pedido Urgente' },
-] as const;
-
-// Função utilitária para sanitizar dados do Firestore
-const sanitizeForFirestore = (obj: any): any => {
-  if (obj === null || obj === undefined) return null;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(item => sanitizeForFirestore(item));
-  
-  const sanitized: Record<string, any> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value === undefined) {
-      sanitized[key] = null;
-    } else if (typeof value === 'object' && value !== null) {
-      sanitized[key] = sanitizeForFirestore(value);
-    } else {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
-};
-
-// Função para exportar pedido para PDF
-const exportOrderToPDF = (order: Order): string => {
-  const doc = new jsPDF();
-  
-  // Configuração do cabeçalho
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.text('ROMANEIO DE EMBARQUE', 105, 30, { align: 'center' });
-  
-  // Linha divisória
-  doc.setLineWidth(0.5);
-  doc.line(20, 40, 190, 40);
-  
-  // Informações do pedido
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Pedido: #${order.orderNumber}`, 20, 55);
-  doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 120, 55);
-  doc.text(`Cliente: ${order.customer}`, 20, 70);
-  doc.text(`OS Interna: ${order.internalOrderNumber}`, 120, 70);
-  doc.text(`Data de Entrega: ${format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 85);
-  
-  // Preparação dos dados da tabela
-  const tableData = order.items?.map((item, index) => [
-    (index + 1).toString(),
-    item.code || '',
-    item.description || item.name || '',
-    (item.quantity || 0).toString(),
-    `${(item.unitWeight || 0).toFixed(3)} kg`,
-    `${((item.quantity || 0) * (item.unitWeight || 0)).toFixed(3)} kg`
-  ]) || [];
-  
-  // Criação da tabela
-  doc.autoTable({
-    head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
-    body: tableData,
-    startY: 100,
-    theme: 'grid',
-    styles: { 
-      fontSize: 10, 
-      cellPadding: 3, 
-      halign: 'center', 
-      valign: 'middle' 
-    },
-    headStyles: { 
-      fillColor: [52, 152, 219], 
-      textColor: 255, 
-      fontStyle: 'bold', 
-      halign: 'center' 
-    },
-    columnStyles: {
-      0: { halign: 'center', cellWidth: 15 },
-      1: { halign: 'center', cellWidth: 30 },
-      2: { halign: 'left', cellWidth: 60 },
-      3: { halign: 'center', cellWidth: 20 },
-      4: { halign: 'right', cellWidth: 25 },
-      5: { halign: 'right', cellWidth: 30 }
-    },
-    alternateRowStyles: { fillColor: [245, 245, 245] }
-  });
-  
-  const fileName = `romaneio_pedido_${order.orderNumber}_${format(new Date(), 'ddMMyyyy_HHmm')}.pdf`;
-  doc.save(fileName);
-  return fileName;
-};
-
-// Função para obter estatísticas mensais dos pedidos
-const getMonthlyOrderStats = (orders: Order[]) => {
-  const stats: Record<string, { count: number; totalWeight: number }> = {};
-  
-  orders.forEach(order => {
-    if (order.status === 'completed' || order.deleted) return;
-    
-    const month = format(new Date(order.deliveryDate), 'yyyy-MM');
-    if (!stats[month]) {
-      stats[month] = { count: 0, totalWeight: 0 };
-    }
-    stats[month].count += 1;
-    stats[month].totalWeight += order.totalWeight || 0;
-  });
-  
-  return stats;
-};
+import OccupationRateTab from './OccupationRateTab';
 
 const Kanban: React.FC = () => {
   // Estados principais
@@ -160,21 +36,33 @@ const Kanban: React.FC = () => {
   // Estados de filtros e busca
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  const [filterByCustomer, setFilterByCustomer] = useState<string[]>([]);
   const [filterByStatus, setFilterByStatus] = useState<string[]>([]);
+  const [filterByCustomer, setFilterByCustomer] = useState<string[]>([]);
   const [filterByProject, setFilterByProject] = useState<string[]>([]);
-  const [filterByDeadline, setFilterByDeadline] = useState<string>('all');
-  const [availableCustomers, setAvailableCustomers] = useState<string[]>([]);
-  const [availableProjects, setAvailableProjects] = useState<string[]>([]);
-  
-  // Estados de visualização
+  const [filterByDateRange, setFilterByDateRange] = useState<[Date | null, Date | null]>([null, null]);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [compactView, setCompactView] = useState(false);
   const [activeTab, setActiveTab] = useState<'kanban' | 'stages' | 'occupation'>('kanban');
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
-
-  // Hooks de stores
-  const { orders, subscribeToOrders, updateOrder, addOrder, deleteOrder } = useOrderStore();
+  
+  // Configurações para DnD
+  const mouseSensor = useSensor(MouseSensor, {
+    activationConstraint: {
+      distance: 10, // Pixel de distância para iniciar o drag
+    },
+  });
+  
+  const touchSensor = useSensor(TouchSensor, {
+    activationConstraint: {
+      delay: 250, // Atraso para iniciar o drag em touchscreens
+      tolerance: 5, // Tolerância em px para movimento durante o delay
+    },
+  });
+  
+  const sensors = useSensors(mouseSensor, touchSensor);
+  
+  // Stores
+  const { orders, updateOrder, deleteOrder, loadOrders, subscribeToOrders } = useOrderStore();
   const { columns, updateColumn, deleteColumn, subscribeToColumns, initializeDefaultColumns } = useColumnStore();
   const { projects, subscribeToProjects } = useProjectStore();
   const { customers, loadCustomers, subscribeToCustomers } = useCustomerStore();
@@ -206,215 +94,354 @@ const Kanban: React.FC = () => {
     };
     
     init();
-  }, [initializeDefaultColumns, subscribeToColumns, subscribeToOrders, subscribeToProjects]);
-
-  // Atualização de listas de clientes e projetos disponíveis
+  }, []);
+  
+  // Carregar clientes
   useEffect(() => {
-    const uniqueCustomers = [...new Set(orders.map(order => order.customer))];
-    setAvailableCustomers(uniqueCustomers.sort());
+    const loadData = async () => {
+      try {
+        await loadCustomers();
+        const unsubscribeCustomers = subscribeToCustomers();
+        return () => unsubscribeCustomers();
+      } catch (error) {
+        console.error("Erro ao carregar clientes:", error);
+      }
+    };
     
-    const projectIds = [...new Set(orders.filter(o => o.projectId).map(o => o.projectId))];
-    const projectNames = projectIds.map(id => {
-      const project = projects.find(p => p.id === id);
-      return project ? project.name : 'Projeto não encontrado';
+    loadData();
+  }, []);
+  
+  // Processamento de dados para exibição
+  const columnsWithOrders = React.useMemo(() => {
+    if (!columns || columns.length === 0) return [];
+    
+    return columns.map(column => {
+      // Filtra os pedidos para esta coluna
+      const columnOrders = orders
+        .filter(order => {
+          // Verificação básica de validade
+          if (!order || !order.id || !order.columnId) return false;
+          
+          // Filtro por coluna
+          if (order.columnId !== column.id) return false;
+          
+          // Aplicar filtros de busca
+          if (searchTerm && searchTerm.trim() !== '') {
+            const term = searchTerm.toLowerCase();
+            const matchesSearch = (
+              (order.orderNumber && order.orderNumber.toLowerCase().includes(term)) ||
+              (order.customer && order.customer.toLowerCase().includes(term)) ||
+              (order.internalOrderNumber && order.internalOrderNumber.toLowerCase().includes(term)) ||
+              (order.notes && order.notes.toLowerCase().includes(term))
+            );
+            if (!matchesSearch) return false;
+          }
+          
+          // Filtro por status
+          if (filterByStatus.length > 0 && order.status) {
+            if (!filterByStatus.includes(order.status)) return false;
+          }
+          
+          // Filtro por cliente
+          if (filterByCustomer.length > 0 && order.customer) {
+            if (!filterByCustomer.includes(order.customer)) return false;
+          }
+          
+          // Filtro por projeto
+          if (filterByProject.length > 0 && order.projectId) {
+            if (!filterByProject.includes(order.projectId)) return false;
+          }
+          
+          // Filtro por data de entrega
+          if (filterByDateRange[0] && filterByDateRange[1] && order.deliveryDate) {
+            const deliveryDate = new Date(order.deliveryDate);
+            if (deliveryDate < filterByDateRange[0] || deliveryDate > filterByDateRange[1]) return false;
+          }
+          
+          return true;
+        })
+        .sort((a, b) => {
+          // Ordenação das ordens dentro da coluna
+          // Por default, ordens urgentes primeiro, depois por data de entrega
+          if (a.status === 'urgent' && b.status !== 'urgent') return -1;
+          if (a.status !== 'urgent' && b.status === 'urgent') return 1;
+          
+          if (a.deliveryDate && b.deliveryDate) {
+            return new Date(a.deliveryDate).getTime() - new Date(b.deliveryDate).getTime();
+          }
+          
+          return 0;
+        });
+      
+      return {
+        ...column,
+        orders: columnOrders
+      };
     });
-    setAvailableProjects(projectNames.sort());
-  }, [orders, projects]);
-
-  // Carregamento de clientes
-  useEffect(() => {
-    loadCustomers();
-    const unsubscribe = subscribeToCustomers();
-    return () => unsubscribe();
-  }, [loadCustomers, subscribeToCustomers]);
-
-  // Configuração de sensores para drag and drop
-  const sensors = useSensors(
-    useSensor(MouseSensor, { 
-      activationConstraint: { distance: 5 } 
-    }),
-    useSensor(TouchSensor, { 
-      activationConstraint: { delay: 100, tolerance: 5 } 
-    })
-  );
-
-  // Handlers de drag and drop
-  const handleDragStart = (event: DragEndEvent) => {
+  }, [columns, orders, searchTerm, filterByStatus, filterByCustomer, filterByProject, filterByDateRange]);
+  
+  // Lista de todos os pedidos filtrados (para exportação)
+  const filteredOrders = React.useMemo(() => {
+    return columnsWithOrders.flatMap(col => col.orders || []);
+  }, [columnsWithOrders]);
+  
+  // Listas para os filtros dropdown
+  const availableCustomers = React.useMemo(() => {
+    return [...new Set(orders
+      .filter(order => order && order.customer)
+      .map(order => order.customer as string)
+    )].sort();
+  }, [orders]);
+  
+  const availableProjects = React.useMemo(() => {
+    return projects
+      .filter(project => project && project.id)
+      .map(project => project.id);
+  }, [projects]);
+  
+  // Status disponíveis para filtro
+  const statusLegend = [
+    { status: 'waiting', label: 'Aguardando', color: 'bg-gray-400', borderColor: 'border-gray-500' },
+    { status: 'in-progress', label: 'Em Processo', color: 'bg-blue-400', borderColor: 'border-blue-500' },
+    { status: 'delayed', label: 'Atrasado', color: 'bg-red-400', borderColor: 'border-red-500' },
+    { status: 'completed', label: 'Concluído', color: 'bg-emerald-400', borderColor: 'border-emerald-500' },
+    { status: 'urgent', label: 'Urgente', color: 'bg-orange-400', borderColor: 'border-orange-500' },
+    { status: 'on-hold', label: 'Em Espera', color: 'bg-amber-400', borderColor: 'border-amber-500' },
+    { status: 'waiting-docs', label: 'Aguardando Docs', color: 'bg-purple-400', borderColor: 'border-purple-500' },
+    { status: 'ready', label: 'Pronto', color: 'bg-indigo-400', borderColor: 'border-indigo-500' },
+  ];
+  
+  // Handlers
+  const handleDragStart = (event: any) => {
     const { active } = event;
-    const draggedOrder = orders.find(order => order.id === active.id);
+    setActiveId(active.id);
     
+    const draggedOrder = orders.find(order => order.id === active.id);
     if (draggedOrder) {
       setDraggedOrder(draggedOrder);
-      setActiveId(active.id as string);
     }
   };
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    try {
-      const { active, over } = event;
+  
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      // Id do pedido sendo movido
+      const orderId = String(active.id);
+      // Id da coluna de destino
+      const targetColumnId = String(over.id);
       
-      if (!over || !active) {
-        setDraggedOrder(null);
-        setActiveId(null);
-        return;
+      // Encontra o pedido e atualiza sua coluna
+      const order = orders.find(o => o.id === orderId);
+      
+      if (order && order.columnId !== targetColumnId) {
+        try {
+          updateOrder({
+            ...order,
+            columnId: targetColumnId,
+            updatedAt: new Date().toISOString()
+          });
+        } catch (error) {
+          console.error('Erro ao mover pedido:', error);
+        }
       }
-
-      const activeOrderId = active.id as string;
-      const overColumnId = over.id as string;
-      const order = orders.find(o => o.id === activeOrderId);
-
-      if (!order || order.columnId === overColumnId) {
-        setDraggedOrder(null);
-        setActiveId(null);
-        return;
+    }
+    
+    setActiveId(null);
+    setDraggedOrder(null);
+  };
+  
+  const handleDeleteColumn = async (column: Column) => {
+    if (!column) return;
+    
+    if (window.confirm(`Tem certeza que deseja excluir a coluna "${column.title}"?\n\nTodos os pedidos nesta coluna serão movidos para a primeira coluna.`)) {
+      try {
+        // Encontrar coluna de fallback (primeira) para mover os pedidos
+        const fallbackColumn = columns.find(col => col.id !== column.id);
+        
+        if (!fallbackColumn) {
+          throw new Error('É necessário ter pelo menos uma coluna no quadro.');
+        }
+        
+        // Mover pedidos para a coluna de fallback
+        const columnOrders = orders.filter(order => order.columnId === column.id);
+        
+        for (const order of columnOrders) {
+          await updateOrder({
+            ...order,
+            columnId: fallbackColumn.id,
+            updatedAt: new Date().toISOString()
+          });
+        }
+        
+        // Excluir a coluna
+        await deleteColumn(column.id);
+        
+      } catch (error) {
+        console.error('Erro ao excluir coluna:', error);
+        alert(`Erro ao excluir coluna: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
       }
-
-      const targetColumn = columns.find(col => col.id === overColumnId);
-      if (!targetColumn) {
-        setDraggedOrder(null);
-        setActiveId(null);
-        return;
-      }
-
-      const isExpedited = targetColumn.title.toLowerCase().includes('expedi');
-      const updatedOrder = {
-        ...order,
-        columnId: overColumnId,
-        status: isExpedited ? 'waiting-docs' : order.status,
-        lastExportDate: isExpedited ? new Date().toISOString() : order.lastExportDate
-      };
-
-      await updateOrder(sanitizeForFirestore(updatedOrder));
-    } catch (error) {
-      console.error('Erro ao mover pedido:', error);
-      alert('Erro ao mover o pedido. Por favor, tente novamente.');
-    } finally {
-      setDraggedOrder(null);
-      setActiveId(null);
     }
   };
-
-  // Handlers de ações
+  
+  const handleUpdateOrder = (order: Order) => {
+    if (!order || !order.id) return;
+    
+    try {
+      updateOrder({
+        ...order,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Erro ao atualizar pedido:', error);
+    }
+  };
+  
   const handleOrderClick = (order: Order) => {
+    if (isManageOrdersModalOpen) {
+      // Modo de seleção de pedidos
+      const isSelected = selectedOrders.includes(order.id);
+      
+      if (isSelected) {
+        setSelectedOrders(selectedOrders.filter(id => id !== order.id));
+      } else {
+        setSelectedOrders([...selectedOrders, order.id]);
+      }
+    } else {
+      // Modo normal - abre o modal de detalhes do pedido
+      setSelectedOrder(order);
+      setIsOrderModalOpen(true);
+    }
+  };
+  
+  const handleQualityControlClick = (order: Order) => {
     setSelectedOrder(order);
     setIsOrderItemsListOpen(true);
   };
-
-  const handleUpdateOrder = async (updatedOrder: Order) => {
-    try {
-      await updateOrder(sanitizeForFirestore(updatedOrder));
-    } catch (error) {
-      console.error('Erro ao atualizar pedido:', error);
-      alert('Erro ao atualizar pedido. Por favor, tente novamente.');
-    }
-  };
-
-  const handleQualityControlClick = (order: Order) => {
-    navigate(`/quality?orderId=${order.id}`);
-  };
-
-  // Função de filtros
-  const getFilteredOrders = () => {
-    return orders.filter(order => {
-      if (order.deleted) return false;
-      
-      // Filtro por status
-      if (filterByStatus.length > 0 && !filterByStatus.includes(order.status)) return false;
-      
-      // Filtro por cliente
-      if (filterByCustomer.length > 0 && !filterByCustomer.includes(order.customer)) return false;
-      
-      // Filtro por projeto
-      if (filterByProject.length > 0 && !filterByProject.some(projectName => {
-        const project = projects.find(p => p.name === projectName);
-        return project && project.id === order.projectId;
-      })) return false;
-
-      // Filtro por prazo
-      if (filterByDeadline !== 'all') {
-        const deliveryDate = new Date(order.deliveryDate);
-        const today = new Date();
-        const weekFromNow = addDays(today, 7);
-        const monthFromNow = addDays(today, 30);
-
-        switch (filterByDeadline) {
-          case 'today':
-            if (!isToday(deliveryDate)) return false;
-            break;
-          case 'week':
-            if (isAfter(deliveryDate, weekFromNow)) return false;
-            break;
-          case 'month':
-            if (isAfter(deliveryDate, monthFromNow)) return false;
-            break;
-          case 'overdue':
-            if (!isBefore(deliveryDate, today)) return false;
-            break;
-        }
-      }
-      
-      // Filtro por termo de busca
-      const searchLower = searchTerm.toLowerCase().trim();
-      if (searchLower) {
-        return (
-          order.orderNumber.toLowerCase().includes(searchLower) ||
-          order.customer.toLowerCase().includes(searchLower) ||
-          order.internalOrderNumber.toLowerCase().includes(searchLower)
-        );
-      }
-      
-      return true;
-    });
-  };
-
-  const filteredOrders = getFilteredOrders();
   
-  // Organização das colunas com pedidos
-  const columnsWithOrders = columns.map(column => {
-    let ordersForColumn: Order[] = [];
-    
-    if (column.title === 'Pedidos em processo') {
-      ordersForColumn = filteredOrders
-        .filter(order => order.status === 'in-progress' && !order.deleted)
-        .sort((a, b) => {
-          const dateA = new Date(a.deliveryDate);
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
-    } else if (column.title === 'Pedidos expedidos') {
-      ordersForColumn = filteredOrders
-        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
-        .sort((a, b) => {
-          const dateA = new Date(a.deliveryDate);
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
-    } else {
-      ordersForColumn = filteredOrders
-        .filter(order => order.columnId === column.id && !order.deleted)
-        .sort((a, b) => {
-          const dateA = new Date(a.deliveryDate);
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
-    }
-    
-    return { 
-      ...column, 
-      orders: ordersForColumn 
-    };
-  });
-
-  // Função para limpar todos os filtros
-  const clearAllFilters = () => {
-    setSearchTerm('');
-    setFilterByCustomer([]);
+  const clearFilters = () => {
     setFilterByStatus([]);
+    setFilterByCustomer([]);
     setFilterByProject([]);
-    setFilterByDeadline('all');
+    setFilterByDateRange([null, null]);
+    setSearchTerm('');
+    setFilterMenuOpen(false);
   };
-
-  // Estados de loading e erro
+  
+  const exportPDF = () => {
+    // Cria uma nova instância de jsPDF
+    const doc = new jsPDF();
+    
+    // Gera um relatório simples
+    try {
+      doc.setFontSize(18);
+      doc.text('Relatório de Pedidos', 20, 20);
+      
+      doc.setFontSize(12);
+      doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 40);
+      doc.text(`Total de pedidos: ${filteredOrders.length}`, 20, 50);
+      
+      const tableData = filteredOrders.map(order => [
+        order.orderNumber,
+        order.customer,
+        order.internalOrderNumber,
+        format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }),
+        statusLegend.find(s => s.status === order.status)?.label || order.status,
+        `${order.progress || 0}%`
+      ]);
+      
+      doc.autoTable({
+        head: [['Pedido', 'Cliente', 'OS Interna', 'Entrega', 'Status', 'Progresso']],
+        body: tableData,
+        startY: 60,
+        theme: 'grid',
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [52, 152, 219] },
+        alternateRowStyles: { fillColor: [245, 245, 245] }
+      });
+      
+      doc.save('relatorio-pedidos.pdf');
+      
+    } catch (error) {
+      console.error('Erro ao gerar PDF:', error);
+      alert('Erro ao gerar PDF. Verifique o console para mais detalhes.');
+    }
+  };
+  
+  const generateReportForOrder = (order: Order) => {
+    if (!order) return;
+    
+    try {
+      const doc = new jsPDF();
+      
+      doc.setFontSize(16);
+      doc.text(`Relatório de Pedido: #${order.orderNumber}`, 20, 20);
+      
+      doc.setFontSize(10);
+      doc.text(`Cliente: ${order.customer || 'Não informado'}`, 20, 35);
+      doc.text(`OS Interna: ${order.internalOrderNumber || 'Não informado'}`, 20, 42);
+      
+      if (order.deliveryDate) {
+        doc.text(`Data de Entrega: ${format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 49);
+      }
+      
+      doc.text(`Status: ${statusLegend.find(s => s.status === order.status)?.label || order.status || 'Não definido'}`, 20, 56);
+      doc.text(`Progresso Geral: ${order.progress || 0}%`, 20, 63);
+      
+      if (order.totalWeight) {
+        doc.text(`Peso Total: ${order.totalWeight.toFixed(1)} kg`, 20, 70);
+      }
+      
+      // Tabela de itens
+      if (order.items && order.items.length > 0) {
+        doc.setFontSize(14);
+        doc.text('Itens do Pedido', 20, 85);
+        
+        const tableData = order.items.map((item, index) => [
+          index + 1,
+          item.code || 'N/A',
+          item.description || 'Sem descrição',
+          `${item.quantity || 0}`,
+          `${item.unitWeight?.toFixed(1) || 0} kg`,
+          `${((item.unitWeight || 0) * (item.quantity || 0)).toFixed(1)} kg`
+        ]);
+        
+        doc.autoTable({
+          head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
+          body: tableData,
+          startY: 100,
+          theme: 'grid',
+          styles: { 
+            fontSize: 10, 
+            cellPadding: 3, 
+            halign: 'center', 
+            valign: 'middle' 
+          },
+          headStyles: { 
+            fillColor: [52, 152, 219], 
+            textColor: 255, 
+            fontStyle: 'bold', 
+            halign: 'center' 
+          },
+          columnStyles: {
+            0: { halign: 'center', cellWidth: 15 },
+            1: { halign: 'center', cellWidth: 30 },
+            2: { halign: 'left', cellWidth: 60 },
+            3: { halign: 'center', cellWidth: 20 },
+            4: { halign: 'right', cellWidth: 25 },
+            5: { halign: 'right', cellWidth: 25 }
+          }
+        });
+      }
+      
+      doc.save(`pedido-${order.orderNumber}.pdf`);
+      
+    } catch (error) {
+      console.error('Erro ao gerar relatório do pedido:', error);
+      alert('Erro ao gerar relatório. Verifique o console para mais detalhes.');
+    }
+  };
+  
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
@@ -444,11 +471,11 @@ const Kanban: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex flex-row w-full h-full">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-900 to-gray-900 flex flex-row w-full h-full">
       <div className="flex-1 overflow-x-auto">
         {/* Header */}
         <div className="max-w-[2000px] mx-auto mb-6 p-4">
-          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50 shadow-2xl">
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/70 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50 shadow-2xl">
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
               <h1 className="text-2xl font-bold text-white">Quadro de Produção</h1>
               <div className="flex gap-2">
@@ -586,35 +613,28 @@ const Kanban: React.FC = () => {
                   >
                     {availableProjects.map(project => (
                       <option key={project} value={project} className="py-1">
-                        {project}
+                        {projects.find(p => p.id === project)?.name || project}
                       </option>
                     ))}
                   </select>
                 </div>
-
+                
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">Prazo de Entrega</label>
-                  <select
-                    value={filterByDeadline}
-                    onChange={(e) => setFilterByDeadline(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Exportar</label>
+                  <button
+                    onClick={exportPDF}
+                    className="w-full mb-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2 justify-center"
                   >
-                    <option value="all">Todos</option>
-                    <option value="today">Hoje</option>
-                    <option value="week">Esta Semana</option>
-                    <option value="month">Este Mês</option>
-                    <option value="overdue">Atrasados</option>
-                  </select>
+                    <Download className="h-4 w-4" />
+                    Exportar PDF
+                  </button>
+                  <button
+                    onClick={clearFilters}
+                    className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                  >
+                    Limpar Filtros
+                  </button>
                 </div>
-              </div>
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  onClick={clearAllFilters}
-                  className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
-                >
-                  Limpar Filtros
-                </button>
               </div>
             </div>
           )}
@@ -639,16 +659,14 @@ const Kanban: React.FC = () => {
                       setIsColumnModalOpen(true);
                     }}
                     onDelete={() => {
-                      if (confirm(`Tem certeza que deseja excluir a coluna "${column.title}"?`)) {
-                        deleteColumn(column.id);
-                      }
+                      handleDeleteColumn(column);
                     }}
                     onOrderClick={handleOrderClick}
                     onUpdateOrder={handleUpdateOrder}
                     onQualityControlClick={handleQualityControlClick}
                     highlightTerm={searchTerm}
                     compactView={compactView}
-                    isManagingOrders={false}
+                    isManagingOrders={isManageOrdersModalOpen}
                     selectedOrders={selectedOrders}
                     customers={customers}
                     expandedCards={expandedCards}
@@ -656,29 +674,25 @@ const Kanban: React.FC = () => {
                   />
                 ))}
                 
-                {/* Botão para adicionar nova coluna */}
-                <div className="flex-shrink-0 w-80">
+                <div className="flex-shrink-0 w-80 h-[calc(100vh-240px)] flex items-center justify-center">
                   <button
                     onClick={() => {
                       setSelectedColumn(null);
                       setIsColumnModalOpen(true);
                     }}
-                    className="w-full h-32 bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm border-2 border-dashed border-gray-600/50 rounded-xl hover:border-blue-500/50 hover:bg-gray-700/30 transition-all duration-300 flex flex-col items-center justify-center text-gray-400 hover:text-blue-400 group"
+                    className="w-60 h-60 rounded-lg border-2 border-gray-700 border-dashed text-gray-500 hover:text-gray-400 hover:border-gray-600 flex flex-col items-center justify-center transition-all duration-200"
                   >
-                    <div className="text-4xl mb-2 group-hover:scale-110 transition-transform duration-300">
-                      <Plus className="h-12 w-12" />
-                    </div>
-                    <span className="text-sm font-medium">Adicionar Coluna</span>
+                    <Plus className="h-10 w-10 mb-2" />
+                    <span className="text-sm font-medium">Nova Coluna</span>
                   </button>
                 </div>
               </div>
               
-              {/* Overlay de drag melhorado */}
               <DragOverlay>
-                {draggedOrder && (
-                  <div className="dragging-overlay transform rotate-3 scale-105">
-                    <KanbanCard
-                      order={draggedOrder}
+                {draggedOrder ? (
+                  <div className="w-80">
+                    <KanbanCard 
+                      order={draggedOrder} 
                       isManaging={false}
                       isSelected={false}
                       highlight={false}
@@ -687,7 +701,7 @@ const Kanban: React.FC = () => {
                       projects={projects}
                     />
                   </div>
-                )}
+                ) : null}
               </DragOverlay>
             </DndContext>
           )}
@@ -716,88 +730,88 @@ const Kanban: React.FC = () => {
             onUpdateOrder={handleUpdateOrder}
           />
         )}
-
-        {/* Modal de gerenciamento de pedidos */}
-        {isManageOrdersModalOpen && (
-          <ManageOrdersModal
-            isOpen={isManageOrdersModalOpen}
-            onClose={() => setIsManageOrdersModalOpen(false)}
-            orders={orders}
-            onUpdateOrder={handleUpdateOrder}
-            onDeleteOrder={deleteOrder}
-          />
-        )}
-
-        {/* Modal de pedido */}
-        {isOrderModalOpen && (
+        
+        {/* Modal de detalhes do pedido */}
+        {isOrderModalOpen && selectedOrder && (
           <OrderModal
-            isOpen={isOrderModalOpen}
+            order={selectedOrder}
             onClose={() => {
               setIsOrderModalOpen(false);
               setSelectedOrder(null);
             }}
-            order={selectedOrder}
-            onSave={handleUpdateOrder}
+            onUpdateOrder={handleUpdateOrder}
+            onDeleteOrder={deleteOrder}
+            generateReport={() => generateReportForOrder(selectedOrder)}
+            customers={customers}
+            projects={projects}
           />
         )}
-
+        
         {/* Modal de coluna */}
         {isColumnModalOpen && (
           <ColumnModal
-            isOpen={isColumnModalOpen}
+            column={selectedColumn}
             onClose={() => {
               setIsColumnModalOpen(false);
               setSelectedColumn(null);
             }}
-            column={selectedColumn}
-            onSave={async (columnData) => {
-              try {
-                if (selectedColumn) {
-                  await updateColumn({ ...selectedColumn, ...columnData });
-                } else {
-                  // Lógica para criar nova coluna (você pode implementar no store)
-                  console.log('Criar nova coluna:', columnData);
-                }
-                setIsColumnModalOpen(false);
-                setSelectedColumn(null);
-              } catch (error) {
-                console.error('Erro ao salvar coluna:', error);
-                alert('Erro ao salvar coluna. Tente novamente.');
-              }
+            onUpdateColumn={updateColumn}
+          />
+        )}
+        
+        {/* Modal de gerenciamento de pedidos */}
+        {isManageOrdersModalOpen && (
+          <ManageOrdersModal
+            orders={orders}
+            selectedOrderIds={selectedOrders}
+            setSelectedOrderIds={setSelectedOrders}
+            onClose={() => {
+              setIsManageOrdersModalOpen(false);
+              setSelectedOrders([]);
             }}
+            onUpdateOrder={handleUpdateOrder}
+            onDeleteOrder={deleteOrder}
           />
         )}
       </div>
       
-      {/* Sidebar de resumo - MANTIDA COMO ESTAVA */}
-      <div className="hidden lg:block w-72 min-w-[260px] max-w-xs bg-gray-900/80 border-l border-gray-800 p-4 text-white sticky top-0 h-[calc(100vh-64px)] overflow-y-auto scrollbar-thin">
-        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-          <Calendar className="h-5 w-5 text-blue-400" />
-          Resumo de Entregas
-        </h3>
-        
-        <div className="space-y-3">
-          {Object.entries(getMonthlyOrderStats(orders))
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([month, data]) => (
-              <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col hover:bg-gray-700/50 transition-colors">
-                <span className="font-semibold text-blue-300">
-                  {format(new Date(month + '-01'), 'MMMM/yyyy', { locale: ptBR })}
-                </span>
-                <span className="text-sm mt-1">
-                  Pedidos: <span className="font-bold text-orange-400">{data.count}</span>
-                </span>
-                <span className="text-sm">
-                  Peso pendente: <span className="font-bold text-green-400">
-                    {data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg
-                  </span>
+      {/* Barra lateral de informações */}
+      <div className="hidden lg:block w-80 bg-gray-900/70 backdrop-blur-sm border-l border-gray-800/50 overflow-y-auto h-screen p-6">
+        <div className="mb-6">
+          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+            <Clipboard className="h-5 w-5 text-blue-400" />
+            Resumo do Quadro
+          </h2>
+          
+          <div className="space-y-4">
+            <div className="rounded-lg bg-gray-800/70 border border-gray-700/50 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm text-gray-400">Total de Pedidos</span>
+                <span className="text-lg font-semibold text-white">{filteredOrders.length}</span>
+              </div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm text-gray-400">Peso Total</span>
+                <span className="text-lg font-semibold text-white">
+                  {filteredOrders.reduce((total, order) => total + (order.totalWeight || 0), 0).toFixed(1)} kg
                 </span>
               </div>
-            ))}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-400">Progresso Médio</span>
+                <span className="text-lg font-semibold text-white">
+                  {filteredOrders.length > 0
+                    ? Math.round(
+                        filteredOrders.reduce((total, order) => total + (order.progress || 0), 0) /
+                          filteredOrders.length
+                      )
+                    : 0}%
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Legenda de status */}
-        <div className="mt-6">
+        <div className="mb-6">
           <h4 className="text-md font-semibold mb-3 flex items-center gap-2">
             <Flag className="h-4 w-4 text-purple-400" />
             Legenda de Status
@@ -819,120 +833,55 @@ const Kanban: React.FC = () => {
             Estatísticas
           </h4>
           <div className="space-y-3">
-            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
-              <span className="text-gray-400">Total de pedidos:</span>
-              <span className="font-bold text-blue-400">{filteredOrders.length}</span>
-            </div>
-            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
-              <span className="text-gray-400">Em processo:</span>
-              <span className="font-bold text-orange-400">
-                {filteredOrders.filter(o => o.status === 'in-progress').length}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
-              <span className="text-gray-400">Concluídos:</span>
-              <span className="font-bold text-green-400">
-                {filteredOrders.filter(o => o.status === 'completed').length}
-              </span>
-            </div>
-            <div className="flex justify-between text-sm p-2 bg-gray-800/50 rounded-lg">
-              <span className="text-gray-400">Atrasados:</span>
-              <span className="font-bold text-red-400">
-                {filteredOrders.filter(o => {
-                  const deliveryDate = new Date(o.deliveryDate);
-                  const today = new Date();
-                  return isBefore(deliveryDate, today) && o.status !== 'completed';
-                }).length}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Progresso geral */}
-        <div className="mt-6">
-          <h4 className="text-md font-semibold mb-3">Progresso Geral</h4>
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs text-gray-400">
-              <span>Média de conclusão</span>
-              <span>
-                {filteredOrders.length > 0 
-                  ? Math.round(
-                      filteredOrders.reduce((total, order) => total + (order.progress || 0), 0) / filteredOrders.length
-                    )
-                  : 0
-                }%
-              </span>
-            </div>
-            <div className="w-full bg-gray-700 rounded-full h-3 border border-gray-600">
-              <div 
-                className="h-3 rounded-full bg-gradient-to-r from-blue-500 to-green-500 transition-all duration-500"
-                style={{ 
-                  width: `${
-                    filteredOrders.length > 0 
-                      ? Math.round(
-                          filteredOrders.reduce((total, order) => total + (order.progress || 0), 0) / filteredOrders.length
-                        )
-                      : 0
-                  }%` 
-                }}
-              />
+            <div className="bg-gray-800/70 rounded-lg border border-gray-700/50 p-3">
+              <div className="text-sm text-gray-400 mb-1.5">Status dos Pedidos</div>
+              <div className="h-8 rounded-md overflow-hidden flex">
+                {statusLegend.map(status => {
+                  const count = filteredOrders.filter(o => o.status === status.status).length;
+                  const percentage = (count / filteredOrders.length) * 100 || 0;
+                  
+                  if (percentage === 0) return null;
+                  
+                  return (
+                    <div 
+                      key={status.status}
+                      className={`${status.color} border-r border-gray-800 last:border-0`}
+                      style={{ width: `${percentage}%` }}
+                      title={`${status.label}: ${count} pedidos (${percentage.toFixed(1)}%)`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {statusLegend.map(status => {
+                  const count = filteredOrders.filter(o => o.status === status.status).length;
+                  if (count === 0) return null;
+                  
+                  return (
+                    <div key={status.status} className="text-xs text-gray-300 flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded-full ${status.color}`}></div>
+                      {count}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Exportação rápida */}
-        <div className="mt-6">
           <button
-            onClick={() => {
-              try {
-                // Função para exportar relatório geral
-                const doc = new jsPDF();
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(16);
-                doc.text('Relatório de Produção', 105, 20, { align: 'center' });
-                
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(12);
-                doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 40);
-                doc.text(`Total de pedidos: ${filteredOrders.length}`, 20, 50);
-                
-                const tableData = filteredOrders.map(order => [
-                  order.orderNumber,
-                  order.customer,
-                  order.internalOrderNumber,
-                  format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }),
-                  statusLegend.find(s => s.status === order.status)?.label || order.status,
-                  `${order.progress || 0}%`
-                ]);
-                
-                doc.autoTable({
-                  head: [['Pedido', 'Cliente', 'OS Interna', 'Entrega', 'Status', 'Progresso']],
-                  body: tableData,
-                  startY: 60,
-                  theme: 'grid',
-                  styles: { fontSize: 9 },
-                  headStyles: { fillColor: [52, 152, 219] },
-                  alternateRowStyles: { fillColor: [245, 245, 245] }
-                });
-                
-                doc.save(`relatorio_producao_${format(new Date(), 'ddMMyyyy_HHmm')}.pdf`);
-              } catch (error) {
-                console.error('Erro ao gerar relatório:', error);
-                alert('Erro ao gerar relatório. Tente novamente.');
-              }
-            }}
-            className="w-full px-4 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-lg transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-green-500/25 hover:shadow-green-500/40 font-medium"
+            onClick={exportPDF}
+            className="w-full mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
           >
             <Download className="h-4 w-4" />
             Exportar Relatório
           </button>
         </div>
-
-        {/* Ações rápidas */}
-        <div className="mt-6 space-y-2">
-          <h4 className="text-md font-semibold mb-3">Ações Rápidas</h4>
+        
+        <div className="mt-6 pt-6 border-t border-gray-800/50 space-y-3">
           <button
-            onClick={() => setIsManageOrdersModalOpen(true)}
+            onClick={() => {
+              setIsManageOrdersModalOpen(true);
+            }}
             className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm flex items-center justify-center gap-2"
           >
             <Clipboard className="h-4 w-4" />
