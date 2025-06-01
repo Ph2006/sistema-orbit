@@ -47,47 +47,47 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   const getColumnTheme = () => {
     if (column.title.toLowerCase().includes('processo')) {
       return {
-        borderColor: 'border-blue-200',
-        headerBg: 'bg-gradient-to-r from-slate-100 to-slate-50',
-        headerBorder: 'border-blue-300',
-        glowColor: 'shadow-blue-100',
-        iconColor: 'text-blue-600',
-        accentColor: 'blue-600',
-        dotColor: 'bg-blue-500',
-        textColor: 'text-slate-700'
+        borderColor: 'border-blue-700',
+        headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+        headerBorder: 'border-blue-700/50',
+        glowColor: 'shadow-blue-900/25',
+        iconColor: 'text-blue-400',
+        accentColor: 'blue-500',
+        dotColor: 'bg-blue-400',
+        textColor: 'text-gray-200'
       };
     } else if (column.title.toLowerCase().includes('expedi')) {
       return {
-        borderColor: 'border-emerald-200',
-        headerBg: 'bg-gradient-to-r from-emerald-50 to-slate-50',
-        headerBorder: 'border-emerald-300',
-        glowColor: 'shadow-emerald-100',
-        iconColor: 'text-emerald-600',
-        accentColor: 'emerald-600',
-        dotColor: 'bg-emerald-500',
-        textColor: 'text-slate-700'
+        borderColor: 'border-emerald-700',
+        headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+        headerBorder: 'border-emerald-700/50',
+        glowColor: 'shadow-emerald-900/25',
+        iconColor: 'text-emerald-400',
+        accentColor: 'emerald-500',
+        dotColor: 'bg-emerald-400',
+        textColor: 'text-gray-200'
       };
     } else if (column.title.toLowerCase().includes('paralisa')) {
       return {
-        borderColor: 'border-red-200',
-        headerBg: 'bg-gradient-to-r from-red-50 to-slate-50',
-        headerBorder: 'border-red-300',
-        glowColor: 'shadow-red-100',
-        iconColor: 'text-red-600',
-        accentColor: 'red-600',
-        dotColor: 'bg-red-500',
-        textColor: 'text-slate-700'
+        borderColor: 'border-red-700',
+        headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+        headerBorder: 'border-red-700/50',
+        glowColor: 'shadow-red-900/25',
+        iconColor: 'text-red-400',
+        accentColor: 'red-500',
+        dotColor: 'bg-red-400',
+        textColor: 'text-gray-200'
       };
     }
     return {
-      borderColor: 'border-slate-200',
-      headerBg: 'bg-gradient-to-r from-slate-100 to-slate-50',
-      headerBorder: 'border-slate-300',
-      glowColor: 'shadow-slate-100',
-      iconColor: 'text-slate-600',
-      accentColor: 'slate-600',
-      dotColor: 'bg-slate-500',
-      textColor: 'text-slate-700'
+      borderColor: 'border-gray-700',
+      headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+      headerBorder: 'border-gray-700',
+      glowColor: 'shadow-gray-900/25',
+      iconColor: 'text-gray-400',
+      accentColor: 'blue-500',
+      dotColor: 'bg-gray-400',
+      textColor: 'text-gray-200'
     };
   };
 
@@ -98,8 +98,8 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
       ref={setNodeRef}
       className={`
         flex-shrink-0 w-80 h-[calc(100vh-180px)] flex flex-col
-        bg-white rounded-lg shadow-sm border-2 transition-all duration-200
-        ${isOver ? 'ring-2 ring-blue-300 shadow-md scale-[1.01] ' + theme.glowColor : theme.glowColor}
+        bg-gray-800 rounded-lg shadow-md border-2 transition-all duration-200
+        ${isOver ? 'ring-2 ring-blue-500 shadow-lg scale-[1.01] ' + theme.glowColor : theme.glowColor}
         ${theme.borderColor}
       `}
     >
@@ -115,7 +115,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
             </h3>
             <span className={`
               inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold
-              bg-slate-100 ${theme.textColor} border border-slate-200
+              bg-gray-700 ${theme.textColor} border border-gray-600
               min-w-[2.5rem] justify-center
             `}>
               {safeOrders.length}
@@ -126,7 +126,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
             <button
               onClick={onEdit}
               className={`
-                p-1.5 text-slate-400 hover:${theme.iconColor} hover:bg-slate-100 
+                p-1.5 text-gray-400 hover:${theme.iconColor} hover:bg-gray-700 
                 rounded-md transition-all duration-200
               `}
               title="Configurar coluna"
@@ -135,7 +135,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
             </button>
             <button
               onClick={onDelete}
-              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all duration-200"
+              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-900/50 rounded-md transition-all duration-200"
               title="Excluir coluna"
             >
               <Trash2 className="h-4 w-4" />
@@ -146,13 +146,13 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
         {/* Estatísticas rápidas no header */}
         {safeOrders.length > 0 && (
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <div className="flex items-center space-x-2 bg-white/50 rounded-md p-2 border border-slate-200/50">
-              <Package className="h-3 w-3 text-slate-500" />
-              <span className="text-slate-600 font-medium">{safeOrders.length} pedidos</span>
+            <div className="flex items-center space-x-2 bg-gray-700/50 rounded-md p-2 border border-gray-600/50">
+              <Package className="h-3 w-3 text-gray-400" />
+              <span className="text-gray-300 font-medium">{safeOrders.length} pedidos</span>
             </div>
-            <div className="flex items-center space-x-2 bg-white/50 rounded-md p-2 border border-slate-200/50">
-              <Scale className="h-3 w-3 text-slate-500" />
-              <span className="text-slate-600 font-medium">
+            <div className="flex items-center space-x-2 bg-gray-700/50 rounded-md p-2 border border-gray-600/50">
+              <Scale className="h-3 w-3 text-gray-400" />
+              <span className="text-gray-300 font-medium">
                 {safeOrders.reduce((total, order) => total + (order.totalWeight || 0), 0).toFixed(1)} kg
               </span>
             </div>
@@ -162,13 +162,13 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
 
       {/* Lista de Cards */}
       <div className="flex-1 overflow-hidden">
-        <div className="h-full overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-track-slate-100 scrollbar-thumb-slate-300 hover:scrollbar-thumb-slate-400">
+        <div className="h-full overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-track-gray-700 scrollbar-thumb-gray-600 hover:scrollbar-thumb-gray-500">
           <SortableContext items={safeOrders.map(order => order.id)} strategy={verticalListSortingStrategy}>
             {safeOrders.length === 0 ? (
-              <div className="text-center py-16 text-slate-400">
+              <div className="text-center py-16 text-gray-500">
                 <div className="text-4xl mb-4 opacity-30">📋</div>
-                <p className="text-sm font-medium text-slate-500">Nenhum pedido nesta coluna</p>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="text-sm font-medium text-gray-400">Nenhum pedido nesta coluna</p>
+                <p className="text-xs text-gray-500 mt-1">
                   Arraste pedidos aqui para organizá-los
                 </p>
               </div>
@@ -206,12 +206,12 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
           ${theme.headerBg} rounded-b-lg border-t ${theme.headerBorder} p-3
         `}>
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="text-center bg-white/60 rounded-md p-2 border border-slate-200/50">
-              <div className="text-slate-500 font-medium mb-1">Total Pedidos</div>
+            <div className="text-center bg-gray-700/60 rounded-md p-2 border border-gray-600/50">
+              <div className="text-gray-400 font-medium mb-1">Total Pedidos</div>
               <div className={`${theme.textColor} font-bold text-lg`}>{safeOrders.length}</div>
             </div>
-            <div className="text-center bg-white/60 rounded-md p-2 border border-slate-200/50">
-              <div className="text-slate-500 font-medium mb-1">Peso Total</div>
+            <div className="text-center bg-gray-700/60 rounded-md p-2 border border-gray-600/50">
+              <div className="text-gray-400 font-medium mb-1">Peso Total</div>
               <div className={`${theme.textColor} font-bold text-lg`}>
                 {safeOrders.reduce((total, order) => total + (order.totalWeight || 0), 0).toFixed(1)} kg
               </div>
@@ -220,12 +220,12 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
           
           {/* Barra de progresso geral da coluna */}
           <div className="mt-3">
-            <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+            <div className="flex justify-between text-xs text-gray-400 mb-1.5">
               <span className="flex items-center gap-1 font-medium">
                 <TrendingUp className="h-3 w-3" />
                 Progresso Médio
               </span>
-              <span className="font-semibold text-slate-600">
+              <span className="font-semibold text-gray-300">
                 {Math.round(
                   safeOrders.reduce((total, order) => {
                     const progress = order.progress || 0;
@@ -234,7 +234,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
                 )}%
               </span>
             </div>
-            <div className="w-full bg-slate-200 rounded-full h-2">
+            <div className="w-full bg-gray-600 rounded-full h-2">
               <div 
                 className={`h-2 rounded-full transition-all duration-300 bg-${theme.accentColor}`}
                 style={{ 
