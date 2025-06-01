@@ -1,4 +1,4 @@
-// types/kanban.ts - Código Completo com todas as propriedades
+// types/kanban.ts - Código Completo com Google Drive adicionado
 
 export type OrderStatus = 
   | 'in-progress' 
@@ -69,6 +69,10 @@ export interface Order {
   // NOVAS: Informações de embarque
   shippingList?: string; // LE - Lista de Embarque
   invoice?: string; // NF - Nota Fiscal
+  
+  // NOVA: Google Drive Integration
+  googleDriveLink?: string; // Link para a pasta do Google Drive do pedido
+  googleDriveFolderId?: string; // ID da pasta no Google Drive (opcional, para API)
   
   // Propriedades adicionais
   priority?: 'low' | 'medium' | 'high' | 'urgent';
@@ -311,6 +315,15 @@ export interface KanbanSettings {
     deadlineWarnings?: number; // dias antes do prazo
     delayedOrderAlerts?: boolean;
   };
+  
+  // NOVA: Configurações do Google Drive
+  googleDriveSettings?: {
+    enabled?: boolean;
+    defaultFolderStructure?: string; // Template para estrutura de pastas
+    autoCreateFolders?: boolean; // Criar pastas automaticamente
+    folderNamingPattern?: string; // Padrão: "{orderNumber} - {customer}"
+    sharedWithTeam?: boolean; // Compartilhar com equipe automaticamente
+  };
 }
 
 // Tipos para filtros e busca
@@ -326,6 +339,7 @@ export interface FilterOptions {
   searchTerm?: string;
   hasDelays?: boolean;
   hasDocuments?: boolean;
+  hasGoogleDrive?: boolean; // NOVO: Filtrar por pedidos com Google Drive
 }
 
 // Tipos para estatísticas
@@ -415,13 +429,25 @@ export type WebhookEvent =
   | 'order.delayed'
   | 'column.created'
   | 'column.updated'
-  | 'column.deleted';
+  | 'column.deleted'
+  | 'googledrive.linked'    // NOVO: Link do Google Drive adicionado
+  | 'googledrive.updated'; // NOVO: Link do Google Drive atualizado
 
 export interface WebhookPayload {
   event: WebhookEvent;
   timestamp: string;
   data: any;
   user?: string;
+}
+
+// NOVA: Interface específica para operações do Google Drive
+export interface GoogleDriveIntegration {
+  createOrderFolder: (order: Order) => Promise<string>; // Retorna o link da pasta criada
+  updateOrderFolder: (orderId: string, newData: Partial<Order>) => Promise<void>;
+  shareFolder: (folderId: string, emails: string[]) => Promise<void>;
+  uploadFile: (folderId: string, file: File) => Promise<string>; // Retorna o link do arquivo
+  getFolderContents: (folderId: string) => Promise<any[]>;
+  generateFolderName: (order: Order) => string;
 }
 
 // Tipos para validação
@@ -465,5 +491,6 @@ export default {
   WebhookPayload,
   ValidationError,
   ValidationResult,
-  CacheEntry
+  CacheEntry,
+  GoogleDriveIntegration
 };
