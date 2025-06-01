@@ -21,6 +21,7 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { useNavigate } from 'react-router-dom';
 
+// Correção da declaração do módulo jsPDF
 declare module 'jspdf' {
   interface jsPDF {
     autoTable: (options: any) => jsPDF;
@@ -35,12 +36,14 @@ const statusLegend = [
   { status: 'completed', color: 'bg-green-100/80', borderColor: 'border-green-400', label: 'Documentação Validada' },
   { status: 'ready', color: 'bg-blue-100/80', borderColor: 'border-blue-400', label: 'Aguardando Embarque' },
   { status: 'urgent', color: 'bg-purple-100/80', borderColor: 'border-purple-400', label: 'Pedido Urgente' },
-];
+] as const;
 
+// Função utilitária para sanitizar dados do Firestore
 const sanitizeForFirestore = (obj: any): any => {
   if (obj === null || obj === undefined) return null;
   if (typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(item => sanitizeForFirestore(item));
+  
   const sanitized: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value === undefined) {
@@ -54,14 +57,20 @@ const sanitizeForFirestore = (obj: any): any => {
   return sanitized;
 };
 
-const exportOrderToPDF = (order: Order) => {
+// Função para exportar pedido para PDF
+const exportOrderToPDF = (order: Order): string => {
   const doc = new jsPDF();
-  doc.setFont('helvetica');
-  doc.setFontSize(20);
+  
+  // Configuração do cabeçalho
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
   doc.text('ROMANEIO DE EMBARQUE', 105, 30, { align: 'center' });
+  
+  // Linha divisória
   doc.setLineWidth(0.5);
   doc.line(20, 40, 190, 40);
+  
+  // Informações do pedido
   doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
   doc.text(`Pedido: #${order.orderNumber}`, 20, 55);
@@ -70,6 +79,7 @@ const exportOrderToPDF = (order: Order) => {
   doc.text(`OS Interna: ${order.internalOrderNumber}`, 120, 70);
   doc.text(`Data de Entrega: ${format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 85);
   
+  // Preparação dos dados da tabela
   const tableData = order.items?.map((item, index) => [
     (index + 1).toString(),
     item.code || '',
@@ -79,13 +89,24 @@ const exportOrderToPDF = (order: Order) => {
     `${((item.quantity || 0) * (item.unitWeight || 0)).toFixed(3)} kg`
   ]) || [];
   
+  // Criação da tabela
   doc.autoTable({
     head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
     body: tableData,
     startY: 100,
     theme: 'grid',
-    styles: { fontSize: 10, cellPadding: 3, halign: 'center', valign: 'middle' },
-    headStyles: { fillColor: [52, 152, 219], textColor: 255, fontStyle: 'bold', halign: 'center' },
+    styles: { 
+      fontSize: 10, 
+      cellPadding: 3, 
+      halign: 'center', 
+      valign: 'middle' 
+    },
+    headStyles: { 
+      fillColor: [52, 152, 219], 
+      textColor: 255, 
+      fontStyle: 'bold', 
+      halign: 'center' 
+    },
     columnStyles: {
       0: { halign: 'center', cellWidth: 15 },
       1: { halign: 'center', cellWidth: 30 },
@@ -102,10 +123,13 @@ const exportOrderToPDF = (order: Order) => {
   return fileName;
 };
 
+// Função para obter estatísticas mensais dos pedidos
 const getMonthlyOrderStats = (orders: Order[]) => {
   const stats: Record<string, { count: number; totalWeight: number }> = {};
+  
   orders.forEach(order => {
     if (order.status === 'completed' || order.deleted) return;
+    
     const month = format(new Date(order.deliveryDate), 'yyyy-MM');
     if (!stats[month]) {
       stats[month] = { count: 0, totalWeight: 0 };
@@ -113,10 +137,12 @@ const getMonthlyOrderStats = (orders: Order[]) => {
     stats[month].count += 1;
     stats[month].totalWeight += order.totalWeight || 0;
   });
+  
   return stats;
 };
 
 const Kanban: React.FC = () => {
+  // Estados principais
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [isManageOrdersModalOpen, setIsManageOrdersModalOpen] = useState(false);
@@ -127,6 +153,8 @@ const Kanban: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [isOrderItemsListOpen, setIsOrderItemsListOpen] = useState(false);
+  
+  // Estados de filtros e busca
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
@@ -136,42 +164,52 @@ const Kanban: React.FC = () => {
   const [filterByDeadline, setFilterByDeadline] = useState<string>('all');
   const [availableCustomers, setAvailableCustomers] = useState<string[]>([]);
   const [availableProjects, setAvailableProjects] = useState<string[]>([]);
+  
+  // Estados de visualização
   const [compactView, setCompactView] = useState(false);
   const [activeTab, setActiveTab] = useState<'kanban' | 'stages' | 'occupation'>('kanban');
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
 
+  // Hooks de stores
   const { orders, subscribeToOrders, updateOrder, addOrder, deleteOrder } = useOrderStore();
   const { columns, updateColumn, deleteColumn, subscribeToColumns, initializeDefaultColumns } = useColumnStore();
   const { projects, subscribeToProjects } = useProjectStore();
   const { customers, loadCustomers, subscribeToCustomers } = useCustomerStore();
   const navigate = useNavigate();
 
+  // Inicialização do componente
   useEffect(() => {
     const init = async () => {
       setIsLoading(true);
       setError(null);
+      
       try {
         await initializeDefaultColumns();
         const unsubscribeColumns = subscribeToColumns();
         const unsubscribeOrders = subscribeToOrders();
         const unsubscribeProjects = subscribeToProjects();
+        
         return () => {
           unsubscribeColumns();
           unsubscribeOrders();
           unsubscribeProjects();
         };
       } catch (error: any) {
+        console.error('Erro ao inicializar Kanban:', error);
         setError('Erro ao carregar o quadro Kanban. Por favor, recarregue a página.');
       } finally {
         setIsLoading(false);
       }
     };
+    
     init();
   }, [initializeDefaultColumns, subscribeToColumns, subscribeToOrders, subscribeToProjects]);
 
+  // Atualização de listas de clientes e projetos disponíveis
   useEffect(() => {
     const uniqueCustomers = [...new Set(orders.map(order => order.customer))];
     setAvailableCustomers(uniqueCustomers.sort());
+    
     const projectIds = [...new Set(orders.filter(o => o.projectId).map(o => o.projectId))];
     const projectNames = projectIds.map(id => {
       const project = projects.find(p => p.id === id);
@@ -180,14 +218,28 @@ const Kanban: React.FC = () => {
     setAvailableProjects(projectNames.sort());
   }, [orders, projects]);
 
+  // Carregamento de clientes
+  useEffect(() => {
+    loadCustomers();
+    const unsubscribe = subscribeToCustomers();
+    return () => unsubscribe();
+  }, [loadCustomers, subscribeToCustomers]);
+
+  // Configuração de sensores para drag and drop
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 5 } })
+    useSensor(MouseSensor, { 
+      activationConstraint: { distance: 5 } 
+    }),
+    useSensor(TouchSensor, { 
+      activationConstraint: { delay: 100, tolerance: 5 } 
+    })
   );
 
+  // Handlers de drag and drop
   const handleDragStart = (event: DragEndEvent) => {
     const { active } = event;
     const draggedOrder = orders.find(order => order.id === active.id);
+    
     if (draggedOrder) {
       setDraggedOrder(draggedOrder);
       setActiveId(active.id as string);
@@ -197,25 +249,30 @@ const Kanban: React.FC = () => {
   const handleDragEnd = async (event: DragEndEvent) => {
     try {
       const { active, over } = event;
+      
       if (!over || !active) {
         setDraggedOrder(null);
         setActiveId(null);
         return;
       }
+
       const activeOrderId = active.id as string;
       const overColumnId = over.id as string;
       const order = orders.find(o => o.id === activeOrderId);
+
       if (!order || order.columnId === overColumnId) {
         setDraggedOrder(null);
         setActiveId(null);
         return;
       }
+
       const targetColumn = columns.find(col => col.id === overColumnId);
       if (!targetColumn) {
         setDraggedOrder(null);
         setActiveId(null);
         return;
       }
+
       const isExpedited = targetColumn.title.toLowerCase().includes('expedi');
       const updatedOrder = {
         ...order,
@@ -223,8 +280,10 @@ const Kanban: React.FC = () => {
         status: isExpedited ? 'waiting-docs' : order.status,
         lastExportDate: isExpedited ? new Date().toISOString() : order.lastExportDate
       };
+
       await updateOrder(sanitizeForFirestore(updatedOrder));
     } catch (error) {
+      console.error('Erro ao mover pedido:', error);
       alert('Erro ao mover o pedido. Por favor, tente novamente.');
     } finally {
       setDraggedOrder(null);
@@ -232,6 +291,7 @@ const Kanban: React.FC = () => {
     }
   };
 
+  // Handlers de ações
   const handleOrderClick = (order: Order) => {
     setSelectedOrder(order);
     setIsOrderItemsListOpen(true);
@@ -241,24 +301,56 @@ const Kanban: React.FC = () => {
     try {
       await updateOrder(sanitizeForFirestore(updatedOrder));
     } catch (error) {
+      console.error('Erro ao atualizar pedido:', error);
       alert('Erro ao atualizar pedido. Por favor, tente novamente.');
     }
   };
 
-  // FUNÇÃO CORRIGIDA PARA NAVEGAÇÃO
   const handleQualityControlClick = (order: Order) => {
     navigate(`/quality?orderId=${order.id}`);
   };
 
+  // Função de filtros
   const getFilteredOrders = () => {
     return orders.filter(order => {
       if (order.deleted) return false;
+      
+      // Filtro por status
       if (filterByStatus.length > 0 && !filterByStatus.includes(order.status)) return false;
+      
+      // Filtro por cliente
       if (filterByCustomer.length > 0 && !filterByCustomer.includes(order.customer)) return false;
+      
+      // Filtro por projeto
       if (filterByProject.length > 0 && !filterByProject.some(projectName => {
         const project = projects.find(p => p.name === projectName);
         return project && project.id === order.projectId;
       })) return false;
+
+      // Filtro por prazo
+      if (filterByDeadline !== 'all') {
+        const deliveryDate = new Date(order.deliveryDate);
+        const today = new Date();
+        const weekFromNow = addDays(today, 7);
+        const monthFromNow = addDays(today, 30);
+
+        switch (filterByDeadline) {
+          case 'today':
+            if (!isToday(deliveryDate)) return false;
+            break;
+          case 'week':
+            if (isAfter(deliveryDate, weekFromNow)) return false;
+            break;
+          case 'month':
+            if (isAfter(deliveryDate, monthFromNow)) return false;
+            break;
+          case 'overdue':
+            if (!isBefore(deliveryDate, today)) return false;
+            break;
+        }
+      }
+      
+      // Filtro por termo de busca
       const searchLower = searchTerm.toLowerCase().trim();
       if (searchLower) {
         return (
@@ -267,14 +359,16 @@ const Kanban: React.FC = () => {
           order.internalOrderNumber.toLowerCase().includes(searchLower)
         );
       }
+      
       return true;
     });
   };
 
   const filteredOrders = getFilteredOrders();
   
+  // Organização das colunas com pedidos
   const columnsWithOrders = columns.map(column => {
-    let ordersForColumn = [];
+    let ordersForColumn: Order[] = [];
     
     if (column.title === 'Pedidos em processo') {
       ordersForColumn = filteredOrders
@@ -282,7 +376,7 @@ const Kanban: React.FC = () => {
         .sort((a, b) => {
           const dateA = new Date(a.deliveryDate);
           const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime(); // Ordem crescente
+          return dateA.getTime() - dateB.getTime();
         });
     } else if (column.title === 'Pedidos expedidos') {
       ordersForColumn = filteredOrders
@@ -290,7 +384,7 @@ const Kanban: React.FC = () => {
         .sort((a, b) => {
           const dateA = new Date(a.deliveryDate);
           const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime(); // Ordem crescente
+          return dateA.getTime() - dateB.getTime();
         });
     } else {
       ordersForColumn = filteredOrders
@@ -298,7 +392,7 @@ const Kanban: React.FC = () => {
         .sort((a, b) => {
           const dateA = new Date(a.deliveryDate);
           const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime(); // Ordem crescente
+          return dateA.getTime() - dateB.getTime();
         });
     }
     
@@ -308,12 +402,16 @@ const Kanban: React.FC = () => {
     };
   });
 
-  useEffect(() => {
-    loadCustomers();
-    const unsubscribe = subscribeToCustomers();
-    return () => unsubscribe();
-  }, [loadCustomers, subscribeToCustomers]);
+  // Função para limpar todos os filtros
+  const clearAllFilters = () => {
+    setSearchTerm('');
+    setFilterByCustomer([]);
+    setFilterByStatus([]);
+    setFilterByProject([]);
+    setFilterByDeadline('all');
+  };
 
+  // Estados de loading e erro
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
@@ -333,37 +431,87 @@ const Kanban: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex flex-row w-full h-full">
       <div className="flex-1 overflow-x-auto">
+        {/* Header */}
         <div className="max-w-[2000px] mx-auto mb-6">
           <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
               <h1 className="text-2xl font-bold text-white">Quadro de Produção</h1>
               <div className="flex gap-2">
-                <button onClick={() => setActiveTab('kanban')} className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'kanban' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                <button 
+                  onClick={() => setActiveTab('kanban')} 
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'kanban' 
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
                   <LayoutGrid className="h-5 w-5" />
                 </button>
-                <button onClick={() => setActiveTab('stages')} className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'stages' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                <button 
+                  onClick={() => setActiveTab('stages')} 
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'stages' 
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
                   <StagedList className="h-5 w-5" />
                 </button>
-                <button onClick={() => setActiveTab('occupation')} className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'occupation' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                <button 
+                  onClick={() => setActiveTab('occupation')} 
+                  className={`px-4 py-2 rounded-lg transition-all ${
+                    activeTab === 'occupation' 
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
                   <BarChart className="h-5 w-5" />
                 </button>
               </div>
             </div>
+            
+            {/* Controles de busca e filtros */}
             <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
               <div className="relative flex-1 lg:flex-none">
-                <input type="text" placeholder="Buscar pedidos..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full lg:w-64 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                <input 
+                  type="text" 
+                  placeholder="Buscar pedidos..." 
+                  value={searchTerm} 
+                  onChange={(e) => setSearchTerm(e.target.value)} 
+                  className="w-full lg:w-64 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                />
                 <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               </div>
+              
               <div className="flex gap-2">
-                <button onClick={() => setFilterMenuOpen(!filterMenuOpen)} className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${filterMenuOpen ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                <button 
+                  onClick={() => setFilterMenuOpen(!filterMenuOpen)} 
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
+                    filterMenuOpen 
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
                   <Filter className="h-5 w-5" />
                   <span className="hidden sm:inline">Filtros</span>
                 </button>
-                <button onClick={() => setCompactView(!compactView)} className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${compactView ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                
+                <button 
+                  onClick={() => setCompactView(!compactView)} 
+                  className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${
+                    compactView 
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' 
+                      : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
                   <LayoutList className="h-5 w-5" />
                   <span className="hidden sm:inline">Compacto</span>
                 </button>
-                <button onClick={() => setIsManageOrdersModalOpen(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25 flex items-center gap-2">
+                
+                <button 
+                  onClick={() => setIsManageOrdersModalOpen(true)} 
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25 flex items-center gap-2"
+                >
                   <Clipboard className="h-5 w-5" />
                   <span className="hidden sm:inline">Gerenciar</span>
                 </button>
@@ -371,6 +519,7 @@ const Kanban: React.FC = () => {
             </div>
           </div>
 
+          {/* Menu de filtros */}
           {filterMenuOpen && (
             <div className="mt-4 bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -443,13 +592,7 @@ const Kanban: React.FC = () => {
 
               <div className="mt-4 flex justify-end gap-2">
                 <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setFilterByCustomer([]);
-                    setFilterByStatus([]);
-                    setFilterByProject([]);
-                    setFilterByDeadline('all');
-                  }}
+                  onClick={clearAllFilters}
                   className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
                 >
                   Limpar Filtros
@@ -459,9 +602,14 @@ const Kanban: React.FC = () => {
           )}
         </div>
 
+        {/* Conteúdo principal */}
         <div className="max-w-[2000px] mx-auto">
           {activeTab === 'kanban' && (
-            <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <DndContext 
+              sensors={sensors} 
+              onDragStart={handleDragStart} 
+              onDragEnd={handleDragEnd}
+            >
               <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
                 {columnsWithOrders.map(column => (
                   <KanbanColumn
@@ -482,6 +630,7 @@ const Kanban: React.FC = () => {
                   />
                 ))}
               </div>
+              
               <DragOverlay>
                 {draggedOrder && (
                   <KanbanCard
@@ -497,10 +646,12 @@ const Kanban: React.FC = () => {
               </DragOverlay>
             </DndContext>
           )}
+          
           {activeTab === 'stages' && <ManufacturingStages />}
           {activeTab === 'occupation' && <OccupationRateTab />}
         </div>
 
+        {/* Modal de lista de itens do pedido */}
         {isOrderItemsListOpen && selectedOrder && (
           <OrderItemsList
             order={selectedOrder}
@@ -511,18 +662,152 @@ const Kanban: React.FC = () => {
             onUpdateOrder={handleUpdateOrder}
           />
         )}
+
+        {/* Modal de gerenciamento de pedidos */}
+        {isManageOrdersModalOpen && (
+          <ManageOrdersModal
+            isOpen={isManageOrdersModalOpen}
+            onClose={() => setIsManageOrdersModalOpen(false)}
+            orders={orders}
+            onUpdateOrder={handleUpdateOrder}
+            onDeleteOrder={deleteOrder}
+          />
+        )}
+
+        {/* Modal de pedido */}
+        {isOrderModalOpen && (
+          <OrderModal
+            isOpen={isOrderModalOpen}
+            onClose={() => {
+              setIsOrderModalOpen(false);
+              setSelectedOrder(null);
+            }}
+            order={selectedOrder}
+            onSave={handleUpdateOrder}
+          />
+        )}
+
+        {/* Modal de coluna */}
+        {isColumnModalOpen && (
+          <ColumnModal
+            isOpen={isColumnModalOpen}
+            onClose={() => {
+              setIsColumnModalOpen(false);
+              setSelectedColumn(null);
+            }}
+            column={selectedColumn}
+            onSave={updateColumn}
+          />
+        )}
       </div>
       
+      {/* Sidebar de resumo */}
       <div className="hidden lg:block w-72 min-w-[260px] max-w-xs bg-gray-900/80 border-l border-gray-800 p-4 text-white sticky top-0 h-[calc(100vh-64px)] overflow-y-auto">
         <h3 className="text-lg font-bold mb-4">Resumo de Entregas</h3>
         <div className="space-y-3">
-          {Object.entries(getMonthlyOrderStats(orders)).sort(([a], [b]) => a.localeCompare(b)).map(([month, data]) => (
-            <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col">
-              <span className="font-semibold text-blue-300">{format(new Date(month + '-01'), 'MMMM/yyyy', { locale: ptBR })}</span>
-              <span className="text-sm mt-1">Pedidos: <span className="font-bold">{data.count}</span></span>
-              <span className="text-sm">Peso pendente: <span className="font-bold">{data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</span></span>
+          {Object.entries(getMonthlyOrderStats(orders))
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([month, data]) => (
+              <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col">
+                <span className="font-semibold text-blue-300">
+                  {format(new Date(month + '-01'), 'MMMM/yyyy', { locale: ptBR })}
+                </span>
+                <span className="text-sm mt-1">
+                  Pedidos: <span className="font-bold">{data.count}</span>
+                </span>
+                <span className="text-sm">
+                  Peso pendente: <span className="font-bold">
+                    {data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg
+                  </span>
+                </span>
+              </div>
+            ))}
+        </div>
+
+        {/* Legenda de status */}
+        <div className="mt-6">
+          <h4 className="text-md font-semibold mb-3">Legenda de Status</h4>
+          <div className="space-y-2">
+            {statusLegend.map(status => (
+              <div key={status.status} className="flex items-center gap-2">
+                <div className={`w-3 h-3 rounded-full ${status.color} ${status.borderColor} border`}></div>
+                <span className="text-sm text-gray-300">{status.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Estatísticas gerais */}
+        <div className="mt-6">
+          <h4 className="text-md font-semibold mb-3">Estatísticas</h4>
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Total de pedidos:</span>
+              <span className="font-bold">{filteredOrders.length}</span>
             </div>
-          ))}
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Em processo:</span>
+              <span className="font-bold text-orange-400">
+                {filteredOrders.filter(o => o.status === 'in-progress').length}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Concluídos:</span>
+              <span className="font-bold text-green-400">
+                {filteredOrders.filter(o => o.status === 'completed').length}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Atrasados:</span>
+              <span className="font-bold text-red-400">
+                {filteredOrders.filter(o => {
+                  const deliveryDate = new Date(o.deliveryDate);
+                  const today = new Date();
+                  return isBefore(deliveryDate, today) && o.status !== 'completed';
+                }).length}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Exportação rápida */}
+        <div className="mt-6">
+          <button
+            onClick={() => {
+              // Função para exportar relatório geral
+              const doc = new jsPDF();
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(16);
+              doc.text('Relatório de Produção', 105, 20, { align: 'center' });
+              
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(12);
+              doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 40);
+              
+              const tableData = filteredOrders.map(order => [
+                order.orderNumber,
+                order.customer,
+                order.internalOrderNumber,
+                format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR }),
+                statusLegend.find(s => s.status === order.status)?.label || order.status
+              ]);
+              
+              doc.autoTable({
+                head: [['Pedido', 'Cliente', 'OS Interna', 'Entrega', 'Status']],
+                body: tableData,
+                startY: 50,
+                theme: 'grid',
+                styles: { fontSize: 10 },
+                headStyles: { fillColor: [52, 152, 219] }
+              });
+              
+              doc.save(`relatorio_producao_${format(new Date(), 'ddMMyyyy')}.pdf`);
+            }}
+            className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            Exportar Relatório
+          </button>
         </div>
       </div>
     </div>
