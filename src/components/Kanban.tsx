@@ -444,7 +444,7 @@ const Kanban: React.FC = () => {
   
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-950 via-blue-900 to-blue-800">
         <div className="text-lg font-medium text-white flex items-center space-x-3">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
           <span>Carregando...</span>
@@ -455,7 +455,7 @@ const Kanban: React.FC = () => {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-950 via-blue-900 to-blue-800">
         <div className="text-lg font-medium text-red-400 text-center">
           <div className="text-6xl mb-4">⚠️</div>
           <div>{error}</div>
@@ -471,7 +471,7 @@ const Kanban: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-900 to-gray-900 flex flex-row w-full h-full">
+    <div className="min-h-screen bg-gradient-to-br from-blue-950 via-blue-900 to-blue-800 flex flex-row w-full h-full">
       <div className="flex-1 overflow-x-auto">
         {/* Header */}
         <div className="max-w-[2000px] mx-auto mb-6 p-4">
