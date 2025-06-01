@@ -1,181 +1,817 @@
-import React from 'react';
-import { Order, Project } from '../types/kanban';
-import { format } from 'date-fns';
+import React, { useState, useEffect } from 'react';
+import { DndContext, DragEndEvent, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { Settings, ListX, Search, Filter, ChevronDown, Calendar, Users, Flag, LayoutGrid, LayoutList, Clipboard, LayoutList as StagedList, BarChart, Download } from 'lucide-react';
+import { Column, Order, OrderStatus } from '../types/kanban';
+import { useOrderStore } from '../store/orderStore';
+import { useColumnStore } from '../store/columnStore';
+import { useProjectStore } from '../store/projectStore';
+import { useCustomerStore } from '../store/customerStore';
+import { KanbanColumn } from './KanbanColumn';
+import KanbanCard from './KanbanCard';
+import ColumnModal from './ColumnModal';
+import ManageOrdersModal from './ManageOrdersModal';
+import OrderModal from './OrderModal';
+import OrderItemsList from './OrderItemsList';
+import ManufacturingStages from './ManufacturingStages';
+import OccupationRateTab from './OccupationRateTab';
+import { format, isAfter, isBefore, addDays, isToday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useSettingsStore } from '../store/settingsStore';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
+import { useNavigate } from 'react-router-dom';
 
-interface KanbanCardProps {
-  order: Order;
-  isManaging: boolean;
-  isSelected: boolean;
-  highlight: boolean;
-  compactView: boolean;
-  onOrderClick: (order: Order) => void;
-  projects?: Project[]; // Adicionar projects como prop
+declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+    lastAutoTable: { finalY: number };
+  }
 }
 
-const KanbanCard: React.FC<KanbanCardProps> = ({ 
-  order, 
-  isManaging, 
-  isSelected, 
-  highlight, 
-  compactView, 
-  onOrderClick,
-  projects = [] 
-}) => {
-  // Buscar o projeto pelo ID
-  const project = projects.find(p => p.id === order.projectId);
-  const projectName = project?.name || '';
+const statusLegend = [
+  { status: 'in-progress', color: 'bg-orange-100/80', borderColor: 'border-orange-400', label: 'Em Processo' },
+  { status: 'delayed', color: 'bg-red-100/80', borderColor: 'border-red-400', label: 'Atrasado' },
+  { status: 'waiting-docs', color: 'bg-yellow-100/80', borderColor: 'border-yellow-400', label: 'Aguardando Validação de Documentação' },
+  { status: 'completed', color: 'bg-green-100/80', borderColor: 'border-green-400', label: 'Documentação Validada' },
+  { status: 'ready', color: 'bg-blue-100/80', borderColor: 'border-blue-400', label: 'Aguardando Embarque' },
+  { status: 'urgent', color: 'bg-purple-100/80', borderColor: 'border-purple-400', label: 'Pedido Urgente' },
+];
 
-  // Função para determinar a cor do status
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'in-progress': return 'bg-orange-100 border-orange-400 text-orange-800';
-      case 'delayed': return 'bg-red-100 border-red-400 text-red-800';
-      case 'waiting-docs': return 'bg-yellow-100 border-yellow-400 text-yellow-800';
-      case 'completed': return 'bg-green-100 border-green-400 text-green-800';
-      case 'ready': return 'bg-blue-100 border-blue-400 text-blue-800';
-      case 'urgent': return 'bg-purple-100 border-purple-400 text-purple-800';
-      default: return 'bg-gray-100 border-gray-400 text-gray-800';
+const sanitizeForFirestore = (obj: any): any => {
+  if (obj === null || obj === undefined) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(item => sanitizeForFirestore(item));
+  const sanitized: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) {
+      sanitized[key] = null;
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizeForFirestore(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
+
+const exportOrderToPDF = (order: Order) => {
+  const doc = new jsPDF();
+  doc.setFont('helvetica');
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ROMANEIO DE EMBARQUE', 105, 30, { align: 'center' });
+  doc.setLineWidth(0.5);
+  doc.line(20, 40, 190, 40);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Pedido: #${order.orderNumber}`, 20, 55);
+  doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 120, 55);
+  doc.text(`Cliente: ${order.customer}`, 20, 70);
+  doc.text(`OS Interna: ${order.internalOrderNumber}`, 120, 70);
+  doc.text(`Data de Entrega: ${format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}`, 20, 85);
+  
+  const tableData = order.items?.map((item, index) => [
+    (index + 1).toString(),
+    item.code || '',
+    item.description || item.name || '',
+    (item.quantity || 0).toString(),
+    `${(item.unitWeight || 0).toFixed(3)} kg`,
+    `${((item.quantity || 0) * (item.unitWeight || 0)).toFixed(3)} kg`
+  ]) || [];
+  
+  doc.autoTable({
+    head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
+    body: tableData,
+    startY: 100,
+    theme: 'grid',
+    styles: { fontSize: 10, cellPadding: 3, halign: 'center', valign: 'middle' },
+    headStyles: { fillColor: [52, 152, 219], textColor: 255, fontStyle: 'bold', halign: 'center' },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 15 },
+      1: { halign: 'center', cellWidth: 30 },
+      2: { halign: 'left', cellWidth: 60 },
+      3: { halign: 'center', cellWidth: 20 },
+      4: { halign: 'right', cellWidth: 25 },
+      5: { halign: 'right', cellWidth: 30 }
+    },
+    alternateRowStyles: { fillColor: [245, 245, 245] }
+  });
+  
+  const fileName = `romaneio_pedido_${order.orderNumber}_${format(new Date(), 'ddMMyyyy_HHmm')}.pdf`;
+  doc.save(fileName);
+  return fileName;
+};
+
+const getMonthlyOrderStats = (orders: Order[]) => {
+  const stats: Record<string, { count: number; totalWeight: number }> = {};
+  orders.forEach(order => {
+    if (order?.status === 'completed' || order?.deleted) return;
+    if (!order?.deliveryDate) return;
+    const month = format(new Date(order.deliveryDate), 'yyyy-MM');
+    if (!stats[month]) {
+      stats[month] = { count: 0, totalWeight: 0 };
+    }
+    stats[month].count += 1;
+    stats[month].totalWeight += order.totalWeight || 0;
+  });
+  return stats;
+};
+
+const Kanban: React.FC = () => {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
+  const [isManageOrdersModalOpen, setIsManageOrdersModalOpen] = useState(false);
+  const [selectedColumn, setSelectedColumn] = useState<Column | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [draggedOrder, setDraggedOrder] = useState<Order | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+  const [isOrderItemsListOpen, setIsOrderItemsListOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [filterByCustomer, setFilterByCustomer] = useState<string[]>([]);
+  const [filterByStatus, setFilterByStatus] = useState<string[]>([]);
+  const [filterByProject, setFilterByProject] = useState<string[]>([]);
+  const [filterByDeadline, setFilterByDeadline] = useState<string>('all');
+  const [availableCustomers, setAvailableCustomers] = useState<string[]>([]);
+  const [availableProjects, setAvailableProjects] = useState<string[]>([]);
+  const [compactView, setCompactView] = useState(false);
+  const [activeTab, setActiveTab] = useState<'kanban' | 'stages' | 'occupation'>('kanban');
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+
+  const { orders, subscribeToOrders, updateOrder, addOrder, deleteOrder } = useOrderStore();
+  const { columns, updateColumn, deleteColumn, subscribeToColumns, initializeDefaultColumns } = useColumnStore();
+  const { projects, subscribeToProjects } = useProjectStore();
+  const { customers, loadCustomers, subscribeToCustomers } = useCustomerStore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const init = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        await initializeDefaultColumns();
+        const unsubscribeColumns = subscribeToColumns();
+        const unsubscribeOrders = subscribeToOrders();
+        const unsubscribeProjects = subscribeToProjects();
+        return () => {
+          unsubscribeColumns();
+          unsubscribeOrders();
+          unsubscribeProjects();
+        };
+      } catch (error: any) {
+        setError('Erro ao carregar o quadro Kanban. Por favor, recarregue a página.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    init();
+  }, [initializeDefaultColumns, subscribeToColumns, subscribeToOrders, subscribeToProjects]);
+
+  useEffect(() => {
+    const uniqueCustomers = [...new Set(orders.filter(o => o?.customer).map(order => order.customer))];
+    setAvailableCustomers(uniqueCustomers.sort());
+    const projectIds = [...new Set(orders.filter(o => o?.projectId).map(o => o.projectId))];
+    const projectNames = projectIds.map(id => {
+      const project = projects.find(p => p.id === id);
+      return project ? project.name : 'Projeto não encontrado';
+    });
+    setAvailableProjects(projectNames.sort());
+  }, [orders, projects]);
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 100, tolerance: 5 } })
+  );
+
+  const handleDragStart = (event: DragEndEvent) => {
+    const { active } = event;
+    const draggedOrder = orders.find(order => order?.id === active.id);
+    if (draggedOrder) {
+      setDraggedOrder(draggedOrder);
+      setActiveId(active.id as string);
     }
   };
 
-  // Função para obter o texto do status
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'in-progress': return 'Em Processo';
-      case 'delayed': return 'Atrasado';
-      case 'waiting-docs': return 'Aguardando Docs';
-      case 'completed': return 'Concluído';
-      case 'ready': return 'Pronto';
-      case 'urgent': return 'Urgente';
-      default: return status;
+  const handleDragEnd = async (event: DragEndEvent) => {
+    try {
+      const { active, over } = event;
+      if (!over || !active) {
+        setDraggedOrder(null);
+        setActiveId(null);
+        return;
+      }
+      const activeOrderId = active.id as string;
+      const overColumnId = over.id as string;
+      const order = orders.find(o => o?.id === activeOrderId);
+      if (!order || order.columnId === overColumnId) {
+        setDraggedOrder(null);
+        setActiveId(null);
+        return;
+      }
+      const targetColumn = columns.find(col => col.id === overColumnId);
+      if (!targetColumn) {
+        setDraggedOrder(null);
+        setActiveId(null);
+        return;
+      }
+      const isExpedited = targetColumn.title.toLowerCase().includes('expedi');
+      const updatedOrder = {
+        ...order,
+        columnId: overColumnId,
+        status: isExpedited ? 'waiting-docs' : order.status,
+        lastExportDate: isExpedited ? new Date().toISOString() : order.lastExportDate
+      };
+      await updateOrder(sanitizeForFirestore(updatedOrder));
+    } catch (error) {
+      alert('Erro ao mover o pedido. Por favor, tente novamente.');
+    } finally {
+      setDraggedOrder(null);
+      setActiveId(null);
     }
   };
+
+  const handleOrderClick = (order: Order) => {
+    setSelectedOrder(order);
+    setIsOrderItemsListOpen(true);
+  };
+
+  const handleUpdateOrder = async (updatedOrder: Order) => {
+    try {
+      await updateOrder(sanitizeForFirestore(updatedOrder));
+    } catch (error) {
+      alert('Erro ao atualizar pedido. Por favor, tente novamente.');
+    }
+  };
+
+  const handleQualityControlClick = (order: Order) => {
+    navigate(`/quality?orderId=${order.id}`);
+  };
+
+  const getFilteredOrders = () => {
+    return orders.filter(order => {
+      // Verificações de segurança
+      if (!order || !order.id || order.deleted) return false;
+      
+      // Filtro por status
+      if (filterByStatus.length > 0 && !filterByStatus.includes(order.status || 'in-progress')) return false;
+      
+      // Filtro por cliente
+      if (filterByCustomer.length > 0 && !filterByCustomer.includes(order.customer || '')) return false;
+      
+      // Filtro por projeto
+      if (filterByProject.length > 0 && !filterByProject.some(projectName => {
+        const project = projects.find(p => p.name === projectName);
+        return project && project.id === order.projectId;
+      })) return false;
+      
+      // Filtro por prazo de entrega
+      if (filterByDeadline !== 'all' && order.deliveryDate) {
+        const deliveryDate = new Date(order.deliveryDate);
+        const today = new Date();
+        
+        switch (filterByDeadline) {
+          case 'today':
+            if (!isToday(deliveryDate)) return false;
+            break;
+          case 'this-week':
+            const weekFromNow = addDays(today, 7);
+            if (isAfter(deliveryDate, weekFromNow) || isBefore(deliveryDate, today)) return false;
+            break;
+          case 'overdue':
+            if (!isBefore(deliveryDate, today)) return false;
+            break;
+          case 'next-week':
+            const nextWeekStart = addDays(today, 7);
+            const nextWeekEnd = addDays(today, 14);
+            if (isBefore(deliveryDate, nextWeekStart) || isAfter(deliveryDate, nextWeekEnd)) return false;
+            break;
+        }
+      }
+      
+      // Filtro por termo de busca
+      const searchLower = searchTerm.toLowerCase().trim();
+      if (searchLower) {
+        const orderNumber = order.orderNumber?.toLowerCase() || '';
+        const customer = order.customer?.toLowerCase() || '';
+        const internalOrderNumber = order.internalOrderNumber?.toLowerCase() || '';
+        const description = order.description?.toLowerCase() || '';
+        
+        return (
+          orderNumber.includes(searchLower) ||
+          customer.includes(searchLower) ||
+          internalOrderNumber.includes(searchLower) ||
+          description.includes(searchLower)
+        );
+      }
+      
+      return true;
+    });
+  };
+
+  const handleSelectOrder = (orderId: string) => {
+    setSelectedOrders(prev => 
+      prev.includes(orderId) 
+        ? prev.filter(id => id !== orderId)
+        : [...prev, orderId]
+    );
+  };
+
+  const handleSelectAllOrders = () => {
+    const filteredOrders = getFilteredOrders();
+    const allSelected = filteredOrders.every(order => selectedOrders.includes(order.id));
+    
+    if (allSelected) {
+      setSelectedOrders([]);
+    } else {
+      setSelectedOrders(filteredOrders.map(order => order.id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedOrders.length === 0) return;
+    
+    const confirmed = window.confirm(`Tem certeza que deseja excluir ${selectedOrders.length} pedido(s)?`);
+    if (!confirmed) return;
+    
+    try {
+      await Promise.all(selectedOrders.map(orderId => deleteOrder(orderId)));
+      setSelectedOrders([]);
+    } catch (error) {
+      alert('Erro ao excluir pedidos. Por favor, tente novamente.');
+    }
+  };
+
+  const handleBulkExport = () => {
+    if (selectedOrders.length === 0) return;
+    
+    const ordersToExport = orders.filter(order => selectedOrders.includes(order.id));
+    ordersToExport.forEach(order => {
+      try {
+        exportOrderToPDF(order);
+      } catch (error) {
+        console.error(`Erro ao exportar pedido ${order.orderNumber}:`, error);
+      }
+    });
+  };
+
+  const toggleCardExpansion = (orderId: string) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(orderId)) {
+        newSet.delete(orderId);
+      } else {
+        newSet.add(orderId);
+      }
+      return newSet;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setFilterByCustomer([]);
+    setFilterByStatus([]);
+    setFilterByProject([]);
+    setFilterByDeadline('all');
+    setSearchTerm('');
+  };
+
+  const filteredOrders = getFilteredOrders();
+  const monthlyStats = getMonthlyOrderStats(filteredOrders);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="text-red-500 text-xl mb-4">{error}</div>
+          <button 
+            onClick={() => window.location.reload()}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+          >
+            Recarregar Página
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div 
-      className={`
-        p-4 bg-white rounded-lg shadow-sm border-2 cursor-pointer transition-all duration-200
-        hover:shadow-md hover:scale-105
-        ${isSelected ? 'ring-2 ring-blue-500' : ''}
-        ${highlight ? 'ring-2 ring-yellow-400' : ''}
-        ${getStatusColor(order.status)}
-      `}
-      onClick={() => onOrderClick(order)}
-    >
-      {/* Cabeçalho do Card */}
-      <div className="flex justify-between items-start mb-3">
-        <div className="flex-1">
-          <h3 className="font-bold text-lg text-gray-900">
-            #{order.orderNumber}
-          </h3>
-          {/* EXIBIR PROJETO NO CABEÇALHO */}
-          {projectName && (
-            <div className="flex items-center mt-1">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                🏗️ {projectName}
-              </span>
+    <div className="h-screen flex flex-col bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <h1 className="text-2xl font-bold text-gray-900">Sistema Orbit</h1>
+            
+            {/* Tabs */}
+            <div className="flex space-x-1 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setActiveTab('kanban')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === 'kanban'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                <LayoutGrid className="w-4 h-4 inline mr-2" />
+                Kanban
+              </button>
+              <button
+                onClick={() => setActiveTab('stages')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === 'stages'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                <StagedList className="w-4 h-4 inline mr-2" />
+                Etapas
+              </button>
+              <button
+                onClick={() => setActiveTab('occupation')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === 'occupation'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                <BarChart className="w-4 h-4 inline mr-2" />
+                Taxa de Ocupação
+              </button>
             </div>
-          )}
-        </div>
-        <div className="flex flex-col items-end">
-          <span className={`
-            inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border
-            ${getStatusColor(order.status)}
-          `}>
-            {getStatusLabel(order.status)}
-          </span>
-        </div>
-      </div>
-
-      {/* Informações do Cliente */}
-      <div className="space-y-2 mb-4">
-        <div className="flex items-center text-sm text-gray-700">
-          <span className="font-medium">🏢 Cliente:</span>
-          <span className="ml-1 truncate">{order.customer}</span>
-        </div>
-        <div className="flex items-center text-sm text-gray-700">
-          <span className="font-medium">📋 OS:</span>
-          <span className="ml-1">{order.internalOrderNumber}</span>
-        </div>
-      </div>
-
-      {/* Datas */}
-      <div className="space-y-1 mb-4">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-600">📅 Entrega:</span>
-          <span className="font-medium text-gray-900">
-            {format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}
-          </span>
-        </div>
-        {order.totalWeight && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">⚖️ Peso:</span>
-            <span className="font-medium text-gray-900">
-              {order.totalWeight.toFixed(1)} kg
-            </span>
           </div>
+
+          <div className="flex items-center space-x-3">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Buscar pedidos..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            {/* Filter Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setFilterMenuOpen(!filterMenuOpen)}
+                className="flex items-center space-x-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                <Filter className="w-4 h-4" />
+                <span>Filtros</span>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+
+              {filterMenuOpen && (
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border z-50">
+                  <div className="p-4 space-y-4">
+                    {/* Status Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Status
+                      </label>
+                      <div className="space-y-2">
+                        {statusLegend.map(({ status, label }) => (
+                          <label key={status} className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={filterByStatus.includes(status)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setFilterByStatus([...filterByStatus, status]);
+                                } else {
+                                  setFilterByStatus(filterByStatus.filter(s => s !== status));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="ml-2 text-sm text-gray-700">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Customer Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Cliente
+                      </label>
+                      <div className="max-h-32 overflow-y-auto space-y-2">
+                        {availableCustomers.map(customer => (
+                          <label key={customer} className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={filterByCustomer.includes(customer)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setFilterByCustomer([...filterByCustomer, customer]);
+                                } else {
+                                  setFilterByCustomer(filterByCustomer.filter(c => c !== customer));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="ml-2 text-sm text-gray-700">{customer}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Deadline Filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Prazo de Entrega
+                      </label>
+                      <select
+                        value={filterByDeadline}
+                        onChange={(e) => setFilterByDeadline(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="all">Todos</option>
+                        <option value="overdue">Em Atraso</option>
+                        <option value="today">Hoje</option>
+                        <option value="this-week">Esta Semana</option>
+                        <option value="next-week">Próxima Semana</option>
+                      </select>
+                    </div>
+
+                    <div className="flex justify-between pt-4 border-t">
+                      <button
+                        onClick={clearAllFilters}
+                        className="text-sm text-gray-600 hover:text-gray-800"
+                      >
+                        Limpar Filtros
+                      </button>
+                      <button
+                        onClick={() => setFilterMenuOpen(false)}
+                        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md text-sm"
+                      >
+                        Aplicar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* View Toggle */}
+            <button
+              onClick={() => setCompactView(!compactView)}
+              className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              title={compactView ? "Vista Expandida" : "Vista Compacta"}
+            >
+              {compactView ? <LayoutGrid className="w-4 h-4" /> : <LayoutList className="w-4 h-4" />}
+            </button>
+
+            {/* Bulk Actions */}
+            {selectedOrders.length > 0 && (
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-600">
+                  {selectedOrders.length} selecionado(s)
+                </span>
+                <button
+                  onClick={handleBulkExport}
+                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                  title="Exportar Selecionados"
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleBulkDelete}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                  title="Excluir Selecionados"
+                >
+                  <ListX className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Settings */}
+            <button
+              onClick={() => setIsColumnModalOpen(true)}
+              className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              title="Configurações"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Status Legend */}
+        <div className="flex flex-wrap gap-4 mt-4">
+          {statusLegend.map(({ status, color, borderColor, label }) => (
+            <div key={status} className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded border-2 ${color} ${borderColor}`}></div>
+              <span className="text-xs text-gray-600">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-hidden">
+        {activeTab === 'kanban' && (
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="h-full overflow-x-auto">
+              <div className="flex h-full min-w-max space-x-6 p-6">
+                {columns.map(column => (
+                  <KanbanColumn
+                    key={column.id}
+                    column={column}
+                    orders={filteredOrders.filter(order => order.columnId === column.id)}
+                    onOrderClick={handleOrderClick}
+                    onUpdateOrder={handleUpdateOrder}
+                    onSelectOrder={handleSelectOrder}
+                    selectedOrders={selectedOrders}
+                    compactView={compactView}
+                    expandedCards={expandedCards}
+                    onToggleExpansion={toggleCardExpansion}
+                    onQualityControlClick={handleQualityControlClick}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <DragOverlay>
+              {activeId && draggedOrder ? (
+                <KanbanCard
+                  order={draggedOrder}
+                  onClick={() => {}}
+                  onUpdate={() => {}}
+                  isSelected={false}
+                  onSelect={() => {}}
+                  compactView={compactView}
+                  isExpanded={false}
+                  onToggleExpansion={() => {}}
+                  onQualityControlClick={() => {}}
+                />
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
+
+        {activeTab === 'stages' && (
+          <ManufacturingStages orders={filteredOrders} />
+        )}
+
+        {activeTab === 'occupation' && (
+          <OccupationRateTab orders={filteredOrders} monthlyStats={monthlyStats} />
         )}
       </div>
 
-      {/* Progresso */}
-      {!compactView && (
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm text-gray-600">Progresso</span>
-            <span className="text-sm font-medium text-gray-900">
-              {order.items?.length || 0} {order.items?.length === 1 ? 'item' : 'itens'}
-            </span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div 
-              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-              style={{ 
-                width: `${
-                  order.items?.length 
-                    ? (order.items.reduce((acc, item) => acc + (item.overallProgress || 0), 0) / order.items.length) 
-                    : 0
-                }%` 
-              }}
-            ></div>
-          </div>
-        </div>
+      {/* Modals */}
+      {isColumnModalOpen && (
+        <ColumnModal
+          isOpen={isColumnModalOpen}
+          onClose={() => setIsColumnModalOpen(false)}
+          column={selectedColumn}
+          onSave={(column) => {
+            if (selectedColumn) {
+              updateColumn(column);
+            }
+            setSelectedColumn(null);
+          }}
+          onDelete={(columnId) => {
+            deleteColumn(columnId);
+            setSelectedColumn(null);
+          }}
+        />
       )}
 
-      {/* Botões de Ação */}
-      {!isManaging && (
-        <div className="flex gap-2 mt-4">
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              // Navegar para controle de qualidade
-            }}
-            className="flex-1 px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
-          >
-            🔍 Controle de Qualidade
-          </button>
-        </div>
+      {isManageOrdersModalOpen && (
+        <ManageOrdersModal
+          isOpen={isManageOrdersModalOpen}
+          onClose={() => setIsManageOrdersModalOpen(false)}
+          orders={filteredOrders}
+          onUpdateOrder={handleUpdateOrder}
+          onDeleteOrder={deleteOrder}
+          onSelectAll={handleSelectAllOrders}
+          selectedOrders={selectedOrders}
+          onSelectOrder={handleSelectOrder}
+        />
       )}
 
-      {/* Link do Google Drive (se existir) */}
-      {order.driveLink && (
-        <div className="mt-3 pt-3 border-t border-gray-200">
-          <a
-            href={order.driveLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="flex items-center text-sm text-blue-600 hover:text-blue-800 transition-colors"
-          >
-            📁 Documentação no Drive
-            <svg className="ml-1 h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-          </a>
+      {isOrderModalOpen && selectedOrder && (
+        <OrderModal
+          isOpen={isOrderModalOpen}
+          onClose={() => {
+            setIsOrderModalOpen(false);
+            setSelectedOrder(null);
+          }}
+          order={selectedOrder}
+          onSave={handleUpdateOrder}
+          onDelete={() => {
+            if (selectedOrder) {
+              deleteOrder(selectedOrder.id);
+              setIsOrderModalOpen(false);
+              setSelectedOrder(null);
+            }
+          }}
+        />
+      )}
+
+      {isOrderItemsListOpen && selectedOrder && (
+        <OrderItemsList
+          isOpen={isOrderItemsListOpen}
+          onClose={() => {
+            setIsOrderItemsListOpen(false);
+            setSelectedOrder(null);
+          }}
+          order={selectedOrder}
+          onUpdateOrder={handleUpdateOrder}
+          onExportPDF={() => {
+            if (selectedOrder) {
+              exportOrderToPDF(selectedOrder);
+            }
+          }}
+          onQualityControl={() => {
+            if (selectedOrder) {
+              handleQualityControlClick(selectedOrder);
+            }
+          }}
+        />
+      )}
+
+      {/* Statistics Summary */}
+      {Object.keys(monthlyStats).length > 0 && (
+        <div className="bg-white border-t px-6 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-6 text-sm text-gray-600">
+              <span>
+                Total de Pedidos: <strong>{filteredOrders.length}</strong>
+              </span>
+              <span>
+                Peso Total: <strong>
+                  {filteredOrders.reduce((sum, order) => sum + (order.totalWeight || 0), 0).toFixed(2)} kg
+                </strong>
+              </span>
+              <span>
+                Em Atraso: <strong>
+                  {filteredOrders.filter(order => {
+                    if (!order.deliveryDate) return false;
+                    return isBefore(new Date(order.deliveryDate), new Date()) && 
+                           order.status !== 'completed';
+                  }).length}
+                </strong>
+              </span>
+              <span>
+                Entrega Hoje: <strong>
+                  {filteredOrders.filter(order => {
+                    if (!order.deliveryDate) return false;
+                    return isToday(new Date(order.deliveryDate));
+                  }).length}
+                </strong>
+              </span>
+            </div>
+            
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={() => setIsManageOrdersModalOpen(true)}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                Gerenciar Pedidos
+              </button>
+              <button
+                onClick={() => {
+                  const newOrder: Partial<Order> = {
+                    orderNumber: `ORD-${Date.now()}`,
+                    customer: '',
+                    deliveryDate: new Date().toISOString().split('T')[0],
+                    status: 'in-progress',
+                    columnId: columns[0]?.id || '',
+                    items: [],
+                    totalWeight: 0,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                  };
+                  addOrder(newOrder as Order);
+                }}
+                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                Novo Pedido
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-export default KanbanCard;
+export default Kanban;
