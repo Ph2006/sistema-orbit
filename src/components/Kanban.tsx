@@ -105,8 +105,7 @@ const exportOrderToPDF = (order: Order) => {
 const getMonthlyOrderStats = (orders: Order[]) => {
   const stats: Record<string, { count: number; totalWeight: number }> = {};
   orders.forEach(order => {
-    if (order?.status === 'completed' || order?.deleted) return;
-    if (!order?.deliveryDate) return;
+    if (order.status === 'completed' || order.deleted) return;
     const month = format(new Date(order.deliveryDate), 'yyyy-MM');
     if (!stats[month]) {
       stats[month] = { count: 0, totalWeight: 0 };
@@ -171,9 +170,9 @@ const Kanban: React.FC = () => {
   }, [initializeDefaultColumns, subscribeToColumns, subscribeToOrders, subscribeToProjects]);
 
   useEffect(() => {
-    const uniqueCustomers = [...new Set(orders.filter(o => o?.customer).map(order => order.customer))];
+    const uniqueCustomers = [...new Set(orders.map(order => order.customer))];
     setAvailableCustomers(uniqueCustomers.sort());
-    const projectIds = [...new Set(orders.filter(o => o?.projectId).map(o => o.projectId))];
+    const projectIds = [...new Set(orders.filter(o => o.projectId).map(o => o.projectId))];
     const projectNames = projectIds.map(id => {
       const project = projects.find(p => p.id === id);
       return project ? project.name : 'Projeto não encontrado';
@@ -188,7 +187,7 @@ const Kanban: React.FC = () => {
 
   const handleDragStart = (event: DragEndEvent) => {
     const { active } = event;
-    const draggedOrder = orders.find(order => order?.id === active.id);
+    const draggedOrder = orders.find(order => order.id === active.id);
     if (draggedOrder) {
       setDraggedOrder(draggedOrder);
       setActiveId(active.id as string);
@@ -205,7 +204,7 @@ const Kanban: React.FC = () => {
       }
       const activeOrderId = active.id as string;
       const overColumnId = over.id as string;
-      const order = orders.find(o => o?.id === activeOrderId);
+      const order = orders.find(o => o.id === activeOrderId);
       if (!order || order.columnId === overColumnId) {
         setDraggedOrder(null);
         setActiveId(null);
@@ -246,570 +245,286 @@ const Kanban: React.FC = () => {
     }
   };
 
+  // FUNÇÃO CORRIGIDA PARA NAVEGAÇÃO
   const handleQualityControlClick = (order: Order) => {
     navigate(`/quality?orderId=${order.id}`);
   };
 
   const getFilteredOrders = () => {
     return orders.filter(order => {
-      // Verificações de segurança
-      if (!order || !order.id || order.deleted) return false;
-      
-      // Filtro por status
-      if (filterByStatus.length > 0 && !filterByStatus.includes(order.status || 'in-progress')) return false;
-      
-      // Filtro por cliente
-      if (filterByCustomer.length > 0 && !filterByCustomer.includes(order.customer || '')) return false;
-      
-      // Filtro por projeto
+      if (order.deleted) return false;
+      if (filterByStatus.length > 0 && !filterByStatus.includes(order.status)) return false;
+      if (filterByCustomer.length > 0 && !filterByCustomer.includes(order.customer)) return false;
       if (filterByProject.length > 0 && !filterByProject.some(projectName => {
         const project = projects.find(p => p.name === projectName);
         return project && project.id === order.projectId;
       })) return false;
-      
-      // Filtro por prazo de entrega
-      if (filterByDeadline !== 'all' && order.deliveryDate) {
-        const deliveryDate = new Date(order.deliveryDate);
-        const today = new Date();
-        
-        switch (filterByDeadline) {
-          case 'today':
-            if (!isToday(deliveryDate)) return false;
-            break;
-          case 'this-week':
-            const weekFromNow = addDays(today, 7);
-            if (isAfter(deliveryDate, weekFromNow) || isBefore(deliveryDate, today)) return false;
-            break;
-          case 'overdue':
-            if (!isBefore(deliveryDate, today)) return false;
-            break;
-          case 'next-week':
-            const nextWeekStart = addDays(today, 7);
-            const nextWeekEnd = addDays(today, 14);
-            if (isBefore(deliveryDate, nextWeekStart) || isAfter(deliveryDate, nextWeekEnd)) return false;
-            break;
-        }
-      }
-      
-      // Filtro por termo de busca
       const searchLower = searchTerm.toLowerCase().trim();
       if (searchLower) {
-        const orderNumber = order.orderNumber?.toLowerCase() || '';
-        const customer = order.customer?.toLowerCase() || '';
-        const internalOrderNumber = order.internalOrderNumber?.toLowerCase() || '';
-        const description = order.description?.toLowerCase() || '';
-        
         return (
-          orderNumber.includes(searchLower) ||
-          customer.includes(searchLower) ||
-          internalOrderNumber.includes(searchLower) ||
-          description.includes(searchLower)
+          order.orderNumber.toLowerCase().includes(searchLower) ||
+          order.customer.toLowerCase().includes(searchLower) ||
+          order.internalOrderNumber.toLowerCase().includes(searchLower)
         );
       }
-      
       return true;
     });
   };
 
-  const handleSelectOrder = (orderId: string) => {
-    setSelectedOrders(prev => 
-      prev.includes(orderId) 
-        ? prev.filter(id => id !== orderId)
-        : [...prev, orderId]
-    );
-  };
-
-  const handleSelectAllOrders = () => {
-    const filteredOrders = getFilteredOrders();
-    const allSelected = filteredOrders.every(order => selectedOrders.includes(order.id));
-    
-    if (allSelected) {
-      setSelectedOrders([]);
-    } else {
-      setSelectedOrders(filteredOrders.map(order => order.id));
-    }
-  };
-
-  const handleBulkDelete = async () => {
-    if (selectedOrders.length === 0) return;
-    
-    const confirmed = window.confirm(`Tem certeza que deseja excluir ${selectedOrders.length} pedido(s)?`);
-    if (!confirmed) return;
-    
-    try {
-      await Promise.all(selectedOrders.map(orderId => deleteOrder(orderId)));
-      setSelectedOrders([]);
-    } catch (error) {
-      alert('Erro ao excluir pedidos. Por favor, tente novamente.');
-    }
-  };
-
-  const handleBulkExport = () => {
-    if (selectedOrders.length === 0) return;
-    
-    const ordersToExport = orders.filter(order => selectedOrders.includes(order.id));
-    ordersToExport.forEach(order => {
-      try {
-        exportOrderToPDF(order);
-      } catch (error) {
-        console.error(`Erro ao exportar pedido ${order.orderNumber}:`, error);
-      }
-    });
-  };
-
-  const toggleCardExpansion = (orderId: string) => {
-    setExpandedCards(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(orderId)) {
-        newSet.delete(orderId);
-      } else {
-        newSet.add(orderId);
-      }
-      return newSet;
-    });
-  };
-
-  const clearAllFilters = () => {
-    setFilterByCustomer([]);
-    setFilterByStatus([]);
-    setFilterByProject([]);
-    setFilterByDeadline('all');
-    setSearchTerm('');
-  };
-
   const filteredOrders = getFilteredOrders();
-  const monthlyStats = getMonthlyOrderStats(filteredOrders);
+  
+  const columnsWithOrders = columns.map(column => {
+    let ordersForColumn = [];
+    
+    if (column.title === 'Pedidos em processo') {
+      ordersForColumn = filteredOrders
+        .filter(order => order.status === 'in-progress' && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime(); // Ordem crescente
+        });
+    } else if (column.title === 'Pedidos expedidos') {
+      ordersForColumn = filteredOrders
+        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime(); // Ordem crescente
+        });
+    } else {
+      ordersForColumn = filteredOrders
+        .filter(order => order.columnId === column.id && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime(); // Ordem crescente
+        });
+    }
+    
+    return { 
+      ...column, 
+      orders: ordersForColumn 
+    };
+  });
+
+  useEffect(() => {
+    loadCustomers();
+    const unsubscribe = subscribeToCustomers();
+    return () => unsubscribe();
+  }, [loadCustomers, subscribeToCustomers]);
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500"></div>
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
+        <div className="text-lg font-medium text-white">Carregando...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="text-red-500 text-xl mb-4">{error}</div>
-          <button 
-            onClick={() => window.location.reload()}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
-          >
-            Recarregar Página
-          </button>
-        </div>
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
+        <div className="text-lg font-medium text-red-400">{error}</div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-bold text-gray-900">Sistema Orbit</h1>
-            
-            {/* Tabs */}
-            <div className="flex space-x-1 bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={() => setActiveTab('kanban')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  activeTab === 'kanban'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-800'
-                }`}
-              >
-                <LayoutGrid className="w-4 h-4 inline mr-2" />
-                Kanban
-              </button>
-              <button
-                onClick={() => setActiveTab('stages')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  activeTab === 'stages'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-800'
-                }`}
-              >
-                <StagedList className="w-4 h-4 inline mr-2" />
-                Etapas
-              </button>
-              <button
-                onClick={() => setActiveTab('occupation')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  activeTab === 'occupation'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-800'
-                }`}
-              >
-                <BarChart className="w-4 h-4 inline mr-2" />
-                Taxa de Ocupação
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                type="text"
-                placeholder="Buscar pedidos..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-
-            {/* Filter Menu */}
-            <div className="relative">
-              <button
-                onClick={() => setFilterMenuOpen(!filterMenuOpen)}
-                className="flex items-center space-x-2 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                <Filter className="w-4 h-4" />
-                <span>Filtros</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
-
-              {filterMenuOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border z-50">
-                  <div className="p-4 space-y-4">
-                    {/* Status Filter */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Status
-                      </label>
-                      <div className="space-y-2">
-                        {statusLegend.map(({ status, label }) => (
-                          <label key={status} className="flex items-center">
-                            <input
-                              type="checkbox"
-                              checked={filterByStatus.includes(status)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setFilterByStatus([...filterByStatus, status]);
-                                } else {
-                                  setFilterByStatus(filterByStatus.filter(s => s !== status));
-                                }
-                              }}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="ml-2 text-sm text-gray-700">{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Customer Filter */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Cliente
-                      </label>
-                      <div className="max-h-32 overflow-y-auto space-y-2">
-                        {availableCustomers.map(customer => (
-                          <label key={customer} className="flex items-center">
-                            <input
-                              type="checkbox"
-                              checked={filterByCustomer.includes(customer)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setFilterByCustomer([...filterByCustomer, customer]);
-                                } else {
-                                  setFilterByCustomer(filterByCustomer.filter(c => c !== customer));
-                                }
-                              }}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="ml-2 text-sm text-gray-700">{customer}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Deadline Filter */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Prazo de Entrega
-                      </label>
-                      <select
-                        value={filterByDeadline}
-                        onChange={(e) => setFilterByDeadline(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="all">Todos</option>
-                        <option value="overdue">Em Atraso</option>
-                        <option value="today">Hoje</option>
-                        <option value="this-week">Esta Semana</option>
-                        <option value="next-week">Próxima Semana</option>
-                      </select>
-                    </div>
-
-                    <div className="flex justify-between pt-4 border-t">
-                      <button
-                        onClick={clearAllFilters}
-                        className="text-sm text-gray-600 hover:text-gray-800"
-                      >
-                        Limpar Filtros
-                      </button>
-                      <button
-                        onClick={() => setFilterMenuOpen(false)}
-                        className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md text-sm"
-                      >
-                        Aplicar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* View Toggle */}
-            <button
-              onClick={() => setCompactView(!compactView)}
-              className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              title={compactView ? "Vista Expandida" : "Vista Compacta"}
-            >
-              {compactView ? <LayoutGrid className="w-4 h-4" /> : <LayoutList className="w-4 h-4" />}
-            </button>
-
-            {/* Bulk Actions */}
-            {selectedOrders.length > 0 && (
-              <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-600">
-                  {selectedOrders.length} selecionado(s)
-                </span>
-                <button
-                  onClick={handleBulkExport}
-                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
-                  title="Exportar Selecionados"
-                >
-                  <Download className="w-4 h-4" />
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex flex-row w-full h-full">
+      <div className="flex-1 overflow-x-auto">
+        <div className="max-w-[2000px] mx-auto mb-6">
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+              <h1 className="text-2xl font-bold text-white">Quadro de Produção</h1>
+              <div className="flex gap-2">
+                <button onClick={() => setActiveTab('kanban')} className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'kanban' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                  <LayoutGrid className="h-5 w-5" />
                 </button>
-                <button
-                  onClick={handleBulkDelete}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                  title="Excluir Selecionados"
-                >
-                  <ListX className="w-4 h-4" />
+                <button onClick={() => setActiveTab('stages')} className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'stages' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                  <StagedList className="h-5 w-5" />
+                </button>
+                <button onClick={() => setActiveTab('occupation')} className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'occupation' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                  <BarChart className="h-5 w-5" />
                 </button>
               </div>
-            )}
-
-            {/* Settings */}
-            <button
-              onClick={() => setIsColumnModalOpen(true)}
-              className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              title="Configurações"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
+              <div className="relative flex-1 lg:flex-none">
+                <input type="text" placeholder="Buscar pedidos..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full lg:w-64 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setFilterMenuOpen(!filterMenuOpen)} className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${filterMenuOpen ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                  <Filter className="h-5 w-5" />
+                  <span className="hidden sm:inline">Filtros</span>
+                </button>
+                <button onClick={() => setCompactView(!compactView)} className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${compactView ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25' : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'}`}>
+                  <LayoutList className="h-5 w-5" />
+                  <span className="hidden sm:inline">Compacto</span>
+                </button>
+                <button onClick={() => setIsManageOrdersModalOpen(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/25 flex items-center gap-2">
+                  <Clipboard className="h-5 w-5" />
+                  <span className="hidden sm:inline">Gerenciar</span>
+                </button>
+              </div>
+            </div>
           </div>
+
+          {filterMenuOpen && (
+            <div className="mt-4 bg-gray-800/50 backdrop-blur-lg rounded-xl p-4 border border-gray-700/50">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Cliente</label>
+                  <select
+                    multiple
+                    value={filterByCustomer}
+                    onChange={(e) => setFilterByCustomer(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {availableCustomers.map(customer => (
+                      <option key={customer} value={customer} className="py-1">
+                        {customer}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Status</label>
+                  <select
+                    multiple
+                    value={filterByStatus}
+                    onChange={(e) => setFilterByStatus(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {statusLegend.map(status => (
+                      <option key={status.status} value={status.status} className="py-1">
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Projeto</label>
+                  <select
+                    multiple
+                    value={filterByProject}
+                    onChange={(e) => setFilterByProject(Array.from(e.target.selectedOptions, option => option.value))}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    size={5}
+                  >
+                    {availableProjects.map(project => (
+                      <option key={project} value={project} className="py-1">
+                        {project}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Prazo de Entrega</label>
+                  <select
+                    value={filterByDeadline}
+                    onChange={(e) => setFilterByDeadline(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="today">Hoje</option>
+                    <option value="week">Esta Semana</option>
+                    <option value="month">Este Mês</option>
+                    <option value="overdue">Atrasados</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setSearchTerm('');
+                    setFilterByCustomer([]);
+                    setFilterByStatus([]);
+                    setFilterByProject([]);
+                    setFilterByDeadline('all');
+                  }}
+                  className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                >
+                  Limpar Filtros
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Status Legend */}
-        <div className="flex flex-wrap gap-4 mt-4">
-          {statusLegend.map(({ status, color, borderColor, label }) => (
-            <div key={status} className="flex items-center space-x-2">
-              <div className={`w-3 h-3 rounded border-2 ${color} ${borderColor}`}></div>
-              <span className="text-xs text-gray-600">{label}</span>
+        <div className="max-w-[2000px] mx-auto">
+          {activeTab === 'kanban' && (
+            <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                {columnsWithOrders.map(column => (
+                  <KanbanColumn
+                    key={column.id}
+                    column={column}
+                    onEdit={() => {}}
+                    onDelete={() => {}}
+                    onOrderClick={handleOrderClick}
+                    onUpdateOrder={handleUpdateOrder}
+                    onQualityControlClick={handleQualityControlClick}
+                    highlightTerm={searchTerm}
+                    compactView={compactView}
+                    isManagingOrders={false}
+                    selectedOrders={selectedOrders}
+                    customers={customers}
+                    expandedCards={expandedCards}
+                    projects={projects}
+                  />
+                ))}
+              </div>
+              <DragOverlay>
+                {draggedOrder && (
+                  <KanbanCard
+                    order={draggedOrder}
+                    isManaging={false}
+                    isSelected={false}
+                    highlight={false}
+                    compactView={compactView}
+                    onOrderClick={() => {}}
+                    projects={projects}
+                  />
+                )}
+              </DragOverlay>
+            </DndContext>
+          )}
+          {activeTab === 'stages' && <ManufacturingStages />}
+          {activeTab === 'occupation' && <OccupationRateTab />}
+        </div>
+
+        {isOrderItemsListOpen && selectedOrder && (
+          <OrderItemsList
+            order={selectedOrder}
+            onClose={() => {
+              setIsOrderItemsListOpen(false);
+              setSelectedOrder(null);
+            }}
+            onUpdateOrder={handleUpdateOrder}
+          />
+        )}
+      </div>
+      
+      <div className="hidden lg:block w-72 min-w-[260px] max-w-xs bg-gray-900/80 border-l border-gray-800 p-4 text-white sticky top-0 h-[calc(100vh-64px)] overflow-y-auto">
+        <h3 className="text-lg font-bold mb-4">Resumo de Entregas</h3>
+        <div className="space-y-3">
+          {Object.entries(getMonthlyOrderStats(orders)).sort(([a], [b]) => a.localeCompare(b)).map(([month, data]) => (
+            <div key={month} className="bg-gray-800 rounded-lg p-3 flex flex-col">
+              <span className="font-semibold text-blue-300">{format(new Date(month + '-01'), 'MMMM/yyyy', { locale: ptBR })}</span>
+              <span className="text-sm mt-1">Pedidos: <span className="font-bold">{data.count}</span></span>
+              <span className="text-sm">Peso pendente: <span className="font-bold">{data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</span></span>
             </div>
           ))}
         </div>
       </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'kanban' && (
-          <DndContext
-            sensors={sensors}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <div className="h-full overflow-x-auto">
-              <div className="flex h-full min-w-max space-x-6 p-6">
-                {columns.map(column => (
-                  <KanbanColumn
-                    key={column.id}
-                    column={column}
-                    orders={filteredOrders.filter(order => order.columnId === column.id)}
-                    onOrderClick={handleOrderClick}
-                    onUpdateOrder={handleUpdateOrder}
-                    onSelectOrder={handleSelectOrder}
-                    selectedOrders={selectedOrders}
-                    compactView={compactView}
-                    expandedCards={expandedCards}
-                    onToggleExpansion={toggleCardExpansion}
-                    onQualityControlClick={handleQualityControlClick}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <DragOverlay>
-              {activeId && draggedOrder ? (
-                <KanbanCard
-                  order={draggedOrder}
-                  onClick={() => {}}
-                  onUpdate={() => {}}
-                  isSelected={false}
-                  onSelect={() => {}}
-                  compactView={compactView}
-                  isExpanded={false}
-                  onToggleExpansion={() => {}}
-                  onQualityControlClick={() => {}}
-                />
-              ) : null}
-            </DragOverlay>
-          </DndContext>
-        )}
-
-        {activeTab === 'stages' && (
-          <ManufacturingStages orders={filteredOrders} />
-        )}
-
-        {activeTab === 'occupation' && (
-          <OccupationRateTab orders={filteredOrders} monthlyStats={monthlyStats} />
-        )}
-      </div>
-
-      {/* Modals */}
-      {isColumnModalOpen && (
-        <ColumnModal
-          isOpen={isColumnModalOpen}
-          onClose={() => setIsColumnModalOpen(false)}
-          column={selectedColumn}
-          onSave={(column) => {
-            if (selectedColumn) {
-              updateColumn(column);
-            }
-            setSelectedColumn(null);
-          }}
-          onDelete={(columnId) => {
-            deleteColumn(columnId);
-            setSelectedColumn(null);
-          }}
-        />
-      )}
-
-      {isManageOrdersModalOpen && (
-        <ManageOrdersModal
-          isOpen={isManageOrdersModalOpen}
-          onClose={() => setIsManageOrdersModalOpen(false)}
-          orders={filteredOrders}
-          onUpdateOrder={handleUpdateOrder}
-          onDeleteOrder={deleteOrder}
-          onSelectAll={handleSelectAllOrders}
-          selectedOrders={selectedOrders}
-          onSelectOrder={handleSelectOrder}
-        />
-      )}
-
-      {isOrderModalOpen && selectedOrder && (
-        <OrderModal
-          isOpen={isOrderModalOpen}
-          onClose={() => {
-            setIsOrderModalOpen(false);
-            setSelectedOrder(null);
-          }}
-          order={selectedOrder}
-          onSave={handleUpdateOrder}
-          onDelete={() => {
-            if (selectedOrder) {
-              deleteOrder(selectedOrder.id);
-              setIsOrderModalOpen(false);
-              setSelectedOrder(null);
-            }
-          }}
-        />
-      )}
-
-      {isOrderItemsListOpen && selectedOrder && (
-        <OrderItemsList
-          isOpen={isOrderItemsListOpen}
-          onClose={() => {
-            setIsOrderItemsListOpen(false);
-            setSelectedOrder(null);
-          }}
-          order={selectedOrder}
-          onUpdateOrder={handleUpdateOrder}
-          onExportPDF={() => {
-            if (selectedOrder) {
-              exportOrderToPDF(selectedOrder);
-            }
-          }}
-          onQualityControl={() => {
-            if (selectedOrder) {
-              handleQualityControlClick(selectedOrder);
-            }
-          }}
-        />
-      )}
-
-      {/* Statistics Summary */}
-      {Object.keys(monthlyStats).length > 0 && (
-        <div className="bg-white border-t px-6 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-6 text-sm text-gray-600">
-              <span>
-                Total de Pedidos: <strong>{filteredOrders.length}</strong>
-              </span>
-              <span>
-                Peso Total: <strong>
-                  {filteredOrders.reduce((sum, order) => sum + (order.totalWeight || 0), 0).toFixed(2)} kg
-                </strong>
-              </span>
-              <span>
-                Em Atraso: <strong>
-                  {filteredOrders.filter(order => {
-                    if (!order.deliveryDate) return false;
-                    return isBefore(new Date(order.deliveryDate), new Date()) && 
-                           order.status !== 'completed';
-                  }).length}
-                </strong>
-              </span>
-              <span>
-                Entrega Hoje: <strong>
-                  {filteredOrders.filter(order => {
-                    if (!order.deliveryDate) return false;
-                    return isToday(new Date(order.deliveryDate));
-                  }).length}
-                </strong>
-              </span>
-            </div>
-            
-            <div className="flex items-center space-x-3">
-              <button
-                onClick={() => setIsManageOrdersModalOpen(true)}
-                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-              >
-                Gerenciar Pedidos
-              </button>
-              <button
-                onClick={() => {
-                  const newOrder: Partial<Order> = {
-                    orderNumber: `ORD-${Date.now()}`,
-                    customer: '',
-                    deliveryDate: new Date().toISOString().split('T')[0],
-                    status: 'in-progress',
-                    columnId: columns[0]?.id || '',
-                    items: [],
-                    totalWeight: 0,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                  };
-                  addOrder(newOrder as Order);
-                }}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                Novo Pedido
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
