@@ -168,8 +168,8 @@ const exportOrderToPDF = (order: Order) => {
   return fileName;
 };
 
-const getMonthlyOrderStats = (orders) => {
-  const stats = {};
+const getMonthlyOrderStats = (orders: Order[]) => {
+  const stats: Record<string, { count: number; totalWeight: number }> = {};
   orders.forEach(order => {
     if (order.status === 'completed' || order.deleted) return;
     const month = format(new Date(order.deliveryDate), 'yyyy-MM');
@@ -716,6 +716,14 @@ const Kanban: React.FC = () => {
           const dateB = new Date(b.deliveryDate);
           return dateA.getTime() - dateB.getTime();
         });
+    } else if (column.title === 'Pedidos expedidos') {
+      ordersForColumn = filteredOrders
+        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
     } else {
       ordersForColumn = filteredOrders
         .filter(order => order.columnId === column.id && !order.deleted)
@@ -1103,11 +1111,3 @@ const Kanban: React.FC = () => {
 };
 
 export default Kanban;
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
-    } else if (column.title === 'Pedidos expedidos') {
-      ordersForColumn = filteredOrders
-        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
-        .sort((a, b) => {
-          const dateA = new Date(a.deliveryDate);
