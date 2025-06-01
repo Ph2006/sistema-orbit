@@ -114,7 +114,78 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     }
   };
 
-  // Resto do código permanece o mesmo...
+  const formatDeliveryDate = () => {
+    try {
+      if (!order.deliveryDate) return 'Data não definida';
+      const date = new Date(order.deliveryDate);
+      if (!isValid(date)) return 'Data inválida';
+      return format(date, 'dd/MM/yyyy', { locale: ptBR });
+    } catch (error) {
+      console.warn('Erro ao formatar data:', error);
+      return 'Data inválida';
+    }
+  };
+
+  const isOverdue = React.useMemo(() => {
+    try {
+      if (!order.deliveryDate) return false;
+      const deliveryDate = new Date(order.deliveryDate);
+      if (!isValid(deliveryDate)) return false;
+      const today = new Date();
+      return deliveryDate < today && order.status !== 'completed';
+    } catch (error) {
+      console.warn('Erro ao verificar atraso:', error);
+      return false;
+    }
+  }, [order.deliveryDate, order.status]);
+
+  // IMPORTANTE: Definir statusInfo antes de usar
+  const statusInfo = getStatusInfo(order.status || 'default');
+  
+  const progress = React.useMemo(() => {
+    try {
+      if (order.progress !== undefined && typeof order.progress === 'number') {
+        return Math.max(0, Math.min(100, order.progress));
+      }
+      
+      if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+        return 0;
+      }
+      
+      let totalProgress = 0;
+      let validItems = 0;
+      
+      for (const item of order.items) {
+        if (item && typeof item === 'object' && typeof item.overallProgress === 'number') {
+          totalProgress += Math.max(0, Math.min(100, item.overallProgress));
+          validItems++;
+        }
+      }
+      
+      return validItems > 0 ? Math.round(totalProgress / validItems) : 0;
+    } catch (error) {
+      console.warn('Erro ao calcular progresso:', error);
+      return 0;
+    }
+  }, [order.progress, order.items]);
+
+  const handleCardClick = () => {
+    if (typeof onOrderClick === 'function') {
+      onOrderClick(order);
+    }
+  };
+
+  const handleQualityControlClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (typeof onQualityControlClick === 'function') {
+      onQualityControlClick(order);
+    }
+  };
+
+  const orderNumber = order.orderNumber || 'N/A';
+  const customer = order.customer || 'Cliente não informado';
+  const internalOrderNumber = order.internalOrderNumber || 'OS não informada';
+  const itemsCount = Array.isArray(order.items) ? order.items.length : 0;
 
   return (
     <div
