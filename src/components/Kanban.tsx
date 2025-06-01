@@ -716,14 +716,6 @@ const Kanban: React.FC = () => {
           const dateB = new Date(b.deliveryDate);
           return dateA.getTime() - dateB.getTime();
         });
-    } else if (column.title === 'Pedidos expedidos') {
-      ordersForColumn = filteredOrders
-        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
-        .sort((a, b) => {
-          const dateA = new Date(a.deliveryDate);
-          const dateB = new Date(b.deliveryDate);
-          return dateA.getTime() - dateB.getTime();
-        });
     } else {
       ordersForColumn = filteredOrders
         .filter(order => order.columnId === column.id && !order.deleted)
@@ -773,10 +765,11 @@ const Kanban: React.FC = () => {
     });
   };
 
-  // Função para navegar para o controle de qualidade com o pedido selecionado
+  // Função CORRIGIDA para navegar para o controle de qualidade com o pedido selecionado
   const handleQualityControlClick = (order: Order) => {
-    // Usar a rota exata que vemos na imagem 4
-    window.location.href = `/controle-de-qualidade?orderId=${order.id}`;
+    // Usar navigate do React Router em vez de window.location.href
+    // Isso garante que a navegação funcione corretamente em uma SPA
+    navigate(`/controle-qualidade?orderId=${order.id}`);
   };
 
   console.log('columns:', columns.map(c => ({ id: c.id, title: c.title })));
@@ -1110,3 +1103,11 @@ const Kanban: React.FC = () => {
 };
 
 export default Kanban;
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime();
+        });
+    } else if (column.title === 'Pedidos expedidos') {
+      ordersForColumn = filteredOrders
+        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
