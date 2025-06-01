@@ -46,11 +46,11 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
   const [hasInspectionPlan, setHasInspectionPlan] = useState(order.hasInspectionPlan || false);
   const [hasPaintPlan, setHasPaintPlan] = useState(order.hasPaintPlan || false);
 
-  // NOVO: Estado para Google Drive
+  // Estados para Google Drive
   const [googleDriveLink, setGoogleDriveLink] = useState(order.googleDriveLink || '');
   const [isEditingGoogleDrive, setIsEditingGoogleDrive] = useState(false);
 
-  // NOVA: Função para validar link do Google Drive
+  // Função para validar link do Google Drive
   const isValidGoogleDriveLink = (url: string) => {
     const drivePatterns = [
       /^https:\/\/drive\.google\.com\//,
@@ -60,7 +60,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     return drivePatterns.some(pattern => pattern.test(url));
   };
 
-  // NOVA: Função para abrir Google Drive
+  // Função para abrir Google Drive
   const handleOpenGoogleDrive = () => {
     if (googleDriveLink) {
       window.open(googleDriveLink, '_blank');
@@ -69,7 +69,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     }
   };
 
-  // NOVA: Função para configurar Google Drive rapidamente
+  // Função para configurar Google Drive rapidamente
   const handleQuickConfigureGoogleDrive = () => {
     const newLink = prompt(
       'Digite o link do Google Drive:',
@@ -88,7 +88,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     }
   };
 
-  // Função para exportar PDF sem coluna de progresso
+  // Função para exportar PDF
   const exportOrderToPDF = (orderToExport: Order, selectedItemIds?: Set<string>) => {
     const doc = new jsPDF();
     
@@ -295,7 +295,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
       hasDrawings,
       hasInspectionPlan,
       hasPaintPlan,
-      googleDriveLink: googleDriveLink.trim() || undefined // NOVO: Salvar Google Drive
+      googleDriveLink: googleDriveLink.trim() || undefined
     };
     onUpdateOrder(updatedOrder);
     onClose();
@@ -339,7 +339,6 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* NOVO: Botão Google Drive no header */}
             {googleDriveLink && (
               <button
                 onClick={handleOpenGoogleDrive}
@@ -412,7 +411,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
             </div>
           </div>
 
-          {/* NOVA SEÇÃO: Google Drive */}
+          {/* Google Drive Section */}
           <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-medium text-green-800 flex items-center gap-2">
@@ -586,94 +585,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
             <div className="divide-y divide-gray-200">
               {items.map((item, index) => (
                 <div key={item.id} className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-50">
-                  <div className="col-span-1">
-                    <input
-                      type="number"
-                      placeholder="Qtd"
-                      min="1"
-                      value={newItem.quantity || 1}
-                      onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) || 1 })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      placeholder="Peso unitário"
-                      step="0.001"
-                      value={newItem.unitWeight || 0}
-                      onChange={(e) => setNewItem({ ...newItem, unitWeight: parseFloat(e.target.value) || 0 })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="col-span-2 flex items-center">
-                    <span className="text-sm text-gray-500">0%</span>
-                  </div>
                   <div className="col-span-1 flex items-center">
-                    <button
-                      onClick={handleAddItem}
-                      className="p-2 bg-green-600 text-white rounded hover:bg-green-700"
-                      title="Adicionar Item"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="border-t border-gray-200 px-6 py-4 flex justify-between items-center bg-gray-50">
-          <div className="text-sm text-gray-600">
-            <span className="font-medium">Total:</span> {items.length} itens • {calculateTotalWeight().toFixed(2)} kg
-            {selectedItems.size > 0 && (
-              <span className="ml-4 text-blue-600">
-                • {selectedItems.size} selecionado(s)
-              </span>
-            )}
-            {/* NOVO: Indicador do Google Drive no footer */}
-            {googleDriveLink && (
-              <span className="ml-4 text-green-600 flex items-center gap-1">
-                • <FolderOpen className="h-3 w-3" /> Google Drive configurado
-              </span>
-            )}
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSaveOrder}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              Salvar Alterações
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Progress Modal */}
-      {isProgressModalOpen && selectedItem && (
-        <ItemProgressModal
-          item={selectedItem}
-          allItems={items}
-          onClose={() => {
-            setIsProgressModalOpen(false);
-            setSelectedItem(null);
-          }}
-          onSave={handleSaveItemProgress}
-        />
-      )}
-    </div>
-  );
-};
-
-export default OrderItemsList;span-1 flex items-center">
                     <input
                       type="checkbox"
                       checked={selectedItems.has(item.id)}
@@ -748,7 +660,93 @@ export default OrderItemsList;span-1 flex items-center">
                     <input
                       type="text"
                       placeholder="Código"
-                      value={newItem.code || ''}
+                  <div className="col-span-1">
+                    <input
+                      type="number"
+                      placeholder="Qtd"
+                      min="1"
+                      value={newItem.quantity || 1}
+                      onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) || 1 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <input
+                      type="number"
+                      placeholder="Peso unitário"
+                      step="0.001"
+                      value={newItem.unitWeight || 0}
+                      onChange={(e) => setNewItem({ ...newItem, unitWeight: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="col-span-2 flex items-center">
+                    <span className="text-sm text-gray-500">0%</span>
+                  </div>
+                  <div className="col-span-1 flex items-center">
+                    <button
+                      onClick={handleAddItem}
+                      className="p-2 bg-green-600 text-white rounded hover:bg-green-700"
+                      title="Adicionar Item"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-gray-200 px-6 py-4 flex justify-between items-center bg-gray-50">
+          <div className="text-sm text-gray-600">
+            <span className="font-medium">Total:</span> {items.length} itens • {calculateTotalWeight().toFixed(2)} kg
+            {selectedItems.size > 0 && (
+              <span className="ml-4 text-blue-600">
+                • {selectedItems.size} selecionado(s)
+              </span>
+            )}
+            {googleDriveLink && (
+              <span className="ml-4 text-green-600 flex items-center gap-1">
+                • <FolderOpen className="h-3 w-3" /> Google Drive configurado
+              </span>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleSaveOrder}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Salvar Alterações
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Progress Modal */}
+      {isProgressModalOpen && selectedItem && (
+        <ItemProgressModal
+          item={selectedItem}
+          allItems={items}
+          onClose={() => {
+            setIsProgressModalOpen(false);
+            setSelectedItem(null);
+          }}
+          onSave={handleSaveItemProgress}
+        />
+      )}
+    </div>
+  );
+};
+
+export default OrderItemsList;={newItem.code || ''}
                       onChange={(e) => setNewItem({ ...newItem, code: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
@@ -762,4 +760,9 @@ export default OrderItemsList;span-1 flex items-center">
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
-                  <div className="col-
+                  <div className="col-span-1">
+                    <input
+                      type="number"
+                      placeholder="Qtd"
+                      min="1"
+                      value
