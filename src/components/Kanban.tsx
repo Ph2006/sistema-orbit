@@ -271,14 +271,37 @@ const Kanban: React.FC = () => {
   
   const columnsWithOrders = columns.map(column => {
     let ordersForColumn = [];
+    
     if (column.title === 'Pedidos em processo') {
-      ordersForColumn = filteredOrders.filter(order => order.status === 'in-progress' && !order.deleted);
+      ordersForColumn = filteredOrders
+        .filter(order => order.status === 'in-progress' && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime(); // Ordem crescente (mais próximo primeiro)
+        });
     } else if (column.title === 'Pedidos expedidos') {
-      ordersForColumn = filteredOrders.filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted);
+      ordersForColumn = filteredOrders
+        .filter(order => (order.status === 'waiting-docs' || order.status === 'completed') && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime(); // Ordem crescente (mais próximo primeiro)
+        });
     } else {
-      ordersForColumn = filteredOrders.filter(order => order.columnId === column.id && !order.deleted);
+      ordersForColumn = filteredOrders
+        .filter(order => order.columnId === column.id && !order.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.deliveryDate);
+          const dateB = new Date(b.deliveryDate);
+          return dateA.getTime() - dateB.getTime(); // Ordem crescente (mais próximo primeiro)
+        });
     }
-    return { ...column, orders: ordersForColumn };
+    
+    return { 
+      ...column, 
+      orders: ordersForColumn 
+    };
   });
 
   useEffect(() => {
