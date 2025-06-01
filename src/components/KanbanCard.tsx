@@ -32,7 +32,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   }
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: String(order.id), // Garantir que o ID é uma string
+    id: String(order.id),
     disabled: isManaging,
   });
 
@@ -44,43 +44,66 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
     switch (status) {
       case 'in-progress':
         return { 
-          bgColor: 'bg-orange-100/10', 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-900', 
           borderColor: 'border-l-orange-500', 
-          statusBg: 'bg-orange-100 dark:bg-orange-900', 
-          statusText: 'text-orange-600 dark:text-orange-300',
-          statusLabel: 'Em Processo'
+          statusBg: 'bg-orange-500/20 border border-orange-500/30', 
+          statusText: 'text-orange-300',
+          statusLabel: 'Em Processo',
+          glowColor: 'shadow-orange-500/10'
         };
       case 'delayed':
         return { 
-          bgColor: 'bg-red-100/10', 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-900', 
           borderColor: 'border-l-red-500', 
-          statusBg: 'bg-red-100 dark:bg-red-900', 
-          statusText: 'text-red-600 dark:text-red-300',
-          statusLabel: 'Atrasado'
+          statusBg: 'bg-red-500/20 border border-red-500/30', 
+          statusText: 'text-red-300',
+          statusLabel: 'Atrasado',
+          glowColor: 'shadow-red-500/10'
         };
       case 'waiting-docs':
         return { 
-          bgColor: 'bg-yellow-100/10', 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-900', 
           borderColor: 'border-l-yellow-500', 
-          statusBg: 'bg-yellow-100 dark:bg-yellow-900', 
-          statusText: 'text-yellow-600 dark:text-yellow-300',
-          statusLabel: 'Aguardando Docs'
+          statusBg: 'bg-yellow-500/20 border border-yellow-500/30', 
+          statusText: 'text-yellow-300',
+          statusLabel: 'Aguardando Docs',
+          glowColor: 'shadow-yellow-500/10'
         };
       case 'completed':
         return { 
-          bgColor: 'bg-green-100/10', 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-900', 
           borderColor: 'border-l-green-500', 
-          statusBg: 'bg-green-100 dark:bg-green-900', 
-          statusText: 'text-green-600 dark:text-green-300',
-          statusLabel: 'Concluído'
+          statusBg: 'bg-green-500/20 border border-green-500/30', 
+          statusText: 'text-green-300',
+          statusLabel: 'Concluído',
+          glowColor: 'shadow-green-500/10'
+        };
+      case 'ready':
+        return { 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-900', 
+          borderColor: 'border-l-blue-500', 
+          statusBg: 'bg-blue-500/20 border border-blue-500/30', 
+          statusText: 'text-blue-300',
+          statusLabel: 'Pronto',
+          glowColor: 'shadow-blue-500/10'
+        };
+      case 'urgent':
+        return { 
+          bgColor: 'bg-gradient-to-br from-purple-900 to-gray-900', 
+          borderColor: 'border-l-purple-500', 
+          statusBg: 'bg-purple-500/20 border border-purple-500/30', 
+          statusText: 'text-purple-300',
+          statusLabel: 'Urgente',
+          glowColor: 'shadow-purple-500/20'
         };
       default:
         return { 
-          bgColor: 'bg-blue-100/10', 
-          borderColor: 'border-l-blue-500', 
-          statusBg: 'bg-blue-100 dark:bg-blue-900', 
-          statusText: 'text-blue-600 dark:text-blue-300',
-          statusLabel: 'Em Andamento'
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-900', 
+          borderColor: 'border-l-gray-500', 
+          statusBg: 'bg-gray-500/20 border border-gray-500/30', 
+          statusText: 'text-gray-300',
+          statusLabel: 'Padrão',
+          glowColor: 'shadow-gray-500/10'
         };
     }
   };
@@ -169,53 +192,65 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
       {...listeners}
       {...attributes}
       className={`
-        ${statusInfo.bgColor} ${statusInfo.borderColor}
-        bg-gray-800/80 backdrop-blur-sm rounded-lg p-4 border-l-4 
-        shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer
-        ${isDragging ? 'opacity-50 rotate-3 scale-105' : ''}
-        ${highlight ? 'ring-2 ring-blue-400 ring-opacity-60' : ''}
-        ${isSelected ? 'ring-2 ring-purple-400' : ''}
+        ${statusInfo.bgColor} ${statusInfo.borderColor} ${statusInfo.glowColor}
+        backdrop-blur-sm rounded-xl border-l-4 border-r border-t border-b
+        border-gray-700/50 shadow-xl hover:shadow-2xl transition-all duration-300 cursor-pointer
+        ${isDragging ? 'opacity-60 rotate-2 scale-105 shadow-2xl' : ''}
+        ${highlight ? 'ring-2 ring-blue-400/60 ring-opacity-80' : ''}
+        ${isSelected ? 'ring-2 ring-purple-400/60' : ''}
         hover:transform hover:scale-[1.02] hover:-translate-y-1
-        border border-gray-700/50
         ${compactView ? 'p-3' : 'p-4'}
+        relative overflow-hidden
       `}
       onClick={handleCardClick}
     >
-      {/* Header with Order Number and Status */}
-      <div className="flex justify-between items-start mb-3">
-        <span className={`${statusInfo.statusBg} ${statusInfo.statusText} px-2 py-1 rounded text-xs font-medium`}>
+      {/* Efeito de brilho sutil */}
+      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -skew-x-12 transform translate-x-[-100%] hover:translate-x-[100%] transition-transform duration-1000"></div>
+      
+      {/* Header com número do pedido e badges */}
+      <div className="flex justify-between items-start mb-3 relative z-10">
+        <span className={`${statusInfo.statusBg} ${statusInfo.statusText} px-3 py-1.5 rounded-lg text-xs font-bold tracking-wide`}>
           #{orderNumber}
         </span>
-        {isOverdue && (
-          <span className="bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300 px-2 py-1 rounded-full text-xs font-medium">
-            Atrasado
-          </span>
-        )}
-        {order.status === 'completed' && (
-          <span className="bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300 px-2 py-1 rounded-full text-xs font-medium">
-            Concluído
-          </span>
-        )}
+        <div className="flex gap-1">
+          {isOverdue && (
+            <span className="bg-red-500/20 border border-red-500/30 text-red-300 px-2 py-1 rounded-full text-xs font-medium animate-pulse">
+              ⚠️ Atrasado
+            </span>
+          )}
+          {order.status === 'completed' && (
+            <span className="bg-green-500/20 border border-green-500/30 text-green-300 px-2 py-1 rounded-full text-xs font-medium">
+              ✅ Concluído
+            </span>
+          )}
+          {order.status === 'urgent' && (
+            <span className="bg-purple-500/20 border border-purple-500/30 text-purple-300 px-2 py-1 rounded-full text-xs font-medium animate-pulse">
+              🚨 Urgente
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* Order Information */}
-      <div className={`space-y-2 ${compactView ? 'text-xs' : 'text-sm'}`}>
-        <div className="flex items-center space-x-2">
-          <span className="text-gray-400">👤</span>
-          <span className="text-gray-300 truncate" title={customer}>
+      {/* Informações do pedido */}
+      <div className={`space-y-3 ${compactView ? 'text-xs' : 'text-sm'} relative z-10`}>
+        <div className="flex items-center space-x-3 group">
+          <span className="text-blue-400 text-lg">👤</span>
+          <span className="text-gray-200 truncate font-medium group-hover:text-blue-300 transition-colors" title={customer}>
             {customer}
           </span>
         </div>
         
-        <div className="flex items-center space-x-2">
-          <span className="text-gray-400">📋</span>
-          <span className="text-gray-300">OS: {internalOrderNumber}</span>
+        <div className="flex items-center space-x-3 group">
+          <span className="text-purple-400 text-lg">📋</span>
+          <span className="text-gray-200 group-hover:text-purple-300 transition-colors">
+            OS: <span className="font-mono font-bold">{internalOrderNumber}</span>
+          </span>
         </div>
         
         <div className="flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <span className="text-gray-400">📅</span>
-            <span className="text-gray-300">
+          <div className="flex items-center space-x-3 group">
+            <span className="text-green-400 text-lg">📅</span>
+            <span className="text-gray-200 group-hover:text-green-300 transition-colors font-medium">
               {formatDeliveryDate()}
             </span>
           </div>
@@ -224,9 +259,9 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
            typeof order.totalWeight === 'number' && 
            !isNaN(order.totalWeight) && 
            order.totalWeight > 0 && (
-            <div className="flex items-center space-x-2">
-              <span className="text-gray-400">⚖️</span>
-              <span className="text-gray-300">
+            <div className="flex items-center space-x-2 group">
+              <span className="text-orange-400 text-lg">⚖️</span>
+              <span className="text-gray-200 group-hover:text-orange-300 transition-colors font-bold">
                 {order.totalWeight.toLocaleString('pt-BR', { 
                   minimumFractionDigits: 1,
                   maximumFractionDigits: 1 
@@ -237,39 +272,47 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </div>
       </div>
 
-      {/* Progress Section */}
+      {/* Seção de progresso */}
       {!compactView && (
-        <div className="mt-4">
-          <div className="flex justify-between text-xs text-gray-400 mb-1">
-            <span>Progresso</span>
-            <span>{itemsCount} {itemsCount === 1 ? 'item' : 'items'}</span>
+        <div className="mt-4 relative z-10">
+          <div className="flex justify-between text-xs text-gray-400 mb-2">
+            <span className="font-medium">Progresso</span>
+            <span className="text-gray-300">
+              {itemsCount} {itemsCount === 1 ? 'item' : 'items'}
+            </span>
           </div>
-          <div className="w-full bg-gray-700 rounded-full h-2">
+          <div className="w-full bg-gray-700/50 rounded-full h-3 border border-gray-600/50 overflow-hidden">
             <div 
-              className={`h-2 rounded-full transition-all duration-300 ${
-                progress >= 100 ? 'bg-green-500' : 
-                progress >= 75 ? 'bg-blue-500' : 
-                progress >= 50 ? 'bg-yellow-500' : 'bg-orange-500'
+              className={`h-full rounded-full transition-all duration-500 shadow-lg ${
+                progress >= 100 ? 'bg-gradient-to-r from-green-500 to-green-400 shadow-green-500/30' : 
+                progress >= 75 ? 'bg-gradient-to-r from-blue-500 to-blue-400 shadow-blue-500/30' : 
+                progress >= 50 ? 'bg-gradient-to-r from-yellow-500 to-yellow-400 shadow-yellow-500/30' : 
+                'bg-gradient-to-r from-orange-500 to-orange-400 shadow-orange-500/30'
               }`}
-              style={{ width: `${Math.max(progress, 2)}%` }}
-            />
+              style={{ width: `${Math.max(progress, 3)}%` }}
+            >
+              <div className="h-full w-full bg-gradient-to-r from-white/20 to-transparent"></div>
+            </div>
           </div>
-          <div className="text-xs text-gray-400 mt-1 text-right">
-            {progress}%
+          <div className="text-xs text-gray-300 mt-1 text-right font-bold">
+            {progress}% completo
           </div>
         </div>
       )}
 
-      {/* Quality Control Button */}
+      {/* Botão de controle de qualidade */}
       {!compactView && onQualityControlClick && (
         <button
           onClick={handleQualityControlClick}
-          className="w-full mt-3 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg transition-colors text-sm font-medium flex items-center justify-center space-x-2"
+          className="w-full mt-4 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white py-2.5 rounded-lg transition-all duration-300 text-sm font-bold flex items-center justify-center space-x-2 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 border border-purple-500/30 relative z-10 group"
         >
-          <span>🔍</span>
+          <span className="group-hover:animate-pulse">🔍</span>
           <span>Controle de Qualidade</span>
         </button>
       )}
+
+      {/* Indicador de status na lateral direita */}
+      <div className={`absolute right-0 top-0 bottom-0 w-1 ${statusInfo.borderColor.replace('border-l-', 'bg-')} opacity-60`}></div>
     </div>
   );
 };
