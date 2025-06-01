@@ -10,7 +10,8 @@ interface KanbanCardProps {
   highlight: boolean;
   compactView: boolean;
   onOrderClick: (order: Order) => void;
-  projects?: Project[]; // Adicionar projects como prop
+  projects?: Project[];
+  onQualityControlClick?: (order: Order) => void;
 }
 
 const KanbanCard: React.FC<KanbanCardProps> = ({ 
@@ -20,11 +21,20 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   highlight, 
   compactView, 
   onOrderClick,
-  projects = [] 
+  projects = [],
+  onQualityControlClick
 }) => {
+  // VERIFICAÇÃO DE SEGURANÇA: Se order não existir ou não tiver dados essenciais
+  if (!order || !order.id || !order.orderNumber) {
+    return null;
+  }
+
   // Buscar o projeto pelo ID
   const project = projects.find(p => p.id === order.projectId);
   const projectName = project?.name || '';
+
+  // Status com fallback seguro
+  const orderStatus = order.status || 'in-progress';
 
   // Função para determinar a cor do status
   const getStatusColor = (status: string) => {
@@ -48,9 +58,22 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
       case 'completed': return 'Concluído';
       case 'ready': return 'Pronto';
       case 'urgent': return 'Urgente';
-      default: return status;
+      default: return status || 'Em Processo';
     }
   };
+
+  // Função para lidar com clique no botão de qualidade
+  const handleQualityControlClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onQualityControlClick) {
+      onQualityControlClick(order);
+    }
+  };
+
+  // Verificações seguras para campos opcionais
+  const customer = order.customer || 'Cliente não informado';
+  const internalOrderNumber = order.internalOrderNumber || 'OS não informada';
+  const deliveryDate = order.deliveryDate || new Date().toISOString();
 
   return (
     <div 
@@ -59,7 +82,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         hover:shadow-md hover:scale-105
         ${isSelected ? 'ring-2 ring-blue-500' : ''}
         ${highlight ? 'ring-2 ring-yellow-400' : ''}
-        ${getStatusColor(order.status)}
+        ${getStatusColor(orderStatus)}
       `}
       onClick={() => onOrderClick(order)}
     >
@@ -81,9 +104,9 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         <div className="flex flex-col items-end">
           <span className={`
             inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border
-            ${getStatusColor(order.status)}
+            ${getStatusColor(orderStatus)}
           `}>
-            {getStatusLabel(order.status)}
+            {getStatusLabel(orderStatus)}
           </span>
         </div>
       </div>
@@ -92,11 +115,11 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
       <div className="space-y-2 mb-4">
         <div className="flex items-center text-sm text-gray-700">
           <span className="font-medium">🏢 Cliente:</span>
-          <span className="ml-1 truncate">{order.customer}</span>
+          <span className="ml-1 truncate">{customer}</span>
         </div>
         <div className="flex items-center text-sm text-gray-700">
           <span className="font-medium">📋 OS:</span>
-          <span className="ml-1">{order.internalOrderNumber}</span>
+          <span className="ml-1">{internalOrderNumber}</span>
         </div>
       </div>
 
@@ -105,7 +128,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         <div className="flex items-center justify-between text-sm">
           <span className="text-gray-600">📅 Entrega:</span>
           <span className="font-medium text-gray-900">
-            {format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}
+            {format(new Date(deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}
           </span>
         </div>
         {order.totalWeight && (
@@ -124,7 +147,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
           <div className="flex items-center justify-between mb-1">
             <span className="text-sm text-gray-600">Progresso</span>
             <span className="text-sm font-medium text-gray-900">
-              {order.items?.length || 0} {order.items?.length === 1 ? 'item' : 'itens'}
+              {order.items?.length || 0} {(order.items?.length || 0) === 1 ? 'item' : 'itens'}
             </span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2">
@@ -132,7 +155,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
               className="bg-blue-600 h-2 rounded-full transition-all duration-300"
               style={{ 
                 width: `${
-                  order.items?.length 
+                  order.items && order.items.length > 0
                     ? (order.items.reduce((acc, item) => acc + (item.overallProgress || 0), 0) / order.items.length) 
                     : 0
                 }%` 
@@ -146,10 +169,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
       {!isManaging && (
         <div className="flex gap-2 mt-4">
           <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              // Navegar para controle de qualidade
-            }}
+            onClick={handleQualityControlClick}
             className="flex-1 px-3 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors"
           >
             🔍 Controle de Qualidade
