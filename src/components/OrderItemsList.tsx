@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { X, Edit, Trash2, Plus, Download, BarChart3, Settings, CheckCircle, Calendar, Building, FolderOpen, ExternalLink, Link } from 'lucide-react';
 import { Order, OrderItem } from '../types/kanban';
 import ItemProgressModal from './ItemProgressModal';
@@ -7,7 +7,6 @@ import 'jspdf-autotable';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-// Declaração para o TypeScript reconhecer o autoTable
 declare module 'jspdf' {
   interface jsPDF {
     autoTable: (options: any) => jsPDF;
@@ -50,7 +49,6 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
   const [googleDriveLink, setGoogleDriveLink] = useState(order.googleDriveLink || '');
   const [isEditingGoogleDrive, setIsEditingGoogleDrive] = useState(false);
 
-  // Função para validar link do Google Drive
   const isValidGoogleDriveLink = (url: string) => {
     const drivePatterns = [
       /^https:\/\/drive\.google\.com\//,
@@ -60,7 +58,6 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     return drivePatterns.some(pattern => pattern.test(url));
   };
 
-  // Função para abrir Google Drive
   const handleOpenGoogleDrive = () => {
     if (googleDriveLink) {
       window.open(googleDriveLink, '_blank');
@@ -69,7 +66,6 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     }
   };
 
-  // Função para configurar Google Drive rapidamente
   const handleQuickConfigureGoogleDrive = () => {
     const newLink = prompt(
       'Digite o link do Google Drive:',
@@ -88,7 +84,6 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     }
   };
 
-  // Função para exportar PDF
   const exportOrderToPDF = (orderToExport: Order, selectedItemIds?: Set<string>) => {
     const doc = new jsPDF();
     
@@ -105,9 +100,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     
     doc.text(`Pedido: #${orderToExport.orderNumber}`, 20, 55);
     doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}`, 120, 55);
-    
     doc.text(`Cliente: ${orderToExport.customer}`, 20, 70);
-    
     doc.text(`OS Interna: ${orderToExport.internalOrderNumber}`, 20, 85);
     
     if (orderToExport.startDate) {
@@ -166,7 +159,6 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
     
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    
     doc.text(`Total de Itens:`, 20, finalY);
     doc.setFont('helvetica', 'normal');
     doc.text(totalItems.toString(), 80, finalY);
@@ -583,7 +575,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
 
             {/* Table Body */}
             <div className="divide-y divide-gray-200">
-              {items.map((item, index) => (
+              {items.map((item) => (
                 <div key={item.id} className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-50">
                   <div className="col-span-1 flex items-center">
                     <input
@@ -660,13 +652,8 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
                     <input
                       type="text"
                       placeholder="Código"
-                  <div className="col-span-1">
-                    <input
-                      type="number"
-                      placeholder="Qtd"
-                      min="1"
-                      value={newItem.quantity || 1}
-                      onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) || 1 })}
+                      value={newItem.code || ''}
+                      onChange={(e) => setNewItem({ ...newItem, code: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
@@ -700,15 +687,15 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
 
         {/* Footer */}
         <div className="border-t border-gray-200 px-6 py-4 flex justify-between items-center bg-gray-50">
-          <div className="text-sm text-gray-600">
-            <span className="font-medium">Total:</span> {items.length} itens • {calculateTotalWeight().toFixed(2)} kg
+          <div className="text-sm text-gray-600 flex items-center gap-4">
+            <span><span className="font-medium">Total:</span> {items.length} itens • {calculateTotalWeight().toFixed(2)} kg</span>
             {selectedItems.size > 0 && (
-              <span className="ml-4 text-blue-600">
+              <span className="text-blue-600">
                 • {selectedItems.size} selecionado(s)
               </span>
             )}
             {googleDriveLink && (
-              <span className="ml-4 text-green-600 flex items-center gap-1">
+              <span className="text-green-600 flex items-center gap-1">
                 • <FolderOpen className="h-3 w-3" /> Google Drive configurado
               </span>
             )}
@@ -746,9 +733,7 @@ const OrderItemsList: React.FC<OrderItemsListProps> = ({
   );
 };
 
-export default OrderItemsList;={newItem.code || ''}
-                      onChange={(e) => setNewItem({ ...newItem, code: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+export default OrderItemsList;rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                   <div className="col-span-3">
@@ -765,4 +750,6 @@ export default OrderItemsList;={newItem.code || ''}
                       type="number"
                       placeholder="Qtd"
                       min="1"
-                      value
+                      value={newItem.quantity || 1}
+                      onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) || 1 })}
+                      className="w-full px-3 py-2 border border-gray-300
