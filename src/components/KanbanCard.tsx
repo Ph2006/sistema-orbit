@@ -271,6 +271,39 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </div>
       </div>
 
+      {/* Lista de Itens (Nova adição) */}
+      {!compactView && order.items && Array.isArray(order.items) && order.items.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-gray-600/50">
+          <div className="text-xs font-medium text-gray-400 mb-2 flex items-center justify-between">
+            <span>Itens do Pedido</span>
+            <span>{order.items.length} {order.items.length === 1 ? 'item' : 'itens'}</span>
+          </div>
+          <div className="space-y-2 max-h-32 overflow-y-auto scrollbar-thin scrollbar-track-gray-700 scrollbar-thumb-gray-600 pr-1">
+            {order.items.map((item, index) => (
+              <div key={index} className="bg-gray-700/50 border border-gray-600/30 rounded-md p-2 text-xs">
+                <div className="flex justify-between items-start">
+                  <span className="font-medium text-gray-300">{item.code || `Item ${index + 1}`}</span>
+                  <span className="bg-gray-600/50 px-1.5 py-0.5 rounded text-gray-300 text-[10px]">
+                    {item.quantity || 0} un
+                  </span>
+                </div>
+                {item.description && (
+                  <p className="text-gray-400 mt-1 truncate" title={item.description}>
+                    {item.description.length > 40 ? `${item.description.substring(0, 40)}...` : item.description}
+                  </p>
+                )}
+                {item.unitWeight && (
+                  <div className="flex justify-between items-center mt-1 text-[10px] text-gray-400">
+                    <span>Peso unitário: {item.unitWeight.toFixed(1)} kg</span>
+                    <span>Total: {((item.unitWeight || 0) * (item.quantity || 0)).toFixed(1)} kg</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Seção de progresso */}
       {!compactView && (
         <div className="mt-4">
