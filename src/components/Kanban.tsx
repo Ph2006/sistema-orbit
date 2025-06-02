@@ -16,7 +16,6 @@ import {
   arrayMove,
   verticalListSortingStrategy 
 } from '@dnd-kit/sortable';
-import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { RefreshCw, Plus, Trash, Settings, Check, Search } from 'lucide-react';
 
 import KanbanColumn from './KanbanColumn';
@@ -84,7 +83,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isManagingColumns, setIsManagingColumns] = useState(false);
   const [isItemProgressModalOpen, setIsItemProgressModalOpen] = useState(false);
-  const [animationParent] = useAutoAnimate();
 
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: {
@@ -343,10 +341,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           </div>
         </div>
         
-        <div 
-          className={`flex-1 flex ${compactView ? 'gap-3' : 'gap-6'} pb-8 overflow-x-auto`}
-          ref={animationParent}
-        >
+        <div className={`flex-1 flex ${compactView ? 'gap-3' : 'gap-6'} pb-8 overflow-x-auto`}>
           <DndContext
             sensors={sensors}
             onDragStart={handleDragStart}
