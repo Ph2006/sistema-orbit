@@ -23,6 +23,7 @@ import KanbanColumn from './KanbanColumn';
 import KanbanCard from './KanbanCard';
 import OrderModal from './OrderModal';
 import ItemProgressModal from './ItemProgressModal';
+import QualityControl from './QualityControl';
 import { Order, OrderItem, KanbanColumn as KanbanColumnType } from '../types/kanban';
 import { useOrdersStore } from '../store/ordersStore';
 import { useSettingsStore } from '../store/settingsStore';
@@ -78,6 +79,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedOrderForQC, setSelectedOrderForQC] = useState<Order | null>(null);
   const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isManagingColumns, setIsManagingColumns] = useState(false);
@@ -189,14 +191,8 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }, []);
 
   const handleQualityControlClick = useCallback((order: Order) => {
-    // Abrir o primeiro item no modal de progresso
-    if (order.items && order.items.length > 0) {
-      const firstItem = order.items[0];
-      setSelectedItem(firstItem);
-      setIsItemProgressModalOpen(true);
-    } else {
-      alert("Este pedido não possui itens para atualizar progresso.");
-    }
+    // Abrir o componente de Controle de Qualidade
+    setSelectedOrderForQC(order);
   }, []);
 
   const handleSaveItemProgress = useCallback((updatedItem: OrderItem) => {
@@ -428,6 +424,14 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           generateReport={handleGenerateReport}
           customers={[]} // Passar array de clientes disponíveis
           projects={[]} // Passar array de projetos disponíveis
+        />
+      )}
+      
+      {/* Modal de Controle de Qualidade */}
+      {selectedOrderForQC && (
+        <QualityControl
+          selectedOrder={selectedOrderForQC}
+          onClose={() => setSelectedOrderForQC(null)}
         />
       )}
       
