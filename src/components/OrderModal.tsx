@@ -10,7 +10,7 @@ interface OrderModalProps {
   onClose: () => void;
   onUpdateOrder: (order: Order) => void;
   onDeleteOrder: (orderId: string) => void;
-  generateReport?: (selectedItems: OrderItem[]) => void; // Mudado para receber os objetos completos
+  generateReport?: (selectedItems: OrderItem[]) => void;
   customers: any[];
   projects: any[];
 }
