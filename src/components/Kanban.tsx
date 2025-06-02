@@ -16,7 +16,7 @@ import {
   SortableContext, 
   verticalListSortingStrategy 
 } from '@dnd-kit/sortable';
-import { RefreshCw, Plus, Settings, Check, Search, BarChart3, Calendar, Package } from 'lucide-react';
+import { RefreshCw, Plus, Settings, Check, Search, BarChart3, Calendar, Package, Edit } from 'lucide-react';
 
 import KanbanColumn from './KanbanColumn';
 import KanbanCard from './KanbanCard';
@@ -54,7 +54,62 @@ interface KanbanProps {
   readOnly?: boolean;
 }
 
-// Componente de Resumo de Pedidos simplificado
+// Componente de Card melhorado com botão de edição
+const EnhancedKanbanCard: React.FC<{
+  order: Order;
+  isManaging: boolean;
+  isSelected: boolean;
+  highlight: boolean;
+  compactView: boolean;
+  onOrderClick: (order: Order) => void;
+  onQualityControlClick?: (order: Order) => void;
+  onItemProgressClick?: (item: OrderItem) => void;
+  onEditClick: (order: Order) => void;
+  projects: any[];
+}> = ({
+  order,
+  isManaging,
+  isSelected,
+  highlight,
+  compactView,
+  onOrderClick,
+  onQualityControlClick,
+  onItemProgressClick,
+  onEditClick,
+  projects
+}) => {
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEditClick(order);
+  };
+
+  return (
+    <div className="relative group">
+      <KanbanCard
+        order={order}
+        isManaging={isManaging}
+        isSelected={isSelected}
+        highlight={highlight}
+        compactView={compactView}
+        onOrderClick={onOrderClick}
+        onQualityControlClick={onQualityControlClick}
+        onItemProgressClick={onItemProgressClick}
+        projects={projects}
+      />
+      
+      {/* Botão de Edição - aparece no hover */}
+      <button
+        onClick={handleEditClick}
+        className="absolute top-2 right-2 p-1 bg-blue-600 text-white rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-blue-700 z-10"
+        title="Editar pedido"
+      >
+        <Edit className="h-3 w-3" />
+      </button>
+    </div>
+  );
+};
+
+// Componente de Resumo de Pedidos
 const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => {
   const summaryData = useMemo(() => {
     const now = new Date();
@@ -119,14 +174,14 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => 
   }, [orders]);
   
   return (
-    <div className="w-80 bg-gray-800 rounded-lg border border-gray-600 p-4 h-fit">
+    <div className="w-80 bg-gradient-to-br from-gray-800 via-gray-800 to-gray-900 rounded-lg border border-gray-600 p-4 shadow-xl">
       <div className="flex items-center mb-4">
         <BarChart3 className="h-5 w-5 text-blue-400 mr-2" />
         <h3 className="font-semibold text-white">Resumo de Pedidos</h3>
       </div>
       
       {/* Totais Gerais */}
-      <div className="mb-4 p-3 bg-gray-700 rounded-lg">
+      <div className="mb-4 p-3 bg-gradient-to-r from-gray-700 to-gray-600 rounded-lg shadow-inner">
         <h4 className="text-sm font-medium text-gray-300 mb-2">Totais Gerais</h4>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <div className="text-center">
@@ -154,7 +209,7 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => 
         </h4>
         
         {[summaryData.currentMonth, summaryData.nextMonth, summaryData.followingMonth].map((month, index) => (
-          <div key={month.name} className="p-3 bg-gray-700 rounded-lg">
+          <div key={month.name} className="p-3 bg-gradient-to-r from-gray-700 to-gray-600 rounded-lg shadow-inner">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-medium text-white">{month.name}</span>
             </div>
@@ -165,8 +220,8 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => 
             <div className="mt-2 w-full bg-gray-600 rounded-full h-2">
               <div 
                 className={`h-2 rounded-full ${
-                  index === 0 ? 'bg-blue-500' : 
-                  index === 1 ? 'bg-green-500' : 'bg-yellow-500'
+                  index === 0 ? 'bg-gradient-to-r from-blue-500 to-blue-400' : 
+                  index === 1 ? 'bg-gradient-to-r from-green-500 to-green-400' : 'bg-gradient-to-r from-yellow-500 to-yellow-400'
                 }`}
                 style={{ 
                   width: `${summaryData.totals.totalWeight > 0 ? 
@@ -248,7 +303,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       if (unsubscribeOrders) unsubscribeOrders();
       if (unsubscribeColumns) unsubscribeColumns();
     };
-  }, []); // Empty dependency array to run only once
+  }, []);
 
   const activeColumns = useMemo(() => {
     if (!mounted || columns.length === 0) return [];
@@ -345,6 +400,10 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     setSelectedOrder(order);
   }, []);
 
+  const handleEditClick = useCallback((order: Order) => {
+    setSelectedOrder(order);
+  }, []);
+
   const handleQualityControlClick = useCallback((order: Order) => {
     setSelectedOrderForQC(order);
   }, []);
@@ -387,10 +446,10 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-full bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900">
         <div className="flex flex-col items-center">
-          <RefreshCw className="animate-spin w-10 h-10 text-blue-500 mb-4" />
-          <p className="text-gray-600">Carregando pedidos...</p>
+          <RefreshCw className="animate-spin w-10 h-10 text-blue-300 mb-4" />
+          <p className="text-blue-200">Carregando pedidos...</p>
         </div>
       </div>
     );
@@ -401,18 +460,18 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }
 
   return (
-    <>
+    <div className="h-full bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 min-h-screen">
       <div className="flex flex-col h-full">
-        <div className="flex justify-between items-center mb-4 px-4">
+        <div className="flex justify-between items-center mb-4 px-4 pt-4">
           <div className="relative w-80">
             <input
               type="text"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder="Buscar pedidos..."
-              className="w-full pl-10 pr-4 py-2 rounded-lg bg-gray-700 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-2 rounded-lg bg-white/10 backdrop-blur-sm border border-white/20 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
             />
-            <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+            <Search className="absolute left-3 top-2.5 h-5 w-5 text-white/60" />
           </div>
           
           <div className="flex space-x-2">
@@ -420,9 +479,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
               <>
                 <button
                   onClick={() => setShowSummary(!showSummary)}
-                  className={`px-3 py-2 rounded-lg flex items-center ${
-                    showSummary ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-600 hover:bg-gray-700'
-                  } text-white`}
+                  className={`px-3 py-2 rounded-lg flex items-center backdrop-blur-sm border border-white/20 ${
+                    showSummary ? 'bg-blue-600/80 hover:bg-blue-700/80' : 'bg-white/10 hover:bg-white/20'
+                  } text-white transition-all duration-200`}
                 >
                   <BarChart3 className="mr-2 h-5 w-5" />
                   <span>Resumo</span>
@@ -430,9 +489,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                 
                 <button
                   onClick={() => setIsManagingColumns(!isManagingColumns)}
-                  className={`px-3 py-2 rounded-lg flex items-center ${
-                    isManagingColumns ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'
-                  } text-white`}
+                  className={`px-3 py-2 rounded-lg flex items-center backdrop-blur-sm border border-white/20 ${
+                    isManagingColumns ? 'bg-green-600/80 hover:bg-green-700/80' : 'bg-white/10 hover:bg-white/20'
+                  } text-white transition-all duration-200`}
                 >
                   {isManagingColumns ? (
                     <>
@@ -449,7 +508,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                 
                 <button
                   onClick={handleAddNewOrder}
-                  className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center"
+                  className="px-3 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-700/80 text-white flex items-center backdrop-blur-sm border border-white/20 transition-all duration-200"
                 >
                   <Plus className="mr-2 h-5 w-5" />
                   <span>Novo Pedido</span>
@@ -459,28 +518,28 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           </div>
         </div>
         
-        <div className="flex-1 flex gap-6 pb-8 overflow-x-auto">
+        <div className="flex-1 flex gap-6 pb-8 overflow-hidden px-4">
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className={`flex ${compactView ? 'gap-3' : 'gap-6'} flex-1`}>
+            <div className={`flex ${compactView ? 'gap-3' : 'gap-6'} flex-1 overflow-x-auto`}>
               {activeColumns.map(column => (
                 <div
                   key={column.id}
                   id={`droppable-${column.id}`}
-                  className="flex-shrink-0 w-80 rounded-lg border border-gray-600 bg-gray-800"
+                  className="flex-shrink-0 w-80 rounded-lg border border-white/20 bg-white/5 backdrop-blur-sm shadow-xl"
                 >
-                  <div className="p-4 border-b border-gray-600">
+                  <div className="p-4 border-b border-white/20 bg-gradient-to-r from-white/10 to-transparent">
                     <h3 className="font-semibold text-white">{column.title}</h3>
-                    <span className="text-sm text-gray-400">({column.orders.length})</span>
+                    <span className="text-sm text-white/60">({column.orders.length})</span>
                   </div>
                   
-                  <div className="p-4 space-y-3 min-h-[400px] max-h-[calc(100vh-200px)] overflow-y-auto">
+                  <div className="p-4 space-y-3 h-[calc(100vh-250px)] overflow-y-auto custom-scrollbar">
                     {column.orders.length === 0 ? (
-                      <div className="text-center text-gray-500 py-8">
+                      <div className="text-center text-white/50 py-8">
                         <div className="text-4xl mb-2">📋</div>
                         <p>Nenhum pedido nesta coluna</p>
                       </div>
@@ -490,7 +549,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                         strategy={verticalListSortingStrategy}
                       >
                         {column.orders.map(order => (
-                          <KanbanCard
+                          <EnhancedKanbanCard
                             key={order.id}
                             order={order}
                             isManaging={isManagingColumns}
@@ -500,6 +559,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                             onOrderClick={handleOrderClick}
                             onQualityControlClick={handleQualityControlClick}
                             onItemProgressClick={handleItemProgressClick}
+                            onEditClick={handleEditClick}
                             projects={[]}
                           />
                         ))}
@@ -571,7 +631,32 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           }}
         />
       )}
-    </>
+      
+      <style jsx>{`
+        .custom-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255, 255, 255, 0.3) rgba(255, 255, 255, 0.1);
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 3px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.3);
+          border-radius: 3px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.5);
+        }
+      `}</style>
+    </div>
   );
 };
 
