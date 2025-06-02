@@ -851,7 +851,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         </div>
       )}
       
-      {/* Estilos personalizados para scrollbar */}
+      {/* Estilos personalizados para scrollbar e animações */}
       <style jsx>{`
         .custom-scrollbar {
           scrollbar-width: thin;
@@ -874,6 +874,16 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
           background: rgba(255, 255, 255, 0.5);
+        }
+        
+        @keyframes slow-zoom {
+          0% { transform: scale(1.05); }
+          50% { transform: scale(1.08); }
+          100% { transform: scale(1.05); }
+        }
+        
+        .animate-slow-zoom {
+          animation: slow-zoom 20s ease-in-out infinite;
         }
       `}</style>
     </div>
