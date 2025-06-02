@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Order, OrderItem } from '../types/kanban';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { X, Save, Trash, FileText, Plus } from 'lucide-react';
+import { X, Save, Trash, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface OrderModalProps {
   order: Order;
@@ -24,30 +24,39 @@ const OrderModal: React.FC<OrderModalProps> = ({
   projects
 }) => {
   const [editedOrder, setEditedOrder] = useState<Order>({ ...order });
-  const [isEditing, setIsEditing] = useState(false);
   const [showItemsSection, setShowItemsSection] = useState(true);
-  const [newItem, setNewItem] = useState<OrderItem>({
-    id: '',
-    code: '',
-    description: '',
-    quantity: 1,
-    unitWeight: 0,
-    overallProgress: 0
-  });
   
   useEffect(() => {
     setEditedOrder({ ...order });
   }, [order]);
   
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setEditedOrder(prev => ({
       ...prev,
       [name]: value
     }));
   };
+
+  const handleItemProgressChange = (itemId: string, progress: number) => {
+    setEditedOrder(prev => ({
+      ...prev,
+      items: (prev.items || []).map(item => 
+        item.id === itemId ? { ...item, overallProgress: progress } : item
+      )
+    }));
+  };
   
   const handleSave = () => {
+    // Calcular o progresso geral com base nos itens
+    if (editedOrder.items && editedOrder.items.length > 0) {
+      const totalProgress = editedOrder.items.reduce((sum, item) => sum + (item.overallProgress || 0), 0);
+      const averageProgress = Math.round(totalProgress / editedOrder.items.length);
+      
+      // Atualizar o progresso geral do pedido
+      editedOrder.progress = averageProgress;
+    }
+    
     onUpdateOrder(editedOrder);
     onClose();
   };
@@ -58,52 +67,59 @@ const OrderModal: React.FC<OrderModalProps> = ({
       onClose();
     }
   };
-  
-  const handleAddItem = () => {
-    if (!newItem.code) return;
-    
-    const newItemWithId = {
-      ...newItem,
-      id: Date.now().toString()
-    };
-    
-    setEditedOrder(prev => ({
-      ...prev,
-      items: [...(prev.items || []), newItemWithId]
-    }));
-    
-    setNewItem({
-      id: '',
-      code: '',
-      description: '',
-      quantity: 1,
-      unitWeight: 0,
-      overallProgress: 0
-    });
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'Não definida';
+    try {
+      return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
+    } catch (error) {
+      return 'Data inválida';
+    }
   };
-  
-  const handleRemoveItem = (itemId: string) => {
-    setEditedOrder(prev => ({
-      ...prev,
-      items: (prev.items || []).filter(item => item.id !== itemId)
-    }));
+
+  const projectName = editedOrder.projectId 
+    ? projects.find(p => p.id === editedOrder.projectId)?.name || 'Projeto não encontrado'
+    : 'Nenhum projeto';
+
+  const getStatusLabel = (status?: string) => {
+    switch(status) {
+      case 'waiting': return 'Aguardando';
+      case 'in-progress': return 'Em Processo';
+      case 'delayed': return 'Atrasado';
+      case 'completed': return 'Concluído';
+      case 'urgent': return 'Urgente';
+      case 'on-hold': return 'Em Espera';
+      case 'waiting-docs': return 'Aguardando Docs';
+      case 'ready': return 'Pronto';
+      default: return 'Indefinido';
+    }
   };
-  
-  const handleItemChange = (itemId: string, field: keyof OrderItem, value: any) => {
-    setEditedOrder(prev => ({
-      ...prev,
-      items: (prev.items || []).map(item => 
-        item.id === itemId ? { ...item, [field]: value } : item
-      )
-    }));
+
+  const getStatusClasses = (status?: string) => {
+    switch(status) {
+      case 'waiting': return 'bg-gray-700 text-gray-300';
+      case 'in-progress': return 'bg-blue-900/50 text-blue-300';
+      case 'delayed': return 'bg-red-900/50 text-red-300';
+      case 'completed': return 'bg-emerald-900/50 text-emerald-300';
+      case 'urgent': return 'bg-orange-900/50 text-orange-300';
+      case 'on-hold': return 'bg-amber-900/50 text-amber-300';
+      case 'waiting-docs': return 'bg-purple-900/50 text-purple-300';
+      case 'ready': return 'bg-indigo-900/50 text-indigo-300';
+      default: return 'bg-gray-700 text-gray-300';
+    }
   };
   
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-start justify-center overflow-y-auto pt-10 pb-10">
-      <div className="bg-gray-800 w-full max-w-3xl rounded-lg shadow-2xl border border-gray-700 overflow-hidden">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center overflow-y-auto p-4">
+      <div className="bg-gray-800 w-full max-w-3xl rounded-lg shadow-2xl border border-gray-700 overflow-hidden mx-auto my-auto">
         {/* Cabeçalho */}
-        <div className="bg-gray-700 px-6 py-4 flex justify-between items-center border-b border-gray-600">
-          <h2 className="text-xl font-bold text-white">Pedido #{editedOrder.orderNumber}</h2>
+        <div className="bg-gray-700 px-4 py-3 sm:px-6 flex justify-between items-center border-b border-gray-600">
+          <div className="flex items-center space-x-3">
+            <h2 className="text-xl font-bold text-white">Pedido #{editedOrder.orderNumber}</h2>
+            <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusClasses(editedOrder.status)}`}>
+              {getStatusLabel(editedOrder.status)}
+            </span>
+          </div>
           <button 
             onClick={onClose}
             className="text-gray-400 hover:text-white transition-colors"
@@ -113,423 +129,250 @@ const OrderModal: React.FC<OrderModalProps> = ({
         </div>
         
         {/* Corpo do modal */}
-        <div className="px-6 py-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {/* Número do Pedido */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Número do Pedido *
-              </label>
-              <input 
-                type="text"
-                name="orderNumber"
-                value={editedOrder.orderNumber || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+        <div className="px-4 py-5 sm:p-6 space-y-6">
+          {/* Informações principais */}
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <div className="bg-gray-700/40 rounded-lg p-4 space-y-3">
+              <div>
+                <h3 className="text-sm font-medium text-gray-400">Cliente</h3>
+                <p className="mt-1 text-base font-medium text-white">{editedOrder.customer || 'Não informado'}</p>
+              </div>
+              
+              <div>
+                <h3 className="text-sm font-medium text-gray-400">OS Interna</h3>
+                <p className="mt-1 text-base font-medium font-mono text-white">{editedOrder.internalOrderNumber || 'Não informado'}</p>
+              </div>
+              
+              <div>
+                <h3 className="text-sm font-medium text-gray-400">Projeto</h3>
+                <p className="mt-1 text-base text-white">{projectName}</p>
+              </div>
             </div>
             
-            {/* OS Interna */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                OS Interna *
-              </label>
-              <input 
-                type="text"
-                name="internalOrderNumber"
-                value={editedOrder.internalOrderNumber || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            
-            {/* Cliente */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Cliente *
-              </label>
-              <input 
-                type="text"
-                name="customer"
-                value={editedOrder.customer || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            
-            {/* Status */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Status
-              </label>
-              <select
-                name="status"
-                value={editedOrder.status || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="waiting">Aguardando</option>
-                <option value="in-progress">Em Processo</option>
-                <option value="delayed">Atrasado</option>
-                <option value="completed">Concluído</option>
-                <option value="urgent">Urgente</option>
-                <option value="on-hold">Em Espera</option>
-                <option value="waiting-docs">Aguardando Docs</option>
-                <option value="ready">Pronto</option>
-              </select>
-            </div>
-            
-            {/* Projeto */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Projeto do Cliente
-              </label>
-              <select
-                name="projectId"
-                value={editedOrder.projectId || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Selecione um projeto</option>
-                {projects.map(project => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            {/* Peso Total */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Peso Total (kg)
-              </label>
-              <input 
-                type="number"
-                step="0.1"
-                name="totalWeight"
-                value={editedOrder.totalWeight || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            
-            {/* Data de Início */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Data de Início *
-              </label>
-              <input 
-                type="date"
-                name="startDate"
-                value={editedOrder.startDate || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            
-            {/* Data de Entrega */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Data de Entrega *
-              </label>
-              <input 
-                type="date"
-                name="deliveryDate"
-                value={editedOrder.deliveryDate || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            
-            {/* Data de Conclusão */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Data de Conclusão
-              </label>
-              <input 
-                type="date"
-                name="completionDate"
-                value={editedOrder.completionDate || ''}
-                onChange={handleChange}
-                className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            <div className="bg-gray-700/40 rounded-lg p-4 space-y-3">
+              <div>
+                <h3 className="text-sm font-medium text-gray-400">Data de Início</h3>
+                <p className="mt-1 text-base text-white">{formatDate(editedOrder.startDate)}</p>
+              </div>
+              
+              <div>
+                <h3 className="text-sm font-medium text-gray-400">Data de Entrega</h3>
+                <p className="mt-1 text-base text-white">{formatDate(editedOrder.deliveryDate)}</p>
+              </div>
+              
+              <div>
+                <h3 className="text-sm font-medium text-gray-400">Data de Conclusão</h3>
+                <div className="mt-1">
+                  <input 
+                    type="date"
+                    name="completionDate"
+                    value={editedOrder.completionDate || ''}
+                    onChange={handleDateChange}
+                    className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white w-full focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+              </div>
             </div>
           </div>
           
-          {/* Descrição */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Descrição
-            </label>
-            <textarea 
-              name="notes"
-              value={editedOrder.notes || ''}
-              onChange={handleChange}
-              rows={3}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Descrição do pedido..."
-            />
-          </div>
+          {/* Descrição e Observações */}
+          {(editedOrder.notes || editedOrder.observations) && (
+            <div className="bg-gray-700/40 rounded-lg p-4 space-y-4">
+              {editedOrder.notes && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-400 flex items-center gap-2">
+                    <span>📝</span>
+                    Descrição
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap">{editedOrder.notes}</p>
+                </div>
+              )}
+              
+              {editedOrder.observations && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-400 flex items-center gap-2">
+                    <span>📌</span>
+                    Observações
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-300 whitespace-pre-wrap">{editedOrder.observations}</p>
+                </div>
+              )}
+            </div>
+          )}
           
-          {/* Observações */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Observações
-            </label>
-            <textarea 
-              name="observations"
-              value={editedOrder.observations || ''}
-              onChange={handleChange}
-              rows={2}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Observações adicionais..."
-            />
-          </div>
+          {/* Documentação */}
+          {editedOrder.documentation && (
+            <div className="bg-gray-700/40 rounded-lg p-4">
+              <h3 className="text-sm font-medium text-gray-400 flex items-center gap-2 mb-3">
+                <span>📄</span>
+                Documentação
+              </h3>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {editedOrder.documentation.drawings && (
+                  <div className="bg-gray-700/70 rounded-md px-3 py-2 text-sm text-white flex items-center gap-2">
+                    <span className="h-2 w-2 bg-blue-500 rounded-full"></span>
+                    Desenhos
+                  </div>
+                )}
+                
+                {editedOrder.documentation.inspectionPlan && (
+                  <div className="bg-gray-700/70 rounded-md px-3 py-2 text-sm text-white flex items-center gap-2">
+                    <span className="h-2 w-2 bg-blue-500 rounded-full"></span>
+                    Plano de Inspeção
+                  </div>
+                )}
+                
+                {editedOrder.documentation.paintingPlan && (
+                  <div className="bg-gray-700/70 rounded-md px-3 py-2 text-sm text-white flex items-center gap-2">
+                    <span className="h-2 w-2 bg-blue-500 rounded-full"></span>
+                    Plano de Pintura
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           
           {/* Seção de Itens */}
-          <div className="mb-6 border border-gray-600 rounded-lg p-4">
+          <div className="bg-gray-700/40 rounded-lg p-4">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-white flex items-center">
-                <span className="mr-2">📦</span> Itens do Pedido
+              <h3 className="text-base font-medium text-white flex items-center gap-2">
+                <span>📦</span> Itens do Pedido ({editedOrder.items?.length || 0})
               </h3>
               <button
                 type="button"
                 onClick={() => setShowItemsSection(!showItemsSection)}
-                className="text-gray-400 hover:text-white transition-colors text-sm"
+                className="text-gray-400 hover:text-white transition-colors flex items-center gap-1"
               >
-                {showItemsSection ? 'Ocultar' : 'Mostrar'}
+                {showItemsSection ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" />
+                    <span className="text-sm">Ocultar</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" />
+                    <span className="text-sm">Mostrar</span>
+                  </>
+                )}
               </button>
             </div>
             
             {showItemsSection && (
-              <>
-                {/* Lista de itens existentes */}
-                <div className="mb-4 max-h-64 overflow-y-auto bg-gray-700/50 rounded-lg p-2">
-                  {editedOrder.items && editedOrder.items.length > 0 ? (
-                    <div className="space-y-2">
-                      {editedOrder.items.map((item, index) => (
-                        <div 
-                          key={item.id || index} 
-                          className="bg-gray-700 border border-gray-600 rounded-lg p-3 flex flex-col"
-                        >
-                          <div className="flex justify-between items-start mb-2">
-                            <div>
-                              <div className="font-medium text-white">{item.code || `Item ${index + 1}`}</div>
-                              <div className="text-sm text-gray-300 truncate max-w-xs">{item.description}</div>
-                            </div>
-                            <button
-                              onClick={() => handleRemoveItem(item.id)}
-                              className="text-red-400 hover:text-red-300 transition-colors"
-                              title="Remover item"
-                            >
-                              <Trash className="h-4 w-4" />
-                            </button>
+              <div className="space-y-3 max-h-64 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-700">
+                {editedOrder.items && editedOrder.items.length > 0 ? (
+                  editedOrder.items.map((item, index) => (
+                    <div 
+                      key={item.id || index}
+                      className="bg-gray-700 border border-gray-600 rounded-lg p-3"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-white">{item.code || `Item ${index + 1}`}</span>
+                            <span className="bg-gray-600 px-2 py-0.5 rounded text-xs text-gray-300">
+                              {item.quantity || 0} un • {((item.unitWeight || 0) * (item.quantity || 0)).toFixed(1)} kg
+                            </span>
+                          </div>
+                          {item.description && (
+                            <p className="text-sm text-gray-400 mt-1">{item.description}</p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="mt-3">
+                        <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
+                          <span>Progresso</span>
+                          <span className="font-medium text-white">{item.overallProgress || 0}%</span>
+                        </div>
+                        <div className="relative">
+                          <div className="h-2 bg-gray-600 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full transition-all ${
+                                (item.overallProgress || 0) >= 100 ? 'bg-emerald-500' : 
+                                (item.overallProgress || 0) >= 75 ? 'bg-blue-500' : 
+                                (item.overallProgress || 0) >= 50 ? 'bg-amber-500' : 
+                                'bg-gray-500'
+                              }`}
+                              style={{ width: `${Math.max(item.overallProgress || 0, 2)}%` }}
+                            />
                           </div>
                           
-                          <div className="grid grid-cols-3 gap-2 mt-2">
-                            <div>
-                              <div className="text-xs text-gray-400">Quantidade</div>
-                              <input
-                                type="number"
-                                min="1"
-                                value={item.quantity || 1}
-                                onChange={(e) => handleItemChange(item.id, 'quantity', parseInt(e.target.value) || 1)}
-                                className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm text-white"
-                              />
-                            </div>
-                            <div>
-                              <div className="text-xs text-gray-400">Peso Unitário (kg)</div>
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={item.unitWeight || 0}
-                                onChange={(e) => handleItemChange(item.id, 'unitWeight', parseFloat(e.target.value) || 0)}
-                                className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm text-white"
-                              />
-                            </div>
-                            <div>
-                              <div className="text-xs text-gray-400">Progresso (%)</div>
-                              <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                value={item.overallProgress || 0}
-                                onChange={(e) => handleItemChange(item.id, 'overallProgress', Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                                className="w-full bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm text-white"
-                              />
-                            </div>
-                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={item.overallProgress || 0}
+                            onChange={(e) => handleItemProgressChange(item.id, parseInt(e.target.value))}
+                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            title="Ajustar progresso"
+                          />
                         </div>
-                      ))}
+                      </div>
                     </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-400">
-                      Nenhum item cadastrado para este pedido
-                    </div>
-                  )}
-                </div>
-                
-                {/* Formulário para adicionar novo item */}
-                <div className="p-3 bg-gray-700 rounded-lg mb-2">
-                  <div className="text-sm font-medium text-white mb-2">Adicionar Novo Item</div>
-                  <div className="grid grid-cols-2 gap-2 mb-2">
-                    <input
-                      type="text"
-                      placeholder="Código"
-                      value={newItem.code}
-                      onChange={e => setNewItem({...newItem, code: e.target.value})}
-                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Descrição"
-                      value={newItem.description}
-                      onChange={e => setNewItem({...newItem, description: e.target.value})}
-                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
-                    />
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-gray-400">
+                    <div className="text-3xl mb-2">📦</div>
+                    <p>Nenhum item cadastrado para este pedido</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 mb-2">
-                    <input
-                      type="number"
-                      placeholder="Quantidade"
-                      min="1"
-                      value={newItem.quantity}
-                      onChange={e => setNewItem({...newItem, quantity: parseInt(e.target.value) || 1})}
-                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Peso Unit. (kg)"
-                      step="0.1"
-                      value={newItem.unitWeight}
-                      onChange={e => setNewItem({...newItem, unitWeight: parseFloat(e.target.value) || 0})}
-                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Progresso (%)"
-                      min="0"
-                      max="100"
-                      value={newItem.overallProgress}
-                      onChange={e => setNewItem({...newItem, overallProgress: Math.min(100, Math.max(0, parseInt(e.target.value) || 0))})}
-                      className="px-3 py-2 bg-gray-600 border border-gray-500 rounded text-white text-sm"
-                    />
-                  </div>
-                  <button
-                    onClick={handleAddItem}
-                    disabled={!newItem.code}
-                    className={`w-full flex items-center justify-center gap-2 py-1.5 text-sm rounded
-                      ${newItem.code 
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                        : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
-                  >
-                    <Plus className="h-4 w-4" />
-                    Adicionar Item
-                  </button>
-                </div>
-              </>
+                )}
+              </div>
             )}
           </div>
           
-          {/* Checklist de Documentação */}
-          <div className="mb-6">
-            <h3 className="text-lg font-medium text-white mb-3 flex items-center">
-              <span className="mr-2">📄</span> Checklist de Documentação
-            </h3>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="drawings"
-                  checked={editedOrder.documentation?.drawings || false}
-                  onChange={(e) => setEditedOrder({
-                    ...editedOrder,
-                    documentation: {
-                      ...(editedOrder.documentation || {}),
-                      drawings: e.target.checked
-                    }
-                  })}
-                  className="w-4 h-4 rounded text-blue-500 bg-gray-700 border-gray-500 focus:ring-blue-500 focus:ring-2"
-                />
-                <label htmlFor="drawings" className="ml-2 text-sm text-gray-300">
-                  Desenhos
-                </label>
-              </div>
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="inspectionPlan"
-                  checked={editedOrder.documentation?.inspectionPlan || false}
-                  onChange={(e) => setEditedOrder({
-                    ...editedOrder,
-                    documentation: {
-                      ...(editedOrder.documentation || {}),
-                      inspectionPlan: e.target.checked
-                    }
-                  })}
-                  className="w-4 h-4 rounded text-blue-500 bg-gray-700 border-gray-500 focus:ring-blue-500 focus:ring-2"
-                />
-                <label htmlFor="inspectionPlan" className="ml-2 text-sm text-gray-300">
-                  Plano de Inspeção
-                </label>
-              </div>
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="paintingPlan"
-                  checked={editedOrder.documentation?.paintingPlan || false}
-                  onChange={(e) => setEditedOrder({
-                    ...editedOrder,
-                    documentation: {
-                      ...(editedOrder.documentation || {}),
-                      paintingPlan: e.target.checked
-                    }
-                  })}
-                  className="w-4 h-4 rounded text-blue-500 bg-gray-700 border-gray-500 focus:ring-blue-500 focus:ring-2"
-                />
-                <label htmlFor="paintingPlan" className="ml-2 text-sm text-gray-300">
-                  Plano de Pintura
-                </label>
-              </div>
+          {/* Progresso geral */}
+          <div className="bg-gray-700/40 rounded-lg p-4">
+            <div className="flex justify-between items-center text-sm mb-2">
+              <h3 className="font-medium text-white">Progresso Geral</h3>
+              <span className="text-white font-medium">{editedOrder.progress || 0}%</span>
+            </div>
+            <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all ${
+                  (editedOrder.progress || 0) >= 100 ? 'bg-emerald-500' : 
+                  (editedOrder.progress || 0) >= 75 ? 'bg-blue-500' : 
+                  (editedOrder.progress || 0) >= 50 ? 'bg-amber-500' : 
+                  'bg-gray-500'
+                }`}
+                style={{ width: `${Math.max(editedOrder.progress || 0, 2)}%` }}
+              />
             </div>
           </div>
         </div>
         
         {/* Rodapé com ações */}
-        <div className="bg-gray-700 px-6 py-4 flex justify-between border-t border-gray-600">
-          <div>
+        <div className="bg-gray-700 px-4 py-3 sm:px-6 flex flex-col sm:flex-row sm:justify-between border-t border-gray-600 gap-3 sm:gap-0">
+          <div className="flex gap-2 flex-col sm:flex-row">
             <button
               onClick={handleDelete}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors mr-2"
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
             >
-              Excluir Pedido
+              <Trash className="h-4 w-4" />
+              <span>Excluir</span>
             </button>
             {generateReport && (
               <button
                 onClick={generateReport}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
               >
-                <span className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Gerar Relatório
-                </span>
+                <FileText className="h-4 w-4" />
+                <span>Gerar Relatório</span>
               </button>
             )}
           </div>
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors"
+              className="flex-1 sm:flex-none px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors"
             >
               Cancelar
             </button>
             <button
               onClick={handleSave}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2"
+              className="flex-1 sm:flex-none px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
             >
               <Save className="h-4 w-4" />
-              Salvar Alterações
+              <span>Salvar</span>
             </button>
           </div>
         </div>
