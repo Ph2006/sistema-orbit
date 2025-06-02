@@ -24,9 +24,12 @@ import OrderModal from './OrderModal';
 import ItemProgressModal from './ItemProgressModal';
 import QualityControl from './QualityControl';
 import { Order, OrderItem, KanbanColumn as KanbanColumnType } from '../types/kanban';
-// Corrigindo o caminho de importação - usando import absoluto do diretório raiz
-import { useOrdersStore } from '/src/store/ordersStore';
-import { useSettingsStore } from '/src/store/settingsStore';
+
+// CORREÇÃO: Usar imports relativos corretos baseados no Orders.tsx
+import { useOrderStore } from '../store/orderStore';
+import { useColumnStore } from '../store/columnStore';
+// Se settingsStore não existir, remova ou crie o arquivo
+// import { useSettingsStore } from '../store/settingsStore';
 import { generateUniqueId } from '../utils/helpers';
 
 const DEFAULT_COLUMNS: KanbanColumnType[] = [
@@ -61,21 +64,24 @@ interface KanbanProps {
 }
 
 const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
+  // CORREÇÃO: Usar o mesmo padrão do Orders.tsx
   const { 
     orders, 
-    isLoading, 
-    error, 
-    fetchOrders, 
     updateOrder, 
     deleteOrder,
-    addNewOrder
-  } = useOrdersStore();
-  
+    addOrder,
+    subscribeToOrders
+  } = useOrderStore();
+
   const { 
-    kanbanColumns, 
-    compactView, 
-    setKanbanColumns
-  } = useSettingsStore();
+    columns,
+    initializeDefaultColumns,
+    subscribeToColumns
+  } = useColumnStore();
+  
+  // Se useSettingsStore não existir, use estado local
+  const [compactView, setCompactView] = useState(false);
+  const [kanbanColumns, setKanbanColumns] = useState<KanbanColumnType[]>(DEFAULT_COLUMNS);
   
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -84,6 +90,8 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isManagingColumns, setIsManagingColumns] = useState(false);
   const [isItemProgressModalOpen, setIsItemProgressModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: {
@@ -114,18 +122,30 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   );
 
   useEffect(() => {
-    fetchOrders();
+    // Subscribe to orders
+    const unsubscribeOrders = subscribeToOrders();
     
-    // Configurar colunas padrão se não houver configuração salva
-    if (!kanbanColumns || kanbanColumns.length === 0) {
-      setKanbanColumns(DEFAULT_COLUMNS);
+    // Initialize columns if needed
+    if (columns.length === 0) {
+      initializeDefaultColumns().catch(console.error);
     }
-  }, [fetchOrders, kanbanColumns, setKanbanColumns]);
-
-  const columns = useMemo(() => {
-    const columnsData = kanbanColumns || DEFAULT_COLUMNS;
     
-    // Filtrar pedidos com base no termo de pesquisa
+    // Subscribe to columns
+    const unsubscribeColumns = subscribeToColumns();
+    
+    setIsLoading(false);
+    
+    return () => {
+      unsubscribeOrders();
+      unsubscribeColumns();
+    };
+  }, [subscribeToOrders, subscribeToColumns, initializeDefaultColumns, columns.length]);
+
+  // Use columns from store or default
+  const activeColumns = useMemo(() => {
+    const columnsData = columns.length > 0 ? columns : kanbanColumns;
+    
+    // Filter orders based on search term
     let filteredOrders = orders;
     if (searchTerm.trim() !== '') {
       const lowerSearchTerm = searchTerm.toLowerCase();
@@ -141,12 +161,12 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       );
     }
     
-    // Distribuir pedidos nas colunas
+    // Distribute orders into columns
     return columnsData.map(column => {
       const columnOrders = filteredOrders.filter(order => order.status === column.status);
       return { ...column, orders: columnOrders };
     });
-  }, [orders, kanbanColumns, searchTerm]);
+  }, [orders, columns, kanbanColumns, searchTerm]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(event.active.id as string);
@@ -160,15 +180,15 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       return;
     }
 
-    // Identificar coluna de destino
+    // Identify target column
     const targetColumnId = over.id.toString().includes('column:') 
       ? over.id.toString().replace('column:', '') 
       : null;
       
     if (targetColumnId) {
-      const targetColumn = columns.find(col => col.id === targetColumnId);
+      const targetColumn = activeColumns.find(col => col.id === targetColumnId);
       if (targetColumn) {
-        // Atualizar status do pedido
+        // Update order status
         const orderId = active.id.toString();
         const orderToUpdate = orders.find(o => o.id === orderId);
         
@@ -183,14 +203,13 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     }
 
     setActiveId(null);
-  }, [columns, orders, updateOrder]);
+  }, [activeColumns, orders, updateOrder]);
 
   const handleOrderClick = useCallback((order: Order) => {
     setSelectedOrder(order);
   }, []);
 
   const handleQualityControlClick = useCallback((order: Order) => {
-    // Abrir o componente de Controle de Qualidade
     setSelectedOrderForQC(order);
   }, []);
 
@@ -200,23 +219,19 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }, []);
 
   const handleSaveItemProgress = useCallback((updatedItem: OrderItem) => {
-    // Encontrar o pedido que contém o item
     const orderWithItem = orders.find(order => 
       order.items?.some(item => item.id === updatedItem.id)
     );
     
     if (orderWithItem) {
-      // Atualizar o item dentro do pedido
       const updatedItems = orderWithItem.items?.map(item => 
         item.id === updatedItem.id ? updatedItem : item
       ) || [];
       
-      // Calcular o progresso geral do pedido
       const overallProgress = updatedItems.length > 0
         ? Math.round(updatedItems.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / updatedItems.length)
         : 0;
       
-      // Atualizar o pedido
       const updatedOrder = {
         ...orderWithItem,
         items: updatedItems,
@@ -241,13 +256,11 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }, [deleteOrder]);
 
   const handleGenerateReport = useCallback((selectedItems: OrderItem[]) => {
-    // Implemente aqui a funcionalidade de gerar relatório com os itens selecionados
     console.log('Gerando relatório para os itens selecionados:', selectedItems);
     alert(`Relatório gerado para ${selectedItems.length} itens.`);
   }, []);
 
   const handleAddNewOrder = useCallback(() => {
-    // Criar um novo pedido com valores padrão
     const newOrder: Order = {
       id: generateUniqueId(),
       orderNumber: `${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`,
@@ -261,23 +274,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       createdAt: new Date().toISOString()
     };
     
-    addNewOrder(newOrder);
+    addOrder(newOrder);
     setSelectedOrder(newOrder);
-  }, [addNewOrder]);
-
-  const handleAddNewColumn = useCallback(() => {
-    // Implementar adição de coluna
-    const newColumn: KanbanColumnType = {
-      id: generateUniqueId(),
-      title: 'Nova Coluna',
-      status: `custom-${generateUniqueId()}`,
-      limit: 0,
-      color: 'gray',
-      orders: []
-    };
-    
-    setKanbanColumns([...(kanbanColumns || DEFAULT_COLUMNS), newColumn]);
-  }, [kanbanColumns, setKanbanColumns]);
+  }, [addOrder]);
 
   const activeOrder = useMemo(() => {
     if (!activeId) return null;
@@ -302,7 +301,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           <h3 className="font-bold mb-2">Erro ao carregar pedidos</h3>
           <p>{error}</p>
           <button 
-            onClick={() => fetchOrders()} 
+            onClick={() => window.location.reload()} 
             className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
           >
             Tentar novamente
@@ -367,37 +366,38 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            {columns.map(column => (
-              <KanbanColumn
+            {activeColumns.map(column => (
+              <div
                 key={column.id}
-                id={column.id}
-                title={column.title}
-                color={column.color}
-                orders={column.orders}
-                isManaging={isManagingColumns}
-                compactView={compactView}
-                limit={column.limit}
+                className="flex-shrink-0 w-80 rounded-lg border border-gray-600 bg-gray-800"
               >
-                <SortableContext
-                  items={column.orders.map(order => order.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {column.orders.map(order => (
-                    <KanbanCard
-                      key={order.id}
-                      order={order}
-                      isManaging={isManagingColumns}
-                      isSelected={selectedOrder?.id === order.id}
-                      highlight={false}
-                      compactView={compactView}
-                      onOrderClick={handleOrderClick}
-                      onQualityControlClick={handleQualityControlClick}
-                      onItemProgressClick={handleItemProgressClick}
-                      projects={[]} // Passar array de projetos disponíveis
-                    />
-                  ))}
-                </SortableContext>
-              </KanbanColumn>
+                <div className="p-4 border-b border-gray-600">
+                  <h3 className="font-semibold text-white">{column.title}</h3>
+                  <span className="text-sm text-gray-400">({column.orders.length})</span>
+                </div>
+                
+                <div className="p-4 space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto">
+                  <SortableContext
+                    items={column.orders.map(order => order.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {column.orders.map(order => (
+                      <KanbanCard
+                        key={order.id}
+                        order={order}
+                        isManaging={isManagingColumns}
+                        isSelected={selectedOrder?.id === order.id}
+                        highlight={false}
+                        compactView={compactView}
+                        onOrderClick={handleOrderClick}
+                        onQualityControlClick={handleQualityControlClick}
+                        onItemProgressClick={handleItemProgressClick}
+                        projects={[]}
+                      />
+                    ))}
+                  </SortableContext>
+                </div>
+              </div>
             ))}
             
             <DragOverlay>
@@ -411,28 +411,14 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                   onOrderClick={() => {}}
                   onQualityControlClick={() => {}}
                   onItemProgressClick={() => {}}
-                  projects={[]} // Passar array de projetos disponíveis
+                  projects={[]}
                 />
               )}
             </DragOverlay>
           </DndContext>
-          
-          {!readOnly && isManagingColumns && (
-            <div className="flex-shrink-0 w-80 rounded-lg border border-dashed border-gray-600 flex flex-col items-center justify-center h-[500px] p-4">
-              <Plus className="h-10 w-10 text-gray-500 mb-4" />
-              <h3 className="text-gray-500 text-lg font-medium mb-2">Adicionar Coluna</h3>
-              <button
-                onClick={handleAddNewColumn}
-                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Nova Coluna
-              </button>
-            </div>
-          )}
         </div>
       </div>
       
-      {/* Modal do Pedido */}
       {selectedOrder && (
         <OrderModal
           order={selectedOrder}
@@ -440,12 +426,11 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           onUpdateOrder={handleUpdateOrder}
           onDeleteOrder={handleDeleteOrder}
           generateReport={handleGenerateReport}
-          customers={[]} // Passar array de clientes disponíveis
-          projects={[]} // Passar array de projetos disponíveis
+          customers={[]}
+          projects={[]}
         />
       )}
       
-      {/* Modal de Controle de Qualidade */}
       {selectedOrderForQC && (
         <QualityControl
           selectedOrder={selectedOrderForQC}
@@ -453,7 +438,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         />
       )}
       
-      {/* Modal de Progresso do Item */}
       {selectedItem && isItemProgressModalOpen && (
         <ItemProgressModal
           item={selectedItem}
