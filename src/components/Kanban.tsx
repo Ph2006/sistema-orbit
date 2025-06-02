@@ -16,16 +16,34 @@ import {
   SortableContext, 
   verticalListSortingStrategy 
 } from '@dnd-kit/sortable';
-import { RefreshCw, Plus, Settings, Check, Search, BarChart3, Calendar, Package, Edit } from 'lucide-react';
+import { 
+  RefreshCw, 
+  Plus, 
+  Settings, 
+  Check, 
+  Search, 
+  BarChart3, 
+  Calendar, 
+  Package, 
+  Edit, 
+  Download, 
+  FileText, 
+  CheckSquare, 
+  Square,
+  X 
+} from 'lucide-react';
 
 import KanbanColumn from './KanbanColumn';
 import KanbanCard from './KanbanCard';
 import OrderModal from './OrderModal';
 import ItemProgressModal from './ItemProgressModal';
 import QualityControl from './QualityControl';
+import ItemProductionReport from './ItemProductionReport';
 import { Order, OrderItem } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 
 // Função local para gerar ID único
 const generateUniqueId = (): string => {
@@ -65,6 +83,9 @@ const EnhancedKanbanCard: React.FC<{
   onQualityControlClick?: (order: Order) => void;
   onItemProgressClick?: (item: OrderItem) => void;
   onEditClick: (order: Order) => void;
+  onSelectForShipping?: (order: Order) => void;
+  onExportItemReport?: (order: Order) => void;
+  selectedForShipping?: boolean;
   projects: any[];
 }> = ({
   order,
@@ -76,11 +97,24 @@ const EnhancedKanbanCard: React.FC<{
   onQualityControlClick,
   onItemProgressClick,
   onEditClick,
+  onSelectForShipping,
+  onExportItemReport,
+  selectedForShipping = false,
   projects
 }) => {
   const handleEditClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onEditClick(order);
+  };
+
+  const handleSelectForShipping = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelectForShipping?.(order);
+  };
+
+  const handleExportReport = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onExportItemReport?.(order);
   };
 
   return (
@@ -95,16 +129,42 @@ const EnhancedKanbanCard: React.FC<{
         onQualityControlClick={onQualityControlClick}
         onItemProgressClick={onItemProgressClick}
         projects={projects}
+        selectedForShipping={selectedForShipping}
       />
       
-      {/* Botão de Edição - aparece no hover */}
-      <button
-        onClick={handleEditClick}
-        className="absolute top-2 right-2 p-1 bg-blue-600 text-white rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-blue-700 z-10"
-        title="Editar pedido"
-      >
-        <Edit className="h-3 w-3" />
-      </button>
+      {/* Botões de ação - aparecem no hover */}
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+        {/* Botão de seleção para embarque */}
+        <button
+          onClick={handleSelectForShipping}
+          className={`p-1 rounded-md transition-colors ${
+            selectedForShipping 
+              ? 'bg-green-600 text-white hover:bg-green-700' 
+              : 'bg-gray-600 text-white hover:bg-gray-700'
+          }`}
+          title="Selecionar para embarque"
+        >
+          {selectedForShipping ? <CheckSquare className="h-3 w-3" /> : <Square className="h-3 w-3" />}
+        </button>
+        
+        {/* Botão de relatório */}
+        <button
+          onClick={handleExportReport}
+          className="p-1 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+          title="Exportar relatório"
+        >
+          <FileText className="h-3 w-3" />
+        </button>
+        
+        {/* Botão de edição */}
+        <button
+          onClick={handleEditClick}
+          className="p-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          title="Editar pedido"
+        >
+          <Edit className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 };
@@ -250,6 +310,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [isManagingColumns, setIsManagingColumns] = useState(false);
   const [isItemProgressModalOpen, setIsItemProgressModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedOrdersForShipping, setSelectedOrdersForShipping] = useState<Set<string>>(new Set());
+  const [showItemProductionReport, setShowItemProductionReport] = useState(false);
+  const [reportOrder, setReportOrder] = useState<Order | null>(null);
 
   // Stores
   const orderStore = useOrderStore();
@@ -413,6 +476,95 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     setIsItemProgressModalOpen(true);
   }, []);
 
+  const handleSelectForShipping = useCallback((order: Order) => {
+    setSelectedOrdersForShipping(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(order.id)) {
+        newSet.delete(order.id);
+      } else {
+        newSet.add(order.id);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleExportItemReport = useCallback((order: Order) => {
+    setReportOrder(order);
+    setShowItemProductionReport(true);
+  }, []);
+
+  const handleExportShippingRomaneio = useCallback(() => {
+    if (selectedOrdersForShipping.size === 0) {
+      alert('Selecione pelo menos um pedido para exportar o romaneio');
+      return;
+    }
+
+    const selectedOrders = orders.filter(order => selectedOrdersForShipping.has(order.id));
+    
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('ROMANEIO DE EMBARQUE', 105, 30, { align: 'center' });
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 20, 50);
+    doc.text(`Total de Pedidos: ${selectedOrders.length}`, 120, 50);
+    
+    let yPosition = 70;
+    
+    selectedOrders.forEach((order, orderIndex) => {
+      // Order header
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Pedido #${order.orderNumber} - ${order.customer}`, 20, yPosition);
+      yPosition += 10;
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`OS: ${order.internalOrderNumber}`, 20, yPosition);
+      doc.text(`Entrega: ${new Date(order.deliveryDate).toLocaleDateString('pt-BR')}`, 120, yPosition);
+      yPosition += 15;
+      
+      if (order.items && order.items.length > 0) {
+        // Items table
+        const tableData = order.items.map((item, index) => [
+          (index + 1).toString(),
+          item.code || '',
+          item.description || '',
+          (item.quantity || 0).toString(),
+          (item.unitWeight || 0).toFixed(3) + ' kg',
+          ((item.quantity || 0) * (item.unitWeight || 0)).toFixed(3) + ' kg'
+        ]);
+        
+        (doc as any).autoTable({
+          head: [['Item', 'Código', 'Descrição', 'Qtd', 'Peso Unit.', 'Peso Total']],
+          body: tableData,
+          startY: yPosition,
+          margin: { left: 20, right: 20 },
+          styles: { fontSize: 8, cellPadding: 2 },
+          headStyles: { fillColor: [52, 152, 219], textColor: 255 },
+        });
+        
+        yPosition = (doc as any).lastAutoTable.finalY + 15;
+      }
+      
+      // Add new page if needed
+      if (orderIndex < selectedOrders.length - 1 && yPosition > 250) {
+        doc.addPage();
+        yPosition = 30;
+      }
+    });
+    
+    doc.save(`romaneio_embarque_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.pdf`);
+  }, [selectedOrdersForShipping, orders]);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedOrdersForShipping(new Set());
+  }, []);
+
   const handleAddNewOrder = useCallback(async () => {
     const defaultColumn = columns[0];
     const defaultStatus = defaultColumn ? getStatusFromColumnTitle(defaultColumn.title) : 'in-progress';
@@ -460,23 +612,30 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }
 
   return (
-    <div className="h-full min-h-screen relative">
-      {/* Background com degradê */}
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900"></div>
-      
-      {/* Imagem de fundo da Terra com transparência */}
+    <div className="h-full min-h-screen relative overflow-hidden">
+      {/* Imagem de fundo da Terra com efeito de zoom suave */}
       <div 
-        className="absolute inset-0 opacity-60"
+        className="absolute inset-0 scale-105 animate-slow-zoom"
         style={{
-          backgroundImage: 'url("https://wallpapers.com/images/hd/space-1920-x-1080-picture-3vdyz7zdnmqk3uzw.jpg")',
+          backgroundImage: 'url("https://images.unsplash.com/photo-1614730321146-b6fa6a46bcb4?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1974&q=80")',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
+          backgroundRepeat: 'no-repeat',
+          filter: 'brightness(0.8) contrast(1.1) saturate(1.2)'
         }}
       ></div>
       
-      {/* Overlay adicional para melhor contraste */}
-      <div className="absolute inset-0 bg-blue-900/30"></div>
+      {/* Gradiente overlay para melhor contraste */}
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-900/40 via-indigo-900/60 to-purple-900/70"></div>
+      
+      {/* Efeito de partículas/estrelas */}
+      <div className="absolute inset-0 opacity-30">
+        <div className="absolute top-1/4 left-1/4 w-1 h-1 bg-white rounded-full animate-pulse"></div>
+        <div className="absolute top-1/3 right-1/3 w-0.5 h-0.5 bg-blue-200 rounded-full animate-pulse delay-1000"></div>
+        <div className="absolute bottom-1/4 left-1/3 w-1 h-1 bg-white rounded-full animate-pulse delay-2000"></div>
+        <div className="absolute top-1/2 right-1/4 w-0.5 h-0.5 bg-blue-100 rounded-full animate-pulse delay-3000"></div>
+        <div className="absolute bottom-1/3 right-1/2 w-1 h-1 bg-white rounded-full animate-pulse delay-500"></div>
+      </div>ooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiig
       
       <div className="relative z-10 flex flex-col h-full">
         <div className="flex justify-between items-center mb-4 px-4 pt-4">
@@ -494,6 +653,26 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           <div className="flex space-x-2">
             {!readOnly && (
               <>
+                {selectedOrdersForShipping.size > 0 && (
+                  <>
+                    <button
+                      onClick={handleExportShippingRomaneio}
+                      className="px-3 py-2 rounded-lg bg-green-600/80 hover:bg-green-700/80 text-white flex items-center backdrop-blur-sm border border-white/20 transition-all duration-200"
+                    >
+                      <Download className="mr-2 h-5 w-5" />
+                      <span>Romaneio ({selectedOrdersForShipping.size})</span>
+                    </button>
+                    
+                    <button
+                      onClick={handleClearSelection}
+                      className="px-3 py-2 rounded-lg bg-red-600/80 hover:bg-red-700/80 text-white flex items-center backdrop-blur-sm border border-white/20 transition-all duration-200"
+                    >
+                      <Square className="mr-2 h-5 w-5" />
+                      <span>Limpar</span>
+                    </button>
+                  </>
+                )}
+                
                 <button
                   onClick={() => setShowSummary(!showSummary)}
                   className={`px-3 py-2 rounded-lg flex items-center backdrop-blur-sm border border-white/20 ${
@@ -577,15 +756,12 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                             onQualityControlClick={handleQualityControlClick}
                             onItemProgressClick={handleItemProgressClick}
                             onEditClick={handleEditClick}
+                            onSelectForShipping={handleSelectForShipping}
+                            onExportItemReport={handleExportItemReport}
+                            selectedForShipping={selectedOrdersForShipping.has(order.id)}
                             projects={[]}
                           />
-                        ))}
-                      </SortableContext>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                      </div>
             
             <DragOverlay>
               {activeOrder && (
@@ -609,6 +785,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         </div>
       </div>
       
+      {/* Modal de Pedido */}
       {selectedOrder && (
         <OrderModal
           order={selectedOrder}
@@ -627,6 +804,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         />
       )}
       
+      {/* Modal de Controle de Qualidade */}
       {selectedOrderForQC && (
         <QualityControl
           selectedOrder={selectedOrderForQC}
@@ -634,6 +812,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         />
       )}
       
+      {/* Modal de Progresso do Item */}
       {selectedItem && isItemProgressModalOpen && (
         <ItemProgressModal
           item={selectedItem}
@@ -649,6 +828,30 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         />
       )}
       
+      {/* Modal de Relatório de Produção */}
+      {showItemProductionReport && reportOrder && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center overflow-y-auto p-4">
+          <div className="bg-white w-full max-w-6xl rounded-lg shadow-2xl border border-gray-200 overflow-hidden mx-auto my-auto">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex justify-between items-center text-white">
+              <h2 className="text-xl font-bold">Relatório Técnico de Produção</h2>
+              <button 
+                onClick={() => {
+                  setShowItemProductionReport(false);
+                  setReportOrder(null);
+                }}
+                className="text-white hover:text-gray-200 transition-colors"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="max-h-[80vh] overflow-y-auto">
+              <ItemProductionReport order={reportOrder} />
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Estilos personalizados para scrollbar */}
       <style jsx>{`
         .custom-scrollbar {
           scrollbar-width: thin;
@@ -678,3 +881,8 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 };
 
 export default Kanban;
+                      </SortableContext>
+                    )}
+                  </div>
+                </div>
+              ))}
