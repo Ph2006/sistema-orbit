@@ -193,6 +193,12 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     setSelectedOrderForQC(order);
   }, []);
 
+  // Add missing handler for item progress
+  const handleItemProgressClick = useCallback((item: OrderItem) => {
+    setSelectedItem(item);
+    setIsItemProgressModalOpen(true);
+  }, []);
+
   const handleSaveItemProgress = useCallback((updatedItem: OrderItem) => {
     // Encontrar o pedido que contém o item
     const orderWithItem = orders.find(order => 
@@ -258,6 +264,20 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     addNewOrder(newOrder);
     setSelectedOrder(newOrder);
   }, [addNewOrder]);
+
+  const handleAddNewColumn = useCallback(() => {
+    // Implementar adição de coluna
+    const newColumn: KanbanColumnType = {
+      id: generateUniqueId(),
+      title: 'Nova Coluna',
+      status: `custom-${generateUniqueId()}`,
+      limit: 0,
+      color: 'gray',
+      orders: []
+    };
+    
+    setKanbanColumns([...(kanbanColumns || DEFAULT_COLUMNS), newColumn]);
+  }, [kanbanColumns, setKanbanColumns]);
 
   const activeOrder = useMemo(() => {
     if (!activeId) return null;
@@ -372,6 +392,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                       compactView={compactView}
                       onOrderClick={handleOrderClick}
                       onQualityControlClick={handleQualityControlClick}
+                      onItemProgressClick={handleItemProgressClick}
                       projects={[]} // Passar array de projetos disponíveis
                     />
                   ))}
@@ -388,6 +409,8 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                   highlight={true}
                   compactView={compactView}
                   onOrderClick={() => {}}
+                  onQualityControlClick={() => {}}
+                  onItemProgressClick={() => {}}
                   projects={[]} // Passar array de projetos disponíveis
                 />
               )}
@@ -399,7 +422,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
               <Plus className="h-10 w-10 text-gray-500 mb-4" />
               <h3 className="text-gray-500 text-lg font-medium mb-2">Adicionar Coluna</h3>
               <button
-                onClick={() => {/* Implementar adição de coluna */}}
+                onClick={handleAddNewColumn}
                 className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Nova Coluna
