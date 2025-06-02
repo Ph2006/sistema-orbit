@@ -23,7 +23,7 @@ import KanbanCard from './KanbanCard';
 import OrderModal from './OrderModal';
 import ItemProgressModal from './ItemProgressModal';
 import QualityControl from './QualityControl';
-import { Order, OrderItem, KanbanColumn as KanbanColumnType } from '../types/kanban';
+import { Order, OrderItem } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
 
@@ -34,97 +34,65 @@ const generateUniqueId = (): string => {
   return `${timestamp}-${randomPart}`;
 };
 
-const DEFAULT_COLUMNS: KanbanColumnType[] = [
-  {
-    id: 'in-process',
-    title: 'Pedidos em processo',
-    status: 'in-progress',
-    limit: 0,
-    color: 'blue',
-    orders: [],
-  },
-  {
-    id: 'pending-approval',
-    title: 'Pedidos expedidos',
-    status: 'waiting-docs',
-    limit: 0,
-    color: 'amber',
-    orders: [],
-  },
-  {
-    id: 'completed',
-    title: 'Pedidos paralisados',
-    status: 'completed',
-    limit: 0,
-    color: 'emerald',
-    orders: [],
-  },
-];
+// Mapeamento de título de coluna para status de pedido
+const getStatusFromColumnTitle = (title: string): string => {
+  const titleLower = title.toLowerCase();
+  
+  if (titleLower.includes('processo')) return 'in-progress';
+  if (titleLower.includes('expedido')) return 'shipped';
+  if (titleLower.includes('paralisado')) return 'on-hold';
+  if (titleLower.includes('concluído') || titleLower.includes('concluido')) return 'completed';
+  if (titleLower.includes('atrasado')) return 'delayed';
+  if (titleLower.includes('urgente')) return 'urgent';
+  if (titleLower.includes('aguardando') || titleLower.includes('docs')) return 'waiting-docs';
+  if (titleLower.includes('pronto')) return 'ready';
+  
+  // Fallback: criar status baseado no título
+  return titleLower.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+};
+
+// Mapeamento inverso: dado um status, encontrar a coluna apropriada
+const getColumnForStatus = (status: string, columns: any[]): any => {
+  // Mapeamento direto de status para títulos de coluna
+  const statusToTitleMap: Record<string, string[]> = {
+    'in-progress': ['processo', 'produção', 'andamento'],
+    'shipped': ['expedido', 'enviado', 'embarcado'],
+    'on-hold': ['paralisado', 'pausado', 'suspenso'],
+    'completed': ['concluído', 'finalizado', 'terminado'],
+    'delayed': ['atrasado', 'atraso'],
+    'urgent': ['urgente', 'prioridade'],
+    'waiting-docs': ['aguardando', 'documentação', 'docs'],
+    'ready': ['pronto', 'preparado']
+  };
+  
+  const keywords = statusToTitleMap[status] || [status];
+  
+  return columns.find(col => {
+    const titleLower = col.title.toLowerCase();
+    return keywords.some(keyword => titleLower.includes(keyword));
+  });
+};
 
 interface KanbanProps {
   readOnly?: boolean;
 }
 
 const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
-  // Debug: Vamos verificar se os stores existem
-  console.log('🔍 Kanban: Iniciando componente...');
-  
-  let orderStore, columnStore;
-  try {
-    orderStore = useOrderStore();
-    console.log('✅ OrderStore carregado:', orderStore);
-  } catch (error) {
-    console.error('❌ Erro ao carregar OrderStore:', error);
-  }
+  const { 
+    orders, 
+    updateOrder, 
+    deleteOrder,
+    addOrder,
+    subscribeToOrders
+  } = useOrderStore();
 
-  try {
-    columnStore = useColumnStore();
-    console.log('✅ ColumnStore carregado:', columnStore);
-  } catch (error) {
-    console.error('❌ Erro ao carregar ColumnStore:', error);
-  }
-
-  // Se os stores não existem, usar dados mockados
-  const [mockOrders] = useState<Order[]>([
-    {
-      id: '1',
-      orderNumber: '2024-001',
-      customer: 'Cliente Teste',
-      internalOrderNumber: 'OS-001',
-      status: 'in-progress',
-      startDate: '2024-01-01',
-      deliveryDate: '2024-02-01',
-      progress: 50,
-      items: [],
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: '2',
-      orderNumber: '2024-002',
-      customer: 'Cliente Teste 2',
-      internalOrderNumber: 'OS-002',
-      status: 'waiting-docs',
-      startDate: '2024-01-02',
-      deliveryDate: '2024-02-02',
-      progress: 25,
-      items: [],
-      createdAt: new Date().toISOString()
-    }
-  ]);
-
-  // Usar dados dos stores ou mock
-  const orders = orderStore?.orders || mockOrders || [];
-  const columns = columnStore?.columns || [];
-  
-  console.log('📊 Dados carregados:', {
-    orders: orders.length,
-    columns: columns.length,
-    orderStore: !!orderStore,
-    columnStore: !!columnStore
-  });
+  const { 
+    columns,
+    initializeDefaultColumns,
+    subscribeToColumns
+  } = useColumnStore();
   
   const [compactView, setCompactView] = useState(false);
-  const [kanbanColumns, setKanbanColumns] = useState<KanbanColumnType[]>(DEFAULT_COLUMNS);
   
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -144,38 +112,53 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   );
 
   useEffect(() => {
-    console.log('🔄 useEffect: Configurando subscriptions...');
+    console.log('🚀 Kanban: Iniciando subscriptions...');
     
-    // Se os stores existem, subscribir
-    if (orderStore?.subscribeToOrders) {
-      console.log('📡 Subscribing to orders...');
-      const unsubscribeOrders = orderStore.subscribeToOrders();
-      
-      if (columnStore?.subscribeToColumns) {
-        console.log('📡 Subscribing to columns...');
-        const unsubscribeColumns = columnStore.subscribeToColumns();
-        
-        // Initialize columns if needed
-        if (columns.length === 0 && columnStore.initializeDefaultColumns) {
-          console.log('🏗️ Initializing default columns...');
-          columnStore.initializeDefaultColumns().catch(console.error);
-        }
-        
-        return () => {
-          unsubscribeOrders();
-          unsubscribeColumns();
-        };
-      }
-      
-      return () => unsubscribeOrders();
+    const unsubscribeOrders = subscribeToOrders();
+    const unsubscribeColumns = subscribeToColumns();
+    
+    // Initialize columns if needed
+    if (columns.length === 0) {
+      console.log('🔧 Inicializando colunas padrão...');
+      initializeDefaultColumns().catch(console.error);
     }
-  }, []);
+    
+    return () => {
+      unsubscribeOrders();
+      unsubscribeColumns();
+    };
+  }, [subscribeToOrders, subscribeToColumns, initializeDefaultColumns, columns.length]);
+
+  // Debug e análise dos dados
+  const dataAnalysis = useMemo(() => {
+    const statusCount: Record<string, number> = {};
+    const columnIdCount: Record<string, number> = {};
+    
+    orders.forEach(order => {
+      const status = order.status || 'no-status';
+      const columnId = order.columnId || 'no-column';
+      
+      statusCount[status] = (statusCount[status] || 0) + 1;
+      columnIdCount[columnId] = (columnIdCount[columnId] || 0) + 1;
+    });
+    
+    console.log('📊 Análise dos Pedidos:', {
+      totalOrders: orders.length,
+      statusCount,
+      columnIdCount,
+      columns: columns.map(col => ({ id: col.id, title: col.title }))
+    });
+    
+    return { statusCount, columnIdCount };
+  }, [orders, columns]);
 
   const activeColumns = useMemo(() => {
-    console.log('🔄 Recalculando colunas ativas...');
-    const columnsData = columns.length > 0 ? columns : kanbanColumns;
-    console.log('📋 Colunas sendo usadas:', columnsData);
+    if (columns.length === 0) {
+      console.log('⚠️ Nenhuma coluna disponível ainda');
+      return [];
+    }
     
+    // Filtrar pedidos com base no termo de busca
     let filteredOrders = orders;
     if (searchTerm.trim() !== '') {
       const lowerSearchTerm = searchTerm.toLowerCase();
@@ -183,31 +166,91 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         order.orderNumber?.toString().toLowerCase().includes(lowerSearchTerm) ||
         order.customer?.toLowerCase().includes(lowerSearchTerm) ||
         order.internalOrderNumber?.toLowerCase().includes(lowerSearchTerm) ||
-        order.notes?.toLowerCase().includes(lowerSearchTerm) ||
-        order.items?.some(item => 
-          item.code?.toLowerCase().includes(lowerSearchTerm) || 
-          item.description?.toLowerCase().includes(lowerSearchTerm)
-        )
+        order.notes?.toLowerCase().includes(lowerSearchTerm)
       );
     }
     
-    console.log('🔍 Pedidos filtrados:', filteredOrders.length);
-    
-    const result = columnsData.map(column => {
-      const columnOrders = filteredOrders.filter(order => order.status === column.status);
-      console.log(`📂 Coluna ${column.title}: ${columnOrders.length} pedidos`);
-      return { ...column, orders: columnOrders };
+    // Distribuir pedidos nas colunas usando múltiplas estratégias
+    const result = columns.map(column => {
+      let columnOrders: Order[] = [];
+      
+      // Estratégia 1: Usar columnId (prioridade)
+      const ordersByColumnId = filteredOrders.filter(order => order.columnId === column.id);
+      
+      // Estratégia 2: Usar status mapeado para título da coluna
+      const columnStatus = getStatusFromColumnTitle(column.title);
+      const ordersByStatus = filteredOrders.filter(order => order.status === columnStatus);
+      
+      // Estratégia 3: Buscar por palavras-chave no status
+      const titleKeywords = column.title.toLowerCase().split(' ');
+      const ordersByKeywords = filteredOrders.filter(order => {
+        if (!order.status) return false;
+        const statusLower = order.status.toLowerCase();
+        return titleKeywords.some(keyword => 
+          keyword.length > 2 && statusLower.includes(keyword)
+        );
+      });
+      
+      // Combinar resultados (prioridade: columnId > status > keywords)
+      const combinedIds = new Set([
+        ...ordersByColumnId.map(o => o.id),
+        ...ordersByStatus.map(o => o.id),
+        ...ordersByKeywords.map(o => o.id)
+      ]);
+      
+      columnOrders = filteredOrders.filter(order => combinedIds.has(order.id));
+      
+      console.log(`📂 Coluna "${column.title}":`, {
+        id: column.id,
+        expectedStatus: columnStatus,
+        byColumnId: ordersByColumnId.length,
+        byStatus: ordersByStatus.length,
+        byKeywords: ordersByKeywords.length,
+        total: columnOrders.length,
+        orders: columnOrders.map(o => ({ 
+          orderNumber: o.orderNumber, 
+          status: o.status, 
+          columnId: o.columnId 
+        }))
+      });
+      
+      return { 
+        ...column, 
+        orders: columnOrders,
+        status: columnStatus // Adicionar status para uso no drag & drop
+      };
     });
     
-    console.log('📊 Resultado final das colunas:', result);
+    // Se ainda há pedidos sem coluna, adicionar uma coluna "Sem Classificação"
+    const assignedOrderIds = new Set(result.flatMap(col => col.orders.map(o => o.id)));
+    const unassignedOrders = filteredOrders.filter(order => !assignedOrderIds.has(order.id));
+    
+    if (unassignedOrders.length > 0) {
+      console.log(`🔍 Encontrados ${unassignedOrders.length} pedidos sem classificação:`, 
+        unassignedOrders.map(o => ({ 
+          orderNumber: o.orderNumber, 
+          status: o.status, 
+          columnId: o.columnId 
+        }))
+      );
+      
+      result.push({
+        id: 'unassigned',
+        title: 'Sem Classificação',
+        order: 999,
+        status: 'unassigned',
+        orders: unassignedOrders
+      });
+    }
+    
     return result;
-  }, [orders, columns, kanbanColumns, searchTerm]);
+  }, [orders, columns, searchTerm]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(event.active.id as string);
   }, []);
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     
     if (!over) {
@@ -215,28 +258,41 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       return;
     }
 
-    const targetColumnId = over.id.toString().includes('column:') 
-      ? over.id.toString().replace('column:', '') 
-      : null;
-      
-    if (targetColumnId && orderStore?.updateOrder) {
+    // Extrair ID da coluna de destino
+    const targetColumnId = over.id.toString().replace('droppable-', '');
+    
+    if (targetColumnId) {
       const targetColumn = activeColumns.find(col => col.id === targetColumnId);
       if (targetColumn) {
         const orderId = active.id.toString();
         const orderToUpdate = orders.find(o => o.id === orderId);
         
         if (orderToUpdate) {
+          console.log(`🔄 Movendo pedido ${orderToUpdate.orderNumber} para coluna ${targetColumn.title}`);
+          
+          // Determinar novo status baseado na coluna
+          const newStatus = targetColumn.status !== 'unassigned' ? 
+            targetColumn.status : 
+            getStatusFromColumnTitle(targetColumn.title);
+          
           const updatedOrder = { 
             ...orderToUpdate, 
-            status: targetColumn.status 
+            columnId: targetColumnId !== 'unassigned' ? targetColumnId : null,
+            status: newStatus
           };
-          orderStore.updateOrder(updatedOrder);
+          
+          try {
+            await updateOrder(updatedOrder);
+            console.log(`✅ Pedido movido com sucesso`);
+          } catch (error) {
+            console.error('❌ Erro ao mover pedido:', error);
+          }
         }
       }
     }
 
     setActiveId(null);
-  }, [activeColumns, orders, orderStore]);
+  }, [activeColumns, orders, updateOrder]);
 
   const handleOrderClick = useCallback((order: Order) => {
     setSelectedOrder(order);
@@ -251,13 +307,18 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     setIsItemProgressModalOpen(true);
   }, []);
 
-  const handleAddNewOrder = useCallback(() => {
+  const handleAddNewOrder = useCallback(async () => {
+    // Usar a primeira coluna como padrão
+    const defaultColumn = columns[0];
+    const defaultStatus = defaultColumn ? getStatusFromColumnTitle(defaultColumn.title) : 'in-progress';
+    
     const newOrder: Order = {
       id: generateUniqueId(),
       orderNumber: `${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`,
       customer: 'Novo Cliente',
       internalOrderNumber: `OS-${Math.floor(Math.random() * 10000)}`,
-      status: 'in-progress',
+      status: defaultStatus,
+      columnId: defaultColumn?.id || null,
       startDate: new Date().toISOString().split('T')[0],
       deliveryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       progress: 0,
@@ -265,42 +326,38 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       createdAt: new Date().toISOString()
     };
     
-    if (orderStore?.addOrder) {
-      orderStore.addOrder(newOrder);
+    try {
+      await addOrder(newOrder);
+      setSelectedOrder(newOrder);
+    } catch (error) {
+      console.error('Erro ao criar novo pedido:', error);
     }
-    setSelectedOrder(newOrder);
-  }, [orderStore]);
-
-  // Debug: Mostrar informações no console sempre que dados mudarem
-  useEffect(() => {
-    console.log('📊 Dados atualizados:', {
-      totalOrders: orders.length,
-      totalColumns: activeColumns.length,
-      ordersPerColumn: activeColumns.map(col => ({
-        title: col.title,
-        count: col.orders.length,
-        orders: col.orders.map(o => ({ id: o.id, orderNumber: o.orderNumber, status: o.status }))
-      }))
-    });
-  }, [orders, activeColumns]);
+  }, [addOrder, columns]);
 
   const activeOrder = useMemo(() => {
     if (!activeId) return null;
     return orders.find(order => order.id === activeId) || null;
   }, [activeId, orders]);
 
-  // Se não há dados, mostrar indicador
-  if (orders.length === 0 && !isLoading) {
-    console.log('⚠️ Nenhum pedido encontrado, mostrando estado vazio');
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex flex-col items-center">
+          <RefreshCw className="animate-spin w-10 h-10 text-blue-500 mb-4" />
+          <p className="text-gray-600">Carregando pedidos...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
     <>
       <div className="flex flex-col h-full">
-        {/* Debug info - remover em produção */}
-        <div className="bg-yellow-100 p-2 text-xs text-yellow-800 border-b">
-          <strong>Debug:</strong> Orders: {orders.length} | Columns: {activeColumns.length} | 
-          Store Orders: {orderStore ? 'OK' : 'FAIL'} | Store Columns: {columnStore ? 'OK' : 'FAIL'}
+        {/* Debug info mais detalhado */}
+        <div className="bg-green-100 p-2 text-xs text-green-800 border-b">
+          <strong>Dados:</strong> {orders.length} pedidos | {columns.length} colunas | 
+          Status: {Object.keys(dataAnalysis.statusCount).join(', ')} |
+          Distribuição: {activeColumns.map(col => `${col.title}(${col.orders.length})`).join(', ')}
         </div>
         
         <div className="flex justify-between items-center mb-4 px-4">
@@ -358,26 +415,27 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
             {activeColumns.map(column => (
               <div
                 key={column.id}
+                id={`droppable-${column.id}`}
                 className="flex-shrink-0 w-80 rounded-lg border border-gray-600 bg-gray-800"
               >
                 <div className="p-4 border-b border-gray-600">
                   <h3 className="font-semibold text-white">{column.title}</h3>
                   <span className="text-sm text-gray-400">({column.orders.length})</span>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Status: {column.status} | ID: {column.id}
+                  </div>
                 </div>
                 
-                <div className="p-4 space-y-3 min-h-[400px]">
+                <div className="p-4 space-y-3 min-h-[400px] max-h-[calc(100vh-200px)] overflow-y-auto">
                   {column.orders.length === 0 ? (
                     <div className="text-center text-gray-500 py-8">
                       <div className="text-4xl mb-2">📋</div>
                       <p>Nenhum pedido nesta coluna</p>
-                      {column.status === 'in-progress' && orders.length === 0 && (
-                        <button 
-                          onClick={handleAddNewOrder}
-                          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                          Adicionar Primeiro Pedido
-                        </button>
-                      )}
+                      <div className="text-xs mt-2 text-gray-600">
+                        <p>Esta coluna aceita:</p>
+                        <p>• Status: {column.status}</p>
+                        <p>• ColumnId: {column.id}</p>
+                      </div>
                     </div>
                   ) : (
                     <SortableContext
@@ -428,15 +486,11 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           order={selectedOrder}
           onClose={() => setSelectedOrder(null)}
           onUpdateOrder={(order) => {
-            if (orderStore?.updateOrder) {
-              orderStore.updateOrder(order);
-            }
+            updateOrder(order);
             setSelectedOrder(null);
           }}
           onDeleteOrder={(orderId) => {
-            if (orderStore?.deleteOrder) {
-              orderStore.deleteOrder(orderId);
-            }
+            deleteOrder(orderId);
             setSelectedOrder(null);
           }}
           generateReport={() => {}}
@@ -461,7 +515,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
             setIsItemProgressModalOpen(false);
           }}
           onSave={(item) => {
-            // Handle save
             setIsItemProgressModalOpen(false);
             setSelectedItem(null);
           }}
