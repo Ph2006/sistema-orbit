@@ -10,13 +10,13 @@ import {
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
+  closestCenter,
 } from '@dnd-kit/core';
 import { 
   SortableContext, 
-  arrayMove,
   verticalListSortingStrategy 
 } from '@dnd-kit/sortable';
-import { RefreshCw, Plus, Trash, Settings, Check, Search, BarChart3, Calendar, Package } from 'lucide-react';
+import { RefreshCw, Plus, Settings, Check, Search, BarChart3, Calendar, Package } from 'lucide-react';
 
 import KanbanColumn from './KanbanColumn';
 import KanbanCard from './KanbanCard';
@@ -26,8 +26,6 @@ import QualityControl from './QualityControl';
 import { Order, OrderItem } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
-import { format, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 
 // Função local para gerar ID único
 const generateUniqueId = (): string => {
@@ -56,25 +54,17 @@ interface KanbanProps {
   readOnly?: boolean;
 }
 
-// Componente de Resumo de Pedidos
-const OrdersSummary: React.FC<{ orders: Order[] }> = ({ orders }) => {
+// Componente de Resumo de Pedidos simplificado
+const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => {
   const summaryData = useMemo(() => {
     const now = new Date();
-    const currentMonth = startOfMonth(now);
-    const nextMonth = startOfMonth(new Date(now.getFullYear(), now.getMonth() + 1));
-    const followingMonth = startOfMonth(new Date(now.getFullYear(), now.getMonth() + 2));
-    
-    const currentMonthEnd = endOfMonth(currentMonth);
-    const nextMonthEnd = endOfMonth(nextMonth);
-    const followingMonthEnd = endOfMonth(followingMonth);
+    const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const followingMonth = new Date(now.getFullYear(), now.getMonth() + 2, 1);
     
     let currentMonthWeight = 0;
     let nextMonthWeight = 0;
     let followingMonthWeight = 0;
-    let currentMonthOrders = 0;
-    let nextMonthOrders = 0;
-    let followingMonthOrders = 0;
-    
     let totalPendingOrders = 0;
     let totalCompletedOrders = 0;
     let totalWeight = 0;
@@ -92,33 +82,33 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = ({ orders }) => {
       }
       
       // Peso por mês baseado na data de entrega
-      if (isWithinInterval(deliveryDate, { start: currentMonth, end: currentMonthEnd })) {
+      const deliveryMonth = new Date(deliveryDate.getFullYear(), deliveryDate.getMonth(), 1);
+      
+      if (deliveryMonth.getTime() === currentMonth.getTime()) {
         currentMonthWeight += orderWeight;
-        currentMonthOrders++;
-      } else if (isWithinInterval(deliveryDate, { start: nextMonth, end: nextMonthEnd })) {
+      } else if (deliveryMonth.getTime() === nextMonth.getTime()) {
         nextMonthWeight += orderWeight;
-        nextMonthOrders++;
-      } else if (isWithinInterval(deliveryDate, { start: followingMonth, end: followingMonthEnd })) {
+      } else if (deliveryMonth.getTime() === followingMonth.getTime()) {
         followingMonthWeight += orderWeight;
-        followingMonthOrders++;
       }
     });
     
+    const formatMonth = (date: Date) => {
+      return date.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+    };
+    
     return {
       currentMonth: {
-        name: format(currentMonth, 'MMM/yyyy', { locale: ptBR }),
-        weight: currentMonthWeight,
-        orders: currentMonthOrders
+        name: formatMonth(currentMonth),
+        weight: currentMonthWeight
       },
       nextMonth: {
-        name: format(nextMonth, 'MMM/yyyy', { locale: ptBR }),
-        weight: nextMonthWeight,
-        orders: nextMonthOrders
+        name: formatMonth(nextMonth),
+        weight: nextMonthWeight
       },
       followingMonth: {
-        name: format(followingMonth, 'MMM/yyyy', { locale: ptBR }),
-        weight: followingMonthWeight,
-        orders: followingMonthOrders
+        name: formatMonth(followingMonth),
+        weight: followingMonthWeight
       },
       totals: {
         pending: totalPendingOrders,
@@ -164,10 +154,9 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = ({ orders }) => {
         </h4>
         
         {[summaryData.currentMonth, summaryData.nextMonth, summaryData.followingMonth].map((month, index) => (
-          <div key={index} className="p-3 bg-gray-700 rounded-lg">
+          <div key={month.name} className="p-3 bg-gray-700 rounded-lg">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-medium text-white">{month.name}</span>
-              <span className="text-xs text-gray-400">{month.orders} pedidos</span>
             </div>
             <div className="flex items-center">
               <Package className="h-4 w-4 text-gray-400 mr-2" />
@@ -181,48 +170,23 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = ({ orders }) => {
                 }`}
                 style={{ 
                   width: `${summaryData.totals.totalWeight > 0 ? 
-                    (month.weight / summaryData.totals.totalWeight) * 100 : 0}%` 
+                    Math.max((month.weight / summaryData.totals.totalWeight) * 100, 2) : 0}%` 
                 }}
               />
             </div>
           </div>
         ))}
       </div>
-      
-      {/* Status dos Pedidos */}
-      <div className="mt-4 p-3 bg-gray-700 rounded-lg">
-        <h4 className="text-sm font-medium text-gray-300 mb-2">Status Distribution</h4>
-        <div className="space-y-2">
-          {orders.reduce((acc, order) => {
-            const status = order.status || 'unknown';
-            if (!acc[status]) acc[status] = 0;
-            acc[status]++;
-            return acc;
-          }, {} as Record<string, number>)}
-        </div>
-      </div>
     </div>
   );
-};
+});
+
+OrdersSummary.displayName = 'OrdersSummary';
 
 const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
-  const { 
-    orders, 
-    updateOrder, 
-    deleteOrder,
-    addOrder,
-    subscribeToOrders
-  } = useOrderStore();
-
-  const { 
-    columns,
-    initializeDefaultColumns,
-    subscribeToColumns
-  } = useColumnStore();
-  
+  const [mounted, setMounted] = useState(false);
   const [compactView, setCompactView] = useState(false);
   const [showSummary, setShowSummary] = useState(true);
-  
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedOrderForQC, setSelectedOrderForQC] = useState<Order | null>(null);
@@ -230,36 +194,70 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isManagingColumns, setIsManagingColumns] = useState(false);
   const [isItemProgressModalOpen, setIsItemProgressModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Stores
+  const orderStore = useOrderStore();
+  const columnStore = useColumnStore();
+
+  const { orders, updateOrder, deleteOrder, addOrder, subscribeToOrders } = orderStore;
+  const { columns, initializeDefaultColumns, subscribeToColumns } = columnStore;
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    useSensor(PointerSensor, { 
+      activationConstraint: { distance: 8 } 
+    }),
+    useSensor(MouseSensor, { 
+      activationConstraint: { distance: 8 } 
+    }),
+    useSensor(TouchSensor, { 
+      activationConstraint: { delay: 200, tolerance: 8 } 
+    }),
     useSensor(KeyboardSensor)
   );
 
+  // Initialize component
   useEffect(() => {
-    const unsubscribeOrders = subscribeToOrders();
-    const unsubscribeColumns = subscribeToColumns();
-    
-    if (columns.length === 0) {
-      initializeDefaultColumns().catch(console.error);
-    }
-    
-    return () => {
-      unsubscribeOrders();
-      unsubscribeColumns();
+    let unsubscribeOrders: (() => void) | null = null;
+    let unsubscribeColumns: (() => void) | null = null;
+
+    const initializeStores = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Subscribe to data
+        unsubscribeOrders = subscribeToOrders();
+        unsubscribeColumns = subscribeToColumns();
+        
+        // Initialize columns if needed
+        if (columns.length === 0) {
+          await initializeDefaultColumns();
+        }
+        
+        setMounted(true);
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error initializing stores:', error);
+        setIsLoading(false);
+      }
     };
-  }, [subscribeToOrders, subscribeToColumns, initializeDefaultColumns, columns.length]);
+
+    initializeStores();
+
+    return () => {
+      if (unsubscribeOrders) unsubscribeOrders();
+      if (unsubscribeColumns) unsubscribeColumns();
+    };
+  }, []); // Empty dependency array to run only once
 
   const activeColumns = useMemo(() => {
-    if (columns.length === 0) return [];
+    if (!mounted || columns.length === 0) return [];
     
     // Filtrar pedidos com base no termo de busca
-    let filteredOrders = orders;
+    let filteredOrders = orders || [];
     if (searchTerm.trim() !== '') {
       const lowerSearchTerm = searchTerm.toLowerCase();
-      filteredOrders = orders.filter(order =>
+      filteredOrders = filteredOrders.filter(order =>
         order.orderNumber?.toString().toLowerCase().includes(lowerSearchTerm) ||
         order.customer?.toLowerCase().includes(lowerSearchTerm) ||
         order.internalOrderNumber?.toLowerCase().includes(lowerSearchTerm) ||
@@ -278,26 +276,15 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       const columnStatus = getStatusFromColumnTitle(column.title);
       const ordersByStatus = filteredOrders.filter(order => order.status === columnStatus);
       
-      // Estratégia 3: Buscar por palavras-chave no status
-      const titleKeywords = column.title.toLowerCase().split(' ');
-      const ordersByKeywords = filteredOrders.filter(order => {
-        if (!order.status) return false;
-        const statusLower = order.status.toLowerCase();
-        return titleKeywords.some(keyword => 
-          keyword.length > 2 && statusLower.includes(keyword)
-        );
-      });
-      
-      // Combinar resultados (prioridade: columnId > status > keywords)
+      // Combinar resultados
       const combinedIds = new Set([
         ...ordersByColumnId.map(o => o.id),
-        ...ordersByStatus.map(o => o.id),
-        ...ordersByKeywords.map(o => o.id)
+        ...ordersByStatus.map(o => o.id)
       ]);
       
       columnOrders = filteredOrders.filter(order => combinedIds.has(order.id));
       
-      // ✅ ORDENAR por data de entrega (mais próxima primeiro)
+      // Ordenar por data de entrega (mais próxima primeiro)
       columnOrders.sort((a, b) => {
         const dateA = new Date(a.deliveryDate).getTime();
         const dateB = new Date(b.deliveryDate).getTime();
@@ -312,7 +299,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     });
     
     return result;
-  }, [orders, columns, searchTerm]);
+  }, [mounted, orders, columns, searchTerm]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(event.active.id as string);
@@ -321,10 +308,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     
-    if (!over) {
-      setActiveId(null);
-      return;
-    }
+    setActiveId(null);
+    
+    if (!over || !active) return;
 
     const targetColumnId = over.id.toString().replace('droppable-', '');
     
@@ -353,8 +339,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         }
       }
     }
-
-    setActiveId(null);
   }, [activeColumns, orders, updateOrder]);
 
   const handleOrderClick = useCallback((order: Order) => {
@@ -400,6 +384,21 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     if (!activeId) return null;
     return orders.find(order => order.id === activeId) || null;
   }, [activeId, orders]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex flex-col items-center">
+          <RefreshCw className="animate-spin w-10 h-10 text-blue-500 mb-4" />
+          <p className="text-gray-600">Carregando pedidos...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <>
@@ -463,6 +462,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         <div className="flex-1 flex gap-6 pb-8 overflow-x-auto">
           <DndContext
             sensors={sensors}
+            collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
@@ -528,9 +528,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           </DndContext>
           
           {/* Painel de Resumo */}
-          {showSummary && (
-            <OrdersSummary orders={orders} />
-          )}
+          {showSummary && <OrdersSummary orders={orders} />}
         </div>
       </div>
       
