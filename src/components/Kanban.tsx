@@ -24,8 +24,9 @@ import OrderModal from './OrderModal';
 import ItemProgressModal from './ItemProgressModal';
 import QualityControl from './QualityControl';
 import { Order, OrderItem, KanbanColumn as KanbanColumnType } from '../types/kanban';
-import { useOrdersStore } from '../store/ordersStore';
-import { useSettingsStore } from '../store/settingsStore';
+// Corrigindo o caminho de importação do store
+import { useOrdersStore } from '../../store/ordersStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { generateUniqueId } from '../utils/helpers';
 
 const DEFAULT_COLUMNS: KanbanColumnType[] = [
@@ -193,7 +194,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     setSelectedOrderForQC(order);
   }, []);
 
-  // Add missing handler for item progress
+  // Adicionando o handler para gerenciar o progresso do item
   const handleItemProgressClick = useCallback((item: OrderItem) => {
     setSelectedItem(item);
     setIsItemProgressModalOpen(true);
