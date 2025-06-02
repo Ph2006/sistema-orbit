@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Order, OrderItem } from '../types/kanban';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { X, Save, Trash, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Save, Trash, FileText, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 
 interface OrderModalProps {
   order: Order;
@@ -43,6 +43,15 @@ const OrderModal: React.FC<OrderModalProps> = ({
       ...prev,
       items: (prev.items || []).map(item => 
         item.id === itemId ? { ...item, overallProgress: progress } : item
+      )
+    }));
+  };
+
+  const handleItemFieldChange = (itemId: string, field: string, value: string) => {
+    setEditedOrder(prev => ({
+      ...prev,
+      items: (prev.items || []).map(item => 
+        item.id === itemId ? { ...item, [field]: value } : item
       )
     }));
   };
@@ -258,7 +267,7 @@ const OrderModal: React.FC<OrderModalProps> = ({
             </div>
             
             {showItemsSection && (
-              <div className="space-y-3 max-h-64 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-700">
+              <div className="space-y-4 max-h-96 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-700">
                 {editedOrder.items && editedOrder.items.length > 0 ? (
                   editedOrder.items.map((item, index) => (
                     <div 
@@ -279,35 +288,101 @@ const OrderModal: React.FC<OrderModalProps> = ({
                         </div>
                       </div>
                       
-                      <div className="mt-3">
-                        <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
-                          <span>Progresso</span>
-                          <span className="font-medium text-white">{item.overallProgress || 0}%</span>
-                        </div>
-                        <div className="relative">
-                          <div className="h-2 bg-gray-600 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full transition-all ${
-                                (item.overallProgress || 0) >= 100 ? 'bg-emerald-500' : 
-                                (item.overallProgress || 0) >= 75 ? 'bg-blue-500' : 
-                                (item.overallProgress || 0) >= 50 ? 'bg-amber-500' : 
-                                'bg-gray-500'
-                              }`}
-                              style={{ width: `${Math.max(item.overallProgress || 0, 2)}%` }}
+                      {/* Progresso com botão de atualizar */}
+                      <div className="mt-3 flex items-center gap-2">
+                        <div className="flex-1">
+                          <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
+                            <span>Progresso</span>
+                            <span className="font-medium text-white">{item.overallProgress || 0}%</span>
+                          </div>
+                          <div className="relative">
+                            <div className="h-2 bg-gray-600 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full rounded-full transition-all ${
+                                  (item.overallProgress || 0) >= 100 ? 'bg-emerald-500' : 
+                                  (item.overallProgress || 0) >= 75 ? 'bg-blue-500' : 
+                                  (item.overallProgress || 0) >= 50 ? 'bg-amber-500' : 
+                                  'bg-gray-500'
+                                }`}
+                                style={{ width: `${Math.max(item.overallProgress || 0, 2)}%` }}
+                              />
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={item.overallProgress || 0}
+                              onChange={(e) => handleItemProgressChange(item.id, parseInt(e.target.value))}
+                              className="absolute inset-0 opacity-0 cursor-pointer"
+                              title="Ajustar progresso"
                             />
                           </div>
-                          
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={item.overallProgress || 0}
-                            onChange={(e) => handleItemProgressChange(item.id, parseInt(e.target.value))}
-                            className="absolute inset-0 opacity-0 cursor-pointer"
-                            title="Ajustar progresso"
-                          />
                         </div>
+                        
+                        {/* Botão de atualizar progresso */}
+                        <button
+                          onClick={() => {
+                            const newProgress = window.prompt(`Atualizar progresso de "${item.code || `Item ${index + 1}`}" (0-100%):`, String(item.overallProgress || 0));
+                            if (newProgress !== null) {
+                              const progress = Math.min(100, Math.max(0, parseInt(newProgress) || 0));
+                              handleItemProgressChange(item.id, progress);
+                            }
+                          }}
+                          className="bg-blue-600 hover:bg-blue-700 text-white p-1.5 rounded-md flex-shrink-0"
+                          title="Atualizar Progresso"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </button>
                       </div>
+                      
+                      {/* Campos adicionais para itens 100% concluídos */}
+                      {(item.overallProgress || 0) === 100 && (
+                        <div className="mt-4 pt-3 border-t border-gray-600/50 space-y-3">
+                          <div className="text-xs font-medium text-emerald-400 mb-2">
+                            Item Concluído - Informações de Despacho
+                          </div>
+                          
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-400 mb-1">
+                                Lista de Embarque (LE)
+                              </label>
+                              <input 
+                                type="text"
+                                value={item.shippingList || ''}
+                                onChange={(e) => handleItemFieldChange(item.id, 'shippingList', e.target.value)}
+                                placeholder="Número da LE"
+                                className="w-full px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            
+                            <div>
+                              <label className="block text-xs font-medium text-gray-400 mb-1">
+                                Nota Fiscal
+                              </label>
+                              <input 
+                                type="text"
+                                value={item.invoice || ''}
+                                onChange={(e) => handleItemFieldChange(item.id, 'invoice', e.target.value)}
+                                placeholder="Número da NF"
+                                className="w-full px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            
+                            <div className="sm:col-span-2">
+                              <label className="block text-xs font-medium text-gray-400 mb-1">
+                                Data de Entrega
+                              </label>
+                              <input 
+                                type="date"
+                                value={item.deliveryDate || ''}
+                                onChange={(e) => handleItemFieldChange(item.id, 'deliveryDate', e.target.value)}
+                                className="w-full px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))
                 ) : (
