@@ -10,7 +10,7 @@ interface OrderModalProps {
   onClose: () => void;
   onUpdateOrder: (order: Order) => void;
   onDeleteOrder: (orderId: string) => void;
-  generateReport?: (selectedItems: string[]) => void;
+  generateReport?: (selectedItems: OrderItem[]) => void; // Mudado para receber os objetos completos
   customers: any[];
   projects: any[];
 }
@@ -101,7 +101,17 @@ const OrderModal: React.FC<OrderModalProps> = ({
 
   const handleGenerateReport = () => {
     if (generateReport && selectedItems.length > 0) {
-      generateReport(selectedItems);
+      // Filtrar apenas os itens selecionados
+      const itemsToReport = editedOrder.items?.filter(item => 
+        selectedItems.includes(item.id)
+      ) || [];
+      
+      if (itemsToReport.length > 0) {
+        // Passar apenas os itens selecionados para a função de geração de relatório
+        generateReport(itemsToReport);
+      } else {
+        alert("Erro ao gerar relatório: itens selecionados não encontrados.");
+      }
     } else {
       alert("Por favor, selecione pelo menos um item para gerar o relatório.");
     }
@@ -147,11 +157,6 @@ const OrderModal: React.FC<OrderModalProps> = ({
       default: return 'bg-gray-700 text-gray-300';
     }
   };
-  
-  // Filtrar apenas os itens com 100% de progresso para mostrar campos adicionais
-  const completedItems = editedOrder.items?.filter(item => 
-    (item.overallProgress || 0) === 100
-  ) || [];
   
   return (
     <>
