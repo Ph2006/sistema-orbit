@@ -16,7 +16,7 @@ import {
   arrayMove,
   verticalListSortingStrategy 
 } from '@dnd-kit/sortable';
-import { RefreshCw, Plus, Trash, Settings, Check, Search } from 'lucide-react';
+import { RefreshCw, Plus, Trash, Settings, Check, Search, BarChart3, Calendar, Package } from 'lucide-react';
 
 import KanbanColumn from './KanbanColumn';
 import KanbanCard from './KanbanCard';
@@ -26,6 +26,8 @@ import QualityControl from './QualityControl';
 import { Order, OrderItem } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
+import { format, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 // Função local para gerar ID único
 const generateUniqueId = (): string => {
@@ -47,35 +49,161 @@ const getStatusFromColumnTitle = (title: string): string => {
   if (titleLower.includes('aguardando') || titleLower.includes('docs')) return 'waiting-docs';
   if (titleLower.includes('pronto')) return 'ready';
   
-  // Fallback: criar status baseado no título
   return titleLower.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-};
-
-// Mapeamento inverso: dado um status, encontrar a coluna apropriada
-const getColumnForStatus = (status: string, columns: any[]): any => {
-  // Mapeamento direto de status para títulos de coluna
-  const statusToTitleMap: Record<string, string[]> = {
-    'in-progress': ['processo', 'produção', 'andamento'],
-    'shipped': ['expedido', 'enviado', 'embarcado'],
-    'on-hold': ['paralisado', 'pausado', 'suspenso'],
-    'completed': ['concluído', 'finalizado', 'terminado'],
-    'delayed': ['atrasado', 'atraso'],
-    'urgent': ['urgente', 'prioridade'],
-    'waiting-docs': ['aguardando', 'documentação', 'docs'],
-    'ready': ['pronto', 'preparado']
-  };
-  
-  const keywords = statusToTitleMap[status] || [status];
-  
-  return columns.find(col => {
-    const titleLower = col.title.toLowerCase();
-    return keywords.some(keyword => titleLower.includes(keyword));
-  });
 };
 
 interface KanbanProps {
   readOnly?: boolean;
 }
+
+// Componente de Resumo de Pedidos
+const OrdersSummary: React.FC<{ orders: Order[] }> = ({ orders }) => {
+  const summaryData = useMemo(() => {
+    const now = new Date();
+    const currentMonth = startOfMonth(now);
+    const nextMonth = startOfMonth(new Date(now.getFullYear(), now.getMonth() + 1));
+    const followingMonth = startOfMonth(new Date(now.getFullYear(), now.getMonth() + 2));
+    
+    const currentMonthEnd = endOfMonth(currentMonth);
+    const nextMonthEnd = endOfMonth(nextMonth);
+    const followingMonthEnd = endOfMonth(followingMonth);
+    
+    let currentMonthWeight = 0;
+    let nextMonthWeight = 0;
+    let followingMonthWeight = 0;
+    let currentMonthOrders = 0;
+    let nextMonthOrders = 0;
+    let followingMonthOrders = 0;
+    
+    let totalPendingOrders = 0;
+    let totalCompletedOrders = 0;
+    let totalWeight = 0;
+    
+    orders.forEach(order => {
+      const deliveryDate = new Date(order.deliveryDate);
+      const orderWeight = order.totalWeight || 0;
+      
+      totalWeight += orderWeight;
+      
+      if (order.status === 'completed') {
+        totalCompletedOrders++;
+      } else {
+        totalPendingOrders++;
+      }
+      
+      // Peso por mês baseado na data de entrega
+      if (isWithinInterval(deliveryDate, { start: currentMonth, end: currentMonthEnd })) {
+        currentMonthWeight += orderWeight;
+        currentMonthOrders++;
+      } else if (isWithinInterval(deliveryDate, { start: nextMonth, end: nextMonthEnd })) {
+        nextMonthWeight += orderWeight;
+        nextMonthOrders++;
+      } else if (isWithinInterval(deliveryDate, { start: followingMonth, end: followingMonthEnd })) {
+        followingMonthWeight += orderWeight;
+        followingMonthOrders++;
+      }
+    });
+    
+    return {
+      currentMonth: {
+        name: format(currentMonth, 'MMM/yyyy', { locale: ptBR }),
+        weight: currentMonthWeight,
+        orders: currentMonthOrders
+      },
+      nextMonth: {
+        name: format(nextMonth, 'MMM/yyyy', { locale: ptBR }),
+        weight: nextMonthWeight,
+        orders: nextMonthOrders
+      },
+      followingMonth: {
+        name: format(followingMonth, 'MMM/yyyy', { locale: ptBR }),
+        weight: followingMonthWeight,
+        orders: followingMonthOrders
+      },
+      totals: {
+        pending: totalPendingOrders,
+        completed: totalCompletedOrders,
+        totalWeight: totalWeight
+      }
+    };
+  }, [orders]);
+  
+  return (
+    <div className="w-80 bg-gray-800 rounded-lg border border-gray-600 p-4 h-fit">
+      <div className="flex items-center mb-4">
+        <BarChart3 className="h-5 w-5 text-blue-400 mr-2" />
+        <h3 className="font-semibold text-white">Resumo de Pedidos</h3>
+      </div>
+      
+      {/* Totais Gerais */}
+      <div className="mb-4 p-3 bg-gray-700 rounded-lg">
+        <h4 className="text-sm font-medium text-gray-300 mb-2">Totais Gerais</h4>
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="text-center">
+            <div className="text-lg font-bold text-blue-400">{summaryData.totals.pending}</div>
+            <div className="text-gray-400">Pendentes</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-bold text-green-400">{summaryData.totals.completed}</div>
+            <div className="text-gray-400">Concluídos</div>
+          </div>
+        </div>
+        <div className="mt-2 text-center">
+          <div className="text-lg font-bold text-yellow-400">
+            {summaryData.totals.totalWeight.toFixed(1)} kg
+          </div>
+          <div className="text-gray-400">Peso Total</div>
+        </div>
+      </div>
+      
+      {/* Peso por Mês */}
+      <div className="space-y-3">
+        <h4 className="text-sm font-medium text-gray-300 flex items-center">
+          <Calendar className="h-4 w-4 mr-1" />
+          Peso por Mês (Entrega)
+        </h4>
+        
+        {[summaryData.currentMonth, summaryData.nextMonth, summaryData.followingMonth].map((month, index) => (
+          <div key={index} className="p-3 bg-gray-700 rounded-lg">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium text-white">{month.name}</span>
+              <span className="text-xs text-gray-400">{month.orders} pedidos</span>
+            </div>
+            <div className="flex items-center">
+              <Package className="h-4 w-4 text-gray-400 mr-2" />
+              <span className="text-lg font-bold text-white">{month.weight.toFixed(1)} kg</span>
+            </div>
+            <div className="mt-2 w-full bg-gray-600 rounded-full h-2">
+              <div 
+                className={`h-2 rounded-full ${
+                  index === 0 ? 'bg-blue-500' : 
+                  index === 1 ? 'bg-green-500' : 'bg-yellow-500'
+                }`}
+                style={{ 
+                  width: `${summaryData.totals.totalWeight > 0 ? 
+                    (month.weight / summaryData.totals.totalWeight) * 100 : 0}%` 
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      {/* Status dos Pedidos */}
+      <div className="mt-4 p-3 bg-gray-700 rounded-lg">
+        <h4 className="text-sm font-medium text-gray-300 mb-2">Status Distribution</h4>
+        <div className="space-y-2">
+          {orders.reduce((acc, order) => {
+            const status = order.status || 'unknown';
+            if (!acc[status]) acc[status] = 0;
+            acc[status]++;
+            return acc;
+          }, {} as Record<string, number>)}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const { 
@@ -93,6 +221,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   } = useColumnStore();
   
   const [compactView, setCompactView] = useState(false);
+  const [showSummary, setShowSummary] = useState(true);
   
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -101,8 +230,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isManagingColumns, setIsManagingColumns] = useState(false);
   const [isItemProgressModalOpen, setIsItemProgressModalOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -112,14 +239,10 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   );
 
   useEffect(() => {
-    console.log('🚀 Kanban: Iniciando subscriptions...');
-    
     const unsubscribeOrders = subscribeToOrders();
     const unsubscribeColumns = subscribeToColumns();
     
-    // Initialize columns if needed
     if (columns.length === 0) {
-      console.log('🔧 Inicializando colunas padrão...');
       initializeDefaultColumns().catch(console.error);
     }
     
@@ -129,34 +252,8 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     };
   }, [subscribeToOrders, subscribeToColumns, initializeDefaultColumns, columns.length]);
 
-  // Debug e análise dos dados
-  const dataAnalysis = useMemo(() => {
-    const statusCount: Record<string, number> = {};
-    const columnIdCount: Record<string, number> = {};
-    
-    orders.forEach(order => {
-      const status = order.status || 'no-status';
-      const columnId = order.columnId || 'no-column';
-      
-      statusCount[status] = (statusCount[status] || 0) + 1;
-      columnIdCount[columnId] = (columnIdCount[columnId] || 0) + 1;
-    });
-    
-    console.log('📊 Análise dos Pedidos:', {
-      totalOrders: orders.length,
-      statusCount,
-      columnIdCount,
-      columns: columns.map(col => ({ id: col.id, title: col.title }))
-    });
-    
-    return { statusCount, columnIdCount };
-  }, [orders, columns]);
-
   const activeColumns = useMemo(() => {
-    if (columns.length === 0) {
-      console.log('⚠️ Nenhuma coluna disponível ainda');
-      return [];
-    }
+    if (columns.length === 0) return [];
     
     // Filtrar pedidos com base no termo de busca
     let filteredOrders = orders;
@@ -170,7 +267,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       );
     }
     
-    // Distribuir pedidos nas colunas usando múltiplas estratégias
+    // Distribuir pedidos nas colunas
     const result = columns.map(column => {
       let columnOrders: Order[] = [];
       
@@ -200,48 +297,19 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       
       columnOrders = filteredOrders.filter(order => combinedIds.has(order.id));
       
-      console.log(`📂 Coluna "${column.title}":`, {
-        id: column.id,
-        expectedStatus: columnStatus,
-        byColumnId: ordersByColumnId.length,
-        byStatus: ordersByStatus.length,
-        byKeywords: ordersByKeywords.length,
-        total: columnOrders.length,
-        orders: columnOrders.map(o => ({ 
-          orderNumber: o.orderNumber, 
-          status: o.status, 
-          columnId: o.columnId 
-        }))
+      // ✅ ORDENAR por data de entrega (mais próxima primeiro)
+      columnOrders.sort((a, b) => {
+        const dateA = new Date(a.deliveryDate).getTime();
+        const dateB = new Date(b.deliveryDate).getTime();
+        return dateA - dateB;
       });
       
       return { 
         ...column, 
         orders: columnOrders,
-        status: columnStatus // Adicionar status para uso no drag & drop
+        status: columnStatus
       };
     });
-    
-    // Se ainda há pedidos sem coluna, adicionar uma coluna "Sem Classificação"
-    const assignedOrderIds = new Set(result.flatMap(col => col.orders.map(o => o.id)));
-    const unassignedOrders = filteredOrders.filter(order => !assignedOrderIds.has(order.id));
-    
-    if (unassignedOrders.length > 0) {
-      console.log(`🔍 Encontrados ${unassignedOrders.length} pedidos sem classificação:`, 
-        unassignedOrders.map(o => ({ 
-          orderNumber: o.orderNumber, 
-          status: o.status, 
-          columnId: o.columnId 
-        }))
-      );
-      
-      result.push({
-        id: 'unassigned',
-        title: 'Sem Classificação',
-        order: 999,
-        status: 'unassigned',
-        orders: unassignedOrders
-      });
-    }
     
     return result;
   }, [orders, columns, searchTerm]);
@@ -258,7 +326,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       return;
     }
 
-    // Extrair ID da coluna de destino
     const targetColumnId = over.id.toString().replace('droppable-', '');
     
     if (targetColumnId) {
@@ -268,9 +335,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         const orderToUpdate = orders.find(o => o.id === orderId);
         
         if (orderToUpdate) {
-          console.log(`🔄 Movendo pedido ${orderToUpdate.orderNumber} para coluna ${targetColumn.title}`);
-          
-          // Determinar novo status baseado na coluna
           const newStatus = targetColumn.status !== 'unassigned' ? 
             targetColumn.status : 
             getStatusFromColumnTitle(targetColumn.title);
@@ -283,9 +347,8 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           
           try {
             await updateOrder(updatedOrder);
-            console.log(`✅ Pedido movido com sucesso`);
           } catch (error) {
-            console.error('❌ Erro ao mover pedido:', error);
+            console.error('Erro ao mover pedido:', error);
           }
         }
       }
@@ -308,7 +371,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }, []);
 
   const handleAddNewOrder = useCallback(async () => {
-    // Usar a primeira coluna como padrão
     const defaultColumn = columns[0];
     const defaultStatus = defaultColumn ? getStatusFromColumnTitle(defaultColumn.title) : 'in-progress';
     
@@ -339,27 +401,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     return orders.find(order => order.id === activeId) || null;
   }, [activeId, orders]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="flex flex-col items-center">
-          <RefreshCw className="animate-spin w-10 h-10 text-blue-500 mb-4" />
-          <p className="text-gray-600">Carregando pedidos...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <>
       <div className="flex flex-col h-full">
-        {/* Debug info mais detalhado */}
-        <div className="bg-green-100 p-2 text-xs text-green-800 border-b">
-          <strong>Dados:</strong> {orders.length} pedidos | {columns.length} colunas | 
-          Status: {Object.keys(dataAnalysis.statusCount).join(', ')} |
-          Distribuição: {activeColumns.map(col => `${col.title}(${col.orders.length})`).join(', ')}
-        </div>
-        
         <div className="flex justify-between items-center mb-4 px-4">
           <div className="relative w-80">
             <input
@@ -375,6 +419,16 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           <div className="flex space-x-2">
             {!readOnly && (
               <>
+                <button
+                  onClick={() => setShowSummary(!showSummary)}
+                  className={`px-3 py-2 rounded-lg flex items-center ${
+                    showSummary ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-600 hover:bg-gray-700'
+                  } text-white`}
+                >
+                  <BarChart3 className="mr-2 h-5 w-5" />
+                  <span>Resumo</span>
+                </button>
+                
                 <button
                   onClick={() => setIsManagingColumns(!isManagingColumns)}
                   className={`px-3 py-2 rounded-lg flex items-center ${
@@ -406,61 +460,55 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           </div>
         </div>
         
-        <div className={`flex-1 flex ${compactView ? 'gap-3' : 'gap-6'} pb-8 overflow-x-auto`}>
+        <div className="flex-1 flex gap-6 pb-8 overflow-x-auto">
           <DndContext
             sensors={sensors}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            {activeColumns.map(column => (
-              <div
-                key={column.id}
-                id={`droppable-${column.id}`}
-                className="flex-shrink-0 w-80 rounded-lg border border-gray-600 bg-gray-800"
-              >
-                <div className="p-4 border-b border-gray-600">
-                  <h3 className="font-semibold text-white">{column.title}</h3>
-                  <span className="text-sm text-gray-400">({column.orders.length})</span>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Status: {column.status} | ID: {column.id}
+            <div className={`flex ${compactView ? 'gap-3' : 'gap-6'} flex-1`}>
+              {activeColumns.map(column => (
+                <div
+                  key={column.id}
+                  id={`droppable-${column.id}`}
+                  className="flex-shrink-0 w-80 rounded-lg border border-gray-600 bg-gray-800"
+                >
+                  <div className="p-4 border-b border-gray-600">
+                    <h3 className="font-semibold text-white">{column.title}</h3>
+                    <span className="text-sm text-gray-400">({column.orders.length})</span>
+                  </div>
+                  
+                  <div className="p-4 space-y-3 min-h-[400px] max-h-[calc(100vh-200px)] overflow-y-auto">
+                    {column.orders.length === 0 ? (
+                      <div className="text-center text-gray-500 py-8">
+                        <div className="text-4xl mb-2">📋</div>
+                        <p>Nenhum pedido nesta coluna</p>
+                      </div>
+                    ) : (
+                      <SortableContext
+                        items={column.orders.map(order => order.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        {column.orders.map(order => (
+                          <KanbanCard
+                            key={order.id}
+                            order={order}
+                            isManaging={isManagingColumns}
+                            isSelected={selectedOrder?.id === order.id}
+                            highlight={false}
+                            compactView={compactView}
+                            onOrderClick={handleOrderClick}
+                            onQualityControlClick={handleQualityControlClick}
+                            onItemProgressClick={handleItemProgressClick}
+                            projects={[]}
+                          />
+                        ))}
+                      </SortableContext>
+                    )}
                   </div>
                 </div>
-                
-                <div className="p-4 space-y-3 min-h-[400px] max-h-[calc(100vh-200px)] overflow-y-auto">
-                  {column.orders.length === 0 ? (
-                    <div className="text-center text-gray-500 py-8">
-                      <div className="text-4xl mb-2">📋</div>
-                      <p>Nenhum pedido nesta coluna</p>
-                      <div className="text-xs mt-2 text-gray-600">
-                        <p>Esta coluna aceita:</p>
-                        <p>• Status: {column.status}</p>
-                        <p>• ColumnId: {column.id}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <SortableContext
-                      items={column.orders.map(order => order.id)}
-                      strategy={verticalListSortingStrategy}
-                    >
-                      {column.orders.map(order => (
-                        <KanbanCard
-                          key={order.id}
-                          order={order}
-                          isManaging={isManagingColumns}
-                          isSelected={selectedOrder?.id === order.id}
-                          highlight={false}
-                          compactView={compactView}
-                          onOrderClick={handleOrderClick}
-                          onQualityControlClick={handleQualityControlClick}
-                          onItemProgressClick={handleItemProgressClick}
-                          projects={[]}
-                        />
-                      ))}
-                    </SortableContext>
-                  )}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
             
             <DragOverlay>
               {activeOrder && (
@@ -478,6 +526,11 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
               )}
             </DragOverlay>
           </DndContext>
+          
+          {/* Painel de Resumo */}
+          {showSummary && (
+            <OrdersSummary orders={orders} />
+          )}
         </div>
       </div>
       
