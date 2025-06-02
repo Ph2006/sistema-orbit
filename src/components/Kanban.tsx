@@ -460,8 +460,25 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }
 
   return (
-    <div className="h-full bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 min-h-screen">
-      <div className="flex flex-col h-full">
+    <div className="h-full min-h-screen relative">
+      {/* Background com degradê */}
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900"></div>
+      
+      {/* Imagem de fundo da Terra com transparência */}
+      <div 
+        className="absolute inset-0 opacity-60"
+        style={{
+          backgroundImage: 'url("https://wallpapers.com/images/hd/space-1920-x-1080-picture-3vdyz7zdnmqk3uzw.jpg")',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat'
+        }}
+      ></div>
+      
+      {/* Overlay adicional para melhor contraste */}
+      <div className="absolute inset-0 bg-blue-900/30"></div>
+      
+      <div className="relative z-10 flex flex-col h-full">
         <div className="flex justify-between items-center mb-4 px-4 pt-4">
           <div className="relative w-80">
             <input
