@@ -10,10 +10,12 @@ import 'jspdf-autotable';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useSettingsStore } from '../store/settingsStore';
+import { useAuthStore } from '../store/authStore';
 
 const CuttingPlanCalculator: React.FC = () => {
   const { orders } = useOrderStore();
   const { companyLogo } = useSettingsStore();
+  const { companyId } = useAuthStore();
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
   const [materialName, setMaterialName] = useState<string>('');
   const [materialDescription, setMaterialDescription] = useState<string>('');
@@ -33,24 +35,49 @@ const CuttingPlanCalculator: React.FC = () => {
   const [loadedPlans, setLoadedPlans] = useState<CuttingPlan[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({ orderId: '' });
   const [items, setItems] = useState<Array<{ id: string; code: string; description: string }>>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [planCounter, setPlanCounter] = useState<number>(1);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // Load existing cutting plans on component mount
   useEffect(() => {
     const loadPlans = async () => {
+      // Aguardar o companyId estar disponível
+      if (!companyId) {
+        console.log('⏳ Aguardando companyId para carregar planos de corte...');
+        return;
+      }
+
       try {
+        console.log('🔄 Configurando listener para planos de corte...');
+        
+        // Limpar listener anterior se existir
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+        }
+
         // Configurar listener em tempo real para planos de corte
+        const collectionPath = getCompanyCollection('cuttingPlans');
+        console.log('📁 Collection path:', collectionPath);
+
+        if (collectionPath.includes('invalid')) {
+          console.error('❌ Caminho de coleção inválido:', collectionPath);
+          return;
+        }
+
         const plansQuery = query(
-          collection(db, getCompanyCollection('cuttingPlans')),
+          collection(db, collectionPath),
           where('deleted', '==', false),
           orderBy('createdAt', 'desc')
         );
         
         const unsubscribe = onSnapshot(plansQuery, (snapshot) => {
+          console.log('📥 Recebidos', snapshot.docs.length, 'planos de corte do Firestore');
+          
           const plans = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
@@ -71,17 +98,27 @@ const CuttingPlanCalculator: React.FC = () => {
             }, 0);
             
             setPlanCounter(maxNumber + 1);
+            console.log('🔢 Próximo número do plano:', maxNumber + 1);
           }
+        }, (error) => {
+          console.error('❌ Erro no listener de planos de corte:', error);
         });
         
-        return () => unsubscribe();
+        unsubscribeRef.current = unsubscribe;
       } catch (error) {
-        console.error('Error loading cutting plans:', error);
+        console.error('❌ Error loading cutting plans:', error);
       }
     };
     
     loadPlans();
-  }, []);
+
+    // Cleanup listener on unmount
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+    };
+  }, [companyId]); // Dependência do companyId
 
   useEffect(() => {
     // If an order ID is selected, load its items
@@ -338,24 +375,36 @@ const CuttingPlanCalculator: React.FC = () => {
     };
 
     setCuttingPlan(newCuttingPlan);
+    console.log('📊 Plano de corte calculado:', newCuttingPlan);
   };
 
   // Save the cutting plan to the database
   const saveCuttingPlan = async () => {
-    if (!cuttingPlan) return;
+    if (!cuttingPlan) {
+      alert('Nenhum plano de corte para salvar');
+      return;
+    }
+
+    if (!companyId) {
+      alert('❌ CompanyId não disponível. Faça login novamente.');
+      console.error('❌ CompanyId não disponível');
+      return;
+    }
+
+    setIsSaving(true);
 
     try {
+      console.log('💾 === INICIANDO SALVAMENTO DO PLANO DE CORTE ===');
+      console.log('💾 CompanyId:', companyId);
+      console.log('💾 Plano a ser salvo:', cuttingPlan);
+
       // Verificar se já existe um plano similar
       const collectionPath = getCompanyCollection('cuttingPlans');
-      if (!collectionPath || typeof collectionPath !== 'string' || collectionPath.includes('invalid')) {
-        alert('Caminho da coleção de planos de corte inválido! Verifique a autenticação e a empresa selecionada.');
-        console.error('Caminho da coleção inválido:', collectionPath);
-        return;
-      }
+      console.log('📁 Collection path:', collectionPath);
 
-      // Logar o plano que será salvo
-      console.log('Plano de corte a ser salvo:', cuttingPlan);
-      console.log('Caminho da coleção:', collectionPath);
+      if (!collectionPath || typeof collectionPath !== 'string' || collectionPath.includes('invalid')) {
+        throw new Error('Caminho da coleção de planos de corte inválido! Verifique a autenticação e a empresa selecionada.');
+      }
 
       const existingPlansQuery = query(
         collection(db, collectionPath),
@@ -363,12 +412,16 @@ const CuttingPlanCalculator: React.FC = () => {
         where('materialName', '==', cuttingPlan.materialName),
         where('deleted', '==', false)
       );
+      
       const existingPlans = await getDocs(existingPlansQuery);
       if (!existingPlans.empty) {
-        const confirm = window.confirm(
+        const shouldContinue = window.confirm(
           'Já existe um plano de corte para este pedido e material. Deseja criar um novo mesmo assim?'
         );
-        if (!confirm) return;
+        if (!shouldContinue) {
+          setIsSaving(false);
+          return;
+        }
       }
 
       // Sanitize data before saving
@@ -386,22 +439,32 @@ const CuttingPlanCalculator: React.FC = () => {
           }))
         }))
       };
-      console.log('Objeto final a ser salvo:', planToSave);
+      
+      console.log('✅ Objeto final a ser salvo:', planToSave);
 
       const docRef = await addDoc(collection(db, collectionPath), planToSave);
-      console.log('Plano de corte salvo com ID:', docRef.id);
+      console.log('✅ Plano de corte salvo com ID:', docRef.id);
+      
+      // ⚠️ CORREÇÃO: NÃO resetar o formulário automaticamente
+      // Apenas incrementar o contador e manter os dados na tela
       setPlanCounter(prev => prev + 1);
-      resetForm();
-      alert('Plano de corte salvo com sucesso!');
+      
+      alert('✅ Plano de corte salvo com sucesso!');
+      
+      // Exportar PDF após salvar
       exportToPDF(cuttingPlan);
+      
     } catch (error) {
-      console.error('Erro ao salvar plano de corte:', error);
-      alert('Erro ao salvar plano de corte: ' + (error instanceof Error ? error.message : JSON.stringify(error)));
+      console.error('❌ Erro ao salvar plano de corte:', error);
+      alert('❌ Erro ao salvar plano de corte: ' + (error instanceof Error ? error.message : JSON.stringify(error)));
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  // Reset form fields after saving
+  // Reset form fields manually
   const resetForm = () => {
+    console.log('🔄 Resetando formulário...');
     setSelectedOrderId('');
     setFormData({ orderId: '' });
     setMaterialName('');
@@ -672,6 +735,7 @@ const CuttingPlanCalculator: React.FC = () => {
 
   // Select a previously generated plan
   const selectPlan = (plan: CuttingPlan) => {
+    console.log('📋 Selecionando plano existente:', plan.traceabilityCode);
     setCuttingPlan(plan);
     setSelectedOrderId(plan.orderId);
     setFormData({ orderId: plan.orderId });
@@ -983,7 +1047,7 @@ const CuttingPlanCalculator: React.FC = () => {
       {/* Previous cutting plans */}
       <div className="bg-white p-6 rounded-lg shadow border">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-medium">Planos de Corte Anteriores</h3>
+          <h3 className="text-lg font-medium">Planos de Corte Salvos ({loadedPlans.length})</h3>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
@@ -1018,7 +1082,14 @@ const CuttingPlanCalculator: React.FC = () => {
         
         {filteredPlans.length === 0 ? (
           <div className="text-center py-8 bg-gray-50 rounded-lg">
-            <p className="text-gray-500">{searchTerm ? 'Nenhum plano de corte encontrado para esta busca.' : 'Nenhum plano de corte salvo.'}</p>
+            <p className="text-gray-500">
+              {searchTerm 
+                ? 'Nenhum plano de corte encontrado para esta busca.' 
+                : loadedPlans.length === 0 
+                  ? 'Nenhum plano de corte salvo.'
+                  : 'Nenhum resultado para o termo de busca.'
+              }
+            </p>
           </div>
         ) : (
           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
@@ -1038,6 +1109,10 @@ const CuttingPlanCalculator: React.FC = () => {
                         {associatedOrder ? `OS #${associatedOrder.internalOrderNumber} - ${associatedOrder.customer}` : plan.traceabilityCode}
                       </h4>
                       <p className="text-sm text-gray-600">Plano: {plan.traceabilityCode}</p>
+                      <p className="text-sm text-gray-600">Material: {plan.materialName}</p>
+                      <p className="text-sm text-gray-500">
+                        {plan.totalBarsNeeded} barras - {plan.utilizationPercentage.toFixed(1)}% aproveitamento
+                      </p>
                     </div>
                     <div className="flex space-x-2">
                       <button
@@ -1079,10 +1154,20 @@ const CuttingPlanCalculator: React.FC = () => {
               <button
                 type="button"
                 onClick={saveCuttingPlan}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center"
+                disabled={isSaving}
+                className={`px-4 py-2 ${isSaving ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'} text-white rounded-md flex items-center`}
               >
-                <Save className="h-5 w-5 mr-2" />
-                Salvar Plano
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin h-5 w-5 mr-2 border-2 border-white rounded-full border-t-transparent"></div>
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-5 w-5 mr-2" />
+                    Salvar Plano
+                  </>
+                )}
               </button>
               <button
                 type="button"
