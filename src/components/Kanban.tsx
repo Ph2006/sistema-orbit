@@ -34,67 +34,16 @@ import {
   Weight
 } from 'lucide-react';
 
-// Removidos imports que causam erro - implementação direta
-// Remover imports problemáticos e usar implementações básicas
+// IMPORTS DOS SEUS COMPONENTES REAIS - DESCOMENTE E AJUSTE OS PATHS
+import KanbanColumn from './KanbanColumn';
+import KanbanCard from './KanbanCard';
 // import OrderModal from './OrderModal';
 // import ItemProgressModal from './ItemProgressModal';
 // import QualityControl from './QualityControl';
 // import ItemProductionReport from './ItemProductionReport';
-// Tipos básicos para o exemplo
-interface Order {
-  id: string;
-  customerName: string;
-  projectName?: string;
-  serviceOrder: string;
-  deliveryDate: string | Date;
-  totalWeight?: number;
-  items?: OrderItem[];
-  status: string;
-  columnId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface OrderItem {
-  id: string;
-  name: string;
-  description?: string;
-  progress?: number;
-}
-
-interface Column {
-  id: string;
-  title: string;
-  position: number;
-}
-
-// Stores simulados para o exemplo
-const useOrderStore = () => ({
-  orders: [] as Order[],
-  updateOrder: (id: string, updates: Partial<Order>) => console.log('Update order:', id, updates),
-  createOrder: (order: Order) => console.log('Create order:', order),
-  deleteOrder: (id: string) => console.log('Delete order:', id),
-  selectedOrdersForShipping: [] as string[],
-  toggleOrderForShipping: (order: Order) => console.log('Toggle shipping:', order.id),
-  clearShippingSelection: () => console.log('Clear shipping selection'),
-  exportShippingList: () => console.log('Export shipping list')
-});
-
-const useColumnStore = () => ({
-  columns: [
-    { id: 'col1', title: 'Pedidos em processo', position: 1 },
-    { id: 'col2', title: 'Pedidos expedidos', position: 2 },
-    { id: 'col3', title: 'Pedidos paralisados', position: 3 }
-  ] as Column[],
-  updateColumn: (id: string, updates: Partial<Column>) => console.log('Update column:', id, updates),
-  createColumn: (column: Column) => console.log('Create column:', column),
-  deleteColumn: (id: string) => console.log('Delete column:', id)
-});
-
-// Remover imports de tipos e stores problemáticos
-// import { Order, OrderItem, Column } from '../types/kanban';
-// import { useOrderStore } from '../store/orderStore';
-// import { useColumnStore } from '../store/columnStore';
+import { Order, OrderItem } from '../types/kanban';
+import { useOrderStore } from '../store/orderStore';
+import { useColumnStore } from '../store/columnStore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
@@ -129,10 +78,13 @@ const isShippedColumn = (columnTitle: string): boolean => {
 
 // Função para identificar se o pedido está concluído
 const isOrderCompleted = (order: Order): boolean => {
-  if (!order.items || order.items.length === 0) return false;
+  if (!order.items || order.items.length === 0) {
+    // Se não tem itens, verifica pelo progresso geral ou status
+    return order.progress === 100 || order.status === 'completed';
+  }
   
   return order.items.every(item => {
-    const progress = item.progress || 0;
+    const progress = item.overallProgress || item.progress || 0;
     return progress >= 100;
   });
 };
@@ -168,173 +120,7 @@ const ColumnWeightSummary: React.FC<{
   );
 };
 
-// Componente KanbanCard implementado diretamente
-const KanbanCard: React.FC<{
-  order: Order;
-  isManaging: boolean;
-  isSelected: boolean;
-  highlight: boolean;
-  compactView: boolean;
-  onOrderClick: (order: Order) => void;
-  onQualityControlClick?: (order: Order) => void;
-  onItemProgressClick?: (item: OrderItem) => void;
-  projects: any[];
-  selectedForShipping?: boolean;
-}> = ({
-  order,
-  isManaging,
-  isSelected,
-  highlight,
-  compactView,
-  onOrderClick,
-  onQualityControlClick,
-  onItemProgressClick,
-  projects,
-  selectedForShipping = false
-}) => {
-  const formatDate = (date: string | Date) => {
-    return new Date(date).toLocaleDateString('pt-BR');
-  };
-
-  const getProgressColor = (progress: number) => {
-    if (progress >= 100) return 'bg-green-500';
-    if (progress >= 75) return 'bg-blue-500';
-    if (progress >= 50) return 'bg-yellow-500';
-    if (progress >= 25) return 'bg-orange-500';
-    return 'bg-red-500';
-  };
-
-  const overallProgress = order.items?.length 
-    ? order.items.reduce((sum, item) => sum + (item.progress || 0), 0) / order.items.length 
-    : 0;
-
-  return (
-    <div 
-      className={`bg-white rounded-lg shadow-md border border-gray-200 p-4 cursor-pointer hover:shadow-lg transition-shadow ${
-        isSelected ? 'ring-2 ring-blue-500' : ''
-      } ${highlight ? 'ring-2 ring-yellow-500' : ''} ${compactView ? 'p-3' : 'p-4'}`}
-      onClick={() => onOrderClick(order)}
-    >
-      {/* Header do card */}
-      <div className="flex justify-between items-start mb-3">
-        <div>
-          <h4 className="font-semibold text-gray-900 text-sm">{order.id}</h4>
-          <p className="text-gray-600 text-xs">{order.customerName}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-gray-500">OS: {order.serviceOrder}</p>
-          <p className="text-xs text-gray-500">{formatDate(order.deliveryDate)}</p>
-        </div>
-      </div>
-
-      {/* Progresso geral */}
-      <div className="mb-3">
-        <div className="flex justify-between items-center mb-1">
-          <span className="text-xs text-gray-600">Progresso</span>
-          <span className="text-xs font-medium">{Math.round(overallProgress)}%</span>
-        </div>
-        <div className="w-full bg-gray-200 rounded-full h-2">
-          <div 
-            className={`h-2 rounded-full transition-all duration-300 ${getProgressColor(overallProgress)}`}
-            style={{ width: `${overallProgress}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Peso total */}
-      <div className="flex justify-between items-center text-xs text-gray-600 mb-2">
-        <span className="flex items-center gap-1">
-          <Weight className="h-3 w-3" />
-          {order.totalWeight?.toFixed(1)} kg
-        </span>
-        <span>{order.items?.length || 0} itens</span>
-      </div>
-
-      {/* Status indicator */}
-      <div className="flex justify-between items-center">
-        <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-          order.status === 'completed' ? 'bg-green-100 text-green-800' :
-          order.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
-          order.status === 'shipped' ? 'bg-purple-100 text-purple-800' :
-          order.status === 'on-hold' ? 'bg-red-100 text-red-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
-          {order.status === 'completed' ? 'Concluído' :
-           order.status === 'in-progress' ? 'Em Processo' :
-           order.status === 'shipped' ? 'Expedido' :
-           order.status === 'on-hold' ? 'Paralisado' :
-           'Pendente'}
-        </div>
-        
-        {selectedForShipping && (
-          <CheckSquare className="h-4 w-4 text-green-600" />
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Componente KanbanColumn implementado diretamente
-const KanbanColumn: React.FC<{
-  column: Column;
-  orders: Order[];
-  isManaging: boolean;
-  compactView: boolean;
-  onOrderClick: (order: Order) => void;
-  onQualityControlClick?: (order: Order) => void;
-  onItemProgressClick?: (item: OrderItem) => void;
-  onEditClick: (order: Order) => void;
-  onSelectForShipping?: (order: Order) => void;
-  onExportItemReport?: (order: Order) => void;
-  selectedForShipping: string[];
-  projects: any[];
-  renderCard?: (order: Order) => React.ReactNode;
-}> = ({
-  column,
-  orders,
-  isManaging,
-  compactView,
-  onOrderClick,
-  onQualityControlClick,
-  onItemProgressClick,
-  onEditClick,
-  onSelectForShipping,
-  onExportItemReport,
-  selectedForShipping,
-  projects,
-  renderCard
-}) => {
-  return (
-    <div className="bg-gray-800 rounded-b-lg border border-gray-600 border-t-0 min-h-96 max-h-[calc(100vh-200px)] overflow-y-auto">
-      <div className="p-4 space-y-3">
-        {orders.map(order => (
-          renderCard ? renderCard(order) : (
-            <KanbanCard
-              key={order.id}
-              order={order}
-              isManaging={isManaging}
-              isSelected={selectedForShipping.includes(order.id)}
-              highlight={false}
-              compactView={compactView}
-              onOrderClick={onOrderClick}
-              onQualityControlClick={onQualityControlClick}
-              onItemProgressClick={onItemProgressClick}
-              projects={projects}
-              selectedForShipping={selectedForShipping.includes(order.id)}
-            />
-          )
-        ))}
-        
-        {orders.length === 0 && (
-          <div className="text-center py-8 text-gray-400">
-            <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">Nenhum pedido nesta coluna</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+// Componente de Card melhorado com botão de edição
 const EnhancedKanbanCard: React.FC<{
   order: Order;
   isManaging: boolean;
@@ -392,6 +178,9 @@ const EnhancedKanbanCard: React.FC<{
         onItemProgressClick={onItemProgressClick}
         projects={projects}
         selectedForShipping={selectedForShipping}
+        onEditClick={onEditClick}
+        onSelectForShipping={onSelectForShipping}
+        onExportItemReport={onExportItemReport}
       />
       
       {/* Botões de ação - aparecem no hover */}
@@ -557,7 +346,7 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => 
 // Hook customizado para movimentação automática de pedidos
 const useAutoMoveCompletedOrders = (
   orders: Order[], 
-  columns: Column[], 
+  columns: any[], 
   updateOrder: (orderId: string, updates: Partial<Order>) => void
 ) => {
   useEffect(() => {
@@ -569,7 +358,8 @@ const useAutoMoveCompletedOrders = (
     const completedOrdersToMove = orders.filter(order => 
       isOrderCompleted(order) && 
       order.columnId !== shippedColumn.id &&
-      order.status !== 'shipped'
+      order.status !== 'shipped' &&
+      order.status !== 'completed'
     );
 
     // Mover pedidos concluídos para coluna de expedidos
@@ -609,7 +399,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [compactView, setCompactView] = useState(false);
   const [isManaging, setIsManaging] = useState(false);
 
-  // Hook para movimentação automática
+  // Hook para movimentação automática com dados reais
   useAutoMoveCompletedOrders(orders, columns, updateOrder);
 
   const sensors = useSensors(
@@ -629,11 +419,16 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     
     const term = searchTerm.toLowerCase();
     return orders.filter(order => 
-      order.id.toLowerCase().includes(term) ||
-      order.customerName.toLowerCase().includes(term) ||
+      order.id?.toLowerCase().includes(term) ||
+      order.orderNumber?.toLowerCase().includes(term) ||
+      order.customer?.toLowerCase().includes(term) ||
+      order.customerName?.toLowerCase().includes(term) ||
       order.projectName?.toLowerCase().includes(term) ||
+      order.internalOrderNumber?.toLowerCase().includes(term) ||
+      order.serviceOrder?.toLowerCase().includes(term) ||
       order.items?.some(item => 
-        item.name.toLowerCase().includes(term) ||
+        item.name?.toLowerCase().includes(term) ||
+        item.code?.toLowerCase().includes(term) ||
         item.description?.toLowerCase().includes(term)
       )
     );
@@ -810,36 +605,19 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                     strategy={verticalListSortingStrategy}
                   >
                     <KanbanColumn
-                      column={column}
-                      orders={ordersByColumn[column.id] || []}
-                      isManaging={isManaging}
-                      compactView={compactView}
+                      column={{...column, orders: ordersByColumn[column.id] || []}}
+                      onEdit={() => console.log('Edit column')}
+                      onDelete={() => console.log('Delete column')}
                       onOrderClick={handleOrderClick}
+                      onUpdateOrder={(order) => updateOrder(order.id, order)}
                       onQualityControlClick={handleQualityControlClick}
-                      onItemProgressClick={handleItemProgressClick}
-                      onEditClick={handleEditOrder}
-                      onSelectForShipping={toggleOrderForShipping}
-                      onExportItemReport={handleExportItemReport}
-                      selectedForShipping={selectedOrdersForShipping}
-                      projects={[]} // Adicione sua lista de projetos aqui
-                      renderCard={(order) => (
-                        <EnhancedKanbanCard
-                          key={order.id}
-                          order={order}
-                          isManaging={isManaging}
-                          isSelected={selectedOrdersForShipping.includes(order.id)}
-                          highlight={false}
-                          compactView={compactView}
-                          onOrderClick={handleOrderClick}
-                          onQualityControlClick={handleQualityControlClick}
-                          onItemProgressClick={handleItemProgressClick}
-                          onEditClick={handleEditOrder}
-                          onSelectForShipping={toggleOrderForShipping}
-                          onExportItemReport={handleExportItemReport}
-                          selectedForShipping={selectedOrdersForShipping.includes(order.id)}
-                          projects={[]}
-                        />
-                      )}
+                      highlightTerm={searchTerm}
+                      compactView={compactView}
+                      isManagingOrders={isManaging}
+                      selectedOrders={selectedOrdersForShipping || []}
+                      customers={[]}
+                      expandedCards={new Set()}
+                      projects={[]}
                     />
                   </SortableContext>
                 </div>
