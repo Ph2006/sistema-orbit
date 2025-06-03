@@ -11,6 +11,8 @@ import {
   MouseSensor,
   TouchSensor,
   closestCenter,
+  useDraggable,
+  useDroppable
 } from '@dnd-kit/core';
 import { 
   SortableContext, 
@@ -31,23 +33,318 @@ import {
   CheckSquare, 
   Square,
   X,
-  Weight
+  Weight,
+  MoreVertical,
+  Target
 } from 'lucide-react';
+import { format, isValid } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
-// IMPORTS DOS SEUS COMPONENTES REAIS - DESCOMENTE E AJUSTE OS PATHS
-import KanbanColumn from './KanbanColumn';
-import KanbanCard from './KanbanCard';
-// import OrderModal from './OrderModal';
-// import ItemProgressModal from './ItemProgressModal';
-// import QualityControl from './QualityControl';
-// import ItemProductionReport from './ItemProductionReport';
+// IMPORTS DOS SEUS STORES/TIPOS - AJUSTE OS PATHS CONFORME NECESSÁRIO
 import { Order, OrderItem } from '../types/kanban';
 import { useOrderStore } from '../store/orderStore';
 import { useColumnStore } from '../store/columnStore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
-// Função local para gerar ID único
+// Implementação direta do KanbanCard baseada no seu código original
+const KanbanCard: React.FC<{
+  order: Order;
+  isManaging: boolean;
+  isSelected: boolean;
+  highlight: boolean;
+  compactView: boolean;
+  onOrderClick: (order: Order) => void;
+  onQualityControlClick?: (order: Order) => void;
+  onItemProgressClick?: (item: OrderItem) => void;
+  projects: any[];
+  selectedForShipping?: boolean;
+  onEditClick?: (order: Order) => void;
+  onSelectForShipping?: (order: Order) => void;
+  onExportItemReport?: (order: Order) => void;
+}> = ({
+  order,
+  isManaging,
+  isSelected,
+  highlight,
+  compactView,
+  onOrderClick,
+  onQualityControlClick,
+  onItemProgressClick,
+  projects,
+  selectedForShipping = false,
+  onEditClick,
+  onSelectForShipping,
+  onExportItemReport
+}) => {
+  const [showItemActions, setShowItemActions] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  if (!order || typeof order !== 'object' || !order.id) {
+    console.warn('KanbanCard: Order inválido recebido:', order);
+    return null;
+  }
+
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: String(order.id),
+    disabled: isManaging || showDropdown,
+  });
+
+  const style = transform ? {
+    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+  } : undefined;
+
+  const getStatusInfo = (status: string) => {
+    switch (status) {
+      case 'in-progress':
+        return { 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-700', 
+          borderColor: 'border-l-blue-500', 
+          statusBg: 'bg-blue-900/50 border border-blue-700/50', 
+          statusText: 'text-blue-300',
+          statusLabel: 'Em Processo',
+          textColor: 'text-gray-300',
+          iconColor: 'text-gray-400'
+        };
+      case 'delayed':
+        return { 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-700', 
+          borderColor: 'border-l-red-500', 
+          statusBg: 'bg-red-900/50 border border-red-700/50', 
+          statusText: 'text-red-300',
+          statusLabel: 'Atrasado',
+          textColor: 'text-gray-300',
+          iconColor: 'text-gray-400'
+        };
+      case 'completed':
+        return { 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-700', 
+          borderColor: 'border-l-emerald-500', 
+          statusBg: 'bg-emerald-900/50 border border-emerald-700/50', 
+          statusText: 'text-emerald-300',
+          statusLabel: 'Concluído',
+          textColor: 'text-gray-300',
+          iconColor: 'text-gray-400'
+        };
+      case 'shipped':
+        return { 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-700', 
+          borderColor: 'border-l-purple-500', 
+          statusBg: 'bg-purple-900/50 border border-purple-700/50', 
+          statusText: 'text-purple-300',
+          statusLabel: 'Expedido',
+          textColor: 'text-gray-300',
+          iconColor: 'text-gray-400'
+        };
+      default:
+        return { 
+          bgColor: 'bg-gradient-to-br from-gray-800 to-gray-700', 
+          borderColor: 'border-l-gray-500', 
+          statusBg: 'bg-gray-700/50 border border-gray-600/50', 
+          statusText: 'text-gray-300',
+          statusLabel: 'Padrão',
+          textColor: 'text-gray-300',
+          iconColor: 'text-gray-400'
+        };
+    }
+  };
+
+  const formatDeliveryDate = () => {
+    try {
+      if (!order.deliveryDate) return 'Data não definida';
+      const date = new Date(order.deliveryDate);
+      if (!isValid(date)) return 'Data inválida';
+      return format(date, 'dd/MM/yyyy', { locale: ptBR });
+    } catch (error) {
+      console.warn('Erro ao formatar data:', error);
+      return 'Data inválida';
+    }
+  };
+
+  const statusInfo = getStatusInfo(order.status || 'default');
+  
+  const progress = React.useMemo(() => {
+    try {
+      if (order.progress !== undefined && typeof order.progress === 'number') {
+        return Math.max(0, Math.min(100, order.progress));
+      }
+      
+      if (!order.items || !Array.isArray(order.items) || order.items.length === 0) {
+        return 0;
+      }
+      
+      let totalProgress = 0;
+      let validItems = 0;
+      
+      for (const item of order.items) {
+        if (item && typeof item === 'object' && typeof item.overallProgress === 'number') {
+          totalProgress += Math.max(0, Math.min(100, item.overallProgress));
+          validItems++;
+        }
+      }
+      
+      return validItems > 0 ? Math.round(totalProgress / validItems) : 0;
+    } catch (error) {
+      console.warn('Erro ao calcular progresso:', error);
+      return 0;
+    }
+  }, [order.progress, order.items]);
+
+  const handleCardClick = () => {
+    if (typeof onOrderClick === 'function' && !showDropdown) {
+      onOrderClick(order);
+    }
+  };
+
+  const handleSelectForShipping = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onSelectForShipping) {
+      onSelectForShipping(order);
+    }
+  };
+
+  const orderNumber = order.orderNumber || order.id || 'N/A';
+  const customer = order.customer || order.customerName || 'Cliente não informado';
+  const internalOrderNumber = order.internalOrderNumber || order.serviceOrder || 'OS não informada';
+  const itemsCount = Array.isArray(order.items) ? order.items.length : 0;
+
+  return (
+    <div className="relative group">
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...(showDropdown ? {} : listeners)}
+        {...attributes}
+        className={`
+          ${statusInfo.bgColor} ${statusInfo.borderColor}
+          rounded-lg border-l-4 border border-gray-600 shadow-sm hover:shadow-md 
+          transition-all duration-200 cursor-pointer backdrop-blur-sm bg-white/5
+          ${isDragging ? 'opacity-60 scale-105 shadow-lg' : ''}
+          ${highlight ? 'ring-2 ring-blue-500/50' : ''}
+          ${isSelected ? 'ring-2 ring-gray-500/50' : ''}
+          ${selectedForShipping ? 'ring-2 ring-green-500/50 bg-green-900/20' : ''}
+          hover:transform hover:scale-[1.01]
+          ${compactView ? 'p-3' : 'p-4'}
+          relative
+        `}
+        onClick={handleCardClick}
+      >
+        {/* Checkbox para seleção de embarque */}
+        <div className="absolute top-2 left-2 z-10">
+          <button
+            onClick={handleSelectForShipping}
+            className="p-1 rounded hover:bg-white/10 transition-colors"
+            title={selectedForShipping ? 'Remover da seleção de embarque' : 'Selecionar para embarque'}
+          >
+            {selectedForShipping ? (
+              <CheckSquare className="h-4 w-4 text-green-400" />
+            ) : (
+              <Square className="h-4 w-4 text-gray-400 hover:text-white" />
+            )}
+          </button>
+        </div>
+
+        {/* Header com número do pedido e status */}
+        <div className="flex justify-between items-start mb-3 mt-6">
+          <div className={`${statusInfo.statusBg} ${statusInfo.statusText} px-3 py-1 rounded-md text-xs font-semibold`}>
+            {orderNumber}
+          </div>
+          <div className="flex gap-1 flex-col items-end">
+            {order.status === 'completed' && (
+              <span className="bg-emerald-900/50 border border-emerald-700/50 text-emerald-300 px-2 py-0.5 rounded text-xs font-medium">
+                CONCLUÍDO
+              </span>
+            )}
+            {order.status === 'shipped' && (
+              <span className="bg-purple-900/50 border border-purple-700/50 text-purple-300 px-2 py-0.5 rounded text-xs font-medium">
+                EXPEDIDO
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Informações do pedido */}
+        <div className={`space-y-2.5 ${compactView ? 'text-xs' : 'text-sm'}`}>
+          <div className="flex items-center space-x-3">
+            <span className={`${statusInfo.iconColor} text-sm`}>👤</span>
+            <span className={`${statusInfo.textColor} truncate font-medium`} title={customer}>
+              {customer}
+            </span>
+          </div>
+          
+          <div className="flex items-center space-x-3">
+            <span className={`${statusInfo.iconColor} text-sm`}>📋</span>
+            <span className={statusInfo.textColor}>
+              OS: <span className="font-mono font-semibold">{internalOrderNumber}</span>
+            </span>
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <div className="flex items-center space-x-3">
+              <span className={`${statusInfo.iconColor} text-sm`}>📅</span>
+              <span className={`${statusInfo.textColor} font-medium`}>
+                {formatDeliveryDate()}
+              </span>
+            </div>
+            
+            {order.totalWeight && 
+             typeof order.totalWeight === 'number' && 
+             !isNaN(order.totalWeight) && 
+             order.totalWeight > 0 && (
+              <div className="flex items-center space-x-2">
+                <Weight className="h-3 w-3 text-gray-400" />
+                <span className={`${statusInfo.textColor} font-semibold text-xs`}>
+                  {order.totalWeight.toLocaleString('pt-BR', { 
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1 
+                  })} kg
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Indicação de itens */}
+          {!compactView && itemsCount > 0 && (
+            <div className="flex items-center mt-1 space-x-2">
+              <span className={`${statusInfo.iconColor} text-sm`}>📦</span>
+              <span className={`${statusInfo.textColor} text-xs`}>
+                {itemsCount} {itemsCount === 1 ? 'item' : 'itens'}
+              </span>
+              {selectedForShipping && (
+                <span className="bg-green-900/50 border border-green-700/50 text-green-300 px-2 py-0.5 rounded text-xs font-medium">
+                  SELECIONADO
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Seção de progresso */}
+        {!compactView && (
+          <div className="mt-4">
+            <div className="flex justify-between text-xs text-gray-400 mb-2 font-medium">
+              <span>Progresso</span>
+              <span className={statusInfo.textColor}>
+                {progress}%
+              </span>
+            </div>
+            <div className="w-full bg-gray-600 rounded-full h-2 overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all duration-300 ${
+                  progress >= 100 ? 'bg-emerald-500' : 
+                  progress >= 75 ? 'bg-blue-500' : 
+                  progress >= 50 ? 'bg-amber-500' : 
+                  'bg-gray-500'
+                }`}
+                style={{ width: `${Math.max(progress, 2)}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 const generateUniqueId = (): string => {
   const timestamp = Date.now().toString(36);
   const randomPart = Math.random().toString(36).substring(2);
@@ -93,7 +390,246 @@ interface KanbanProps {
   readOnly?: boolean;
 }
 
-// Componente para exibir peso total da coluna
+// Implementação direta do KanbanColumn baseada no seu código original
+const KanbanColumn: React.FC<{
+  column: any;
+  orders: Order[];
+  isManaging: boolean;
+  compactView: boolean;
+  onOrderClick: (order: Order) => void;
+  onQualityControlClick?: (order: Order) => void;
+  onItemProgressClick?: (item: OrderItem) => void;
+  onEditClick: (order: Order) => void;
+  onSelectForShipping?: (order: Order) => void;
+  onExportItemReport?: (order: Order) => void;
+  selectedForShipping: string[];
+  projects: any[];
+  highlightTerm?: string;
+}> = ({
+  column,
+  orders,
+  isManaging,
+  compactView,
+  onOrderClick,
+  onQualityControlClick,
+  onItemProgressClick,
+  onEditClick,
+  onSelectForShipping,
+  onExportItemReport,
+  selectedForShipping,
+  projects,
+  highlightTerm = ''
+}) => {
+  const { setNodeRef, isOver } = useDroppable({
+    id: column.id,
+  });
+
+  const safeOrders = orders?.filter(order => 
+    order && order.id && (order.orderNumber || order.id)
+  ) || [];
+
+  const getColumnTheme = () => {
+    if (column.title.toLowerCase().includes('processo')) {
+      return {
+        borderColor: 'border-blue-700',
+        headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+        headerBorder: 'border-blue-700/50',
+        glowColor: 'shadow-blue-900/25',
+        iconColor: 'text-blue-400',
+        accentColor: 'blue-500',
+        dotColor: 'bg-blue-400',
+        textColor: 'text-gray-200'
+      };
+    } else if (column.title.toLowerCase().includes('expedi')) {
+      return {
+        borderColor: 'border-emerald-700',
+        headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+        headerBorder: 'border-emerald-700/50',
+        glowColor: 'shadow-emerald-900/25',
+        iconColor: 'text-emerald-400',
+        accentColor: 'emerald-500',
+        dotColor: 'bg-emerald-400',
+        textColor: 'text-gray-200'
+      };
+    } else if (column.title.toLowerCase().includes('paralisa')) {
+      return {
+        borderColor: 'border-red-700',
+        headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+        headerBorder: 'border-red-700/50',
+        glowColor: 'shadow-red-900/25',
+        iconColor: 'text-red-400',
+        accentColor: 'red-500',
+        dotColor: 'bg-red-400',
+        textColor: 'text-gray-200'
+      };
+    }
+    return {
+      borderColor: 'border-gray-700',
+      headerBg: 'bg-gradient-to-r from-gray-800 to-gray-700',
+      headerBorder: 'border-gray-700',
+      glowColor: 'shadow-gray-900/25',
+      iconColor: 'text-gray-400',
+      accentColor: 'blue-500',
+      dotColor: 'bg-gray-400',
+      textColor: 'text-gray-200'
+    };
+  };
+
+  const theme = getColumnTheme();
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`
+        flex-shrink-0 w-80 h-[calc(100vh-180px)] flex flex-col
+        bg-gray-800 rounded-lg shadow-md border-2 transition-all duration-200
+        ${isOver ? 'ring-2 ring-blue-500 shadow-lg scale-[1.01] ' + theme.glowColor : theme.glowColor}
+        ${theme.borderColor}
+      `}
+    >
+      {/* Header da Coluna */}
+      <div className={`
+        ${theme.headerBg} rounded-t-lg border-b ${theme.headerBorder} p-4
+      `}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className={`w-2 h-2 rounded-full ${theme.dotColor}`}></div>
+            <h3 className={`font-semibold text-lg ${theme.textColor}`}>
+              {column.title}
+            </h3>
+            <span className={`
+              inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold
+              bg-gray-700 ${theme.textColor} border border-gray-600
+              min-w-[2.5rem] justify-center
+            `}>
+              {safeOrders.length}
+            </span>
+          </div>
+        </div>
+        
+        {/* Estatísticas rápidas no header */}
+        {safeOrders.length > 0 && (
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="flex items-center space-x-2 bg-gray-700/50 rounded-md p-2 border border-gray-600/50">
+              <Package className="h-3 w-3 text-gray-400" />
+              <span className="text-gray-300 font-medium">{safeOrders.length} pedidos</span>
+            </div>
+            <div className="flex items-center space-x-2 bg-gray-700/50 rounded-md p-2 border border-gray-600/50">
+              <Weight className="h-3 w-3 text-gray-400" />
+              <span className="text-gray-300 font-medium">
+                {safeOrders.reduce((total, order) => total + (order.totalWeight || 0), 0).toFixed(1)} kg
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Lista de Cards */}
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full overflow-y-auto p-4 space-y-3">
+          <SortableContext items={safeOrders.map(order => order.id)} strategy={verticalListSortingStrategy}>
+            {safeOrders.length === 0 ? (
+              <div className="text-center py-16 text-gray-500">
+                <div className="text-4xl mb-4 opacity-30">📋</div>
+                <p className="text-sm font-medium text-gray-400">Nenhum pedido nesta coluna</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Arraste pedidos aqui para organizá-los
+                </p>
+              </div>
+            ) : (
+              safeOrders.map(order => {
+                if (!order || !order.id) return null;
+
+                return (
+                  <KanbanCard
+                    key={order.id}
+                    order={order}
+                    isManaging={isManaging}
+                    isSelected={selectedForShipping.includes(order.id)}
+                    highlight={highlightTerm ? 
+                      ((order.orderNumber || order.id)?.toLowerCase().includes(highlightTerm.toLowerCase()) ||
+                       (order.customer || order.customerName)?.toLowerCase().includes(highlightTerm.toLowerCase()) ||
+                       (order.internalOrderNumber || order.serviceOrder)?.toLowerCase().includes(highlightTerm.toLowerCase())) || false
+                      : false
+                    }
+                    compactView={compactView}
+                    onOrderClick={onOrderClick}
+                    projects={projects}
+                    onQualityControlClick={onQualityControlClick}
+                    onItemProgressClick={onItemProgressClick}
+                    selectedForShipping={selectedForShipping.includes(order.id)}
+                    onEditClick={onEditClick}
+                    onSelectForShipping={onSelectForShipping}
+                    onExportItemReport={onExportItemReport}
+                  />
+                );
+              })
+            )}
+          </SortableContext>
+        </div>
+      </div>
+
+      {/* Footer da Coluna */}
+      {safeOrders.length > 0 && (
+        <div className={`
+          ${theme.headerBg} rounded-b-lg border-t ${theme.headerBorder} p-3
+        `}>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="text-center bg-gray-700/60 rounded-md p-2 border border-gray-600/50">
+              <div className="text-gray-400 font-medium mb-1">Total Pedidos</div>
+              <div className={`${theme.textColor} font-bold text-lg`}>{safeOrders.length}</div>
+            </div>
+            <div className="text-center bg-gray-700/60 rounded-md p-2 border border-gray-600/50">
+              <div className="text-gray-400 font-medium mb-1">Peso Total</div>
+              <div className={`${theme.textColor} font-bold text-lg`}>
+                {safeOrders.reduce((total, order) => total + (order.totalWeight || 0), 0).toFixed(1)} kg
+              </div>
+            </div>
+          </div>
+          
+          {/* Barra de progresso geral da coluna */}
+          <div className="mt-3">
+            <div className="flex justify-between text-xs text-gray-400 mb-1.5">
+              <span className="flex items-center gap-1 font-medium">
+                <BarChart3 className="h-3 w-3" />
+                Progresso Médio
+              </span>
+              <span className="font-semibold text-gray-300">
+                {Math.round(
+                  safeOrders.reduce((total, order) => {
+                    const progress = order.progress || 0;
+                    return total + progress;
+                  }, 0) / safeOrders.length
+                )}%
+              </span>
+            </div>
+            <div className="w-full bg-gray-600 rounded-full h-2">
+              <div 
+                className={`h-2 rounded-full transition-all duration-300 bg-${theme.accentColor}`}
+                style={{ 
+                  width: `${Math.max(
+                    safeOrders.reduce((total, order) => {
+                      const progress = order.progress || 0;
+                      return total + progress;
+                    }, 0) / safeOrders.length, 
+                    3
+                  )}%` 
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Função local para gerar ID único
+const generateUniqueId = (): string => {
+  const timestamp = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).substring(2);
+  return `${timestamp}-${randomPart}`;
+};
 const ColumnWeightSummary: React.FC<{ 
   orders: Order[]; 
   columnTitle: string;
@@ -120,105 +656,7 @@ const ColumnWeightSummary: React.FC<{
   );
 };
 
-// Componente de Card melhorado com botão de edição
-const EnhancedKanbanCard: React.FC<{
-  order: Order;
-  isManaging: boolean;
-  isSelected: boolean;
-  highlight: boolean;
-  compactView: boolean;
-  onOrderClick: (order: Order) => void;
-  onQualityControlClick?: (order: Order) => void;
-  onItemProgressClick?: (item: OrderItem) => void;
-  onEditClick: (order: Order) => void;
-  onSelectForShipping?: (order: Order) => void;
-  onExportItemReport?: (order: Order) => void;
-  selectedForShipping?: boolean;
-  projects: any[];
-}> = ({
-  order,
-  isManaging,
-  isSelected,
-  highlight,
-  compactView,
-  onOrderClick,
-  onQualityControlClick,
-  onItemProgressClick,
-  onEditClick,
-  onSelectForShipping,
-  onExportItemReport,
-  selectedForShipping = false,
-  projects
-}) => {
-  const handleEditClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onEditClick(order);
-  };
-
-  const handleSelectForShipping = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onSelectForShipping?.(order);
-  };
-
-  const handleExportReport = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onExportItemReport?.(order);
-  };
-
-  return (
-    <div className="relative group">
-      <KanbanCard
-        order={order}
-        isManaging={isManaging}
-        isSelected={isSelected}
-        highlight={highlight}
-        compactView={compactView}
-        onOrderClick={onOrderClick}
-        onQualityControlClick={onQualityControlClick}
-        onItemProgressClick={onItemProgressClick}
-        projects={projects}
-        selectedForShipping={selectedForShipping}
-        onEditClick={onEditClick}
-        onSelectForShipping={onSelectForShipping}
-        onExportItemReport={onExportItemReport}
-      />
-      
-      {/* Botões de ação - aparecem no hover */}
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
-        {/* Botão de seleção para embarque */}
-        <button
-          onClick={handleSelectForShipping}
-          className={`p-1 rounded-md transition-colors ${
-            selectedForShipping 
-              ? 'bg-green-600 text-white hover:bg-green-700' 
-              : 'bg-gray-600 text-white hover:bg-gray-700'
-          }`}
-          title="Selecionar para embarque"
-        >
-          {selectedForShipping ? <CheckSquare className="h-3 w-3" /> : <Square className="h-3 w-3" />}
-        </button>
-        
-        {/* Botão de relatório */}
-        <button
-          onClick={handleExportReport}
-          className="p-1 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
-          title="Exportar relatório"
-        >
-          <FileText className="h-3 w-3" />
-        </button>
-        
-        {/* Botão de edição */}
-        <button
-          onClick={handleEditClick}
-          className="p-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          title="Editar pedido"
-        >
-          <Edit className="h-3 w-3" />
-        </button>
-      </div>
-    </div>
-  );
-};
+// Componente EnhancedKanbanCard removido pois agora usamos KanbanCard diretamente
 
 // Componente de Resumo de Pedidos
 const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => {
@@ -580,43 +1018,27 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
             <div className="flex gap-6 p-6 h-full min-w-max">
               {columns.map(column => (
                 <div key={column.id} className="flex-shrink-0 w-80">
-                  {/* Header da coluna com peso total */}
-                  <div className="bg-gray-800 rounded-t-lg border border-gray-600 border-b-0">
-                    <div className="p-4 border-b border-gray-600">
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-semibold text-white">{column.title}</h3>
-                        <span className="bg-gray-600 text-white text-sm px-2 py-1 rounded-full">
-                          {ordersByColumn[column.id]?.length || 0}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {/* Resumo de peso da coluna */}
-                    <ColumnWeightSummary 
-                      orders={ordersByColumn[column.id] || []} 
-                      columnTitle={column.title}
-                      className="border-b border-gray-600"
-                    />
-                  </div>
-
-                  {/* Conteúdo da coluna */}
                   <SortableContext
                     items={ordersByColumn[column.id]?.map(order => order.id) || []}
                     strategy={verticalListSortingStrategy}
                   >
                     <KanbanColumn
-                      column={{...column, orders: ordersByColumn[column.id] || []}}
-                      onEdit={() => console.log('Edit column')}
-                      onDelete={() => console.log('Delete column')}
-                      onOrderClick={handleOrderClick}
-                      onUpdateOrder={(order) => updateOrder(order.id, order)}
-                      onQualityControlClick={handleQualityControlClick}
-                      highlightTerm={searchTerm}
+                      column={column}
+                      orders={ordersByColumn[column.id] || []}
+                      isManaging={isManaging}
                       compactView={compactView}
-                      isManagingOrders={isManaging}
-                      selectedOrders={selectedOrdersForShipping || []}
-                      customers={[]}
-                      expandedCards={new Set()}
+                      onOrderClick={handleOrderClick}
+                      onQualityControlClick={handleQualityControlClick}
+                      onItemProgressClick={handleItemProgressClick}
+                      onEditClick={handleEditOrder}
+                      onSelectForShipping={toggleOrderForShipping}
+                      onExportItemReport={handleExportItemReport}
+                      selectedForShipping={selectedOrdersForShipping || []}
+                      projects={[]}
+                      highlightTerm={searchTerm}
+                    />
+                  </SortableContext>
+                </div>      expandedCards={new Set()}
                       projects={[]}
                     />
                   </SortableContext>
@@ -626,14 +1048,13 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 
             <DragOverlay>
               {activeOrder ? (
-                <EnhancedKanbanCard
+                <KanbanCard
                   order={activeOrder}
                   isManaging={isManaging}
                   isSelected={false}
                   highlight={false}
                   compactView={compactView}
                   onOrderClick={() => {}}
-                  onEditClick={() => {}}
                   projects={[]}
                 />
               ) : null}
