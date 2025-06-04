@@ -815,7 +815,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     error
   } = useOrderStore();
 
-  const { columns } = useColumnStore();
+  const { columns, loadColumns } = useColumnStore();
 
   // Estados locais
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -831,15 +831,32 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 
   // Carregar dados ao montar o componente
   useEffect(() => {
-    console.log('🚀 Kanban mounted, loading orders...');
+    console.log('🚀 Kanban mounted, loading orders and columns...');
     loadOrders();
-  }, [loadOrders]);
+    
+    // Tentar carregar colunas se a função existir
+    if (loadColumns) {
+      loadColumns();
+    } else {
+      console.warn('⚠️ loadColumns function not available in columnStore');
+    }
+  }, [loadOrders, loadColumns]);
+
+  // Fallback para colunas padrão se não houver colunas carregadas
+  const defaultColumns = [
+    { id: 'processo', title: 'Pedidos em processo', position: 1 },
+    { id: 'expedidos', title: 'Pedidos expedidos', position: 2 },
+    { id: 'paralisados', title: 'Pedidos paralisados', position: 3 }
+  ];
+
+  const activeColumns = columns && columns.length > 0 ? columns : defaultColumns;
 
   // Debug: verificar se os dados estão sendo carregados
   console.log('📊 Kanban Debug:');
   console.log('- Orders:', orders?.length || 0, 'total');
-  console.log('- Columns:', columns?.length || 0, 'total'); 
-  console.log('- Columns data:', columns);
+  console.log('- Columns from store:', columns?.length || 0, 'total'); 
+  console.log('- Active columns:', activeColumns?.length || 0, 'total');
+  console.log('- Columns data:', activeColumns);
   console.log('- Loading:', loading);
   console.log('- Error:', error);
 
@@ -895,13 +912,13 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 
   // Agrupar pedidos por coluna e ordenar por data de entrega
   const ordersByColumn = useMemo(() => {
-    if (!columns || !Array.isArray(columns) || !filteredOrders || !Array.isArray(filteredOrders)) {
+    if (!activeColumns || !Array.isArray(activeColumns) || !filteredOrders || !Array.isArray(filteredOrders)) {
       return {};
     }
 
     const grouped: Record<string, Order[]> = {};
     
-    columns.forEach(column => {
+    activeColumns.forEach(column => {
       const columnOrders = filteredOrders.filter(order => order.columnId === column.id);
       
       // Ordenar pedidos por data de entrega (mais próximos primeiro)
@@ -915,7 +932,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     });
     
     return grouped;
-  }, [filteredOrders, columns]);
+  }, [filteredOrders, activeColumns]);
 
   // Debug: verificar agrupamento
   console.log('Orders by column:', ordersByColumn);
@@ -931,7 +948,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     const { active, over } = event;
     setActiveId(null);
 
-    if (!over || !orders || !Array.isArray(orders) || !columns || !Array.isArray(columns)) return;
+    if (!over || !orders || !Array.isArray(orders) || !activeColumns || !Array.isArray(activeColumns)) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -940,7 +957,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     const activeOrder = orders.find(order => order.id === activeId);
     if (!activeOrder) return;
 
-    const targetColumn = columns.find(col => col.id === overId);
+    const targetColumn = activeColumns.find(col => col.id === overId);
     if (targetColumn && activeOrder.columnId !== overId) {
       const newStatus = getStatusFromColumnTitle(targetColumn.title);
       
@@ -952,7 +969,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
       };
       updateOrder(updatedOrder);
     }
-  }, [readOnly, orders, columns, updateOrder]);
+  }, [readOnly, orders, activeColumns, updateOrder]);
 
   const handleOrderClick = useCallback((order: Order) => {
     console.log('📋 Abrindo detalhes do pedido:', order.orderNumber);
@@ -1104,12 +1121,12 @@ ${order.items?.length > 0 ? 'ITENS:\n' + order.items.map(item =>
                     Tentar novamente
                   </button>
                 </div>
-              ) : !columns || !Array.isArray(columns) || columns.length === 0 ? (
+              ) : !activeColumns || !Array.isArray(activeColumns) || activeColumns.length === 0 ? (
                 <div className="text-white text-center w-full flex items-center justify-center">
-                  <p>Nenhuma coluna configurada. Columns: {JSON.stringify(columns)}</p>
+                  <p>Nenhuma coluna configurada. Columns: {JSON.stringify(activeColumns)}</p>
                 </div>
               ) : (
-                columns.map(column => (
+                activeColumns.map(column => (
                   <div key={column.id} className="flex-shrink-0 w-80">
                     <SortableContext
                       items={ordersByColumn[column.id]?.map(order => order.id) || []}
