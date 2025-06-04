@@ -908,13 +908,12 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [compactView, setCompactView] = useState(false);
   const [isManaging, setIsManaging] = useState(false);
 
-  // Hook para movimentação automática com dados reais
-  useAutoMoveCompletedOrders(orders, columns, updateOrder);
-
   // Debug: verificar se os dados estão sendo carregados
   console.log('Orders:', orders);
   console.log('Columns:', columns);
-  console.log('Orders by column:', ordersByColumn);
+
+  // Hook para movimentação automática com dados reais
+  useAutoMoveCompletedOrders(orders, columns, updateOrder);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -929,6 +928,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 
   // Filtrar pedidos por termo de busca
   const filteredOrders = useMemo(() => {
+    if (!orders || !Array.isArray(orders)) return [];
     if (!searchTerm.trim()) return orders;
     
     const term = searchTerm.toLowerCase();
@@ -950,6 +950,10 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 
   // Agrupar pedidos por coluna e ordenar por data de entrega
   const ordersByColumn = useMemo(() => {
+    if (!columns || !Array.isArray(columns) || !filteredOrders || !Array.isArray(filteredOrders)) {
+      return {};
+    }
+
     const grouped: Record<string, Order[]> = {};
     
     columns.forEach(column => {
@@ -968,6 +972,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     return grouped;
   }, [filteredOrders, columns]);
 
+  // Debug: verificar agrupamento
+  console.log('Orders by column:', ordersByColumn);
+
   const handleDragStart = useCallback((event: DragStartEvent) => {
     if (readOnly) return;
     setActiveId(event.active.id as string);
@@ -979,7 +986,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     const { active, over } = event;
     setActiveId(null);
 
-    if (!over) return;
+    if (!over || !orders || !Array.isArray(orders) || !columns || !Array.isArray(columns)) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -1043,7 +1050,8 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     console.log('Exportando relatório para pedido:', order.id);
   }, []);
 
-  const activeOrder = activeId ? orders.find(order => order.id === activeId) : null;
+  const activeOrder = activeId && orders && Array.isArray(orders) ? 
+    orders.find(order => order.id === activeId) : null;
 
   return (
     <div className="h-full bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex">
@@ -1116,7 +1124,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
             onDragEnd={handleDragEnd}
           >
             <div className="flex gap-6 p-6 h-full min-w-max">
-              {columns.map(column => (
+              {columns && Array.isArray(columns) ? columns.map(column => (
                 <div key={column.id} className="flex-shrink-0 w-80">
                   <SortableContext
                     items={ordersByColumn[column.id]?.map(order => order.id) || []}
@@ -1139,7 +1147,11 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                     />
                   </SortableContext>
                 </div>
-              ))}
+              )) : (
+                <div className="text-white text-center">
+                  <p>Carregando colunas...</p>
+                </div>
+              )}
             </div>
 
             <DragOverlay>
@@ -1164,7 +1176,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
 
       {/* Sidebar com resumo */}
       <div className="w-96 bg-gray-800 border-l border-gray-600 p-4 overflow-y-auto">
-        <OrdersSummary orders={orders} />
+        <OrdersSummary orders={orders || []} />
       </div>
 
       {/* Modais comentados para evitar erros de compilação */}
