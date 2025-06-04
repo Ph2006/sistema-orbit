@@ -839,19 +839,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   console.log('📊 Kanban Debug:');
   console.log('- Orders:', orders?.length || 0, 'total');
   console.log('- Columns:', columns?.length || 0, 'total'); 
+  console.log('- Columns data:', columns);
   console.log('- Loading:', loading);
   console.log('- Error:', error);
-  
-  // Debug específico para movimentação automática
-  if (orders && orders.length > 0) {
-    const completedOrders = orders.filter(order => isOrderCompleted(order));
-    console.log('📈 Pedidos concluídos:', completedOrders.map(o => ({
-      orderNumber: o.orderNumber,
-      progress: o.overallProgress,
-      columnId: o.columnId,
-      status: o.status
-    })));
-  }
 
   // Simulando selectedOrdersForShipping e toggleOrderForShipping
   const [selectedOrdersForShipping, setSelectedOrdersForShipping] = useState<string[]>([]);
@@ -864,11 +854,11 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     console.log('Toggle shipping for order:', order.id);
   }, []);
 
-  // Hook para movimentação automática com dados reais
-  useAutoMoveCompletedOrders(orders, columns, (updatedOrder: Order) => {
-    console.log('🔄 Atualizando pedido via movimentação automática:', updatedOrder.orderNumber);
-    updateOrder(updatedOrder);
-  });
+  // Hook para movimentação automática com dados reais - TEMPORARIAMENTE DESABILITADO
+  // useAutoMoveCompletedOrders(orders, columns, (updatedOrder: Order) => {
+  //   console.log('🔄 Atualizando pedido via movimentação automática:', updatedOrder.orderNumber);
+  //   updateOrder(updatedOrder);
+  // });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -1101,11 +1091,11 @@ ${order.items?.length > 0 ? 'ITENS:\n' + order.items.map(item =>
           >
             <div className="flex gap-6 p-6 h-full min-w-max">
               {loading ? (
-                <div className="text-white text-center">
+                <div className="text-white text-center w-full flex items-center justify-center">
                   <p>Carregando pedidos...</p>
                 </div>
               ) : error ? (
-                <div className="text-red-400 text-center">
+                <div className="text-red-400 text-center w-full flex flex-col items-center justify-center">
                   <p>Erro: {error}</p>
                   <button 
                     onClick={loadOrders}
@@ -1114,33 +1104,35 @@ ${order.items?.length > 0 ? 'ITENS:\n' + order.items.map(item =>
                     Tentar novamente
                   </button>
                 </div>
-              ) : columns && Array.isArray(columns) ? columns.map(column => (
-                <div key={column.id} className="flex-shrink-0 w-80">
-                  <SortableContext
-                    items={ordersByColumn[column.id]?.map(order => order.id) || []}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <KanbanColumn
-                      column={column}
-                      orders={ordersByColumn[column.id] || []}
-                      isManaging={isManaging}
-                      compactView={compactView}
-                      onOrderClick={handleOrderClick}
-                      onQualityControlClick={handleQualityControlClick}
-                      onItemProgressClick={handleItemProgressClick}
-                      onEditClick={handleEditOrder}
-                      onSelectForShipping={toggleOrderForShipping}
-                      onExportItemReport={handleExportItemReport}
-                      selectedForShipping={selectedOrdersForShipping || []}
-                      projects={[]}
-                      highlightTerm={searchTerm}
-                    />
-                  </SortableContext>
+              ) : !columns || !Array.isArray(columns) || columns.length === 0 ? (
+                <div className="text-white text-center w-full flex items-center justify-center">
+                  <p>Nenhuma coluna configurada. Columns: {JSON.stringify(columns)}</p>
                 </div>
-              )) : (
-                <div className="text-white text-center">
-                  <p>Nenhuma coluna configurada</p>
-                </div>
+              ) : (
+                columns.map(column => (
+                  <div key={column.id} className="flex-shrink-0 w-80">
+                    <SortableContext
+                      items={ordersByColumn[column.id]?.map(order => order.id) || []}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <KanbanColumn
+                        column={column}
+                        orders={ordersByColumn[column.id] || []}
+                        isManaging={isManaging}
+                        compactView={compactView}
+                        onOrderClick={handleOrderClick}
+                        onQualityControlClick={handleQualityControlClick}
+                        onItemProgressClick={handleItemProgressClick}
+                        onEditClick={handleEditOrder}
+                        onSelectForShipping={toggleOrderForShipping}
+                        onExportItemReport={handleExportItemReport}
+                        selectedForShipping={selectedOrdersForShipping || []}
+                        projects={[]}
+                        highlightTerm={searchTerm}
+                      />
+                    </SortableContext>
+                  </div>
+                ))
               )}
             </div>
 
