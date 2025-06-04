@@ -78,6 +78,12 @@ const isShippedColumn = (columnTitle: string): boolean => {
 
 // Função para identificar se o pedido está concluído (baseado nos dados reais)
 const isOrderCompleted = (order: Order): boolean => {
+  // Verifica pelo overallProgress que vem do store
+  if (typeof order.overallProgress === 'number') {
+    return order.overallProgress >= 100;
+  }
+
+  // Fallback: verifica pelos items
   if (!order.items || order.items.length === 0) {
     // Se não tem itens, verifica pelo progresso geral ou status
     return order.progress === 100 || order.status === 'completed';
@@ -754,30 +760,48 @@ const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => 
 const useAutoMoveCompletedOrders = (
   orders: Order[], 
   columns: any[], 
-  updateOrder: (orderId: string, updates: Partial<Order>) => void
+  updateOrderFn: (order: Order) => void
 ) => {
   useEffect(() => {
+    if (!orders || !Array.isArray(orders) || !columns || !Array.isArray(columns)) return;
+
     // Encontrar a coluna de expedidos
     const shippedColumn = columns.find(col => isShippedColumn(col.title));
-    if (!shippedColumn) return;
+    if (!shippedColumn) {
+      console.log('⚠️ Coluna de expedidos não encontrada');
+      return;
+    }
+
+    console.log('🔍 Verificando pedidos concluídos para mover automaticamente...');
 
     // Verificar pedidos concluídos que não estão na coluna de expedidos
-    const completedOrdersToMove = orders.filter(order => 
-      isOrderCompleted(order) && 
-      order.columnId !== shippedColumn.id &&
-      order.status !== 'shipped' &&
-      order.status !== 'completed'
-    );
+    const completedOrdersToMove = orders.filter(order => {
+      const isCompleted = isOrderCompleted(order);
+      const notInShippedColumn = order.columnId !== shippedColumn.id;
+      const notAlreadyShipped = order.status !== 'shipped';
+      
+      console.log(`📋 Pedido ${order.orderNumber}: completed=${isCompleted}, notInShipped=${notInShippedColumn}, notShipped=${notAlreadyShipped}`);
+      
+      return isCompleted && notInShippedColumn && notAlreadyShipped;
+    });
 
     // Mover pedidos concluídos para coluna de expedidos
     completedOrdersToMove.forEach(order => {
-      console.log(`Movendo pedido ${order.id} para coluna de expedidos automaticamente`);
-      updateOrder(order.id, {
+      console.log(`🚀 Movendo pedido ${order.orderNumber} para expedidos automaticamente (progresso: ${order.overallProgress}%)`);
+      
+      const updatedOrder = {
+        ...order,
         columnId: shippedColumn.id,
         status: 'shipped'
-      });
+      };
+      
+      updateOrderFn(updatedOrder);
     });
-  }, [orders, columns, updateOrder]);
+
+    if (completedOrdersToMove.length > 0) {
+      console.log(`✅ ${completedOrdersToMove.length} pedidos movidos automaticamente para expedidos`);
+    }
+  }, [orders, columns, updateOrderFn]);
 };
 
 // Componente principal do Kanban
@@ -817,6 +841,17 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   console.log('- Columns:', columns?.length || 0, 'total'); 
   console.log('- Loading:', loading);
   console.log('- Error:', error);
+  
+  // Debug específico para movimentação automática
+  if (orders && orders.length > 0) {
+    const completedOrders = orders.filter(order => isOrderCompleted(order));
+    console.log('📈 Pedidos concluídos:', completedOrders.map(o => ({
+      orderNumber: o.orderNumber,
+      progress: o.overallProgress,
+      columnId: o.columnId,
+      status: o.status
+    })));
+  }
 
   // Simulando selectedOrdersForShipping e toggleOrderForShipping
   const [selectedOrdersForShipping, setSelectedOrdersForShipping] = useState<string[]>([]);
@@ -830,11 +865,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }, []);
 
   // Hook para movimentação automática com dados reais
-  useAutoMoveCompletedOrders(orders, columns, (orderId: string, updates: Partial<Order>) => {
-    const orderToUpdate = orders.find(o => o.id === orderId);
-    if (orderToUpdate) {
-      updateOrder({ ...orderToUpdate, ...updates });
-    }
+  useAutoMoveCompletedOrders(orders, columns, (updatedOrder: Order) => {
+    console.log('🔄 Atualizando pedido via movimentação automática:', updatedOrder.orderNumber);
+    updateOrder(updatedOrder);
   });
 
   const sensors = useSensors(
@@ -932,13 +965,30 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }, [readOnly, orders, columns, updateOrder]);
 
   const handleOrderClick = useCallback((order: Order) => {
-    console.log('Clicou no pedido:', order);
-    // Se você tem um modal de detalhes do pedido, descomente a linha abaixo:
+    console.log('📋 Abrindo detalhes do pedido:', order.orderNumber);
+    
+    // Aqui você pode abrir o mesmo modal que usa na aba Pedidos
+    // Por enquanto, vou mostrar um alert com os dados principais
+    const orderDetails = `
+PEDIDO: ${order.orderNumber || order.id}
+CLIENTE: ${order.customer || order.customerName || 'Não informado'}
+OS: ${order.internalOrderNumber || order.serviceOrder || 'Não informado'}
+DATA ENTREGA: ${new Date(order.deliveryDate).toLocaleDateString('pt-BR')}
+PESO TOTAL: ${order.totalWeight || 0} kg
+PROGRESSO: ${order.overallProgress || 0}%
+STATUS: ${order.status}
+ITENS: ${order.items?.length || 0}
+
+${order.items?.length > 0 ? 'ITENS:\n' + order.items.map(item => 
+  `- ${item.code || item.name}: ${item.overallProgress || 0}% (${item.quantity || 1} un.)`
+).join('\n') : ''}
+    `;
+    
+    alert(orderDetails);
+    
+    // DESCOMENTE as linhas abaixo quando quiser conectar ao modal real:
     // setEditingOrder(order);
     // setShowOrderModal(true);
-    
-    // Por enquanto, vamos apenas logar os dados do pedido
-    alert(`Pedido: ${order.orderNumber || order.id}\nCliente: ${order.customer || order.customerName}\nOS: ${order.internalOrderNumber || order.serviceOrder}\nStatus: ${order.status}\nProgresso: ${order.progress || 0}%`);
   }, []);
 
   const handleCreateOrder = useCallback(() => {
