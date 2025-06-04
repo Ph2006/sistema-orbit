@@ -47,6 +47,52 @@ import { useColumnStore } from '../store/columnStore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
+// Função local para gerar ID único
+const generateUniqueId = (): string => {
+  const timestamp = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).substring(2);
+  return `${timestamp}-${randomPart}`;
+};
+
+// Mapeamento de título de coluna para status de pedido
+const getStatusFromColumnTitle = (title: string): string => {
+  const titleLower = title.toLowerCase();
+  
+  if (titleLower.includes('processo')) return 'in-progress';
+  if (titleLower.includes('expedido')) return 'shipped';
+  if (titleLower.includes('paralisado')) return 'on-hold';
+  if (titleLower.includes('concluído') || titleLower.includes('concluido')) return 'completed';
+  if (titleLower.includes('atrasado')) return 'delayed';
+  if (titleLower.includes('urgente')) return 'urgent';
+  if (titleLower.includes('aguardando') || titleLower.includes('docs')) return 'waiting-docs';
+  if (titleLower.includes('pronto')) return 'ready';
+  
+  return titleLower.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+};
+
+// Função para identificar coluna de expedidos
+const isShippedColumn = (columnTitle: string): boolean => {
+  const titleLower = columnTitle.toLowerCase();
+  return titleLower.includes('expedido') || titleLower.includes('shipped');
+};
+
+// Função para identificar se o pedido está concluído (baseado nos dados reais)
+const isOrderCompleted = (order: Order): boolean => {
+  if (!order.items || order.items.length === 0) {
+    // Se não tem itens, verifica pelo progresso geral ou status
+    return order.progress === 100 || order.status === 'completed';
+  }
+  
+  return order.items.every(item => {
+    const progress = item.overallProgress || 0;
+    return progress >= 100;
+  });
+};
+
+interface KanbanProps {
+  readOnly?: boolean;
+}
+
 // Implementação direta do KanbanCard baseada no seu código original
 const KanbanCard: React.FC<{
   order: Order;
@@ -345,50 +391,6 @@ const KanbanCard: React.FC<{
     </div>
   );
 };
-const generateUniqueId = (): string => {
-  const timestamp = Date.now().toString(36);
-  const randomPart = Math.random().toString(36).substring(2);
-  return `${timestamp}-${randomPart}`;
-};
-
-// Mapeamento de título de coluna para status de pedido
-const getStatusFromColumnTitle = (title: string): string => {
-  const titleLower = title.toLowerCase();
-  
-  if (titleLower.includes('processo')) return 'in-progress';
-  if (titleLower.includes('expedido')) return 'shipped';
-  if (titleLower.includes('paralisado')) return 'on-hold';
-  if (titleLower.includes('concluído') || titleLower.includes('concluido')) return 'completed';
-  if (titleLower.includes('atrasado')) return 'delayed';
-  if (titleLower.includes('urgente')) return 'urgent';
-  if (titleLower.includes('aguardando') || titleLower.includes('docs')) return 'waiting-docs';
-  if (titleLower.includes('pronto')) return 'ready';
-  
-  return titleLower.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-};
-
-// Função para identificar coluna de expedidos
-const isShippedColumn = (columnTitle: string): boolean => {
-  const titleLower = columnTitle.toLowerCase();
-  return titleLower.includes('expedido') || titleLower.includes('shipped');
-};
-
-// Função para identificar se o pedido está concluído
-const isOrderCompleted = (order: Order): boolean => {
-  if (!order.items || order.items.length === 0) {
-    // Se não tem itens, verifica pelo progresso geral ou status
-    return order.progress === 100 || order.status === 'completed';
-  }
-  
-  return order.items.every(item => {
-    const progress = item.overallProgress || item.progress || 0;
-    return progress >= 100;
-  });
-};
-
-interface KanbanProps {
-  readOnly?: boolean;
-}
 
 // Implementação direta do KanbanColumn baseada no seu código original
 const KanbanColumn: React.FC<{
@@ -623,40 +625,6 @@ const KanbanColumn: React.FC<{
     </div>
   );
 };
-
-// Função local para gerar ID único
-const generateUniqueId = (): string => {
-  const timestamp = Date.now().toString(36);
-  const randomPart = Math.random().toString(36).substring(2);
-  return `${timestamp}-${randomPart}`;
-};
-const ColumnWeightSummary: React.FC<{ 
-  orders: Order[]; 
-  columnTitle: string;
-  className?: string;
-}> = ({ orders, columnTitle, className = "" }) => {
-  const totalWeight = useMemo(() => {
-    return orders.reduce((sum, order) => sum + (order.totalWeight || 0), 0);
-  }, [orders]);
-
-  const orderCount = orders.length;
-
-  return (
-    <div className={`flex items-center justify-between text-sm text-gray-400 px-2 py-1 ${className}`}>
-      <div className="flex items-center gap-2">
-        <Weight className="h-3 w-3" />
-        <span className="font-medium text-white">
-          {totalWeight.toFixed(1)} kg
-        </span>
-      </div>
-      <div className="text-xs opacity-75">
-        {orderCount} {orderCount === 1 ? 'pedido' : 'pedidos'}
-      </div>
-    </div>
-  );
-};
-
-// Componente EnhancedKanbanCard removido pois agora usamos KanbanCard diretamente
 
 // Componente de Resumo de Pedidos
 const OrdersSummary: React.FC<{ orders: Order[] }> = React.memo(({ orders }) => {
@@ -1038,10 +1006,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                       highlightTerm={searchTerm}
                     />
                   </SortableContext>
-                </div>      expandedCards={new Set()}
-                      projects={[]}
-                    />
-                  </SortableContext>
                 </div>
               ))}
             </div>
@@ -1071,7 +1035,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         <OrdersSummary orders={orders} />
       </div>
 
-      {/* Modais - comentados para evitar erros de compilação */}
+      {/* Modais comentados para evitar erros de compilação */}
       {/*
       {showOrderModal && (
         <OrderModal
@@ -1105,7 +1069,6 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
           onClose={() => setShowItemProgressModal(false)}
           item={selectedItem}
           onSave={(updatedItem) => {
-            // Lógica para atualizar o item
             console.log('Item atualizado:', updatedItem);
             setShowItemProgressModal(false);
             setSelectedItem(null);
