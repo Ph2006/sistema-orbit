@@ -1056,6 +1056,9 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                   compactView={compactView}
                   onOrderClick={() => {}}
                   projects={[]}
+                  onEditClick={() => {}}
+                  onSelectForShipping={() => {}}
+                  onExportItemReport={() => {}}
                 />
               ) : null}
             </DragOverlay>
@@ -1068,7 +1071,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
         <OrdersSummary orders={orders} />
       </div>
 
-      {/* Modais - implementação básica comentada para evitar erros */}
+      {/* Modais - comentados para evitar erros de compilação */}
       {/*
       {showOrderModal && (
         <OrderModal
