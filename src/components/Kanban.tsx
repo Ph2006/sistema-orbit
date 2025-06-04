@@ -237,6 +237,7 @@ const KanbanCard: React.FC<{
   }, [order.progress, order.items]);
 
   const handleCardClick = () => {
+    console.log('Card clicado:', order);
     if (typeof onOrderClick === 'function' && !showDropdown) {
       onOrderClick(order);
     }
@@ -840,12 +841,21 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     );
   }, [orders, searchTerm]);
 
-  // Agrupar pedidos por coluna
+  // Agrupar pedidos por coluna e ordenar por data de entrega
   const ordersByColumn = useMemo(() => {
     const grouped: Record<string, Order[]> = {};
     
     columns.forEach(column => {
-      grouped[column.id] = filteredOrders.filter(order => order.columnId === column.id);
+      const columnOrders = filteredOrders.filter(order => order.columnId === column.id);
+      
+      // Ordenar pedidos por data de entrega (mais próximos primeiro)
+      const sortedOrders = columnOrders.sort((a, b) => {
+        const dateA = new Date(a.deliveryDate);
+        const dateB = new Date(b.deliveryDate);
+        return dateA.getTime() - dateB.getTime();
+      });
+      
+      grouped[column.id] = sortedOrders;
     });
     
     return grouped;
@@ -882,18 +892,33 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   }, [readOnly, orders, columns, updateOrder]);
 
   const handleOrderClick = useCallback((order: Order) => {
-    setEditingOrder(order);
-    setShowOrderModal(true);
+    console.log('Clicou no pedido:', order);
+    // Se você tem um modal de detalhes do pedido, descomente a linha abaixo:
+    // setEditingOrder(order);
+    // setShowOrderModal(true);
+    
+    // Por enquanto, vamos apenas logar os dados do pedido
+    alert(`Pedido: ${order.orderNumber || order.id}\nCliente: ${order.customer || order.customerName}\nOS: ${order.internalOrderNumber || order.serviceOrder}\nStatus: ${order.status}\nProgresso: ${order.progress || 0}%`);
   }, []);
 
   const handleCreateOrder = useCallback(() => {
-    setEditingOrder(null);
-    setShowOrderModal(true);
+    console.log('Criando novo pedido');
+    // Se você tem um modal de criação, descomente as linhas abaixo:
+    // setEditingOrder(null);
+    // setShowOrderModal(true);
+    
+    // Por enquanto, vamos apenas logar
+    alert('Funcionalidade de criar novo pedido será implementada');
   }, []);
 
   const handleEditOrder = useCallback((order: Order) => {
-    setEditingOrder(order);
-    setShowOrderModal(true);
+    console.log('Editando pedido:', order);
+    // Se você tem um modal de edição, descomente as linhas abaixo:
+    // setEditingOrder(order);
+    // setShowOrderModal(true);
+    
+    // Por enquanto, vamos apenas logar
+    alert(`Editando pedido: ${order.orderNumber || order.id}`);
   }, []);
 
   const handleQualityControlClick = useCallback((order: Order) => {
