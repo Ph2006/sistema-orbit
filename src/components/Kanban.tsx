@@ -782,121 +782,18 @@ const useAutoMoveCompletedOrders = (
 
 // Componente principal do Kanban
 const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
-  // Dados de exemplo temporários - REMOVA quando conectar aos stores reais
-  const exampleOrders: Order[] = [
-    {
-      id: '4500204565',
-      orderNumber: '4500204565',
-      customer: 'Haver & Boecker Latinoamericana',
-      customerName: 'Haver & Boecker Latinoamericana',
-      projectName: 'Projeto Industrial',
-      internalOrderNumber: '05/936',
-      serviceOrder: '05/936',
-      deliveryDate: '2025-07-02',
-      totalWeight: 3716.5,
-      columnId: 'col1',
-      status: 'in-progress',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      progress: 0,
-      items: [
-        { id: 'item1', itemNumber: '1', code: 'COMP-A', name: 'Componente A', description: 'Descrição A', overallProgress: 0 },
-        { id: 'item2', itemNumber: '2', code: 'COMP-B', name: 'Componente B', description: 'Descrição B', overallProgress: 0 },
-        { id: 'item3', itemNumber: '3', code: 'COMP-C', name: 'Componente C', description: 'Descrição C', overallProgress: 0 },
-        { id: 'item4', itemNumber: '4', code: 'COMP-D', name: 'Componente D', description: 'Descrição D', overallProgress: 0 }
-      ]
-    },
-    {
-      id: '77693',
-      orderNumber: '77693',
-      customer: 'Sandvik Rock Processing Brasil Ltda',
-      customerName: 'Sandvik Rock Processing Brasil Ltda',
-      projectName: 'Projeto Rock',
-      internalOrderNumber: '032/25',
-      serviceOrder: '032/25',
-      deliveryDate: '2025-06-29',
-      totalWeight: 954.1,
-      columnId: 'col1',
-      status: 'in-progress',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      progress: 0,
-      items: [
-        { id: 'item5', itemNumber: '1', code: 'ROCK-A', name: 'Peça Rock A', description: 'Descrição Rock A', overallProgress: 0 },
-        { id: 'item6', itemNumber: '2', code: 'ROCK-B', name: 'Peça Rock B', description: 'Descrição Rock B', overallProgress: 0 },
-        { id: 'item7', itemNumber: '3', code: 'ROCK-C', name: 'Peça Rock C', description: 'Descrição Rock C', overallProgress: 0 },
-        { id: 'item8', itemNumber: '4', code: 'ROCK-D', name: 'Peça Rock D', description: 'Descrição Rock D', overallProgress: 0 }
-      ]
-    },
-    {
-      id: '4500204479',
-      orderNumber: '4500204479',
-      customer: 'Haver & Boecker Latinoamericana',
-      customerName: 'Haver & Boecker Latinoamericana',
-      projectName: 'Projeto Concluído',
-      internalOrderNumber: '038/25',
-      serviceOrder: '038/25',
-      deliveryDate: '2025-05-29',
-      totalWeight: 40.3,
-      columnId: 'col2',
-      status: 'completed',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      progress: 100,
-      items: [
-        { id: 'item9', itemNumber: '1', code: 'CONC-A', name: 'Peça Concluída A', description: 'Descrição A', overallProgress: 100 },
-        { id: 'item10', itemNumber: '2', code: 'CONC-B', name: 'Peça Concluída B', description: 'Descrição B', overallProgress: 100 },
-        { id: 'item11', itemNumber: '3', code: 'CONC-C', name: 'Peça Concluída C', description: 'Descrição C', overallProgress: 100 },
-        { id: 'item12', itemNumber: '4', code: 'CONC-D', name: 'Peça Concluída D', description: 'Descrição D', overallProgress: 100 },
-        { id: 'item13', itemNumber: '5', code: 'CONC-E', name: 'Peça Concluída E', description: 'Descrição E', overallProgress: 100 },
-        { id: 'item14', itemNumber: '6', code: 'CONC-F', name: 'Peça Concluída F', description: 'Descrição F', overallProgress: 100 },
-        { id: 'item15', itemNumber: '7', code: 'CONC-G', name: 'Peça Concluída G', description: 'Descrição G', overallProgress: 100 },
-        { id: 'item16', itemNumber: '8', code: 'CONC-H', name: 'Peça Concluída H', description: 'Descrição H', overallProgress: 100 }
-      ]
-    },
-    {
-      id: '4500202860',
-      orderNumber: '4500202860',
-      customer: '05',
-      customerName: '05',
-      projectName: 'Projeto 05',
-      internalOrderNumber: '821/25',
-      serviceOrder: '821/25',
-      deliveryDate: '2025-05-29',
-      totalWeight: 1590.7,
-      columnId: 'col2',
-      status: 'completed',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      progress: 100,
-      items: [
-        { id: 'item17', itemNumber: '1', code: 'PROJ-A', name: 'Item Projeto A', description: 'Descrição A', overallProgress: 100 }
-      ]
-    }
-  ];
+  // USAR STORES REAIS - removendo dados de exemplo
+  const {
+    orders,
+    updateOrder,
+    loadOrders,
+    loading,
+    error
+  } = useOrderStore();
 
-  const exampleColumns = [
-    { id: 'col1', title: 'Pedidos em processo', position: 1 },
-    { id: 'col2', title: 'Pedidos expedidos', position: 2 },
-    { id: 'col3', title: 'Pedidos paralisados', position: 3 }
-  ];
+  const { columns } = useColumnStore();
 
-  // TEMPORÁRIO: Usar dados de exemplo - SUBSTITUA pelos stores reais quando estiver pronto
-  const useExampleData = true; // Mude para false quando quiser usar os stores reais
-
-  const storeData = useOrderStore();
-  const columnData = useColumnStore();
-
-  const orders = useExampleData ? exampleOrders : storeData.orders;
-  const columns = useExampleData ? exampleColumns : columnData.columns;
-  const updateOrder = useExampleData ? 
-    (id: string, updates: Partial<Order>) => console.log('Update order:', id, updates) : 
-    storeData.updateOrder;
-  const selectedOrdersForShipping = useExampleData ? [] : storeData.selectedOrdersForShipping;
-  const toggleOrderForShipping = useExampleData ? 
-    (order: Order) => console.log('Toggle shipping:', order.id) : 
-    storeData.toggleOrderForShipping;
-
+  // Estados locais
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -908,12 +805,37 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
   const [compactView, setCompactView] = useState(false);
   const [isManaging, setIsManaging] = useState(false);
 
+  // Carregar dados ao montar o componente
+  useEffect(() => {
+    console.log('🚀 Kanban mounted, loading orders...');
+    loadOrders();
+  }, [loadOrders]);
+
   // Debug: verificar se os dados estão sendo carregados
-  console.log('Orders:', orders);
-  console.log('Columns:', columns);
+  console.log('📊 Kanban Debug:');
+  console.log('- Orders:', orders?.length || 0, 'total');
+  console.log('- Columns:', columns?.length || 0, 'total'); 
+  console.log('- Loading:', loading);
+  console.log('- Error:', error);
+
+  // Simulando selectedOrdersForShipping e toggleOrderForShipping
+  const [selectedOrdersForShipping, setSelectedOrdersForShipping] = useState<string[]>([]);
+  const toggleOrderForShipping = useCallback((order: Order) => {
+    setSelectedOrdersForShipping(prev => 
+      prev.includes(order.id) 
+        ? prev.filter(id => id !== order.id)
+        : [...prev, order.id]
+    );
+    console.log('Toggle shipping for order:', order.id);
+  }, []);
 
   // Hook para movimentação automática com dados reais
-  useAutoMoveCompletedOrders(orders, columns, updateOrder);
+  useAutoMoveCompletedOrders(orders, columns, (orderId: string, updates: Partial<Order>) => {
+    const orderToUpdate = orders.find(o => o.id === orderId);
+    if (orderToUpdate) {
+      updateOrder({ ...orderToUpdate, ...updates });
+    }
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -998,10 +920,14 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
     const targetColumn = columns.find(col => col.id === overId);
     if (targetColumn && activeOrder.columnId !== overId) {
       const newStatus = getStatusFromColumnTitle(targetColumn.title);
-      updateOrder(activeId, {
+      
+      // Atualizar usando o store real
+      const updatedOrder = {
+        ...activeOrder,
         columnId: overId,
         status: newStatus
-      });
+      };
+      updateOrder(updatedOrder);
     }
   }, [readOnly, orders, columns, updateOrder]);
 
@@ -1124,7 +1050,21 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
             onDragEnd={handleDragEnd}
           >
             <div className="flex gap-6 p-6 h-full min-w-max">
-              {columns && Array.isArray(columns) ? columns.map(column => (
+              {loading ? (
+                <div className="text-white text-center">
+                  <p>Carregando pedidos...</p>
+                </div>
+              ) : error ? (
+                <div className="text-red-400 text-center">
+                  <p>Erro: {error}</p>
+                  <button 
+                    onClick={loadOrders}
+                    className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              ) : columns && Array.isArray(columns) ? columns.map(column => (
                 <div key={column.id} className="flex-shrink-0 w-80">
                   <SortableContext
                     items={ordersByColumn[column.id]?.map(order => order.id) || []}
@@ -1149,7 +1089,7 @@ const Kanban: React.FC<KanbanProps> = ({ readOnly = false }) => {
                 </div>
               )) : (
                 <div className="text-white text-center">
-                  <p>Carregando colunas...</p>
+                  <p>Nenhuma coluna configurada</p>
                 </div>
               )}
             </div>
