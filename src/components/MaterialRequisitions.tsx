@@ -47,7 +47,6 @@ const MaterialsRequisitionEdit = () => {
   const [originalRequisition, setOriginalRequisition] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [isOnlyStatusUpdate, setIsOnlyStatusUpdate] = useState(false);
   
   useEffect(() => {
     const fetchRequisition = async () => {
@@ -92,15 +91,27 @@ const MaterialsRequisitionEdit = () => {
     fetchRequisition();
   }, [id]);
   
+  // Função para verificar se é apenas mudança de status para estoque
+  const isOnlyStatusToStockUpdate = () => {
+    if (!originalRequisition) return false;
+    
+    // Verifica se mudou apenas o status para 'estoque'
+    const statusChanged = formData.status === 'estoque' && originalRequisition.status !== 'estoque';
+    
+    // Verifica se outros campos importantes não foram alterados
+    const otherFieldsUnchanged = 
+      formData.requester === originalRequisition.requester &&
+      formData.department === originalRequisition.department &&
+      formData.description === originalRequisition.description &&
+      formData.priority === originalRequisition.priority &&
+      formData.quantity === originalRequisition.quantity &&
+      formData.unit === originalRequisition.unit;
+    
+    return statusChanged && otherFieldsUnchanged;
+  };
+  
   const handleChange = (e) => {
     const { name, value } = e.target;
-    
-    // Detecta se é apenas mudança para "estoque"
-    if (name === 'status' && value === 'estoque' && originalRequisition?.status !== 'estoque') {
-      setIsOnlyStatusUpdate(true);
-    } else if (name === 'status') {
-      setIsOnlyStatusUpdate(false);
-    }
     
     setFormData(prev => ({
       ...prev,
@@ -116,8 +127,8 @@ const MaterialsRequisitionEdit = () => {
   };
   
   const validateForm = () => {
-    // Pula validação se for apenas atualização para estoque
-    if (isOnlyStatusUpdate) return true;
+    // Pula validação se for apenas atualização de status para estoque
+    if (isOnlyStatusToStockUpdate()) return true;
     
     if (!formData.requester?.trim()) return false;
     if (!formData.department?.trim()) return false;
@@ -133,8 +144,8 @@ const MaterialsRequisitionEdit = () => {
     e.preventDefault();
     
     try {
-      // Atualização somente para estoque
-      if (isOnlyStatusUpdate) {
+      // Verifica se é apenas atualização de status para estoque
+      if (isOnlyStatusToStockUpdate()) {
         const updateData = {
           status: 'estoque',
           withdrawalDate: Timestamp.fromDate(new Date())
@@ -148,7 +159,7 @@ const MaterialsRequisitionEdit = () => {
         return;
       }
       
-      // Validação completa
+      // Validação completa para outras alterações
       if (!validateForm()) {
         setError('Por favor, preencha todos os campos obrigatórios');
         return;
@@ -212,104 +223,100 @@ const MaterialsRequisitionEdit = () => {
         </Select>
       </FormControl>
       
-      {/* Campos adicionais apenas se não for atualização simples */}
-      {!isOnlyStatusUpdate && (
-        <>
-          <TextField
-            fullWidth
-            margin="normal"
-            label="Solicitante"
-            name="requester"
-            value={formData.requester || ''}
-            onChange={handleChange}
-            required
+      {/* Campos adicionais sempre visíveis */}
+      <TextField
+        fullWidth
+        margin="normal"
+        label="Solicitante"
+        name="requester"
+        value={formData.requester || ''}
+        onChange={handleChange}
+        required={!isOnlyStatusToStockUpdate()}
+      />
+      
+      <TextField
+        fullWidth
+        margin="normal"
+        label="Departamento"
+        name="department"
+        value={formData.department || ''}
+        onChange={handleChange}
+        required={!isOnlyStatusToStockUpdate()}
+      />
+      
+      <TextField
+        fullWidth
+        margin="normal"
+        label="Descrição"
+        name="description"
+        multiline
+        rows={3}
+        value={formData.description || ''}
+        onChange={handleChange}
+        required={!isOnlyStatusToStockUpdate()}
+      />
+      
+      <FormControl fullWidth sx={{ mt: 2, mb: 2 }}>
+        <InputLabel>Prioridade</InputLabel>
+        <Select
+          name="priority"
+          value={formData.priority || ''}
+          onChange={handleChange}
+          required={!isOnlyStatusToStockUpdate()}
+        >
+          <MenuItem value="baixa">Baixa</MenuItem>
+          <MenuItem value="media">Média</MenuItem>
+          <MenuItem value="alta">Alta</MenuItem>
+          <MenuItem value="urgente">Urgente</MenuItem>
+        </Select>
+      </FormControl>
+      
+      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+        <TextField
+          fullWidth
+          label="Quantidade"
+          name="quantity"
+          type="number"
+          value={formData.quantity || ''}
+          onChange={handleChange}
+          required={!isOnlyStatusToStockUpdate()}
+        />
+        
+        <TextField
+          fullWidth
+          label="Unidade"
+          name="unit"
+          value={formData.unit || ''}
+          onChange={handleChange}
+          required={!isOnlyStatusToStockUpdate()}
+        />
+      </Box>
+      
+      <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
+        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+          <DatePicker
+            label="Data da Solicitação"
+            value={formData.requestDate}
+            onChange={(date) => handleDateChange('requestDate', date)}
           />
           
-          <TextField
-            fullWidth
-            margin="normal"
-            label="Departamento"
-            name="department"
-            value={formData.department || ''}
-            onChange={handleChange}
-            required
-          />
-          
-          <TextField
-            fullWidth
-            margin="normal"
-            label="Descrição"
-            name="description"
-            multiline
-            rows={3}
-            value={formData.description || ''}
-            onChange={handleChange}
-            required
-          />
-          
-          <FormControl fullWidth sx={{ mt: 2, mb: 2 }}>
-            <InputLabel>Prioridade</InputLabel>
-            <Select
-              name="priority"
-              value={formData.priority || ''}
-              onChange={handleChange}
-              required
-            >
-              <MenuItem value="baixa">Baixa</MenuItem>
-              <MenuItem value="media">Média</MenuItem>
-              <MenuItem value="alta">Alta</MenuItem>
-              <MenuItem value="urgente">Urgente</MenuItem>
-            </Select>
-          </FormControl>
-          
-          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-            <TextField
-              fullWidth
-              label="Quantidade"
-              name="quantity"
-              type="number"
-              value={formData.quantity || ''}
-              onChange={handleChange}
-              required
+          {(formData.status === 'aprovado' || formData.status === 'rejeitado') && (
+            <DatePicker
+              label="Data de Aprovação/Rejeição"
+              value={formData.approvalDate}
+              onChange={(date) => handleDateChange('approvalDate', date)}
             />
-            
-            <TextField
-              fullWidth
-              label="Unidade"
-              name="unit"
-              value={formData.unit || ''}
-              onChange={handleChange}
-              required
-            />
-          </Box>
+          )}
           
-          <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
-            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-              <DatePicker
-                label="Data da Solicitação"
-                value={formData.requestDate}
-                onChange={(date) => handleDateChange('requestDate', date)}
-              />
-              
-              {(formData.status === 'aprovado' || formData.status === 'rejeitado') && (
-                <DatePicker
-                  label="Data de Aprovação/Rejeição"
-                  value={formData.approvalDate}
-                  onChange={(date) => handleDateChange('approvalDate', date)}
-                />
-              )}
-              
-              {formData.status === 'estoque' && (
-                <DatePicker
-                  label="Data de Retirada"
-                  value={formData.withdrawalDate}
-                  onChange={(date) => handleDateChange('withdrawalDate', date)}
-                />
-              )}
-            </Box>
-          </LocalizationProvider>
-        </>
-      )}
+          {formData.status === 'estoque' && (
+            <DatePicker
+              label="Data de Retirada"
+              value={formData.withdrawalDate}
+              onChange={(date) => handleDateChange('withdrawalDate', date)}
+            />
+          )}
+        </Box>
+      </LocalizationProvider>
       
       <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
         <Button
@@ -325,7 +332,7 @@ const MaterialsRequisitionEdit = () => {
           variant="contained"
           color="primary"
         >
-          {isOnlyStatusUpdate ? 'Atualizar Status' : 'Salvar Alterações'}
+          {isOnlyStatusToStockUpdate() ? 'Atualizar Status' : 'Salvar Alterações'}
         </Button>
       </Box>
     </Box>
