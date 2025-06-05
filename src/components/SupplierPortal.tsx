@@ -42,12 +42,12 @@ const SupplierPortal = () => {
     notes: ''
   });
 
-  // Buscar fornecedores
+  // Buscar fornecedores - CORRIGIDO para usar companies/mecald
   useEffect(() => {
     const fetchSuppliers = async () => {
       try {
         setLoading(true);
-        const q = query(collection(db, 'companies/mecaid/suppliers'));
+        const q = query(collection(db, 'companies/mecald/suppliers')); // ✅ CORRIGIDO
         const querySnapshot = await getDocs(q);
         
         const suppliersData = [];
@@ -136,7 +136,7 @@ const SupplierPortal = () => {
   const handleDeleteSupplier = async (id) => {
     if (window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
       try {
-        await deleteDoc(doc(db, 'companies/mecaid/suppliers', id));
+        await deleteDoc(doc(db, 'companies/mecald/suppliers', id)); // ✅ CORRIGIDO
         setSuppliers(suppliers.filter(supplier => supplier.id !== id));
         showNotification('Fornecedor excluído com sucesso', 'success');
       } catch (err) {
@@ -173,7 +173,7 @@ const SupplierPortal = () => {
       setSaving(true);
 
       if (dialogMode === 'add') {
-        const docRef = await addDoc(collection(db, 'companies/mecaid/suppliers'), formData);
+        const docRef = await addDoc(collection(db, 'companies/mecald/suppliers'), formData); // ✅ CORRIGIDO
         const newSupplier = {
           id: docRef.id,
           ...formData
@@ -181,7 +181,7 @@ const SupplierPortal = () => {
         setSuppliers([...suppliers, newSupplier]);
         showNotification('Fornecedor adicionado com sucesso', 'success');
       } else {
-        await updateDoc(doc(db, 'companies/mecaid/suppliers', currentSupplier.id), formData);
+        await updateDoc(doc(db, 'companies/mecald/suppliers', currentSupplier.id), formData); // ✅ CORRIGIDO
         setSuppliers(suppliers.map(supplier => {
           if (supplier.id === currentSupplier.id) {
             return { ...supplier, ...formData };
