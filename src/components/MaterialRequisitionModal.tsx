@@ -4,7 +4,7 @@ import { MaterialRequisition, MaterialRequisitionItem } from '../types/materials
 import { Order, OrderItem } from '../types/kanban';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
-import { useAuthStore } from '../store/authStore'; // ✅ ADICIONADO
+import { useAuthStore } from '../store/authStore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -25,7 +25,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   generateTraceabilityCode,
   calculateBudgetLimit
 }) => {
-  const { companyId } = useAuthStore(); // ✅ ADICIONADO
+  const { companyId } = useAuthStore();
   console.log('🏗️ Modal renderizado com props:', { 
     requisition: requisition?.id, 
     onSave: typeof onSave,
@@ -63,7 +63,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     sentForQuotation: false
   });
 
-  // ✅ CORREÇÃO: Load suppliers usando getCompanyCollection
+  // Load suppliers usando getCompanyCollection
   useEffect(() => {
     const loadSuppliers = async () => {
       if (!companyId) return;
@@ -84,7 +84,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     loadSuppliers();
   }, [companyId]);
 
-  // ✅ CORREÇÃO: Carregar itens automaticamente quando pedido é selecionado
+  // Carregar itens automaticamente quando pedido é selecionado
   useEffect(() => {
     if (formData.orderId) {
       const order = orders.find(o => o.id === formData.orderId);
@@ -92,11 +92,11 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         setCurrentOrder(order);
         setOrderItems(order.items);
         
-        // ✅ CORREÇÃO: Só carregar itens automaticamente se for nova requisição
+        // Só carregar itens automaticamente se for nova requisição
         if (formData.id === 'new' || !requisition) {
           const budgetLimit = calculateBudgetLimit(order as any);
           
-          // ✅ ADICIONADO: Gerar itens automaticamente dos itens do pedido
+          // Gerar itens automaticamente dos itens do pedido
           const generatedItems = order.items.map(orderItem => ({
             id: crypto.randomUUID(),
             traceabilityCode: generateTraceabilityCode(order.id, orderItem.id),
@@ -234,7 +234,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   };
 
-  // ✅ ADICIONADO: Função para adicionar item manualmente
+  // Função para adicionar item manualmente
   const handleAddItem = () => {
     if (!newItem.description?.trim() || !newItem.material?.trim()) {
       alert('Por favor, preencha pelo menos a descrição e o material.');
@@ -290,7 +290,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     });
   };
 
-  // ✅ ADICIONADO: Função para remover item
+  // Função para remover item
   const handleRemoveItem = (itemId: string) => {
     setFormData(prev => ({
       ...prev,
@@ -592,7 +592,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             </div>
           )}
 
-          {/* ✅ ADICIONADO: Formulário para adicionar novo item */}
+          {/* Formulário para adicionar novo item */}
           {formData.orderId && formData.id === 'new' && (
             <div className="bg-gray-50 p-4 rounded-lg border">
               <h4 className="text-md font-semibold mb-4">Adicionar Item Manualmente</h4>
@@ -675,27 +675,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                   <thead className="bg-gray-50">
                     <tr>
                       <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Código
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Descrição
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Material
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Qtd.
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Dimensões
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Peso (kg)
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Fornecedor
                       </th>
                       <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -709,6 +688,31 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                   <tbody className="bg-white divide-y divide-gray-200">
                     {formData.items.map((item, index) => (
                       <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                          <div className="flex items-center">
+                            <Tag className="h-4 w-4 text-gray-500 mr-1" />
+                            <span className="font-mono text-xs">{item.traceabilityCode}</span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">{item.itemCode}</div>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                          <input
+                            type="text"
+                            value={item.description}
+                            onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                            disabled={isOnlyStatusToStockUpdate()}
+                          />
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                          <input
+                            type="text"
+                            value={item.material}
+                            onChange={(e) => handleItemChange(item.id, 'material', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                            disabled={isOnlyStatusToStockUpdate()}
+                          />
+                        </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm">
                           <input
                             type="number"
@@ -865,29 +869,25 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   );
 };
 
-export default MaterialRequisitionModal;3 py-2 whitespace-nowrap text-sm">
-                          <div className="flex items-center">
-                            <Tag className="h-4 w-4 text-gray-500 mr-1" />
-                            <span className="font-mono text-xs">{item.traceabilityCode}</span>
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1">{item.itemCode}</div>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
-                          <input
-                            type="text"
-                            value={item.description}
-                            onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            disabled={isOnlyStatusToStockUpdate()}
-                          />
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
-                          <input
-                            type="text"
-                            value={item.material}
-                            onChange={(e) => handleItemChange(item.id, 'material', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            disabled={isOnlyStatusToStockUpdate()}
-                          />
-                        </td>
-                        <td className="px-
+export default MaterialRequisitionModal;
+                        Código
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Descrição
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Material
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Qtd.
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Dimensões
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Peso (kg)
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
