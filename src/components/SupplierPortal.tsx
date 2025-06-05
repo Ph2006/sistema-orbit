@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { db } from '../lib/firebase'; // ✅ CORRIGIDO: Caminho correto do Firebase
 import { 
   Search,
   Plus,
