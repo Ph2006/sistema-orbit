@@ -560,65 +560,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                         <td className="px-3 py-2 whitespace-nowrap text-sm">
                           <input
                             type="number"
-                            value={typeof item.invoiceValue === 'number' ? item.invoiceValue : 0}
-                            onChange={(e) => {
-                              const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                              handleItemChange(item.id, 'invoiceValue', isNaN(newValue) ? 0 : newValue);
-                            }}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            min="0"
-                            step="0.01"
-                            placeholder="Valor (R$)"
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-gray-50">
-                    <tr>
-                      <td colSpan={7} className="px-3 py-3 text-right text-sm font-medium">
-                        Total de Itens: {formData.items.length}
-                      </td>
-                      <td className="px-3 py-3 text-sm font-medium">
-                        {formatCurrency(formData.totalCost ?? 0)}
-                      </td>
-                      <td></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-end pt-4 border-t space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              disabled={formData.items.length === 0}
-            >
-              {isOnlyStatusToStockUpdate() 
-                ? 'Salvar Atualização para Estoque' 
-                : isSimpleEdit() 
-                  ? 'Salvar Alterações'
-                  : 'Salvar Requisição'
-              }
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default MaterialRequisitionModal;"
                             value={typeof item.quantity === 'number' ? item.quantity : 1}
                             onChange={(e) => handleItemChange(item.id, 'quantity', e.target.value ? parseInt(e.target.value) : 1)}
                             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
@@ -702,4 +643,63 @@ export default MaterialRequisitionModal;"
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-sm">
                           <input
-                            type="number
+                            type="number"
+                            value={typeof item.invoiceValue === 'number' ? item.invoiceValue : 0}
+                            onChange={(e) => {
+                              const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                              handleItemChange(item.id, 'invoiceValue', isNaN(newValue) ? 0 : newValue);
+                            }}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                            min="0"
+                            step="0.01"
+                            placeholder="Valor (R$)"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50">
+                    <tr>
+                      <td colSpan={7} className="px-3 py-3 text-right text-sm font-medium">
+                        Total de Itens: {formData.items.length}
+                      </td>
+                      <td className="px-3 py-3 text-sm font-medium">
+                        {formatCurrency(formData.totalCost ?? 0)}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-4 border-t space-x-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              disabled={formData.items.length === 0}
+            >
+              {isOnlyStatusToStockUpdate() 
+                ? 'Salvar Atualização para Estoque' 
+                : isSimpleEdit() 
+                  ? 'Salvar Alterações'
+                  : 'Salvar Requisição'
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default MaterialRequisitionModal;
