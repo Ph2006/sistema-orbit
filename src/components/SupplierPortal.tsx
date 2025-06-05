@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase'; // ✅ CORRIGIDO: Caminho correto do Firebase
+import { collection, getDocs, query, addDoc, updateDoc, doc, deleteDoc, where } from 'firebase/firestore';
+import { db, getCompanyCollection } from '../lib/firebase';
+import { useAuthStore } from '../store/authStore';
 import { 
   Search,
   Plus,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react';
 
 const SupplierPortal = () => {
+  const { companyId } = useAuthStore();
   const [suppliers, setSuppliers] = useState([]);
   const [filteredSuppliers, setFilteredSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,34 +44,48 @@ const SupplierPortal = () => {
     notes: ''
   });
 
-  // Buscar fornecedores - CORRIGIDO para usar companies/mecald
+  // Aguardar companyId antes de buscar fornecedores
   useEffect(() => {
-    const fetchSuppliers = async () => {
-      try {
-        setLoading(true);
-        const q = query(collection(db, 'companies/mecald/suppliers')); // ✅ CORRIGIDO
-        const querySnapshot = await getDocs(q);
-        
-        const suppliersData = [];
-        querySnapshot.forEach((doc) => {
-          suppliersData.push({
-            id: doc.id,
-            ...doc.data()
-          });
-        });
-        
-        setSuppliers(suppliersData);
-        setFilteredSuppliers(suppliersData);
-      } catch (err) {
-        console.error('Erro ao buscar fornecedores:', err);
-        setError('Não foi possível carregar os fornecedores');
-      } finally {
-        setLoading(false);
-      }
-    };
-
+    if (!companyId) {
+      console.log('⏳ Aguardando companyId...');
+      return;
+    }
+    
+    console.log('🔑 CompanyId disponível:', companyId);
     fetchSuppliers();
-  }, []);
+  }, [companyId]);
+
+  // Buscar fornecedores
+  const fetchSuppliers = async () => {
+    if (!companyId) return;
+    
+    try {
+      setLoading(true);
+      const collectionPath = getCompanyCollection('suppliers', companyId);
+      const q = query(
+        collection(db, collectionPath),
+        where('deleted', '!=', true)
+      );
+      const querySnapshot = await getDocs(q);
+      
+      const suppliersData = [];
+      querySnapshot.forEach((doc) => {
+        suppliersData.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+      
+      console.log('✅ Fornecedores carregados:', suppliersData.length);
+      setSuppliers(suppliersData);
+      setFilteredSuppliers(suppliersData);
+    } catch (err) {
+      console.error('Erro ao buscar fornecedores:', err);
+      setError('Não foi possível carregar os fornecedores: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Atualiza os fornecedores filtrados quando o termo de busca mudar
   useEffect(() => {
@@ -134,15 +150,18 @@ const SupplierPortal = () => {
   };
 
   const handleDeleteSupplier = async (id) => {
-    if (window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
-      try {
-        await deleteDoc(doc(db, 'companies/mecald/suppliers', id)); // ✅ CORRIGIDO
-        setSuppliers(suppliers.filter(supplier => supplier.id !== id));
-        showNotification('Fornecedor excluído com sucesso', 'success');
-      } catch (err) {
-        console.error('Erro ao excluir fornecedor:', err);
-        showNotification('Erro ao excluir fornecedor', 'error');
-      }
+    if (!window.confirm('Tem certeza que deseja excluir este fornecedor?')) return;
+    if (!companyId) return;
+
+    try {
+      const collectionPath = getCompanyCollection('suppliers', companyId);
+      // Usar soft delete em vez de deletar documento
+      await updateDoc(doc(db, collectionPath, id), { deleted: true });
+      setSuppliers(suppliers.filter(supplier => supplier.id !== id));
+      showNotification('Fornecedor excluído com sucesso', 'success');
+    } catch (err) {
+      console.error('Erro ao excluir fornecedor:', err);
+      showNotification('Erro ao excluir fornecedor: ' + err.message, 'error');
     }
   };
 
@@ -164,6 +183,11 @@ const SupplierPortal = () => {
   };
 
   const handleSaveSupplier = async () => {
+    if (!companyId) {
+      showNotification('CompanyId não disponível. Faça login novamente.', 'error');
+      return;
+    }
+
     try {
       if (!validateForm()) {
         showNotification('Nome e Categoria são campos obrigatórios', 'error');
@@ -172,19 +196,28 @@ const SupplierPortal = () => {
 
       setSaving(true);
 
+      const dataToSave = {
+        ...formData,
+        deleted: false,
+        createdAt: dialogMode === 'add' ? new Date().toISOString() : currentSupplier?.createdAt,
+        updatedAt: new Date().toISOString()
+      };
+
+      const collectionPath = getCompanyCollection('suppliers', companyId);
+
       if (dialogMode === 'add') {
-        const docRef = await addDoc(collection(db, 'companies/mecald/suppliers'), formData); // ✅ CORRIGIDO
+        const docRef = await addDoc(collection(db, collectionPath), dataToSave);
         const newSupplier = {
           id: docRef.id,
-          ...formData
+          ...dataToSave
         };
         setSuppliers([...suppliers, newSupplier]);
         showNotification('Fornecedor adicionado com sucesso', 'success');
       } else {
-        await updateDoc(doc(db, 'companies/mecald/suppliers', currentSupplier.id), formData); // ✅ CORRIGIDO
+        await updateDoc(doc(db, collectionPath, currentSupplier.id), dataToSave);
         setSuppliers(suppliers.map(supplier => {
           if (supplier.id === currentSupplier.id) {
-            return { ...supplier, ...formData };
+            return { ...supplier, ...dataToSave };
           }
           return supplier;
         }));
@@ -203,6 +236,18 @@ const SupplierPortal = () => {
   const handleCloseDialog = () => {
     setOpenDialog(false);
   };
+
+  // Aguardar companyId
+  if (!companyId) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex items-center space-x-3">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <span className="text-lg text-gray-600">Carregando sistema...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -224,7 +269,12 @@ const SupplierPortal = () => {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center space-x-3">
               <Users className="h-8 w-8 text-blue-600" />
-              <h1 className="text-2xl font-bold text-gray-900">Portal de Fornecedores</h1>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Portal de Fornecedores</h1>
+                <p className="text-gray-600 text-sm">
+                  Gerencie seus fornecedores e categorias de materiais
+                </p>
+              </div>
             </div>
             <button
               onClick={handleAddSupplier}
@@ -278,6 +328,9 @@ const SupplierPortal = () => {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
+          <div className="mt-2 text-sm text-gray-600">
+            <strong>{filteredSuppliers.length}</strong> de <strong>{suppliers.length}</strong> fornecedores
+          </div>
         </div>
 
         {/* Table */}
@@ -330,12 +383,14 @@ const SupplierPortal = () => {
                           <button
                             onClick={() => handleEditSupplier(supplier)}
                             className="text-blue-600 hover:text-blue-900 p-1 rounded"
+                            title="Editar"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => handleDeleteSupplier(supplier.id)}
                             className="text-red-600 hover:text-red-900 p-1 rounded"
+                            title="Excluir"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -398,6 +453,7 @@ const SupplierPortal = () => {
                         onChange={handleChange}
                         required
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Razão social do fornecedor"
                       />
                     </div>
 
@@ -413,6 +469,7 @@ const SupplierPortal = () => {
                           value={formData.contact}
                           onChange={handleChange}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Nome da pessoa de contato"
                         />
                       </div>
 
@@ -426,6 +483,7 @@ const SupplierPortal = () => {
                           value={formData.category}
                           onChange={handleChange}
                           required
+                          placeholder="Ex: Aço, Parafusos, Soldas, etc."
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                       </div>
@@ -443,6 +501,7 @@ const SupplierPortal = () => {
                           value={formData.email}
                           onChange={handleChange}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="email@fornecedor.com.br"
                         />
                       </div>
 
@@ -457,6 +516,7 @@ const SupplierPortal = () => {
                           value={formData.phone}
                           onChange={handleChange}
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="(11) 99999-9999"
                         />
                       </div>
                     </div>
@@ -472,6 +532,7 @@ const SupplierPortal = () => {
                         value={formData.address}
                         onChange={handleChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Endereço completo da empresa"
                       />
                     </div>
 
@@ -486,6 +547,7 @@ const SupplierPortal = () => {
                         onChange={handleChange}
                         rows={3}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Informações adicionais sobre o fornecedor..."
                       />
                     </div>
                   </form>
