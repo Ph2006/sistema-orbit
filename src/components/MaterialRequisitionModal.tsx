@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Calendar, Download, Info, DollarSign, Truck, Edit, Package, Search, Tag, AlertTriangle } from 'lucide-react';
+import { X, Plus, Trash2, DollarSign, Edit, Package, Tag, AlertTriangle } from 'lucide-react';
 import { MaterialRequisition, MaterialRequisitionItem } from '../types/materials';
 import { Order, OrderItem } from '../types/kanban';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db, getCompanyCollection } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 
 interface MaterialRequisitionModalProps {
   requisition: MaterialRequisition | null;
@@ -58,7 +56,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     sentForQuotation: false
   });
 
-  // Load suppliers
   useEffect(() => {
     const loadSuppliers = async () => {
       if (!companyId) return;
@@ -79,7 +76,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     loadSuppliers();
   }, [companyId]);
 
-  // Carregar itens quando pedido é selecionado
   useEffect(() => {
     if (formData.orderId) {
       const order = orders.find(o => o.id === formData.orderId);
@@ -130,7 +126,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }
   }, [formData.orderId, orders, calculateBudgetLimit, generateTraceabilityCode, requisition]);
 
-  // Update total cost
   useEffect(() => {
     const totalCost = formData.items.reduce((sum, item) => {
       const invoiceValue = typeof item.invoiceValue === 'number' ? item.invoiceValue : 0;
@@ -144,7 +139,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   }, [formData.items]);
 
-  // Sync formData for editing
   useEffect(() => {
     if (requisition) {
       const itemsWithDefaults = requisition.items.map(item => ({
@@ -413,7 +407,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         </div>
 
         <div className="space-y-6">
-          {/* Order Selection */}
           <div className="border-b pb-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -480,7 +473,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             </div>
           </div>
 
-          {/* Budget Status */}
           {formData.budgetExceeded && (
             <div className="p-4 bg-red-50 border-l-4 border-red-500 rounded-md">
               <div className="flex">
@@ -497,7 +489,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             </div>
           )}
 
-          {/* Add Item Form */}
           {formData.orderId && formData.id === 'new' && (
             <div className="bg-gray-50 p-4 rounded-lg border">
               <h4 className="text-md font-semibold mb-4">Adicionar Item Manualmente</h4>
@@ -563,7 +554,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             </div>
           )}
 
-          {/* Items Section */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium">Itens da Requisição</h3>
             
@@ -657,45 +647,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <input
                               type="number"
                               value={typeof item.weight === 'number' ? item.weight : 0}
-                              onChange={(e) => {
-                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                            />
-                            <span>+</span>
-                            <input
-                              type="number"
-                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
-                              onChange={(e) => {
-                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                              title="Sobra"
-                            />
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toFixed(2)} kg
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          <select
-                            value={item.status}
-                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                          >
-                            <option value="stock">Estoque</option>
-                          </select>
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          {item.status !== 'stock' ? (
-                            <select
-                              value={item.supplierId || ''}
                               onChange={(e) => handleItemChange(item.id, 'supplierId', e.target.value)}
                               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                             >
@@ -778,7 +729,46 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   );
 };
 
-export default MaterialRequisitionModal; value="pending">Pendente</option>
+export default MaterialRequisitionModal; {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                            />
+                            <span>+</span>
+                            <input
+                              type="number"
+                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                              title="Sobra"
+                            />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toFixed(2)} kg
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <select
+                            value={item.status}
+                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                          >
+                            <option value="pending">Pendente</option>
                             <option value="ordered">Encomendado</option>
                             <option value="received">Recebido</option>
-                            <option
+                            <option value="stock">Estoque</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          {item.status !== 'stock' ? (
+                            <select
+                              value={item.supplierId || ''}
+                              onChange={(e) =>
