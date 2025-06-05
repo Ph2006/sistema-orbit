@@ -625,10 +625,70 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             value={item.description}
                             onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
                             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <input
+                            type="text"
+                            value={item.material}
+                            onChange={(e) => handleItemChange(item.id, 'material', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <input
+                            type="number"
+                            value={typeof item.quantity === 'number' ? item.quantity : 1}
+                            onChange={(e) => handleItemChange(item.id, 'quantity', e.target.value ? parseInt(e.target.value) : 1)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                            min="1"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <input
+                            type="text"
+                            value={item.dimensions}
+                            onChange={(e) => handleItemChange(item.id, 'dimensions', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <div className="flex items-center space-x-1">
+                            <input
+                              type="number"
+                              value={typeof item.weight === 'number' ? item.weight : 0}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                            />
+                            <span>+</span>
+                            <input
+                              type="number"
+                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                              title="Sobra"
+                            />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toFixed(2)} kg
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <select
+                            value={item.status}
+                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                           >
-                            <option value="pending">Pendente</option>
-                            <option value="ordered">Encomendado</option>
-                            <option value="received">Recebido</option>
                             <option value="stock">Estoque</option>
                           </select>
                         </td>
@@ -718,67 +778,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   );
 };
 
-export default MaterialRequisitionModal;-200 text-sm"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          <input
-                            type="text"
-                            value={item.material}
-                            onChange={(e) => handleItemChange(item.id, 'material', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          <input
-                            type="number"
-                            value={typeof item.quantity === 'number' ? item.quantity : 1}
-                            onChange={(e) => handleItemChange(item.id, 'quantity', e.target.value ? parseInt(e.target.value) : 1)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            min="1"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          <input
-                            type="text"
-                            value={item.dimensions}
-                            onChange={(e) => handleItemChange(item.id, 'dimensions', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          <div className="flex items-center space-x-1">
-                            <input
-                              type="number"
-                              value={typeof item.weight === 'number' ? item.weight : 0}
-                              onChange={(e) => {
-                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                            />
-                            <span>+</span>
-                            <input
-                              type="number"
-                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
-                              onChange={(e) => {
-                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                              title="Sobra"
-                            />
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toFixed(2)} kg
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          <select
-                            value={item.status}
-                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue
+export default MaterialRequisitionModal; value="pending">Pendente</option>
+                            <option value="ordered">Encomendado</option>
+                            <option value="received">Recebido</option>
+                            <option
