@@ -493,63 +493,51 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             <div className="bg-gray-50 p-4 rounded-lg border">
               <h4 className="text-md font-semibold mb-4">Adicionar Item Manualmente</h4>
               <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                <div>
-                  <input
-                    type="text"
-                    value={newItem.description || ''}
-                    onChange={(e) => setNewItem({...newItem, description: e.target.value})}
-                    placeholder="Descrição"
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                  />
-                </div>
-                <div>
-                  <input
-                    type="text"
-                    value={newItem.material || ''}
-                    onChange={(e) => setNewItem({...newItem, material: e.target.value})}
-                    placeholder="Material"
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                  />
-                </div>
-                <div>
-                  <input
-                    type="number"
-                    value={newItem.quantity || ''}
-                    onChange={(e) => setNewItem({...newItem, quantity: parseInt(e.target.value) || 1})}
-                    placeholder="Qtd"
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                    min="1"
-                  />
-                </div>
-                <div>
-                  <input
-                    type="text"
-                    value={newItem.dimensions || ''}
-                    onChange={(e) => setNewItem({...newItem, dimensions: e.target.value})}
-                    placeholder="Dimensões"
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                  />
-                </div>
-                <div>
-                  <input
-                    type="number"
-                    value={newItem.weight || ''}
-                    onChange={(e) => setNewItem({...newItem, weight: parseFloat(e.target.value) || 0})}
-                    placeholder="Peso (kg)"
-                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                    step="0.01"
-                  />
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    onClick={handleAddItem}
-                    className="w-full bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 text-sm"
-                  >
-                    <Plus className="h-4 w-4 inline mr-1" />
-                    Adicionar
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  value={newItem.description || ''}
+                  onChange={(e) => setNewItem({...newItem, description: e.target.value})}
+                  placeholder="Descrição"
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                />
+                <input
+                  type="text"
+                  value={newItem.material || ''}
+                  onChange={(e) => setNewItem({...newItem, material: e.target.value})}
+                  placeholder="Material"
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                />
+                <input
+                  type="number"
+                  value={newItem.quantity || ''}
+                  onChange={(e) => setNewItem({...newItem, quantity: parseInt(e.target.value) || 1})}
+                  placeholder="Qtd"
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                  min="1"
+                />
+                <input
+                  type="text"
+                  value={newItem.dimensions || ''}
+                  onChange={(e) => setNewItem({...newItem, dimensions: e.target.value})}
+                  placeholder="Dimensões"
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                />
+                <input
+                  type="number"
+                  value={newItem.weight || ''}
+                  onChange={(e) => setNewItem({...newItem, weight: parseFloat(e.target.value) || 0})}
+                  placeholder="Peso (kg)"
+                  className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                  step="0.01"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddItem}
+                  className="bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 text-sm"
+                >
+                  <Plus className="h-4 w-4 inline mr-1" />
+                  Adicionar
+                </button>
               </div>
             </div>
           )}
@@ -593,7 +581,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                         Fornecedor
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Valor (R$)
+                        Valor
                       </th>
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Ações
@@ -647,6 +635,48 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <input
                               type="number"
                               value={typeof item.weight === 'number' ? item.weight : 0}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                            />
+                            <span>+</span>
+                            <input
+                              type="number"
+                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                              title="Sobra"
+                            />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toFixed(2)} kg
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <select
+                            value={item.status}
+                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                          >
+                            <option value="pending">Pendente</option>
+                            <option value="ordered">Encomendado</option>
+                            <option value="received">Recebido</option>
+                            <option value="stock">Estoque</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          {item.status !== 'stock' ? (
+                            <select
+                              value={item.supplierId || ''}
                               onChange={(e) => handleItemChange(item.id, 'supplierId', e.target.value)}
                               className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                             >
@@ -729,46 +759,4 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   );
 };
 
-export default MaterialRequisitionModal; {
-                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                            />
-                            <span>+</span>
-                            <input
-                              type="number"
-                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
-                              onChange={(e) => {
-                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                              title="Sobra"
-                            />
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toFixed(2)} kg
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          <select
-                            value={item.status}
-                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                          >
-                            <option value="pending">Pendente</option>
-                            <option value="ordered">Encomendado</option>
-                            <option value="received">Recebido</option>
-                            <option value="stock">Estoque</option>
-                          </select>
-                        </td>
-                        <td className="px-3 py-2 text-sm">
-                          {item.status !== 'stock' ? (
-                            <select
-                              value={item.supplierId || ''}
-                              onChange={(e) =>
+export default MaterialRequisitionModal;
