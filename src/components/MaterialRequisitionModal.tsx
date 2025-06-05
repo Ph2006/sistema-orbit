@@ -14,7 +14,7 @@ interface MaterialRequisitionModalProps {
   onSave: (requisition: MaterialRequisition) => void;
   orders: Order[];
   generateTraceabilityCode: (orderId: string, itemId: string) => string;
-  calculateBudgetLimit: (order: MaterialRequisition) => number;
+  calculateBudgetLimit: (order: any) => number;
 }
 
 const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
@@ -26,12 +26,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   calculateBudgetLimit
 }) => {
   const { companyId } = useAuthStore();
-  console.log('🏗️ Modal renderizado com props:', { 
-    requisition: requisition?.id, 
-    onSave: typeof onSave,
-    onClose: typeof onClose 
-  });
-
+  
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [formData, setFormData] = useState<MaterialRequisition>({
     id: requisition?.id || 'new',
@@ -48,8 +43,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     budgetLimit: requisition?.budgetLimit || 0,
     budgetExceeded: requisition?.budgetExceeded || false
   });
+  
   const [suppliers, setSuppliers] = useState<{id: string; name: string}[]>([]);
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [newItem, setNewItem] = useState<Partial<MaterialRequisitionItem>>({
     description: '',
     material: '',
@@ -63,7 +58,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     sentForQuotation: false
   });
 
-  // Load suppliers usando getCompanyCollection
+  // Load suppliers
   useEffect(() => {
     const loadSuppliers = async () => {
       if (!companyId) return;
@@ -84,19 +79,16 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     loadSuppliers();
   }, [companyId]);
 
-  // Carregar itens automaticamente quando pedido é selecionado
+  // Carregar itens quando pedido é selecionado
   useEffect(() => {
     if (formData.orderId) {
       const order = orders.find(o => o.id === formData.orderId);
       if (order) {
         setCurrentOrder(order);
-        setOrderItems(order.items);
         
-        // Só carregar itens automaticamente se for nova requisição
         if (formData.id === 'new' || !requisition) {
-          const budgetLimit = calculateBudgetLimit(order as any);
+          const budgetLimit = calculateBudgetLimit(order);
           
-          // Gerar itens automaticamente dos itens do pedido
           const generatedItems = order.items.map(orderItem => ({
             id: crypto.randomUUID(),
             traceabilityCode: generateTraceabilityCode(order.id, orderItem.id),
@@ -133,19 +125,12 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             budgetLimit: budgetLimit || 0,
             items: generatedItems
           }));
-        } else {
-          // Apenas atualizar dados básicos do pedido
-          setFormData(prev => ({
-            ...prev,
-            orderNumber: order.orderNumber,
-            customer: order.customer
-          }));
         }
       }
     }
   }, [formData.orderId, orders, calculateBudgetLimit, generateTraceabilityCode, requisition]);
 
-  // Update total cost and budget exceeded status
+  // Update total cost
   useEffect(() => {
     const totalCost = formData.items.reduce((sum, item) => {
       const invoiceValue = typeof item.invoiceValue === 'number' ? item.invoiceValue : 0;
@@ -159,7 +144,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   }, [formData.items]);
 
-  // Sincronizar formData ao editar uma requisição existente
+  // Sync formData for editing
   useEffect(() => {
     if (requisition) {
       const itemsWithDefaults = requisition.items.map(item => ({
@@ -181,11 +166,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         budgetExceeded: Boolean(requisition.budgetExceeded),
         lastUpdated: new Date().toISOString()
       });
-      
-      const order = orders.find(o => o.id === requisition.orderId);
-      if (order) setOrderItems(order.items);
     }
-  }, [requisition, orders]);
+  }, [requisition]);
 
   const handleOrderChange = (orderId: string) => {
     setFormData(prev => ({ ...prev, orderId }));
@@ -214,11 +196,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             updatedItem.purchaseOrderNumber = 'Estoque';
           }
           
-          if (field === 'weight' || field === 'surplusWeight') {
-            updatedItem.totalWeight = weight + surplusWeight;
-          } else {
-            updatedItem.totalWeight = weight + surplusWeight;
-          }
+          updatedItem.totalWeight = weight + surplusWeight;
           
           if (field === 'supplierId') {
             const supplier = suppliers.find(s => s.id === value);
@@ -234,7 +212,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   };
 
-  // Função para adicionar item manualmente
   const handleAddItem = () => {
     if (!newItem.description?.trim() || !newItem.material?.trim()) {
       alert('Por favor, preencha pelo menos a descrição e o material.');
@@ -275,7 +252,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
       items: [...prev.items, item]
     }));
 
-    // Reset form
     setNewItem({
       description: '',
       material: '',
@@ -290,7 +266,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     });
   };
 
-  // Função para remover item
   const handleRemoveItem = (itemId: string) => {
     setFormData(prev => ({
       ...prev,
@@ -298,47 +273,12 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     }));
   };
 
-  // Detectar se é apenas mudança de status para estoque
-  const isOnlyStatusToStockUpdate = (): boolean => {
-    if (!requisition || !requisition.items || requisition.items.length === 0) return false;
-    
-    const hasStatusChangeToStock = formData.items.some((newItem, index) => {
-      const originalItem = requisition.items[index];
-      if (!originalItem) return false;
-      
-      const statusChanged = newItem.status === 'stock' && originalItem.status !== 'stock';
-      const onlyStatusChanged = 
-        newItem.description === originalItem.description &&
-        newItem.material === originalItem.material &&
-        newItem.quantity === originalItem.quantity &&
-        newItem.weight === originalItem.weight &&
-        newItem.dimensions === originalItem.dimensions;
-      
-      return statusChanged && onlyStatusChanged;
-    });
-    
-    return hasStatusChangeToStock;
-  };
-
-  // Detectar se é edição simples de requisição existente
   const isSimpleEdit = (): boolean => {
     return !!requisition && requisition.id !== 'new';
   };
 
-  // Validação inteligente
   const validateForm = (): boolean => {
-    console.log('🔍 Validando formulário...');
-    console.log('🔍 É edição simples?', isSimpleEdit());
-    console.log('🔍 É apenas mudança para estoque?', isOnlyStatusToStockUpdate());
-    
-    if (isOnlyStatusToStockUpdate()) {
-      console.log('✅ Validação passou: apenas mudança para estoque');
-      return true;
-    }
-    
     if (isSimpleEdit()) {
-      console.log('🔍 Validação para edição simples...');
-      
       if (!formData.items || formData.items.length === 0) {
         alert('A requisição deve ter pelo menos um item.');
         return false;
@@ -359,11 +299,8 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         }
       }
       
-      console.log('✅ Validação passou: edição simples');
       return true;
     }
-    
-    console.log('🔍 Validação completa para nova requisição...');
     
     if (!formData.orderId) {
       alert('Por favor, selecione um pedido.');
@@ -382,31 +319,22 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     
     for (const item of formData.items) {
       if (!item.description?.trim() || !item.material?.trim() || !item.quantity) {
-        alert('Por favor, preencha todos os campos obrigatórios dos itens (descrição, material e quantidade).');
+        alert('Por favor, preencha todos os campos obrigatórios dos itens.');
         return false;
       }
     }
     
-    console.log('✅ Validação passou: nova requisição');
     return true;
   };
 
-  // Função de salvamento
   const handleSave = async (e?: React.FormEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     
-    console.log('🏗️ === MODAL: TENTANDO SALVAR ===');
-    console.log('🏗️ onSave function exists?', typeof onSave);
-    console.log('🏗️ Current formData:', formData);
-    console.log('🏗️ É apenas mudança para estoque?', isOnlyStatusToStockUpdate());
-    console.log('🏗️ É edição simples?', isSimpleEdit());
-    
     try {
       if (!validateForm()) {
-        console.log('❌ Validação falhou');
         return;
       }
       
@@ -424,8 +352,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         }))
       };
       
-      console.log('🏗️ Dados corrigidos:', correctedFormData);
-      
       const requisitionData: MaterialRequisition = {
         ...correctedFormData,
         id: requisition?.id || 'new',
@@ -434,29 +360,20 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
         lastUpdated: new Date().toISOString()
       };
       
-      console.log('🏗️ Dados preparados para envio:', requisitionData);
-      
       if (!onSave) {
-        console.error('❌ onSave function is missing!');
         alert('Erro: Função de salvamento não encontrada');
         return;
       }
       
-      console.log('🏗️ Chamando onSave...');
       await onSave(requisitionData);
-      console.log('🏗️ onSave chamada com sucesso');
-      
-      console.log('🏗️ Fechando modal...');
       onClose();
       
     } catch (error) {
-      console.error('[REQUISITION] Erro ao salvar requisição:', error);
-      console.error('🏗️ Erro detalhado:', error);
+      console.error('Erro ao salvar requisição:', error);
       alert(`Erro ao salvar requisição: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
     }
   };
 
-  // Format currency
   const formatCurrency = (value: number) => {
     return value.toLocaleString('pt-BR', {
       style: 'currency',
@@ -464,7 +381,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
     });
   };
 
-  // Filter orders to only show in-process orders
   const availableOrders = orders.filter(order => 
     !order.deleted && 
     order.status !== 'completed' && 
@@ -484,16 +400,10 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                 Pedido #{currentOrder.orderNumber} - {currentOrder.customer}
               </p>
             )}
-            {isOnlyStatusToStockUpdate() && (
-              <div className="mt-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                <Package className="h-4 w-4 mr-1" />
-                Modo: Atualização para Estoque
-              </div>
-            )}
-            {isSimpleEdit() && !isOnlyStatusToStockUpdate() && (
+            {isSimpleEdit() && (
               <div className="mt-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                 <Edit className="h-4 w-4 mr-1" />
-                Modo: Edição Simples
+                Modo: Edição
               </div>
             )}
           </div>
@@ -524,11 +434,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                     </option>
                   ))}
                 </select>
-                {orders.length > 0 && availableOrders.length === 0 && (
-                  <p className="text-sm text-red-500 mt-1">
-                    Não há pedidos disponíveis que ainda não foram expedidos.
-                  </p>
-                )}
               </div>
               
               <div>
@@ -592,7 +497,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
             </div>
           )}
 
-          {/* Formulário para adicionar novo item */}
+          {/* Add Item Form */}
           {formData.orderId && formData.id === 'new' && (
             <div className="bg-gray-50 p-4 rounded-lg border">
               <h4 className="text-md font-semibold mb-4">Adicionar Item Manualmente</h4>
@@ -662,7 +567,6 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
           <div className="space-y-4">
             <h3 className="text-lg font-medium">Itens da Requisição</h3>
             
-            {/* Items List */}
             {formData.items.length === 0 ? (
               <div className="text-center p-8 bg-gray-50 rounded-lg border border-gray-200">
                 <p className="text-gray-500">
@@ -674,13 +578,34 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Código
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Descrição
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Material
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Qtd.
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Dimensões
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Peso (kg)
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Fornecedor
                       </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Valor (R$)
                       </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Ações
                       </th>
                     </tr>
@@ -693,82 +618,12 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <Tag className="h-4 w-4 text-gray-500 mr-1" />
                             <span className="font-mono text-xs">{item.traceabilityCode}</span>
                           </div>
-                          <div className="text-xs text-gray-500 mt-1">{item.itemCode}</div>
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                        <td className="px-3 py-2 text-sm">
                           <input
                             type="text"
                             value={item.description}
                             onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            disabled={isOnlyStatusToStockUpdate()}
-                          />
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
-                          <input
-                            type="text"
-                            value={item.material}
-                            onChange={(e) => handleItemChange(item.id, 'material', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            disabled={isOnlyStatusToStockUpdate()}
-                          />
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
-                          <input
-                            type="number"
-                            value={typeof item.quantity === 'number' ? item.quantity : 1}
-                            onChange={(e) => handleItemChange(item.id, 'quantity', e.target.value ? parseInt(e.target.value) : 1)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            min="1"
-                            disabled={isOnlyStatusToStockUpdate()}
-                          />
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
-                          <input
-                            type="text"
-                            value={item.dimensions}
-                            onChange={(e) => handleItemChange(item.id, 'dimensions', e.target.value)}
-                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                            disabled={isOnlyStatusToStockUpdate()}
-                          />
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
-                          <div className="flex items-center space-x-1">
-                            <input
-                              type="number"
-                              value={typeof item.weight === 'number' ? item.weight : 0}
-                              onChange={(e) => {
-                                const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                              disabled={isOnlyStatusToStockUpdate()}
-                            />
-                            <span>+</span>
-                            <input
-                              type="number"
-                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
-                              onChange={(e) => {
-                                const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
-                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
-                              }}
-                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
-                              min="0"
-                              step="0.01"
-                              title="Sobra"
-                              disabled={isOnlyStatusToStockUpdate()}
-                            />
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toLocaleString('pt-BR')} kg
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
-                          <select
-                            value={item.status}
-                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
                             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                           >
                             <option value="pending">Pendente</option>
@@ -777,7 +632,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                             <option value="stock">Estoque</option>
                           </select>
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                        <td className="px-3 py-2 text-sm">
                           {item.status !== 'stock' ? (
                             <select
                               value={item.supplierId || ''}
@@ -792,26 +647,26 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                               ))}
                             </select>
                           ) : (
-                            <div className="text-purple-600 font-medium">
+                            <div className="text-purple-600 font-medium text-sm">
                               Material de Estoque
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                        <td className="px-3 py-2 text-sm">
                           <input
                             type="number"
                             value={typeof item.invoiceValue === 'number' ? item.invoiceValue : 0}
                             onChange={(e) => {
-                              const newValue = e.target.value !== undefined && e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                              const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
                               handleItemChange(item.id, 'invoiceValue', isNaN(newValue) ? 0 : newValue);
                             }}
                             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
                             min="0"
                             step="0.01"
-                            placeholder="Valor (R$)"
+                            placeholder="Valor"
                           />
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-sm">
+                        <td className="px-3 py-2 text-sm">
                           <button
                             type="button"
                             onClick={() => handleRemoveItem(item.id)}
@@ -832,8 +687,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
                       <td className="px-3 py-3 text-sm font-medium">
                         {formatCurrency(formData.totalCost ?? 0)}
                       </td>
-                      <td></td>
-                      <td></td>
+                      <td colSpan={2}></td>
                     </tr>
                   </tfoot>
                 </table>
@@ -855,12 +709,7 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
               disabled={formData.items.length === 0}
             >
-              {isOnlyStatusToStockUpdate() 
-                ? 'Salvar Atualização para Estoque' 
-                : isSimpleEdit() 
-                  ? 'Salvar Alterações'
-                  : 'Salvar Requisição'
-              }
+              {isSimpleEdit() ? 'Salvar Alterações' : 'Salvar Requisição'}
             </button>
           </div>
         </div>
@@ -869,25 +718,67 @@ const MaterialRequisitionModal: React.FC<MaterialRequisitionModalProps> = ({
   );
 };
 
-export default MaterialRequisitionModal;
-                        Código
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Descrição
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Material
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Qtd.
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Dimensões
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Peso (kg)
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+export default MaterialRequisitionModal;-200 text-sm"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <input
+                            type="text"
+                            value={item.material}
+                            onChange={(e) => handleItemChange(item.id, 'material', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <input
+                            type="number"
+                            value={typeof item.quantity === 'number' ? item.quantity : 1}
+                            onChange={(e) => handleItemChange(item.id, 'quantity', e.target.value ? parseInt(e.target.value) : 1)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                            min="1"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <input
+                            type="text"
+                            value={item.dimensions}
+                            onChange={(e) => handleItemChange(item.id, 'dimensions', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <div className="flex items-center space-x-1">
+                            <input
+                              type="number"
+                              value={typeof item.weight === 'number' ? item.weight : 0}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'weight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                            />
+                            <span>+</span>
+                            <input
+                              type="number"
+                              value={typeof item.surplusWeight === 'number' ? item.surplusWeight : 0}
+                              onChange={(e) => {
+                                const newValue = e.target.value !== '' ? parseFloat(e.target.value) : 0;
+                                handleItemChange(item.id, 'surplusWeight', isNaN(newValue) ? 0 : newValue);
+                              }}
+                              className="w-20 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 text-sm"
+                              min="0"
+                              step="0.01"
+                              title="Sobra"
+                            />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Total: {(typeof item.totalWeight === 'number' ? item.totalWeight : 0).toFixed(2)} kg
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <select
+                            value={item.status}
+                            onChange={(e) => handleItemChange(item.id, 'status', e.target.value)}
+                            className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue
