@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, query, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
+// Corrija as importações para evitar erros de build
 import { 
   Box, 
   Button, 
@@ -22,18 +23,22 @@ import {
   Alert,
   CircularProgress
 } from '@mui/material';
+// Certifique-se de importar corretamente os ícones
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
 
 const SupplierPortal = () => {
   const [suppliers, setSuppliers] = useState([]);
+  const [filteredSuppliers, setFilteredSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [openDialog, setOpenDialog] = useState(false);
   const [dialogMode, setDialogMode] = useState('add'); // 'add' ou 'edit'
   const [currentSupplier, setCurrentSupplier] = useState(null);
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [formData, setFormData] = useState({
     name: '',
@@ -45,7 +50,7 @@ const SupplierPortal = () => {
     notes: ''
   });
 
-  // Buscar fornecedores do Firestore
+  // Buscar fornecedores
   useEffect(() => {
     const fetchSuppliers = async () => {
       try {
@@ -62,6 +67,7 @@ const SupplierPortal = () => {
         });
         
         setSuppliers(suppliersData);
+        setFilteredSuppliers(suppliersData);
       } catch (err) {
         console.error('Erro ao buscar fornecedores:', err);
         setError('Não foi possível carregar os fornecedores');
@@ -73,7 +79,31 @@ const SupplierPortal = () => {
     fetchSuppliers();
   }, []);
 
-  // Manipulador de mudanças no formulário
+  // Atualiza os fornecedores filtrados quando o termo de busca mudar
+  useEffect(() => {
+    filterSuppliers(searchTerm);
+  }, [searchTerm, suppliers]);
+
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
+
+  // Esta é a função que substitui B()
+  const filterSuppliers = (term) => {
+    if (!term) {
+      setFilteredSuppliers(suppliers);
+      return;
+    }
+    
+    const filtered = suppliers.filter(supplier => 
+      supplier.name?.toLowerCase().includes(term.toLowerCase()) ||
+      supplier.category?.toLowerCase().includes(term.toLowerCase()) ||
+      supplier.contact?.toLowerCase().includes(term.toLowerCase())
+    );
+    
+    setFilteredSuppliers(filtered);
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -82,7 +112,6 @@ const SupplierPortal = () => {
     }));
   };
 
-  // Abrir diálogo para adicionar novo fornecedor
   const handleAddSupplier = () => {
     setDialogMode('add');
     setFormData({
@@ -97,7 +126,6 @@ const SupplierPortal = () => {
     setOpenDialog(true);
   };
 
-  // Abrir diálogo para editar fornecedor existente
   const handleEditSupplier = (supplier) => {
     setDialogMode('edit');
     setCurrentSupplier(supplier);
@@ -113,15 +141,11 @@ const SupplierPortal = () => {
     setOpenDialog(true);
   };
 
-  // Confirmar exclusão de fornecedor
   const handleDeleteSupplier = async (id) => {
     if (window.confirm('Tem certeza que deseja excluir este fornecedor?')) {
       try {
         await deleteDoc(doc(db, 'companies/mecaid/suppliers', id));
-        
-        // Atualizar lista removendo o item
         setSuppliers(suppliers.filter(supplier => supplier.id !== id));
-        
         setNotification({
           open: true,
           message: 'Fornecedor excluído com sucesso',
@@ -138,18 +162,29 @@ const SupplierPortal = () => {
     }
   };
 
-  // Salvar fornecedor (adicionar ou atualizar)
+  const validateForm = () => {
+    if (!formData.name?.trim()) return false;
+    if (!formData.category?.trim()) return false;
+    return true;
+  };
+
   const handleSaveSupplier = async () => {
     try {
+      if (!validateForm()) {
+        setNotification({
+          open: true,
+          message: 'Nome e Categoria são campos obrigatórios',
+          severity: 'error'
+        });
+        return;
+      }
+
       if (dialogMode === 'add') {
-        // Adicionar novo fornecedor
         const docRef = await addDoc(collection(db, 'companies/mecaid/suppliers'), formData);
-        
         const newSupplier = {
           id: docRef.id,
           ...formData
         };
-        
         setSuppliers([...suppliers, newSupplier]);
         setNotification({
           open: true,
@@ -157,17 +192,13 @@ const SupplierPortal = () => {
           severity: 'success'
         });
       } else {
-        // Atualizar fornecedor existente
         await updateDoc(doc(db, 'companies/mecaid/suppliers', currentSupplier.id), formData);
-        
-        // Atualizar lista local
         setSuppliers(suppliers.map(supplier => {
           if (supplier.id === currentSupplier.id) {
             return { ...supplier, ...formData };
           }
           return supplier;
         }));
-        
         setNotification({
           open: true,
           message: 'Fornecedor atualizado com sucesso',
@@ -180,29 +211,16 @@ const SupplierPortal = () => {
       console.error('Erro ao salvar fornecedor:', err);
       setNotification({
         open: true,
-        message: `Erro ao ${dialogMode === 'add' ? 'adicionar' : 'atualizar'} fornecedor`,
+        message: `Erro ao ${dialogMode === 'add' ? 'adicionar' : 'atualizar'} fornecedor: ${err.message}`,
         severity: 'error'
       });
     }
   };
 
-  // Esta função substitui a anterior que estava causando o erro "B is not a function"
-  const filterSuppliers = (searchTerm) => {
-    // Implementação correta da função de filtro
-    if (!searchTerm) return suppliers;
-    
-    return suppliers.filter(supplier => 
-      supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      supplier.category.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  };
-
-  // Fechar notificação
   const handleCloseNotification = () => {
     setNotification({ ...notification, open: false });
   };
 
-  // Fechar diálogo
   const handleCloseDialog = () => {
     setOpenDialog(false);
   };
@@ -214,17 +232,6 @@ const SupplierPortal = () => {
       </Box>
     );
   }
-
-  if (error) {
-    return (
-      <Box sx={{ mt: 4 }}>
-        <Alert severity="error">{error}</Alert>
-      </Box>
-    );
-  }
-
-  // Substitui a chamada problemática em B() da linha 99 por uma solução correta
-  const displayedSuppliers = filterSuppliers(''); // Ao invés de usar B() diretamente
 
   return (
     <Box sx={{ p: 3 }}>
@@ -238,6 +245,25 @@ const SupplierPortal = () => {
         >
           Novo Fornecedor
         </Button>
+      </Box>
+      
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
+      
+      <Box sx={{ mb: 3 }}>
+        <TextField
+          fullWidth
+          variant="outlined"
+          placeholder="Buscar fornecedores"
+          value={searchTerm}
+          onChange={handleSearchChange}
+          InputProps={{
+            startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
+          }}
+        />
       </Box>
 
       <TableContainer component={Paper}>
@@ -253,8 +279,8 @@ const SupplierPortal = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {displayedSuppliers.length > 0 ? (
-              displayedSuppliers.map((supplier) => (
+            {filteredSuppliers.length > 0 ? (
+              filteredSuppliers.map((supplier) => (
                 <TableRow key={supplier.id}>
                   <TableCell>{supplier.name}</TableCell>
                   <TableCell>{supplier.category}</TableCell>
@@ -282,7 +308,7 @@ const SupplierPortal = () => {
             ) : (
               <TableRow>
                 <TableCell colSpan={6} align="center">
-                  Nenhum fornecedor cadastrado
+                  {searchTerm ? 'Nenhum fornecedor encontrado na busca' : 'Nenhum fornecedor cadastrado'}
                 </TableCell>
               </TableRow>
             )}
@@ -290,7 +316,6 @@ const SupplierPortal = () => {
         </Table>
       </TableContainer>
 
-      {/* Diálogo de adição/edição de fornecedor */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
         <DialogTitle>
           {dialogMode === 'add' ? 'Adicionar Novo Fornecedor' : 'Editar Fornecedor'}
@@ -317,6 +342,7 @@ const SupplierPortal = () => {
               />
               <TextField
                 margin="normal"
+                required
                 fullWidth
                 label="Categoria"
                 name="category"
@@ -371,7 +397,6 @@ const SupplierPortal = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Notificação de sucesso/erro */}
       <Snackbar 
         open={notification.open} 
         autoHideDuration={6000} 
