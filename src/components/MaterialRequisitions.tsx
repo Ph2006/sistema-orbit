@@ -6,7 +6,7 @@ import {
   updateDoc, 
   Timestamp 
 } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { db } from '../lib/firebase';
 import { 
   Save, 
   X, 
