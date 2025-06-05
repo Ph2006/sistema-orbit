@@ -8,9 +8,11 @@ import {
   doc, 
   query, 
   orderBy,
+  where,
   Timestamp 
 } from 'firebase/firestore';
-import { db } from '../lib/firebase'; // ✅ CORRIGIDO: Caminho correto do Firebase
+import { db, getCompanyCollection } from '../lib/firebase'; 
+import { useAuthStore } from '../store/authStore'; // ✅ ADICIONADO
 import { 
   Plus, 
   Search, 
@@ -49,6 +51,7 @@ const calculateBudgetLimit = (order: any): number => {
 };
 
 const MaterialRequisitions = () => {
+  const { companyId } = useAuthStore(); // ✅ ADICIONADO
   const [requisitions, setRequisitions] = useState<MaterialRequisition[]>([]);
   const [filteredRequisitions, setFilteredRequisitions] = useState<MaterialRequisition[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -65,76 +68,90 @@ const MaterialRequisitions = () => {
   const [selectedRequisition, setSelectedRequisition] = useState<MaterialRequisition | null>(null);
   const [editingRequisition, setEditingRequisition] = useState<MaterialRequisition | null>(null);
 
-  // Carregar pedidos (orders) - CORRIGIDO para usar companies/mecald
+  // ✅ CORREÇÃO: Aguardar companyId antes de carregar dados
   useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        console.log('🔄 Carregando pedidos...');
-        const ordersRef = collection(db, 'companies/mecald/orders'); // ✅ CORRIGIDO
-        const ordersSnapshot = await getDocs(ordersRef);
-        const ordersData = ordersSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Order[];
-        
-        console.log('✅ Pedidos carregados:', ordersData.length);
-        setOrders(ordersData);
-      } catch (err) {
-        console.error('❌ Erro ao carregar pedidos:', err);
-        setError('Erro ao carregar pedidos: ' + err.message);
-      }
-    };
-
+    if (!companyId) {
+      console.log('⏳ Aguardando companyId...');
+      return;
+    }
+    
+    console.log('🔑 CompanyId disponível:', companyId);
     fetchOrders();
-  }, []);
-
-  // Carregar requisições - CORRIGIDO para usar companies/mecald
-  useEffect(() => {
-    const fetchRequisitions = async () => {
-      try {
-        console.log('🔄 Carregando requisições...');
-        setLoading(true);
-        
-        const requisitionsRef = collection(db, 'companies/mecald/materialsRequisitions'); // ✅ CORRIGIDO
-        const q = query(requisitionsRef, orderBy('createdAt', 'desc'));
-        const querySnapshot = await getDocs(q);
-        
-        const requisitionsData = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            // Garantir que datas sejam convertidas corretamente
-            requestDate: data.requestDate?.toDate?.() ? data.requestDate.toDate().toISOString() : data.requestDate,
-            createdAt: data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : data.createdAt,
-            lastUpdated: data.lastUpdated?.toDate?.() ? data.lastUpdated.toDate().toISOString() : data.lastUpdated,
-            // Garantir que campos numéricos tenham valores padrão
-            totalCost: typeof data.totalCost === 'number' ? data.totalCost : 0,
-            budgetLimit: typeof data.budgetLimit === 'number' ? data.budgetLimit : 0,
-            budgetExceeded: Boolean(data.budgetExceeded),
-            // Garantir que items seja um array
-            items: Array.isArray(data.items) ? data.items : []
-          };
-        }) as MaterialRequisition[];
-        
-        console.log('✅ Requisições carregadas:', requisitionsData.length);
-        setRequisitions(requisitionsData);
-        setFilteredRequisitions(requisitionsData);
-        
-        if (requisitionsData.length === 0) {
-          console.log('ℹ️ Nenhuma requisição encontrada');
-        }
-        
-      } catch (err) {
-        console.error('❌ Erro ao carregar requisições:', err);
-        setError('Erro ao carregar requisições: ' + err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchRequisitions();
-  }, []);
+  }, [companyId]);
+
+  // Carregar pedidos - ✅ CORRIGIDO para usar getCompanyCollection
+  const fetchOrders = async () => {
+    if (!companyId) return;
+    
+    try {
+      console.log('🔄 Carregando pedidos...');
+      const ordersRef = collection(db, getCompanyCollection('orders', companyId));
+      const q = query(ordersRef, where('deleted', '==', false));
+      const ordersSnapshot = await getDocs(q);
+      const ordersData = ordersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Order[];
+      
+      console.log('✅ Pedidos carregados:', ordersData.length);
+      setOrders(ordersData);
+    } catch (err) {
+      console.error('❌ Erro ao carregar pedidos:', err);
+      setError('Erro ao carregar pedidos: ' + err.message);
+    }
+  };
+
+  // Carregar requisições - ✅ CORRIGIDO caminho da coleção
+  const fetchRequisitions = async () => {
+    if (!companyId) return;
+    
+    try {
+      console.log('🔄 Carregando requisições...');
+      setLoading(true);
+      
+      // ✅ CORREÇÃO: Nome correto da coleção
+      const requisitionsRef = collection(db, getCompanyCollection('materialRequisitions', companyId));
+      const q = query(
+        requisitionsRef, 
+        where('deleted', '!=', true),
+        orderBy('createdAt', 'desc')
+      );
+      const querySnapshot = await getDocs(q);
+      
+      const requisitionsData = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Garantir que datas sejam convertidas corretamente
+          requestDate: data.requestDate?.toDate?.() ? data.requestDate.toDate().toISOString() : data.requestDate,
+          createdAt: data.createdAt?.toDate?.() ? data.createdAt.toDate().toISOString() : data.createdAt,
+          lastUpdated: data.lastUpdated?.toDate?.() ? data.lastUpdated.toDate().toISOString() : data.lastUpdated,
+          // Garantir que campos numéricos tenham valores padrão
+          totalCost: typeof data.totalCost === 'number' ? data.totalCost : 0,
+          budgetLimit: typeof data.budgetLimit === 'number' ? data.budgetLimit : 0,
+          budgetExceeded: Boolean(data.budgetExceeded),
+          // Garantir que items seja um array
+          items: Array.isArray(data.items) ? data.items : []
+        };
+      }) as MaterialRequisition[];
+      
+      console.log('✅ Requisições carregadas:', requisitionsData.length);
+      setRequisitions(requisitionsData);
+      setFilteredRequisitions(requisitionsData);
+      
+      if (requisitionsData.length === 0) {
+        console.log('ℹ️ Nenhuma requisição encontrada');
+      }
+      
+    } catch (err) {
+      console.error('❌ Erro ao carregar requisições:', err);
+      setError('Erro ao carregar requisições: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Filtrar requisições
   useEffect(() => {
@@ -157,10 +174,15 @@ const MaterialRequisitions = () => {
     setFilteredRequisitions(filtered);
   }, [requisitions, searchTerm, statusFilter]);
 
-  // Salvar requisição - CORRIGIDO para usar companies/mecald
+  // Salvar requisição - ✅ CORRIGIDO para usar getCompanyCollection
   const handleSaveRequisition = async (requisitionData: MaterialRequisition) => {
     console.log('💾 === SALVANDO REQUISIÇÃO ===');
     console.log('💾 Dados recebidos:', requisitionData);
+    
+    if (!companyId) {
+      alert('❌ CompanyId não disponível. Faça login novamente.');
+      return;
+    }
     
     try {
       setSaving(true);
@@ -177,7 +199,8 @@ const MaterialRequisitions = () => {
         // Garantir campos numéricos
         totalCost: typeof requisitionData.totalCost === 'number' ? requisitionData.totalCost : 0,
         budgetLimit: typeof requisitionData.budgetLimit === 'number' ? requisitionData.budgetLimit : 0,
-        budgetExceeded: Boolean(requisitionData.budgetExceeded)
+        budgetExceeded: Boolean(requisitionData.budgetExceeded),
+        deleted: false
       };
 
       // Remover o campo 'id' antes de salvar
@@ -185,7 +208,8 @@ const MaterialRequisitions = () => {
 
       if (requisitionData.id === 'new') {
         console.log('💾 Criando nova requisição...');
-        const docRef = await addDoc(collection(db, 'companies/mecald/materialsRequisitions'), dataToSave); // ✅ CORRIGIDO
+        const collectionPath = getCompanyCollection('materialRequisitions', companyId);
+        const docRef = await addDoc(collection(db, collectionPath), dataToSave);
         console.log('✅ Nova requisição criada com ID:', docRef.id);
         
         // Atualizar a lista local
@@ -199,7 +223,8 @@ const MaterialRequisitions = () => {
         setSuccess('Requisição criada com sucesso!');
       } else {
         console.log('💾 Atualizando requisição existente...');
-        const docRef = doc(db, 'companies/mecald/materialsRequisitions', requisitionData.id); // ✅ CORRIGIDO
+        const collectionPath = getCompanyCollection('materialRequisitions', companyId);
+        const docRef = doc(db, collectionPath, requisitionData.id);
         await updateDoc(docRef, dataToSave);
         console.log('✅ Requisição atualizada');
         
@@ -223,12 +248,14 @@ const MaterialRequisitions = () => {
     }
   };
 
-  // Excluir requisição - CORRIGIDO para usar companies/mecald
+  // Excluir requisição - ✅ CORRIGIDO para usar getCompanyCollection
   const handleDeleteRequisition = async (requisition: MaterialRequisition) => {
     if (!window.confirm('Tem certeza que deseja excluir esta requisição?')) return;
+    if (!companyId) return;
 
     try {
-      await deleteDoc(doc(db, 'companies/mecald/materialsRequisitions', requisition.id)); // ✅ CORRIGIDO
+      const collectionPath = getCompanyCollection('materialRequisitions', companyId);
+      await updateDoc(doc(db, collectionPath, requisition.id), { deleted: true });
       setRequisitions(prev => prev.filter(req => req.id !== requisition.id));
       setSuccess('Requisição excluída com sucesso!');
       setShowDetailModal(false);
@@ -319,6 +346,18 @@ const MaterialRequisitions = () => {
       return () => clearTimeout(timer);
     }
   }, [error]);
+
+  // ✅ CORREÇÃO: Aguardar companyId
+  if (!companyId) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex items-center space-x-3">
+          <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
+          <span className="text-lg text-gray-600">Carregando sistema...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
