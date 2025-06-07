@@ -1,106 +1,181 @@
 import { create } from 'zustand';
-import { User } from 'firebase/auth';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { TeamMember } from '../types/team';
+import { 
+  signInWithEmailAndPassword, 
+  signOut as firebaseSignOut, 
+  onAuthStateChanged,
+  User
+} from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
+import { initializeUserInCompany, initializeCompanyIfNeeded, repairUserPermissions } from '../utils/userInitialization';
+
+interface UserData {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string | null;
+  companyId: string;
+  permissions: Record<string, Record<string, boolean>>;
+  role: 'admin' | 'user';
+  isActive: boolean;
+  lastLogin: string;
+}
 
 interface AuthState {
   user: User | null;
+  userData: UserData | null;
+  currentCompany: string;
   loading: boolean;
   error: string | null;
-  companyId: string | null;
-  setUser: (user: User | null) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  teamMember: TeamMember | null;
-  loadTeamMember: (email: string) => Promise<void>;
-  setCompanyId: (companyId: string | null) => void;
+  
+  // Actions
+  signIn: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  setCurrentCompany: (companyId: string) => void;
+  hasPermission: (module: string, action: string) => boolean;
+  initializeAuth: () => () => void;
+  clearError: () => void;
+  refreshUserData: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
+  userData: null,
+  currentCompany: 'mecald', // Empresa padrão
   loading: false,
   error: null,
-  teamMember: null,
-  companyId: localStorage.getItem('companyId'),
-  
-  setUser: async (user) => {
-    set({ user });
-    
-    // When user changes, load their team member profile if exists
+
+  // Login
+  signIn: async (email: string, password: string) => {
+    try {
+      set({ loading: true, error: null });
+      
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+      
+      // Inicializar usuário na empresa atual se necessário
+      const { currentCompany } = get();
+      await initializeUserInCompany(user, currentCompany);
+      
+      // Carregar dados do usuário
+      await get().refreshUserData();
+      
+      set({ loading: false });
+    } catch (error: any) {
+      console.error('Erro no login:', error);
+      set({ 
+        error: error.message || 'Erro ao fazer login', 
+        loading: false 
+      });
+      throw error;
+    }
+  },
+
+  // Logout
+  signOut: async () => {
+    try {
+      set({ loading: true, error: null });
+      await firebaseSignOut(auth);
+      set({ 
+        user: null, 
+        userData: null,
+        loading: false 
+      });
+    } catch (error: any) {
+      console.error('Erro no logout:', error);
+      set({ 
+        error: error.message || 'Erro ao fazer logout', 
+        loading: false 
+      });
+    }
+  },
+
+  // Definir empresa atual
+  setCurrentCompany: (companyId: string) => {
+    set({ currentCompany: companyId });
+    // Recarregar dados do usuário para a nova empresa
+    const { user } = get();
     if (user) {
-      await get().loadTeamMember(user.email || '');
-    } else {
-      set({ teamMember: null });
+      get().refreshUserData();
     }
   },
-  setLoading: (loading) => set({ loading }),
-  setError: (error) => set({ error }),
-  
-  setCompanyId: (companyId) => {
-    set({ companyId });
-    if (companyId) {
-      localStorage.setItem('companyId', companyId);
-      console.log(`Company ID set to: ${companyId}`);
-    } else {
-      localStorage.removeItem('companyId');
-      console.log('Company ID removed from storage');
-    }
-  },
-  
-  loadTeamMember: async (email) => {
-    if (!email) return;
-    
-    const companyId = get().companyId;
-    if (!companyId) {
-      console.log('Cannot load team member: companyId is not available yet.');
-      set({ teamMember: null, loading: false });
-      return;
-    }
+
+  // Verificar permissões
+  hasPermission: (module: string, action: string) => {
+    const { userData } = get();
+    if (!userData) return false;
     
     try {
-      set({ loading: true });
-      
-      // Query team members collection from the company-specific collection path
-      const teamMembersPath = `companies/${companyId}/teamMembers`;
-      const teamMembersRef = collection(db, teamMembersPath);
-      const q = query(teamMembersRef, where('email', '==', email));
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
-        const memberData = snapshot.docs[0].data() as TeamMember;
-        set({ 
-          teamMember: {
-            id: snapshot.docs[0].id,
-            ...memberData
-          }
-        });
-        console.log(`Loaded team member for ${email} in company ${companyId}`);
-      } else {
-        // If not found in new structure, try looking in the old structure as fallback
-        const legacyTeamMembersRef = collection(db, 'teamMembers');
-        const legacyQuery = query(legacyTeamMembersRef, where('email', '==', email));
-        const legacySnapshot = await getDocs(legacyQuery);
-        
-        if (!legacySnapshot.empty) {
-          const memberData = legacySnapshot.docs[0].data() as TeamMember;
-          set({ 
-            teamMember: {
-              id: legacySnapshot.docs[0].id,
-              ...memberData
-            }
-          });
-          console.log(`Loaded team member for ${email} from legacy collection`);
-        } else {
-          set({ teamMember: null });
-          console.log(`No team member found for ${email} in company ${companyId}`);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading team member:', error);
-      set({ error: 'Failed to load team member data' });
-    } finally {
-      set({ loading: false });
+      return userData.permissions[module]?.[action] === true;
+    } catch {
+      return false;
     }
+  },
+
+  // Atualizar dados do usuário
+  refreshUserData: async () => {
+    try {
+      const { user, currentCompany } = get();
+      if (!user || !currentCompany) return;
+
+      // Inicializar empresa se necessário
+      const companyName = currentCompany === 'mecald' ? 'Mecald' : 'Brasmold';
+      await initializeCompanyIfNeeded(currentCompany, companyName);
+
+      // Buscar dados do usuário na empresa
+      const userRef = doc(db, 'companies', currentCompany, 'users', user.uid);
+      const userDoc = await getDoc(userRef);
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as UserData;
+        
+        // Verificar se as permissões estão completas
+        if (!userData.permissions || Object.keys(userData.permissions).length === 0) {
+          await repairUserPermissions(user.uid, currentCompany);
+          // Buscar novamente após o reparo
+          const repairedDoc = await getDoc(userRef);
+          if (repairedDoc.exists()) {
+            set({ userData: repairedDoc.data() as UserData });
+          }
+        } else {
+          set({ userData });
+        }
+      } else {
+        // Criar usuário se não existir
+        const newUserData = await initializeUserInCompany(user, currentCompany);
+        set({ userData: newUserData as UserData });
+      }
+    } catch (error: any) {
+      console.error('Erro ao carregar dados do usuário:', error);
+      set({ error: error.message });
+    }
+  },
+
+  // Inicializar autenticação
+  initializeAuth: () => {
+    set({ loading: true });
+    
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      try {
+        if (user) {
+          set({ user });
+          await get().refreshUserData();
+        } else {
+          set({ user: null, userData: null });
+        }
+      } catch (error: any) {
+        console.error('Erro na inicialização da auth:', error);
+        set({ error: error.message });
+      } finally {
+        set({ loading: false });
+      }
+    });
+
+    return unsubscribe;
+  },
+
+  // Limpar erro
+  clearError: () => {
+    set({ error: null });
   }
 }));
