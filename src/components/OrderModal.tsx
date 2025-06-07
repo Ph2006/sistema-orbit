@@ -1249,28 +1249,6 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-3 mb-3">
-                    <Camera className="w-8 h-8 text-green-600" />
-                    <div>
-                      <h5 className="font-medium text-gray-900">Fotos de Progresso</h5>
-                      <p className="text-sm text-gray-600">Registro visual da produção</p>
-                    </div>
-                  </div>
-                  {formData.googleDriveLink ? (
-                    <a
-                      href={`${formData.googleDriveLink}?filter=jpg,png,jpeg`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-green-600 hover:text-green-800 text-sm font-medium"
-                    >
-                      Ver fotos →
-                    </a>
-                  ) : (
-                    <span className="text-gray-400 text-sm">Configure o link do Drive</span>
-                  )}
-                </div>
-
-                <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-3 mb-3">
                     <Calendar className="w-8 h-8 text-purple-600" />
                     <div>
                       <h5 className="font-medium text-gray-900">Cronogramas</h5>
@@ -1285,6 +1263,28 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                       className="text-purple-600 hover:text-purple-800 text-sm font-medium"
                     >
                       Ver cronogramas →
+                    </a>
+                  ) : (
+                    <span className="text-gray-400 text-sm">Configure o link do Drive</span>
+                  )}
+                </div>
+
+                <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-3 mb-3">
+                    <FileText className="w-8 h-8 text-blue-600" />
+                    <div>
+                      <h5 className="font-medium text-gray-900">Especificações Técnicas</h5>
+                      <p className="text-sm text-gray-600">Desenhos e especificações</p>
+                    </div>
+                  </div>
+                  {formData.googleDriveLink ? (
+                    <a
+                      href={`${formData.googleDriveLink}?filter=pdf,dwg,doc`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                    >
+                      Ver documentos técnicos →
                     </a>
                   ) : (
                     <span className="text-gray-400 text-sm">Configure o link do Drive</span>
@@ -2199,26 +2199,36 @@ const Camera = (props: any) => {
       <circle cx="12" cy="13" r="3" />
     </svg>
   );
-};-gray-200 hover:shadow-md transition-shadow">
+};
+                  d transition-shadow">
                   <div className="flex items-center gap-3 mb-3">
-                    <FileText className="w-8 h-8 text-blue-600" />
+                    <Camera className="w-8 h-8 text-green-600" />
                     <div>
-                      <h5 className="font-medium text-gray-900">Especificações Técnicas</h5>
-                      <p className="text-sm text-gray-600">Desenhos e especificações</p>
+                      <h5 className="font-medium text-gray-900">Fotos de Progresso</h5>
+                      <p className="text-sm text-gray-600">Registro visual da produção</p>
                     </div>
                   </div>
                   {formData.googleDriveLink ? (
                     <a
-                      href={`${formData.googleDriveLink}?filter=pdf,dwg,doc`}
+                      href={`${formData.googleDriveLink}?filter=jpg,png,jpeg`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      className="text-green-600 hover:text-green-800 text-sm font-medium"
                     >
-                      Ver documentos técnicos →
+                      Ver fotos →
                     </a>
                   ) : (
                     <span className="text-gray-400 text-sm">Configure o link do Drive</span>
                   )}
                 </div>
 
-                <div className="bg-white p-4 rounded-lg border border
+                <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-m
+                   </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
