@@ -14,8 +14,43 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Order } from '../types/order';
 import { useAuthStore } from './authStore';
+
+// Definição interna de tipo Order para evitar problemas de referência circular
+interface OrderItem {
+  id: string;
+  code: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  weight: number;
+  progress: number;
+}
+
+type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | string;
+
+interface Order {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  customer?: string; // Campo de compatibilidade
+  project?: string;
+  projectName?: string; // Campo de compatibilidade
+  orderNumber?: string;
+  internalOS?: string;
+  internalOrderNumber?: string; // Campo de compatibilidade
+  serviceOrder?: string; // Campo de compatibilidade
+  startDate?: string;
+  deliveryDate?: string;
+  completionDate?: string;
+  status?: OrderStatus;
+  observations?: string;
+  notes?: string; // Campo de compatibilidade
+  items?: OrderItem[];
+  createdAt?: string;
+  updatedAt?: string;
+  [key: string]: any;
+}
 
 interface OrderState {
   orders: Order[];
@@ -50,6 +85,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
+      console.log(`Fetching orders for company: ${companyId}`);
       const ordersRef = collection(db, 'companies', companyId, 'orders');
       const q = query(ordersRef, orderBy('createdAt', 'desc'));
       
@@ -69,6 +105,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         } as Order);
       });
 
+      console.log(`Fetched ${orders.length} orders`);
       set({ orders, loading: false });
     } catch (error: any) {
       console.error('Erro ao buscar pedidos:', error);
@@ -124,19 +161,37 @@ export const useOrderStore = create<OrderState>((set, get) => ({
 
       const ordersRef = collection(db, 'companies', companyId, 'orders');
       
+      // Converter valores undefined para null
+      const cleanedData = { ...orderData };
+      Object.keys(cleanedData).forEach(key => {
+        if (cleanedData[key as keyof typeof cleanedData] === undefined) {
+          cleanedData[key as keyof typeof cleanedData] = null;
+        }
+      });
+      
       // Converter datas para Timestamp do Firebase
-      const dataToSave = {
-        ...orderData,
+      const dataToSave: any = {
+        ...cleanedData,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-        startDate: orderData.startDate ? Timestamp.fromDate(new Date(orderData.startDate)) : null,
-        deliveryDate: orderData.deliveryDate ? Timestamp.fromDate(new Date(orderData.deliveryDate)) : null,
-        completionDate: orderData.completionDate ? Timestamp.fromDate(new Date(orderData.completionDate)) : null,
         createdBy: user.uid,
         company: companyId
       };
 
+      // Converter datas se existirem e não forem null
+      if (orderData.startDate) {
+        dataToSave.startDate = Timestamp.fromDate(new Date(orderData.startDate));
+      }
+      if (orderData.deliveryDate) {
+        dataToSave.deliveryDate = Timestamp.fromDate(new Date(orderData.deliveryDate));
+      }
+      if (orderData.completionDate) {
+        dataToSave.completionDate = Timestamp.fromDate(new Date(orderData.completionDate));
+      }
+
+      console.log("Adding order with data:", dataToSave);
       const docRef = await addDoc(ordersRef, dataToSave);
+      console.log("Order added with ID:", docRef.id);
       
       // Atualizar lista local
       await get().fetchOrders();
@@ -165,12 +220,15 @@ export const useOrderStore = create<OrderState>((set, get) => ({
 
       const orderRef = doc(db, 'companies', companyId, 'orders', id);
       
-      // Converter datas para Timestamp do Firebase
-      const updatesToSave: any = {
-        ...updates,
-        updatedAt: Timestamp.now(),
-        updatedBy: user.uid
-      };
+      // Converter datas para Timestamp do Firebase e substituir undefined por null
+      const updatesToSave: any = { ...updates, updatedAt: Timestamp.now(), updatedBy: user.uid };
+
+      // Converter undefined para null em todos os campos
+      Object.keys(updatesToSave).forEach(key => {
+        if (updatesToSave[key] === undefined) {
+          updatesToSave[key] = null;
+        }
+      });
 
       // Converter datas se existirem
       if (updates.startDate) {
@@ -181,9 +239,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       }
       if (updates.completionDate) {
         updatesToSave.completionDate = Timestamp.fromDate(new Date(updates.completionDate));
+      } else {
+        // Garante que completionDate seja null e não undefined
+        updatesToSave.completionDate = null;
       }
 
+      console.log("Updating order with data:", updatesToSave);
       await updateDoc(orderRef, updatesToSave);
+      console.log("Order updated successfully");
       
       // Atualizar lista local
       await get().fetchOrders();
@@ -241,6 +304,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       return () => {};
     }
 
+    console.log(`Subscribing to orders for company: ${companyId}`);
     const ordersRef = collection(db, 'companies', companyId, 'orders');
     const q = query(ordersRef, orderBy('createdAt', 'desc'));
     
@@ -260,6 +324,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
             completionDate: data.completionDate?.toDate?.()?.toISOString() || data.completionDate,
           } as Order);
         });
+        console.log(`Got ${orders.length} orders from subscription`);
         set({ orders });
       },
       (error) => {
