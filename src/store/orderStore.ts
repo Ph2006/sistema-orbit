@@ -45,12 +45,12 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     try {
       set({ loading: true, error: null });
       
-      const { user, currentCompany } = useAuthStore.getState();
-      if (!user || !currentCompany) {
+      const { user, companyId } = useAuthStore.getState();
+      if (!user || !companyId) {
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
-      const ordersRef = collection(db, 'companies', currentCompany, 'orders');
+      const ordersRef = collection(db, 'companies', companyId, 'orders');
       const q = query(ordersRef, orderBy('createdAt', 'desc'));
       
       const querySnapshot = await getDocs(q);
@@ -82,12 +82,12 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   // Buscar pedido por ID
   getOrderById: async (id: string) => {
     try {
-      const { user, currentCompany } = useAuthStore.getState();
-      if (!user || !currentCompany) {
+      const { user, companyId } = useAuthStore.getState();
+      if (!user || !companyId) {
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
-      const orderRef = doc(db, 'companies', currentCompany, 'orders', id);
+      const orderRef = doc(db, 'companies', companyId, 'orders', id);
       const orderSnap = await getDoc(orderRef);
       
       if (!orderSnap.exists()) {
@@ -117,12 +117,12 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     try {
       set({ loading: true, error: null });
       
-      const { user, currentCompany } = useAuthStore.getState();
-      if (!user || !currentCompany) {
+      const { user, companyId } = useAuthStore.getState();
+      if (!user || !companyId) {
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
-      const ordersRef = collection(db, 'companies', currentCompany, 'orders');
+      const ordersRef = collection(db, 'companies', companyId, 'orders');
       
       // Converter datas para Timestamp do Firebase
       const dataToSave = {
@@ -133,7 +133,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         deliveryDate: orderData.deliveryDate ? Timestamp.fromDate(new Date(orderData.deliveryDate)) : null,
         completionDate: orderData.completionDate ? Timestamp.fromDate(new Date(orderData.completionDate)) : null,
         createdBy: user.uid,
-        company: currentCompany
+        company: companyId
       };
 
       const docRef = await addDoc(ordersRef, dataToSave);
@@ -158,12 +158,12 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     try {
       set({ loading: true, error: null });
       
-      const { user, currentCompany } = useAuthStore.getState();
-      if (!user || !currentCompany) {
+      const { user, companyId } = useAuthStore.getState();
+      if (!user || !companyId) {
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
-      const orderRef = doc(db, 'companies', currentCompany, 'orders', id);
+      const orderRef = doc(db, 'companies', companyId, 'orders', id);
       
       // Converter datas para Timestamp do Firebase
       const updatesToSave: any = {
@@ -204,12 +204,12 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     try {
       set({ loading: true, error: null });
       
-      const { user, currentCompany } = useAuthStore.getState();
-      if (!user || !currentCompany) {
+      const { user, companyId } = useAuthStore.getState();
+      if (!user || !companyId) {
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
-      const orderRef = doc(db, 'companies', currentCompany, 'orders', id);
+      const orderRef = doc(db, 'companies', companyId, 'orders', id);
       await deleteDoc(orderRef);
       
       // Remover da lista local
@@ -235,13 +235,13 @@ export const useOrderStore = create<OrderState>((set, get) => ({
 
   // Subscrever a mudanças em tempo real
   subscribeToOrders: () => {
-    const { user, currentCompany } = useAuthStore.getState();
-    if (!user || !currentCompany) {
+    const { user, companyId } = useAuthStore.getState();
+    if (!user || !companyId) {
       console.warn('Usuário não autenticado para subscrição');
       return () => {};
     }
 
-    const ordersRef = collection(db, 'companies', currentCompany, 'orders');
+    const ordersRef = collection(db, 'companies', companyId, 'orders');
     const q = query(ordersRef, orderBy('createdAt', 'desc'));
     
     const unsubscribe = onSnapshot(
