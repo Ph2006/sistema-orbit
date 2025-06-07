@@ -17,7 +17,7 @@ interface OrderItem {
 }
 
 // Definição de tipo interna para OrderStatus
-type OrderStatus = 'Em Processo' | 'Concluído' | 'Cancelado' | 'Em Pausa' | string;
+type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | string;
 
 // Definição de tipo interna para Order
 interface Order {
@@ -57,7 +57,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
     startDate: '',
     deliveryDate: '',
     completionDate: '',
-    status: 'Em Processo',
+    status: 'in-progress',
     observations: '',
     items: [] as OrderItem[]
   });
@@ -101,7 +101,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
         startDate: formatDateField(order.startDate),
         deliveryDate: formatDateField(order.deliveryDate),
         completionDate: formatDateField(order.completionDate),
-        status: order.status || 'Em Processo',
+        status: order.status || 'in-progress',
         observations: order.observations || order.notes || '',
         items: Array.isArray(order.items) ? [...order.items] : []
       });
@@ -123,7 +123,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
         startDate: '',
         deliveryDate: '',
         completionDate: '',
-        status: 'Em Processo',
+        status: 'in-progress',
         observations: '',
         items: []
       });
@@ -165,36 +165,45 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
         return;
       }
 
-      // Converte datas para o formato ISO
+      // Converte datas para o formato ISO ou null (não undefined)
       const convertDate = (dateStr: string | undefined) => {
-        if (!dateStr) return undefined;
+        if (!dateStr || dateStr.trim() === '') return null;
         try {
           return new Date(dateStr).toISOString();
         } catch (error) {
           console.error("Error converting date:", dateStr, error);
-          return undefined;
+          return null; // Retorna null em caso de erro, não undefined
         }
       };
 
       const orderData: Partial<Order> = {
-        customerId: formData.customerId,
-        customerName: formData.customerName,
-        customer: formData.customerName, // Campo adicional para compatibilidade
-        project: formData.project,
-        projectName: formData.project, // Campo adicional para compatibilidade
-        orderNumber: formData.orderNumber,
-        internalOS: formData.internalOS,
-        internalOrderNumber: formData.internalOS, // Campo adicional para compatibilidade
-        serviceOrder: formData.internalOS, // Campo adicional para compatibilidade
+        customerId: formData.customerId || null,
+        customerName: formData.customerName || '',
+        customer: formData.customerName || '', // Campo adicional para compatibilidade
+        project: formData.project || '',
+        projectName: formData.project || '', // Campo adicional para compatibilidade
+        orderNumber: formData.orderNumber || '',
+        internalOS: formData.internalOS || '',
+        internalOrderNumber: formData.internalOS || '', // Campo adicional para compatibilidade
+        serviceOrder: formData.internalOS || '', // Campo adicional para compatibilidade
         startDate: convertDate(formData.startDate),
         deliveryDate: convertDate(formData.deliveryDate),
-        completionDate: convertDate(formData.completionDate),
-        status: formData.status,
-        observations: formData.observations,
-        notes: formData.observations, // Campo adicional para compatibilidade
-        items: formData.items,
+        completionDate: convertDate(formData.completionDate), // Isso vai retornar null, não undefined
+        status: formData.status || 'in-progress',
+        observations: formData.observations || '',
+        notes: formData.observations || '', // Campo adicional para compatibilidade
+        items: formData.items || [],
         updatedAt: new Date().toISOString()
       };
+
+      // Remover explicitamente quaisquer campos undefined antes de enviar ao Firestore
+      Object.keys(orderData).forEach(key => {
+        if (orderData[key as keyof typeof orderData] === undefined) {
+          orderData[key as keyof typeof orderData] = null;
+        }
+      });
+
+      console.log("Final order data to be saved:", orderData);
 
       if (mode === 'create') {
         orderData.createdAt = new Date().toISOString();
@@ -268,6 +277,17 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
 
   if (!isOpen) return null;
 
+  // Determinar qual status exibir no formulário
+  const getStatusLabel = (status: string) => {
+    const statusMap: Record<string, string> = {
+      'in-progress': 'Em Processo',
+      'completed': 'Concluído',
+      'on-hold': 'Em Pausa',
+      'cancelled': 'Cancelado'
+    };
+    return statusMap[status] || status;
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden">
@@ -276,9 +296,9 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
           <h2 className="text-xl font-semibold flex items-center gap-2">
             <FileText className="w-5 h-5" />
             {mode === 'create' ? 'Novo Pedido' : `Editando Pedido #${order?.orderNumber}`}
-            {mode === 'edit' && (
+            {mode === 'edit' && formData.status && (
               <span className="text-xs bg-blue-500 px-2 py-1 rounded">
-                {formData.status || 'Em Processo'}
+                {getStatusLabel(formData.status)}
               </span>
             )}
           </h2>
@@ -352,7 +372,6 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
               </div>
             </div>
 
-            {/* Restante do formulário continua igual... */}
             {/* Cronograma */}
             <div className="bg-gray-50 p-4 rounded-lg">
               <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -411,7 +430,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                     Status
                   </label>
                   <select
-                    value={formData.status || 'Em Processo'}
+                    value={formData.status || 'in-progress'}
                     onChange={(e) => setFormData(prev => ({...prev, status: e.target.value}))}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
