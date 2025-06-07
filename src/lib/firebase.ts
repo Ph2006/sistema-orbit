@@ -3,6 +3,8 @@ import { getAuth, browserLocalPersistence, setPersistence } from 'firebase/auth'
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+// Remover esta importação circular:
+// import { useAuthStore } from '../store/authStore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -61,8 +63,9 @@ if (useEmulators) {
 }
 
 // Helper function to get company-specific collection path
+// Modificando para aceitar companyId como parâmetro em vez de acessar o store
 export const getCompanyCollection = (collectionName: string, companyId?: string) => {
-  // Use the passed companyId or try to get it from localStorage if not provided
+  // Não acessar o store diretamente para quebrar a dependência circular
   const finalCompanyId = companyId || localStorage.getItem('companyId') || 'mecald';
   
   if (!finalCompanyId) {
