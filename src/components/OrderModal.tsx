@@ -1856,7 +1856,8 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
             <p className="text-xs text-gray-500">
               Romaneio gerado automaticamente em {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
             </p>
-          </div>-2 border-gray-300">
+          </div>
+        </div>-2 border-gray-300">
                       TOTAIS
                     </td>
                     <td className="py-3 px-4 text-right font-semibold text-gray-900 border-t-2 border-gray-300">
