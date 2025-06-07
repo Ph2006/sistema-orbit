@@ -83,7 +83,7 @@ interface Order {
 // Tipo para organização da tabela
 type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'deliveryDate' | 'status' | 'priority' | 'value';
 type SortOrder = 'asc' | 'desc';
-type ViewMode = 'table' | 'calendar' | 'kanban';
+type ViewMode = 'table' | 'calendar';
 
 export default function Orders() {
   const navigate = useNavigate();
@@ -452,12 +452,12 @@ export default function Orders() {
     setActiveDropdown(activeDropdown === orderId ? null : orderId);
   };
 
-  // Função para exportar para Excel (mock)
+  // Função para exportar para Excel
   const handleExportToExcel = () => {
     alert('Função de exportar para Excel estará disponível em breve!');
   };
 
-  // Função para imprimir (mock)
+  // Função para imprimir
   const handlePrint = () => {
     window.print();
   };
@@ -567,9 +567,6 @@ export default function Orders() {
     const todayOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'today').length;
     const tomorrowOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'tomorrow').length;
     const criticalOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'critical').length;
-    
-    // Calcular valor total
-    const totalValue = processedOrders.reduce((sum, order) => sum + (order.value || 0), 0);
     
     // Calcular tempos médios
     let totalProductionDays = 0;
@@ -1439,3 +1436,291 @@ export default function Orders() {
                           </td>
                         </tr>
                       );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Paginação */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 sm:px-6 print:hidden">
+                  <div className="flex flex-1 justify-between sm:hidden">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      disabled={currentPage === 1}
+                      className={`relative inline-flex items-center rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                        currentPage === 1
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                      }`}
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      disabled={currentPage === totalPages}
+                      className={`relative ml-3 inline-flex items-center rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                        currentPage === totalPages
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                      }`}
+                    >
+                      Próximo
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </button>
+                  </div>
+                  
+                  <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm text-gray-700">
+                        Mostrando <span className="font-medium">{Math.min((currentPage - 1) * itemsPerPage + 1, processedOrders.length)}</span> a{' '}
+                        <span className="font-medium">{Math.min(currentPage * itemsPerPage, processedOrders.length)}</span> de{' '}
+                        <span className="font-medium">{processedOrders.length}</span> resultados
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                          disabled={currentPage === 1}
+                          className={`relative inline-flex items-center rounded-l-md px-2 py-2 transition-colors ${
+                            currentPage === 1
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                          }`}
+                        >
+                          <span className="sr-only">Anterior</span>
+                          <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+                        </button>
+                        
+                        {/* Paginação dinâmica */}
+                        {Array.from({ length: totalPages }, (_, i) => i + 1)
+                          .filter(page => 
+                            page === 1 || 
+                            page === totalPages || 
+                            Math.abs(page - currentPage) <= 1
+                          )
+                          .map((page, index, array) => {
+                            // Adicionar reticências se necessário
+                            if (index > 0 && page > array[index - 1] + 1) {
+                              return (
+                                <React.Fragment key={`ellipsis-${page}`}>
+                                  <span className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300">
+                                    ...
+                                  </span>
+                                  <button
+                                    onClick={() => setCurrentPage(page)}
+                                    className={`relative inline-flex items-center px-4 py-2 text-sm font-medium transition-colors ${
+                                      currentPage === page
+                                        ? 'bg-blue-50 text-blue-700 border-blue-500 z-10'
+                                        : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                </React.Fragment>
+                              );
+                            }
+                            
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`relative inline-flex items-center px-4 py-2 text-sm font-medium transition-colors ${
+                                  currentPage === page
+                                    ? 'bg-blue-50 text-blue-700 border-blue-500 z-10'
+                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          })}
+                        
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                          className={`relative inline-flex items-center rounded-r-md px-2 py-2 transition-colors ${
+                            currentPage === totalPages
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                          }`}
+                        >
+                          <span className="sr-only">Próximo</span>
+                          <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                        </button>
+                      </nav>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Estatísticas de resumo */}
+      {processedOrders.length > 0 && viewMode === 'table' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 print:hidden">
+          <div className="p-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-blue-600">
+                  {processedOrders.filter(o => o.status === 'in-progress').length}
+                </span>
+                <span className="text-sm text-gray-600">Em Processo</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-green-600">
+                  {processedOrders.filter(o => o.status === 'completed').length}
+                </span>
+                <span className="text-sm text-gray-600">Concluídos</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-red-600">
+                  {processedOrders.filter(order => getDeliveryUrgency(order) === 'overdue').length}
+                </span>
+                <span className="text-sm text-gray-600">Atrasados</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-orange-600">
+                  {processedOrders.filter(order => ['today', 'tomorrow'].includes(getDeliveryUrgency(order))).length}
+                </span>
+                <span className="text-sm text-gray-600">Urgentes</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-yellow-600">
+                  {processedOrders.filter(o => o.status === 'on-hold').length}
+                </span>
+                <span className="text-sm text-gray-600">Em Pausa</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-gray-600">
+                  {processedOrders.length}
+                </span>
+                <span className="text-sm text-gray-600">Total</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal */}
+      <OrderModal
+        isOpen={isModalOpen}
+        onClose={handleModalClose}
+        order={selectedOrder}
+        mode={modalMode}
+      />
+      
+      {/* Estilo para impressão e animações */}
+      <style jsx>{`
+        @media print {
+          @page {
+            size: landscape;
+            margin: 10mm;
+          }
+          body {
+            font-size: 11pt;
+            line-height: 1.3;
+          }
+          .print\\:hidden {
+            display: none !important;
+          }
+          .print\\:shadow-none {
+            box-shadow: none !important;
+          }
+          .print\\:border-none {
+            border: none !important;
+          }
+          table {
+            font-size: 10pt;
+          }
+          th, td {
+            padding: 4px 8px !important;
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out forwards;
+        }
+        
+        /* Scroll suave para tabelas responsivas */
+        .overflow-x-auto {
+          scrollbar-width: thin;
+          scrollbar-color: #CBD5E0 #F7FAFC;
+        }
+        
+        .overflow-x-auto::-webkit-scrollbar {
+          height: 6px;
+        }
+        
+        .overflow-x-auto::-webkit-scrollbar-track {
+          background: #F7FAFC;
+          border-radius: 3px;
+        }
+        
+        .overflow-x-auto::-webkit-scrollbar-thumb {
+          background: #CBD5E0;
+          border-radius: 3px;
+        }
+        
+        .overflow-x-auto::-webkit-scrollbar-thumb:hover {
+          background: #A0AEC0;
+        }
+        
+        /* Melhorias na responsividade */
+        @media (max-width: 768px) {
+          .grid-cols-2 {
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+          }
+          
+          .lg\\:grid-cols-4 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          
+          .lg\\:grid-cols-8 {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+        
+        /* Hover effects aprimorados */
+        .group:hover .group-hover\\:visible {
+          visibility: visible;
+        }
+        
+        .group .group-hover\\:visible {
+          visibility: hidden;
+        }
+        
+        /* Animações suaves para filtros */
+        .transition-all {
+          transition: all 0.2s ease-in-out;
+        }
+        
+        /* Cores personalizadas para urgência */
+        .bg-gradient-to-r {
+          background-image: linear-gradient(to right, var(--tw-gradient-stops));
+        }
+      `}</style>
+    </div>
+  );
+}
