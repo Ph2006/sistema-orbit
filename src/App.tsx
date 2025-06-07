@@ -40,10 +40,23 @@ function App() {
   
   // Use objeto vazio como fallback para evitar erros de desestruturação
   const authStore = useAuthStore() || {};
-  const { setUser, setLoading, companyId } = authStore;
+  const { setUser, setLoading, setCompanyId, companyId } = authStore;
 
   useEffect(() => {
     console.log("App.tsx useEffect - Inicializando autenticação");
+    
+    // Recuperar companyId do localStorage se existir
+    const savedCompanyId = localStorage.getItem('companyId');
+    if (savedCompanyId && setCompanyId && typeof setCompanyId === 'function') {
+      try {
+        console.log("Restaurando companyId do localStorage:", savedCompanyId);
+        setCompanyId(savedCompanyId);
+      } catch (error) {
+        console.error("Erro ao restaurar companyId:", error);
+      }
+    } else {
+      console.log("Não foi encontrado companyId no localStorage ou não é possível definir");
+    }
     
     // Verificar se o store foi inicializado corretamente
     if (!setLoading || typeof setLoading !== 'function') {
@@ -90,7 +103,8 @@ function App() {
       if (companyId) {
         console.log(`Company ID after auth state change: ${companyId}`);
       } else {
-        console.warn("Company ID não está disponível");
+        const localCompanyId = localStorage.getItem('companyId');
+        console.log(`Company ID from localStorage: ${localCompanyId || 'não definido'}`);
       }
     });
 
@@ -99,7 +113,7 @@ function App() {
       console.log("App.tsx useEffect cleanup - Desvinculando listener");
       unsubscribe();
     };
-  }, [setUser, setLoading, companyId]);
+  }, [setUser, setLoading, setCompanyId, companyId]);
 
   // Mostrar um indicador de carregamento enquanto inicializa
   if (!isInitialized) {
