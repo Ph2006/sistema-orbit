@@ -11,13 +11,20 @@ import {
   orderBy,
   getDoc
 } from 'firebase/firestore';
-import { db, getCompanyCollection } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { Customer } from '../types/customer';
+
+// Função auxiliar para obter coleção com base na empresa
+const getCompanyCollection = (collectionName: string) => {
+  const companyId = localStorage.getItem('companyId') || 'mecald';
+  return `companies/${companyId}/${collectionName}`;
+};
 
 interface CustomerState {
   customers: Customer[];
   loading: boolean;
   error: string | null;
+  initialized: boolean;
   loadCustomers: () => Promise<void>;
   getCustomer: (customerId: string) => Promise<Customer | null>;
   addCustomer: (customer: Omit<Customer, 'id'>) => Promise<string>;
@@ -30,17 +37,27 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
   customers: [],
   loading: false,
   error: null,
+  initialized: false,
 
   loadCustomers: async () => {
+    // Se já estiver carregando ou já inicializado, não fazer nada
+    if (get().loading || (get().initialized && get().customers.length > 0)) {
+      return;
+    }
+
     try {
+      console.log("CustomerStore: Loading customers");
       set({ loading: true, error: null });
+
       // Use company-specific collection path
       const querySnapshot = await getDocs(collection(db, getCompanyCollection('customers')));
       const customersData = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Customer[];
-      set({ customers: customersData, loading: false });
+
+      console.log(`CustomerStore: Loaded ${customersData.length} customers`);
+      set({ customers: customersData, loading: false, initialized: true });
     } catch (error) {
       console.error('Error loading customers:', error);
       set({ error: 'Failed to load customers', loading: false });
@@ -131,7 +148,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           id: doc.id,
           ...doc.data()
         })) as Customer[];
-        set({ customers, loading: false });
+        set({ customers, loading: false, initialized: true });
       }, (error) => {
         console.error('Error in customers subscription:', error);
         set({ error: 'Failed to subscribe to customers', loading: false });
