@@ -3,7 +3,6 @@ import { getAuth, browserLocalPersistence, setPersistence } from 'firebase/auth'
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
-import { useAuthStore } from '../store/authStore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -40,24 +39,17 @@ const storage = getStorage(app);
 const functions = getFunctions(app);
 
 // Check if we're in development mode AND emulators are explicitly enabled
-// For WebContainer environments, we'll default to production services
-const useEmulators = false; // Set this to true only when you're running emulators locally
+const useEmulators = false;
 
 // Only connect to emulators if explicitly enabled
 if (useEmulators) {
   try {
-    // Connect to Firestore emulator
     connectFirestoreEmulator(db, 'localhost', 8080);
     console.log('Connected to Firestore emulator');
     
-    // Connect to Auth emulator (uncomment if needed)
-    // connectAuthEmulator(auth, 'http://localhost:9099');
-    
-    // Connect to Storage emulator
     connectStorageEmulator(storage, 'localhost', 9199);
     console.log('Connected to Storage emulator');
     
-    // Connect to Functions emulator
     connectFunctionsEmulator(functions, 'localhost', 5001);
     console.log('Connected to Functions emulator');
   } catch (error) {
@@ -69,26 +61,16 @@ if (useEmulators) {
 }
 
 // Helper function to get company-specific collection path
-export const getCompanyCollection = (collectionName: string) => {
-  // Get companyId directly from the auth store
-  const { companyId } = useAuthStore.getState();
+export const getCompanyCollection = (collectionName: string, companyId?: string) => {
+  // Use the passed companyId or try to get it from localStorage if not provided
+  const finalCompanyId = companyId || localStorage.getItem('companyId') || 'mecald';
   
-  // Fallback to localStorage if auth store is not yet initialized or companyId is null
-  // This might still happen during initial load, but relying on auth state is better.
-  const finalCompanyId = companyId || localStorage.getItem('companyId');
-
   if (!finalCompanyId) {
-    // Handle the case where companyId is still not available
     console.error('Company ID is not available when trying to access collection:', collectionName);
-    // You might want to return an invalid path or throw an error here
-    // Returning a path that likely won't exist will prevent unintentional data access
     return `invalid/company/collection/${collectionName}`;
   }
   
-  // Log which collection we're accessing
   console.log(`Accessing collection: companies/${finalCompanyId}/${collectionName}`);
-  
-  // Return the company-specific path structure
   return `companies/${finalCompanyId}/${collectionName}`;
 };
 
