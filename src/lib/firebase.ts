@@ -3,7 +3,7 @@ import { getAuth, browserLocalPersistence, setPersistence } from 'firebase/auth'
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
-// Remover esta importação circular:
+// REMOVA esta importação para quebrar a dependência circular
 // import { useAuthStore } from '../store/authStore';
 
 const firebaseConfig = {
@@ -41,17 +41,20 @@ const storage = getStorage(app);
 const functions = getFunctions(app);
 
 // Check if we're in development mode AND emulators are explicitly enabled
-const useEmulators = false;
+const useEmulators = false; // Set this to true only when you're running emulators locally
 
 // Only connect to emulators if explicitly enabled
 if (useEmulators) {
   try {
+    // Connect to Firestore emulator
     connectFirestoreEmulator(db, 'localhost', 8080);
     console.log('Connected to Firestore emulator');
     
+    // Connect to Storage emulator
     connectStorageEmulator(storage, 'localhost', 9199);
     console.log('Connected to Storage emulator');
     
+    // Connect to Functions emulator
     connectFunctionsEmulator(functions, 'localhost', 5001);
     console.log('Connected to Functions emulator');
   } catch (error) {
@@ -63,9 +66,9 @@ if (useEmulators) {
 }
 
 // Helper function to get company-specific collection path
-// Modificando para aceitar companyId como parâmetro em vez de acessar o store
+// MODIFICADA para não depender de authStore
 export const getCompanyCollection = (collectionName: string, companyId?: string) => {
-  // Não acessar o store diretamente para quebrar a dependência circular
+  // Obter companyId do parâmetro ou do localStorage, mas NÃO do authStore
   const finalCompanyId = companyId || localStorage.getItem('companyId') || 'mecald';
   
   if (!finalCompanyId) {
