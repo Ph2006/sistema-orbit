@@ -12,7 +12,24 @@ import {
   getDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Customer } from '../types/customer';
+
+// Definição interna para Customer
+interface Customer {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  notes?: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  [key: string]: any;
+}
 
 // Função auxiliar para obter coleção com base na empresa
 const getCompanyCollection = (collectionName: string) => {
@@ -41,7 +58,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
 
   loadCustomers: async () => {
     // Se já estiver carregando ou já inicializado, não fazer nada
-    if (get().loading || (get().initialized && get().customers.length > 0)) {
+    if (get().loading) {
+      console.log("CustomerStore: Already loading, skipping loadCustomers call");
       return;
     }
 
@@ -50,7 +68,10 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       set({ loading: true, error: null });
 
       // Use company-specific collection path
-      const querySnapshot = await getDocs(collection(db, getCompanyCollection('customers')));
+      const customersRef = collection(db, getCompanyCollection('customers'));
+      const customersQuery = query(customersRef, orderBy('name', 'asc'));
+      const querySnapshot = await getDocs(customersQuery);
+      
       const customersData = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -148,6 +169,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           id: doc.id,
           ...doc.data()
         })) as Customer[];
+        console.log(`CustomerStore: Subscription updated with ${customers.length} customers`);
         set({ customers, loading: false, initialized: true });
       }, (error) => {
         console.error('Error in customers subscription:', error);
