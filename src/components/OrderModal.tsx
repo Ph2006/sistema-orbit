@@ -119,6 +119,29 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
         }
       };
 
+      // Processar itens com todos os dados, incluindo peso
+      const processedItems = Array.isArray(order.items) ? 
+        order.items.map((item, index) => ({
+          id: item.id || `item-${index}`,
+          code: item.code || '',
+          description: item.description || '',
+          quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+          unit: item.unit || 'un',
+          weight: typeof item.weight === 'number' ? item.weight : 0,
+          progress: typeof item.progress === 'number' ? item.progress : 0,
+          overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : (typeof item.progress === 'number' ? item.progress : 0),
+          itemNumber: item.itemNumber || (index + 1),
+          notes: item.notes || '',
+          priority: item.priority || 'medium',
+          estimatedDays: typeof item.estimatedDays === 'number' ? item.estimatedDays : 1,
+          startDate: item.startDate || '',
+          endDate: item.endDate || '',
+          responsible: item.responsible || '',
+          stagePlanning: item.stagePlanning || {}
+        })) : [];
+
+      console.log("Processed items with weights:", processedItems);
+
       setFormData({
         customerId: order.customerId || '',
         customerName: order.customerName || order.customer || '',
@@ -130,10 +153,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
         completionDate: formatDateField(order.completionDate),
         status: order.status || 'in-progress',
         observations: order.observations || order.notes || '',
-        items: Array.isArray(order.items) ? [...order.items.map((item, index) => ({
-          ...item,
-          itemNumber: item.itemNumber || index + 1
-        }))] : [],
+        items: processedItems,
         googleDriveLink: order.googleDriveLink || '',
         value: order.value || 0,
         priority: order.priority || 'medium'
@@ -475,7 +495,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
     const completedItems = items.filter(item => (item.overallProgress || 0) >= 100).length;
     const inProgressItems = items.filter(item => (item.overallProgress || 0) > 0 && (item.overallProgress || 0) < 100).length;
     const notStartedItems = items.filter(item => (item.overallProgress || 0) === 0).length;
-    const totalWeight = items.reduce((sum, item) => sum + (item.weight || 0), 0);
+    const totalWeight = items.reduce((sum, item) => sum + ((item.weight || 0) * (item.quantity || 1)), 0);
     const averageProgress = totalItems > 0 ? items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems : 0;
 
     return {
@@ -1012,7 +1032,17 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                               <span className="text-gray-900">{item.quantity} {item.unit}</span>
                             </td>
                             <td className="py-4 px-4">
-                              <span className="text-gray-900">{item.weight} kg</span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-gray-900 font-medium">{(item.weight || 0).toFixed(2)} kg</span>
+                                {(item.weight || 0) === 0 && (
+                                  <AlertCircle className="w-4 h-4 text-amber-500" title="Peso não informado" />
+                                )}
+                              </div>
+                              {(item.quantity || 1) > 1 && (
+                                <div className="text-xs text-gray-500">
+                                  Total: {((item.weight || 0) * (item.quantity || 1)).toFixed(2)} kg
+                                </div>
+                              )}
                             </td>
                             <td className="py-4 px-4">
                               <div className="flex items-center gap-2">
@@ -1093,6 +1123,30 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                     <div>
                       <span className="text-gray-600">Valor Total:</span>
                       <span className="font-medium text-gray-900 ml-2">R$ {(formData.value || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                  
+                  {/* Detalhamento dos pesos */}
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                      <div>
+                        <span className="text-gray-600">Itens com peso informado:</span>
+                        <span className="font-medium text-green-700 ml-2">
+                          {formData.items?.filter(item => (item.weight || 0) > 0).length || 0}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Itens sem peso:</span>
+                        <span className="font-medium text-red-700 ml-2">
+                          {formData.items?.filter(item => (item.weight || 0) === 0).length || 0}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Peso médio por item:</span>
+                        <span className="font-medium text-blue-700 ml-2">
+                          {itemStats.totalItems > 0 ? (itemStats.totalWeight / itemStats.totalItems).toFixed(2) : '0.00'} kg
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1327,9 +1381,217 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
     window.print();
   };
 
-  // Função para exportar como PDF (mock)
+  // Função para exportar como PDF
   const handleExportPDF = () => {
-    alert('Funcionalidade de exportação PDF será implementada em breve!');
+    try {
+      // Criar um novo documento temporário para a impressão em PDF
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        alert('Por favor, permita pop-ups para exportar o PDF');
+        return;
+      }
+
+      // Obter o conteúdo HTML do romaneio
+      const romaneioContent = document.querySelector('.romaneio-content');
+      if (!romaneioContent) {
+        alert('Erro ao gerar PDF: conteúdo não encontrado');
+        return;
+      }
+
+      // HTML completo para o PDF
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Romaneio - ${generateRomaneioNumber()}</title>
+          <style>
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            
+            body {
+              font-family: Arial, sans-serif;
+              font-size: 11pt;
+              line-height: 1.4;
+              color: #333;
+              padding: 1cm;
+            }
+            
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+            }
+            
+            .header h1 {
+              font-size: 20pt;
+              font-weight: bold;
+              margin-bottom: 8px;
+            }
+            
+            .header p {
+              font-size: 12pt;
+              color: #666;
+              margin-bottom: 15px;
+            }
+            
+            .romaneio-number {
+              background-color: #f5f5f5;
+              padding: 12px;
+              border-radius: 6px;
+              display: inline-block;
+              border: 1px solid #ddd;
+            }
+            
+            .romaneio-number p:first-child {
+              font-weight: bold;
+              font-size: 14pt;
+            }
+            
+            .info-section {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 20px;
+              margin-bottom: 30px;
+            }
+            
+            .info-box {
+              background-color: #f9f9f9;
+              padding: 15px;
+              border-radius: 6px;
+              border: 1px solid #e0e0e0;
+            }
+            
+            .info-box h3 {
+              font-weight: bold;
+              margin-bottom: 12px;
+              color: #333;
+            }
+            
+            .info-box div {
+              margin-bottom: 6px;
+              font-size: 10pt;
+            }
+            
+            .info-box span {
+              font-weight: bold;
+            }
+            
+            .items-section h3 {
+              font-weight: bold;
+              margin-bottom: 15px;
+              color: #333;
+            }
+            
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
+              border: 1px solid #ddd;
+            }
+            
+            th, td {
+              border: 1px solid #ddd;
+              padding: 8px;
+              text-align: left;
+              font-size: 9pt;
+            }
+            
+            th {
+              background-color: #f5f5f5;
+              font-weight: bold;
+              text-align: center;
+            }
+            
+            .text-center { text-align: center; }
+            .text-right { text-align: right; }
+            
+            .totals {
+              background-color: #f0f0f0;
+              font-weight: bold;
+            }
+            
+            .observations {
+              background-color: #fff9c4;
+              padding: 12px;
+              border-radius: 6px;
+              border: 1px solid #f4d03f;
+              margin-bottom: 30px;
+            }
+            
+            .observations h3 {
+              margin-bottom: 8px;
+              color: #333;
+            }
+            
+            .signatures {
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 30px;
+              margin-top: 40px;
+              padding-top: 30px;
+              border-top: 1px solid #ddd;
+            }
+            
+            .signature-box {
+              text-align: center;
+            }
+            
+            .signature-line {
+              border-top: 1px solid #666;
+              margin-top: 50px;
+              padding-top: 8px;
+            }
+            
+            .signature-box p:first-child {
+              font-weight: bold;
+            }
+            
+            .signature-box p:last-child {
+              font-size: 9pt;
+              color: #666;
+            }
+            
+            .footer {
+              text-align: center;
+              margin-top: 30px;
+              padding-top: 15px;
+              border-top: 1px solid #ddd;
+              font-size: 8pt;
+              color: #999;
+            }
+            
+            @media print {
+              body { padding: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          ${romaneioContent.innerHTML}
+        </body>
+        </html>
+      `;
+
+      // Escrever o conteúdo na nova janela
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+
+      // Aguardar o carregamento e disparar a impressão
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          printWindow.close();
+        }, 500);
+      };
+
+    } catch (error) {
+      console.error('Erro ao exportar PDF:', error);
+      alert('Erro ao exportar PDF. Tente novamente ou use a função de impressão.');
+    }
   };
 
   // Função para gerar número do romaneio
@@ -1456,20 +1718,20 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
         </div>
 
         {/* Conteúdo do Romaneio - Para impressão */}
-        <div className="p-8 overflow-y-auto max-h-[60vh] print:max-h-none print:overflow-visible">
+        <div className="p-8 overflow-y-auto max-h-[60vh] print:max-h-none print:overflow-visible romaneio-content">
           {/* Cabeçalho do Romaneio */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-8 header">
             <h1 className="text-2xl font-bold text-gray-900 mb-2">{romaneioData.title}</h1>
             <p className="text-gray-600 mb-4">{romaneioData.subtitle}</p>
-            <div className="bg-gray-100 p-4 rounded-lg inline-block">
+            <div className="bg-gray-100 p-4 rounded-lg inline-block romaneio-number">
               <p className="font-semibold text-lg">Romaneio Nº: {generateRomaneioNumber()}</p>
               <p className="text-gray-600">Data: {format(new Date(romaneioData.expeditionDate), 'dd/MM/yyyy', { locale: ptBR })}</p>
             </div>
           </div>
 
           {/* Informações do Pedido */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <div className="bg-gray-50 p-4 rounded-lg">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 info-section">
+            <div className="bg-gray-50 p-4 rounded-lg info-box">
               <h3 className="font-semibold text-gray-900 mb-3">Dados do Pedido</h3>
               <div className="space-y-2 text-sm">
                 <div><span className="font-medium">Pedido Nº:</span> {order.orderNumber}</div>
@@ -1482,7 +1744,7 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
               </div>
             </div>
 
-            <div className="bg-gray-50 p-4 rounded-lg">
+            <div className="bg-gray-50 p-4 rounded-lg info-box">
               <h3 className="font-semibold text-gray-900 mb-3">Dados da Expedição</h3>
               <div className="space-y-2 text-sm">
                 <div><span className="font-medium">Destino:</span> {romaneioData.destination || 'A definir'}</div>
@@ -1495,7 +1757,7 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
           </div>
 
           {/* Tabela de Itens */}
-          <div className="mb-8">
+          <div className="mb-8 items-section">
             <h3 className="font-semibold text-gray-900 mb-4">Relação de Itens</h3>
             <div className="border border-gray-300 rounded-lg overflow-hidden">
               <table className="w-full">
@@ -1541,8 +1803,60 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
                   ))}
                 </tbody>
                 <tfoot className="bg-gray-100">
-                  <tr>
+                  <tr className="totals">
                     <td colSpan={5} className="py-3 px-4 font-semibold text-gray-900 border-t-2 border-gray-300">
+                      TOTAIS
+                    </td>
+                    <td className="py-3 px-4 text-right font-semibold text-gray-900 border-t-2 border-gray-300">
+                      {totalQuantity} itens
+                    </td>
+                    <td className="py-3 px-4 text-right font-bold text-gray-900 border-t-2 border-gray-300 text-lg">
+                      {totalWeight.toFixed(2)} kg
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          {/* Observações */}
+          {romaneioData.observations && (
+            <div className="mb-8 observations">
+              <h3 className="font-semibold text-gray-900 mb-2">Observações</h3>
+              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                <p className="text-gray-800">{romaneioData.observations}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Assinaturas */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12 pt-8 border-t border-gray-300 signatures">
+            <div className="text-center signature-box">
+              <div className="border-t border-gray-400 pt-2 mt-16 signature-line">
+                <p className="font-medium">Responsável pela Expedição</p>
+                <p className="text-sm text-gray-600">Nome e Assinatura</p>
+              </div>
+            </div>
+            <div className="text-center signature-box">
+              <div className="border-t border-gray-400 pt-2 mt-16 signature-line">
+                <p className="font-medium">Motorista/Transportadora</p>
+                <p className="text-sm text-gray-600">Nome e Assinatura</p>
+              </div>
+            </div>
+            <div className="text-center signature-box">
+              <div className="border-t border-gray-400 pt-2 mt-16 signature-line">
+                <p className="font-medium">Recebedor</p>
+                <p className="text-sm text-gray-600">Nome, Assinatura e Data</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Rodapé */}
+          <div className="text-center mt-8 pt-4 border-t border-gray-200 footer">
+            <p className="text-xs text-gray-500">
+              Romaneio gerado automaticamente em {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+            </p>
+          </div>-2 border-gray-300">
                       TOTAIS
                     </td>
                     <td className="py-3 px-4 text-right font-semibold text-gray-900 border-t-2 border-gray-300">
