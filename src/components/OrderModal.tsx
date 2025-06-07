@@ -424,6 +424,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
   const clearSelection = () => {
     setSelectedItems([]);
   };
+  
   const filteredAndSortedItems = React.useMemo(() => {
     let filtered = formData.items || [];
 
@@ -1248,28 +1249,6 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-3 mb-3">
-                    <FileText className="w-8 h-8 text-blue-600" />
-                    <div>
-                      <h5 className="font-medium text-gray-900">Especificações Técnicas</h5>
-                      <p className="text-sm text-gray-600">Desenhos e especificações</p>
-                    </div>
-                  </div>
-                  {formData.googleDriveLink ? (
-                    <a
-                      href={`${formData.googleDriveLink}?filter=pdf,dwg,doc`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                    >
-                      Ver documentos técnicos →
-                    </a>
-                  ) : (
-                    <span className="text-gray-400 text-sm">Configure o link do Drive</span>
-                  )}
-                </div>
-
-                <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-3 mb-3">
                     <Camera className="w-8 h-8 text-green-600" />
                     <div>
                       <h5 className="font-medium text-gray-900">Fotos de Progresso</h5>
@@ -1341,6 +1320,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
           }}
         />
       )}
+
       {/* Modal de Romaneio */}
       {showRomaneioModal && (
         <RomaneioModal
@@ -1857,59 +1837,6 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
               Romaneio gerado automaticamente em {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
             </p>
           </div>
-        </div>-2 border-gray-300">
-                      TOTAIS
-                    </td>
-                    <td className="py-3 px-4 text-right font-semibold text-gray-900 border-t-2 border-gray-300">
-                      {totalQuantity} itens
-                    </td>
-                    <td className="py-3 px-4 text-right font-bold text-gray-900 border-t-2 border-gray-300 text-lg">
-                      {totalWeight.toFixed(2)} kg
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-
-          {/* Observações */}
-          {romaneioData.observations && (
-            <div className="mb-8">
-              <h3 className="font-semibold text-gray-900 mb-2">Observações</h3>
-              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                <p className="text-gray-800">{romaneioData.observations}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Assinaturas */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12 pt-8 border-t border-gray-300">
-            <div className="text-center">
-              <div className="border-t border-gray-400 pt-2 mt-16">
-                <p className="font-medium">Responsável pela Expedição</p>
-                <p className="text-sm text-gray-600">Nome e Assinatura</p>
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="border-t border-gray-400 pt-2 mt-16">
-                <p className="font-medium">Motorista/Transportadora</p>
-                <p className="text-sm text-gray-600">Nome e Assinatura</p>
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="border-t border-gray-400 pt-2 mt-16">
-                <p className="font-medium">Recebedor</p>
-                <p className="text-sm text-gray-600">Nome, Assinatura e Data</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Rodapé */}
-          <div className="text-center mt-8 pt-4 border-t border-gray-200">
-            <p className="text-xs text-gray-500">
-              Romaneio gerado automaticamente em {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
-            </p>
-          </div>
         </div>
       </div>
 
@@ -1959,6 +1886,7 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
     </div>
   );
 };
+
 interface ItemModalProps {
   item?: OrderItem | null;
   onSave: (item: OrderItem) => void;
@@ -2271,4 +2199,26 @@ const Camera = (props: any) => {
       <circle cx="12" cy="13" r="3" />
     </svg>
   );
-};
+};-gray-200 hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-3 mb-3">
+                    <FileText className="w-8 h-8 text-blue-600" />
+                    <div>
+                      <h5 className="font-medium text-gray-900">Especificações Técnicas</h5>
+                      <p className="text-sm text-gray-600">Desenhos e especificações</p>
+                    </div>
+                  </div>
+                  {formData.googleDriveLink ? (
+                    <a
+                      href={`${formData.googleDriveLink}?filter=pdf,dwg,doc`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                    >
+                      Ver documentos técnicos →
+                    </a>
+                  ) : (
+                    <span className="text-gray-400 text-sm">Configure o link do Drive</span>
+                  )}
+                </div>
+
+                <div className="bg-white p-4 rounded-lg border border
