@@ -5,7 +5,6 @@ import {
   Plus, 
   Edit, 
   Trash2, 
-  Eye, 
   Calendar, 
   User, 
   Package, 
@@ -63,7 +62,7 @@ interface Order {
 }
 
 // Tipo para organização da tabela
-type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'status';
+type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'deliveryDate' | 'status';
 type SortOrder = 'asc' | 'desc';
 
 export default function Orders() {
@@ -267,6 +266,14 @@ export default function Orders() {
             : bValue - aValue;
         }
         
+        if (sortField === 'deliveryDate') {
+          const aValue = a.deliveryDate ? new Date(a.deliveryDate).getTime() : 0;
+          const bValue = b.deliveryDate ? new Date(b.deliveryDate).getTime() : 0;
+          return sortOrder === 'asc' 
+            ? aValue - bValue 
+            : bValue - aValue;
+        }
+        
         if (sortField === 'status') {
           const aValue = a.status || '';
           const bValue = b.status || '';
@@ -302,13 +309,6 @@ export default function Orders() {
     setSelectedOrderState(order);
     setSelectedOrder(order);
     setModalMode('edit');
-    setIsModalOpen(true);
-  };
-
-  const handleViewOrder = (order: Order) => {
-    setSelectedOrderState(order);
-    setSelectedOrder(order);
-    setModalMode('view');
     setIsModalOpen(true);
   };
 
@@ -375,6 +375,20 @@ export default function Orders() {
     }
   };
 
+  // Verificar se um pedido está atrasado
+  const isOrderLate = (order: Order) => {
+    if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return false;
+    
+    try {
+      const deliveryDate = new Date(order.deliveryDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return deliveryDate < today;
+    } catch {
+      return false;
+    }
+  };
+
   // Função para obter o texto do status
   const getStatusText = (status: string | undefined) => {
     if (!status) return 'Desconhecido';
@@ -428,18 +442,7 @@ export default function Orders() {
     const cancelledOrders = processedOrders.filter(o => o.status === 'cancelled').length;
     
     // Calcular pedidos atrasados
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const lateOrders = processedOrders.filter(order => {
-      if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return false;
-      try {
-        const deliveryDate = new Date(order.deliveryDate);
-        return deliveryDate < today;
-      } catch {
-        return false;
-      }
-    }).length;
+    const lateOrders = processedOrders.filter(order => isOrderLate(order)).length;
     
     // Calcular tempos médios
     let totalProductionDays = 0;
@@ -746,6 +749,15 @@ export default function Orders() {
                       </div>
                     </th>
                     <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer" 
+                        onClick={() => handleSort('deliveryDate')}>
+                      <div className="flex items-center gap-1">
+                        Data de Entrega
+                        {sortField === 'deliveryDate' && (
+                          <ArrowUpDown className={`w-4 h-4 ${sortOrder === 'asc' ? 'transform rotate-180' : ''}`} />
+                        )}
+                      </div>
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer" 
                         onClick={() => handleSort('status')}>
                       <div className="flex items-center gap-1">
                         Status
@@ -767,6 +779,7 @@ export default function Orders() {
                     const internalOS = safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']);
                     const statusText = getStatusText(order.status);
                     const statusColorClass = getStatusColor(order.status);
+                    const isLate = isOrderLate(order);
                     
                     return (
                       <tr key={order.id} className="hover:bg-gray-50 transition-colors">
@@ -792,20 +805,21 @@ export default function Orders() {
                           </div>
                         </td>
                         <td className="py-4 px-4">
+                          <div className="flex items-center">
+                            <Calendar className={`w-4 h-4 ${isLate ? 'text-red-400' : 'text-gray-400'} mr-2`} />
+                            <span className={isLate ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                              {formatDate(order.deliveryDate)}
+                              {isLate && <span className="ml-2 text-xs bg-red-100 text-red-800 px-1.5 py-0.5 rounded-full">Atrasado</span>}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-4 px-4">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColorClass}`}>
                             {statusText}
                           </span>
                         </td>
                         <td className="py-4 px-4 print:hidden">
                           <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => handleViewOrder(order)}
-                              className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
-                              title="Visualizar"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            
                             <button
                               onClick={() => handleEditOrder(order)}
                               className="p-1 text-gray-400 hover:text-green-600 transition-colors"
@@ -988,6 +1002,7 @@ export default function Orders() {
               <span>Em Processo: {processedOrders.filter(o => o.status === 'in-progress').length}</span>
               <span>Concluídos: {processedOrders.filter(o => o.status === 'completed').length}</span>
               <span>Em Pausa: {processedOrders.filter(o => o.status === 'on-hold').length}</span>
+              <span>Atrasados: {processedOrders.filter(order => isOrderLate(order)).length}</span>
             </div>
           </div>
         </div>
