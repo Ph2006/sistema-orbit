@@ -89,6 +89,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
   const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [progressItem, setProgressItem] = useState<OrderItem | null>(null);
+  const [showRomaneioModal, setShowRomaneioModal] = useState(false);
 
   // Carregar clientes quando o modal for aberto
   useEffect(() => {
@@ -372,7 +373,37 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
     setProgressItem(null);
   };
 
-  // Filtrar e ordenar itens
+  // Função para selecionar/deselecionar todos os itens
+  const toggleSelectAll = () => {
+    if (selectedItems.length === filteredAndSortedItems.length) {
+      setSelectedItems([]);
+    } else {
+      setSelectedItems(filteredAndSortedItems.map(item => item.id));
+    }
+  };
+
+  // Função para selecionar/deselecionar um item
+  const toggleSelectItem = (itemId: string) => {
+    setSelectedItems(prev => 
+      prev.includes(itemId) 
+        ? prev.filter(id => id !== itemId)
+        : [...prev, itemId]
+    );
+  };
+
+  // Função para abrir modal de romaneio
+  const openRomaneioModal = () => {
+    if (selectedItems.length === 0) {
+      alert('Selecione pelo menos um item para gerar o romaneio.');
+      return;
+    }
+    setShowRomaneioModal(true);
+  };
+
+  // Função para limpar seleção
+  const clearSelection = () => {
+    setSelectedItems([]);
+  };
   const filteredAndSortedItems = React.useMemo(() => {
     let filtered = formData.items || [];
 
@@ -877,6 +908,24 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                 {/* Ações */}
                 {mode !== 'view' && (
                   <div className="flex gap-2">
+                    {selectedItems.length > 0 && (
+                      <>
+                        <button
+                          onClick={openRomaneioModal}
+                          className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-md"
+                        >
+                          <FileText className="w-4 h-4" />
+                          Romaneio ({selectedItems.length})
+                        </button>
+                        <button
+                          onClick={clearSelection}
+                          className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors shadow-md"
+                        >
+                          <X className="w-4 h-4" />
+                          Limpar Seleção
+                        </button>
+                      </>
+                    )}
                     <button
                       onClick={() => openItemModal()}
                       className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-md"
@@ -910,6 +959,14 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
+                          <th className="text-left py-3 px-4 font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={selectedItems.length === filteredAndSortedItems.length && filteredAndSortedItems.length > 0}
+                              onChange={toggleSelectAll}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                          </th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">#</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">Código</th>
                           <th className="text-left py-3 px-4 font-medium text-gray-700">Descrição</th>
@@ -922,7 +979,15 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                       </thead>
                       <tbody className="divide-y divide-gray-200">
                         {filteredAndSortedItems.map((item, index) => (
-                          <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                          <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${selectedItems.includes(item.id) ? 'bg-blue-50' : ''}`}>
+                            <td className="py-4 px-4">
+                              <input
+                                type="checkbox"
+                                checked={selectedItems.includes(item.id)}
+                                onChange={() => toggleSelectItem(item.id)}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                            </td>
                             <td className="py-4 px-4">
                               <div className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-100 text-blue-800 font-medium text-sm">
                                 {item.itemNumber || index + 1}
@@ -1222,11 +1287,363 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
           }}
         />
       )}
+      {/* Modal de Romaneio */}
+      {showRomaneioModal && (
+        <RomaneioModal
+          order={formData}
+          selectedItems={formData.items?.filter(item => selectedItems.includes(item.id)) || []}
+          onClose={() => setShowRomaneioModal(false)}
+        />
+      )}
     </div>
   );
 }
 
-// Componente para Modal de Item
+// Componente para Modal de Romaneio
+interface RomaneioModalProps {
+  order: Order;
+  selectedItems: OrderItem[];
+  onClose: () => void;
+}
+
+const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onClose }) => {
+  const [romaneioData, setRomaneioData] = useState({
+    title: 'ROMANEIO DE EXPEDIÇÃO',
+    subtitle: 'Relação de materiais para expedição',
+    destination: '',
+    transport: '',
+    driver: '',
+    vehicle: '',
+    observations: '',
+    expeditionDate: new Date().toISOString().split('T')[0]
+  });
+
+  // Calcular totais
+  const totalWeight = selectedItems.reduce((sum, item) => sum + (item.weight || 0) * (item.quantity || 1), 0);
+  const totalQuantity = selectedItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+
+  // Função para imprimir
+  const handlePrint = () => {
+    window.print();
+  };
+
+  // Função para exportar como PDF (mock)
+  const handleExportPDF = () => {
+    alert('Funcionalidade de exportação PDF será implementada em breve!');
+  };
+
+  // Função para gerar número do romaneio
+  const generateRomaneioNumber = () => {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const orderNumber = order.orderNumber || '000';
+    return `ROM-${orderNumber}-${year}${month}${day}`;
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg w-full max-w-4xl max-h-[95vh] overflow-hidden shadow-2xl">
+        {/* Header - Não imprime */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-blue-600 text-white print:hidden">
+          <div>
+            <h2 className="text-xl font-semibold">Gerar Romaneio de Expedição</h2>
+            <p className="text-blue-100 text-sm mt-1">
+              {selectedItems.length} item(s) selecionado(s) - Peso total: {totalWeight.toFixed(2)} kg
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors"
+            >
+              <Printer className="w-4 h-4" />
+              Imprimir
+            </button>
+            <button
+              onClick={handleExportPDF}
+              className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="text-white hover:text-gray-300 transition-colors p-1"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+
+        {/* Configurações do Romaneio - Não imprime */}
+        <div className="p-6 bg-gray-50 border-b border-gray-200 print:hidden">
+          <h3 className="text-lg font-semibold mb-4">Configurações do Romaneio</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Destino
+              </label>
+              <input
+                type="text"
+                value={romaneioData.destination}
+                onChange={(e) => setRomaneioData(prev => ({...prev, destination: e.target.value}))}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Local de destino"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Transportadora
+              </label>
+              <input
+                type="text"
+                value={romaneioData.transport}
+                onChange={(e) => setRomaneioData(prev => ({...prev, transport: e.target.value}))}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Nome da transportadora"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Motorista
+              </label>
+              <input
+                type="text"
+                value={romaneioData.driver}
+                onChange={(e) => setRomaneioData(prev => ({...prev, driver: e.target.value}))}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Nome do motorista"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Veículo/Placa
+              </label>
+              <input
+                type="text"
+                value={romaneioData.vehicle}
+                onChange={(e) => setRomaneioData(prev => ({...prev, vehicle: e.target.value}))}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Placa do veículo"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Data de Expedição
+              </label>
+              <input
+                type="date"
+                value={romaneioData.expeditionDate}
+                onChange={(e) => setRomaneioData(prev => ({...prev, expeditionDate: e.target.value}))}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Observações
+              </label>
+              <input
+                type="text"
+                value={romaneioData.observations}
+                onChange={(e) => setRomaneioData(prev => ({...prev, observations: e.target.value}))}
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Observações gerais"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Conteúdo do Romaneio - Para impressão */}
+        <div className="p-8 overflow-y-auto max-h-[60vh] print:max-h-none print:overflow-visible">
+          {/* Cabeçalho do Romaneio */}
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">{romaneioData.title}</h1>
+            <p className="text-gray-600 mb-4">{romaneioData.subtitle}</p>
+            <div className="bg-gray-100 p-4 rounded-lg inline-block">
+              <p className="font-semibold text-lg">Romaneio Nº: {generateRomaneioNumber()}</p>
+              <p className="text-gray-600">Data: {format(new Date(romaneioData.expeditionDate), 'dd/MM/yyyy', { locale: ptBR })}</p>
+            </div>
+          </div>
+
+          {/* Informações do Pedido */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-3">Dados do Pedido</h3>
+              <div className="space-y-2 text-sm">
+                <div><span className="font-medium">Pedido Nº:</span> {order.orderNumber}</div>
+                <div><span className="font-medium">OS Interna:</span> {order.internalOS}</div>
+                <div><span className="font-medium">Cliente:</span> {order.customerName}</div>
+                <div><span className="font-medium">Projeto:</span> {order.project || 'N/A'}</div>
+                {order.deliveryDate && (
+                  <div><span className="font-medium">Data de Entrega:</span> {format(new Date(order.deliveryDate), 'dd/MM/yyyy', { locale: ptBR })}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-3">Dados da Expedição</h3>
+              <div className="space-y-2 text-sm">
+                <div><span className="font-medium">Destino:</span> {romaneioData.destination || 'A definir'}</div>
+                <div><span className="font-medium">Transportadora:</span> {romaneioData.transport || 'A definir'}</div>
+                <div><span className="font-medium">Motorista:</span> {romaneioData.driver || 'A definir'}</div>
+                <div><span className="font-medium">Veículo:</span> {romaneioData.vehicle || 'A definir'}</div>
+                <div><span className="font-medium">Data Expedição:</span> {format(new Date(romaneioData.expeditionDate), 'dd/MM/yyyy', { locale: ptBR })}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela de Itens */}
+          <div className="mb-8">
+            <h3 className="font-semibold text-gray-900 mb-4">Relação de Itens</h3>
+            <div className="border border-gray-300 rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Item</th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Código</th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Descrição</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Qtd.</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Unid.</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Peso Unit. (kg)</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Peso Total (kg)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedItems.map((item, index) => (
+                    <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="py-3 px-4 border-b border-gray-200 text-center font-medium">
+                        {item.itemNumber || index + 1}
+                      </td>
+                      <td className="py-3 px-4 border-b border-gray-200 font-medium">
+                        {item.code}
+                      </td>
+                      <td className="py-3 px-4 border-b border-gray-200">
+                        {item.description}
+                        {item.notes && (
+                          <div className="text-xs text-gray-500 mt-1">{item.notes}</div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 border-b border-gray-200 text-center">
+                        {item.quantity || 1}
+                      </td>
+                      <td className="py-3 px-4 border-b border-gray-200 text-center">
+                        {item.unit || 'un'}
+                      </td>
+                      <td className="py-3 px-4 border-b border-gray-200 text-right">
+                        {(item.weight || 0).toFixed(2)}
+                      </td>
+                      <td className="py-3 px-4 border-b border-gray-200 text-right font-medium">
+                        {((item.weight || 0) * (item.quantity || 1)).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-100">
+                  <tr>
+                    <td colSpan={5} className="py-3 px-4 font-semibold text-gray-900 border-t-2 border-gray-300">
+                      TOTAIS
+                    </td>
+                    <td className="py-3 px-4 text-right font-semibold text-gray-900 border-t-2 border-gray-300">
+                      {totalQuantity} itens
+                    </td>
+                    <td className="py-3 px-4 text-right font-bold text-gray-900 border-t-2 border-gray-300 text-lg">
+                      {totalWeight.toFixed(2)} kg
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          {/* Observações */}
+          {romaneioData.observations && (
+            <div className="mb-8">
+              <h3 className="font-semibold text-gray-900 mb-2">Observações</h3>
+              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                <p className="text-gray-800">{romaneioData.observations}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Assinaturas */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12 pt-8 border-t border-gray-300">
+            <div className="text-center">
+              <div className="border-t border-gray-400 pt-2 mt-16">
+                <p className="font-medium">Responsável pela Expedição</p>
+                <p className="text-sm text-gray-600">Nome e Assinatura</p>
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="border-t border-gray-400 pt-2 mt-16">
+                <p className="font-medium">Motorista/Transportadora</p>
+                <p className="text-sm text-gray-600">Nome e Assinatura</p>
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="border-t border-gray-400 pt-2 mt-16">
+                <p className="font-medium">Recebedor</p>
+                <p className="text-sm text-gray-600">Nome, Assinatura e Data</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Rodapé */}
+          <div className="text-center mt-8 pt-4 border-t border-gray-200">
+            <p className="text-xs text-gray-500">
+              Romaneio gerado automaticamente em {format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Estilos para impressão */}
+      <style jsx>{`
+        @media print {
+          @page {
+            size: A4;
+            margin: 1cm;
+          }
+          
+          body {
+            font-size: 11pt;
+            line-height: 1.3;
+          }
+          
+          .print\\:hidden {
+            display: none !important;
+          }
+          
+          .print\\:max-h-none {
+            max-height: none !important;
+          }
+          
+          .print\\:overflow-visible {
+            overflow: visible !important;
+          }
+          
+          table {
+            page-break-inside: avoid;
+          }
+          
+          tr {
+            page-break-inside: avoid;
+          }
+          
+          h1, h2, h3 {
+            page-break-after: avoid;
+          }
+          
+          .bg-gray-50, .bg-gray-100 {
+            background-color: #f9f9f9 !important;
+            -webkit-print-color-adjust: exact;
+          }
+        }
+      `}</style>
+    </div>
+  );
+};
 interface ItemModalProps {
   item?: OrderItem | null;
   onSave: (item: OrderItem) => void;
