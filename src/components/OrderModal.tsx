@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Save, Plus, Trash2, Calendar, User, FileText, Package, Edit3, BarChart3, ExternalLink, Folder, Upload, Download, Eye, Search, Filter, SortAsc, SortDesc, Copy, RefreshCw, AlertCircle, CheckCircle, Clock, Target } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, Save, Plus, Trash2, Calendar, User, FileText, Package, Edit3, BarChart3, ExternalLink, Folder, Upload, Download, Eye, Search, Filter, SortAsc, SortDesc, Copy, RefreshCw, AlertCircle, CheckCircle, Clock, Target, Printer } from 'lucide-react';
 import { useOrderStore } from '../store/orderStore';
 import { useCustomerStore } from '../store/customerStore';
 import { format } from 'date-fns';
@@ -469,7 +469,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
   };
 
   // Calcular estatísticas dos itens
-  const itemStats = React.useMemo(() => {
+  const itemStats = useMemo(() => {
     const items = formData.items || [];
     const totalItems = items.length;
     const completedItems = items.filter(item => (item.overallProgress || 0) >= 100).length;
@@ -1844,15 +1844,14 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onSave, onClose }) => {
   );
 };
 
-// Componente ItemProgressModal (importado do arquivo existente)
+// Componente ItemProgressModal simplificado (placeholder)
+// Em produção, você deve importar o componente real do arquivo ItemProgressModal.tsx
 const ItemProgressModal: React.FC<{
   item: OrderItem;
   allItems: OrderItem[];
   onSave: (item: OrderItem) => void;
   onClose: () => void;
 }> = ({ item, allItems, onSave, onClose }) => {
-  // Este é um placeholder - você deve importar o componente real do arquivo ItemProgressModal.tsx
-  // Por enquanto, apenas um modal simples para demonstrar a funcionalidade
   const [progress, setProgress] = useState(item.overallProgress || 0);
 
   const handleSave = () => {
