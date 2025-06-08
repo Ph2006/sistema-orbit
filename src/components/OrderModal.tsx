@@ -1098,6 +1098,27 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                 {loading ? 'Salvando...' : 'Salvar'}
               </button>
             )}
+            
+            {/* Botão de Debug - remover em produção */}
+            <button
+              onClick={() => {
+                console.log("=== DEBUG ORDER DATA ===");
+                console.log("Original order:", order);
+                console.log("Current formData:", formData);
+                console.log("Current items:", formData.items);
+                console.log("Items with weights:", formData.items?.map(item => ({
+                  code: item.code,
+                  weight: item.weight,
+                  weightType: typeof item.weight
+                })));
+                alert("Dados enviados para o console. Verifique as informações lá.");
+              }}
+              className="flex items-center gap-2 bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors shadow-md"
+            >
+              <AlertCircle className="w-4 h-4" />
+              Debug
+            </button>
+            
             <button
               onClick={onClose}
               className="text-white hover:text-gray-300 transition-colors p-1"
@@ -1560,7 +1581,13 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                             </td>
                             <td className="py-4 px-4">
                               <div className="flex items-center gap-1">
-                                <span className="text-gray-900 font-medium">{(item.weight || 0).toFixed(2)} kg</span>
+                                <span className="text-gray-900 font-medium">
+                                  {(() => {
+                                    const weight = item.weight || 0;
+                                    console.log(`Displaying weight for item ${item.code}:`, weight, typeof weight);
+                                    return weight.toFixed(2);
+                                  })()} kg
+                                </span>
                                 {(item.weight || 0) === 0 && (
                                   <AlertCircle className="w-4 h-4 text-amber-500" title="Peso não informado" />
                                 )}
