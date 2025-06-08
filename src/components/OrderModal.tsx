@@ -1561,7 +1561,14 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                             </td>
                             <td className="py-4 px-4">
                               <div className="flex items-center gap-1">
-                                <span className="text-gray-900 font-medium">{(item.weight || 0).toFixed(2)} kg</span>
+                                <span className="text-gray-900 font-medium">
+                                  {(() => {
+                                    const weight = item.weight || 0;
+                                    console.log(`Displaying weight for item ${item.code}: ${weight} (type: ${typeof weight})`);
+                                    console.log(`Full item data:`, item);
+                                    return weight.toFixed(2);
+                                  })()} kg
+                                </span>
                                 {(item.weight || 0) === 0 && (
                                   <AlertCircle className="w-4 h-4 text-amber-500" title="Peso não informado" />
                                 )}
