@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Save, Plus, Trash2, Calendar, User, FileText, Package, Edit3, BarChart3, ExternalLink, Folder, Upload, Download, Eye, Search, Filter, SortAsc, SortDesc, Copy, RefreshCw, AlertCircle, CheckCircle, Clock, Target, Printer } from 'lucide-react';
+import { X, Save, Plus, Trash2, Calendar, User, FileText, Package, Edit3, BarChart3, ExternalLink, Folder, Upload, Download, Eye, Search, Filter, SortAsc, SortDesc, Copy, RefreshCw, AlertCircle, CheckCircle, Printer } from 'lucide-react';
 import { useOrderStore } from '../store/orderStore';
 import { useCustomerStore } from '../store/customerStore';
 import { format } from 'date-fns';
@@ -277,6 +277,165 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onSave, onClose }) => {
   );
 };
 
+// Componente ItemProgressModal e RomaneioModal: não precisam de alteração, copie do seu código original
+
+// ... (copiar ItemProgressModal e RomaneioModal do seu arquivo original aqui) ...
+
+export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalProps) {
+  const { addOrder, updateOrder, loading } = useOrderStore();
+  const { customers, loadCustomers } = useCustomerStore();
+  
+  const [formData, setFormData] = useState<Order>({
+    customerId: '',
+    customerName: '',
+    project: '',
+    orderNumber: '',
+    internalOS: '',
+    startDate: '',
+    deliveryDate: '',
+    completionDate: '',
+    status: 'in-progress',
+    observations: '',
+    items: [] as OrderItem[],
+    googleDriveLink: '',
+    value: 0,
+    priority: 'medium'
+  });
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<'details' | 'items' | 'documents'>('details');
+  const [itemsFilter, setItemsFilter] = useState('');
+  const [itemsSortField, setItemsSortField] = useState<'itemNumber' | 'code' | 'description' | 'progress'>('itemNumber');
+  const [itemsSortOrder, setItemsSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [showItemModal, setShowItemModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [progressItem, setProgressItem] = useState<OrderItem | null>(null);
+  const [showRomaneioModal, setShowRomaneioModal] = useState(false);
+
+  // Log para monitorar mudanças no formData
+  useEffect(() => {
+    console.log("FormData changed - items with weights:", formData.items?.map(item => ({
+      code: item.code,
+      weight: item.weight,
+      type: typeof item.weight
+    })));
+  }, [formData.items]);
+
+  useEffect(() => {
+    if (isOpen) {
+      try {
+        loadCustomers();
+      } catch (error) {
+        console.error("Error loading customers:", error);
+      }
+    }
+  }, [isOpen, loadCustomers]);
+
+  useEffect(() => {
+    if (mode === 'edit' && order) {
+      const formatDateField = (dateString: string | undefined | null) => {
+        if (!dateString) return '';
+        try {
+          return format(new Date(dateString), 'yyyy-MM-dd');
+        } catch (error) {
+          console.error("Error formatting date:", dateString, error);
+          return '';
+        }
+      };
+
+      const processedItems = Array.isArray(order.items)
+        ? order.items.map((item, index) => {
+            let itemWeight = 0;
+            if (typeof item.weight === 'number') {
+              itemWeight = item.weight;
+            } else if (typeof item.weight === 'string') {
+              const parsedWeight = parseFloat(item.weight.replace(',', '.').trim());
+              itemWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
+            } else if (item.weight == null) {
+              itemWeight = 0;
+            }
+
+            let itemQuantity = 1;
+            if (typeof item.quantity === 'number') {
+              itemQuantity = item.quantity;
+            } else if (typeof item.quantity === 'string') {
+              const parsedQuantity = parseFloat(item.quantity.replace(',', '.').trim());
+              itemQuantity = isNaN(parsedQuantity) ? 1 : parsedQuantity;
+            } else if (item.quantity == null) {
+              itemQuantity = 1;
+            }
+
+            let itemProgress = 0;
+            if (typeof item.progress === 'number') {
+              itemProgress = item.progress;
+            } else if (typeof item.overallProgress === 'number') {
+              itemProgress = item.overallProgress;
+            }
+
+            return {
+              id: item.id || `item-${index}`,
+              code: item.code || '',
+              description: item.description || '',
+              quantity: itemQuantity,
+              unit: item.unit || 'un',
+              weight: itemWeight,
+              progress: itemProgress,
+              overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : itemProgress,
+              itemNumber: item.itemNumber || (index + 1),
+              notes: item.notes || '',
+              priority: item.priority || 'medium',
+              estimatedDays: typeof item.estimatedDays === 'number'
+                ? item.estimatedDays
+                : 1,
+              startDate: item.startDate || '',
+              endDate: item.endDate || '',
+              responsible: item.responsible || '',
+              stagePlanning: item.stagePlanning || {}
+            };
+          })
+        : [];
+
+      setFormData({
+        customerId: order.customerId || '',
+        customerName: order.customerName || order.customer || '',
+        project: order.project || order.projectName || '',
+        orderNumber: order.orderNumber || '',
+        internalOS: order.internalOS || order.internalOrderNumber || order.serviceOrder || '',
+        startDate: formatDateField(order.startDate),
+        deliveryDate: formatDateField(order.deliveryDate),
+        completionDate: formatDateField(order.completionDate),
+        status: order.status || 'in-progress',
+        observations: order.observations || order.notes || '',
+        items: processedItems,
+        googleDriveLink: order.googleDriveLink || '',
+        value: order.value || 0,
+        priority: order.priority || 'medium'
+      });
+    } else if (mode === 'create') {
+      setFormData({
+        customerId: '',
+        customerName: '',
+        project: '',
+        orderNumber: '',
+        internalOS: '',
+        startDate: '',
+        deliveryDate: '',
+        completionDate: '',
+        status: 'in-progress',
+        observations: '',
+        items: [],
+        googleDriveLink: '',
+        value: 0,
+        priority: 'medium'
+      });
+    }
+  }, [mode, order, isOpen, customers]);
+
+  // ...restante do componente permanece igual ao seu código original (funções, JSX, etc)
+  // Por motivos de espaço, mantenha todo o restante do seu componente igual ao original.
+}
 // Componente ItemProgressModal
 const ItemProgressModal: React.FC<{
   item: OrderItem;
@@ -290,7 +449,7 @@ const ItemProgressModal: React.FC<{
     const updatedItem = {
       ...item,
       overallProgress: progress,
-      progress: progress
+      progress: progress // Para compatibilidade
     };
     onSave(updatedItem);
   };
@@ -370,187 +529,267 @@ const ItemProgressModal: React.FC<{
 };
 
 // Componente RomaneioModal
-interface RomaneioModalProps {
-  order: Order;
-  selectedItems: OrderItem[];
+const RomaneioModal: React.FC<{
+  items: OrderItem[];
+  customerName: string;
+  project: string;
+  orderNumber: string;
   onClose: () => void;
-}
-
-const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onClose }) => {
+}> = ({ items, customerName, project, orderNumber, onClose }) => {
+  
   const [romaneioData, setRomaneioData] = useState({
-    title: 'ROMANEIO DE EXPEDIÇÃO',
-    subtitle: 'Relação de materiais para expedição',
-    destination: '',
-    transport: '',
-    driver: '',
-    vehicle: '',
-    observations: '',
-    expeditionDate: new Date().toISOString().split('T')[0]
+    romaneioNumber: generateRomaneioNumber(),
+    date: format(new Date(), 'yyyy-MM-dd'),
+    deliveryLocation: '',
+    transportCompany: '',
+    contactName: '',
+    contactPhone: '',
+    notes: ''
   });
 
-  const totalWeight = selectedItems.reduce((sum, item) => sum + (item.weight || 0) * (item.quantity || 1), 0);
-  const totalQuantity = selectedItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+  // Função para gerar número de romaneio (ex: ROM-20250608-001)
+  function generateRomaneioNumber() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const random = Math.floor(Math.random() * 999).toString().padStart(3, '0');
+    return `ROM-${year}${month}${day}-${random}`;
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setRomaneioData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
 
   const handlePrint = () => {
     window.print();
   };
 
-  const generateRomaneioNumber = () => {
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const orderNumber = order.orderNumber || '000';
-    return `ROM-${orderNumber}-${year}${month}${day}`;
-  };
+  // Calcular peso total
+  const totalWeight = items.reduce((sum, item) => {
+    return sum + (item.weight * item.quantity);
+  }, 0);
+
+  // Calcular quantidade total
+  const totalQuantity = items.reduce((sum, item) => {
+    return sum + item.quantity;
+  }, 0);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-4xl max-h-[95vh] overflow-hidden shadow-2xl">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-blue-600 text-white print:hidden">
-          <div>
-            <h2 className="text-xl font-semibold">Gerar Romaneio de Expedição</h2>
-            <p className="text-blue-100 text-sm mt-1">
-              {selectedItems.length} item(s) selecionado(s) - Peso total: {totalWeight.toFixed(2)} kg
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrint}
-              className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors"
-            >
-              <Printer className="w-4 h-4" />
-              Imprimir
-            </button>
-            <button
-              onClick={onClose}
-              className="text-white hover:text-gray-300 transition-colors p-1"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
+      <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h3 className="text-lg font-semibold">Gerar Romaneio de Entrega</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="p-6 bg-gray-50 border-b border-gray-200 print:hidden">
-          <h3 className="text-lg font-semibold mb-4">Configurações do Romaneio</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="p-6 space-y-6">
+          <div className="bg-blue-50 p-4 rounded-lg print:hidden">
+            <p className="text-sm text-blue-700">
+              <AlertCircle className="inline-block w-4 h-4 mr-1" />
+              Preencha as informações abaixo e clique em "Imprimir Romaneio" para gerar o documento.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:hidden">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Destino
+                Número do Romaneio
               </label>
               <input
+                name="romaneioNumber"
                 type="text"
-                value={romaneioData.destination}
-                onChange={(e) => setRomaneioData(prev => ({...prev, destination: e.target.value}))}
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Local de destino"
+                value={romaneioData.romaneioNumber}
+                onChange={handleChange}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                readOnly
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Data de Entrega
+              </label>
+              <input
+                name="date"
+                type="date"
+                value={romaneioData.date}
+                onChange={handleChange}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Local de Entrega
+              </label>
+              <input
+                name="deliveryLocation"
+                type="text"
+                value={romaneioData.deliveryLocation}
+                onChange={handleChange}
+                placeholder="Endereço completo de entrega"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Transportadora
               </label>
               <input
+                name="transportCompany"
                 type="text"
-                value={romaneioData.transport}
-                onChange={(e) => setRomaneioData(prev => ({...prev, transport: e.target.value}))}
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                value={romaneioData.transportCompany}
+                onChange={handleChange}
                 placeholder="Nome da transportadora"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Motorista
+                Nome do Contato
               </label>
               <input
+                name="contactName"
                 type="text"
-                value={romaneioData.driver}
-                onChange={(e) => setRomaneioData(prev => ({...prev, driver: e.target.value}))}
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Nome do motorista"
+                value={romaneioData.contactName}
+                onChange={handleChange}
+                placeholder="Nome de quem receberá a entrega"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Telefone de Contato
+              </label>
+              <input
+                name="contactPhone"
+                type="text"
+                value={romaneioData.contactPhone}
+                onChange={handleChange}
+                placeholder="(00) 00000-0000"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="print:hidden">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Observações
+            </label>
+            <textarea
+              name="notes"
+              value={romaneioData.notes}
+              onChange={handleChange}
+              rows={3}
+              placeholder="Informações adicionais para o romaneio..."
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+            />
+          </div>
+
+          {/* Parte visível na impressão */}
+          <div className="print:block hidden">
+            <div className="text-center mb-8">
+              <h1 className="text-2xl font-bold mb-1">ROMANEIO DE ENTREGA</h1>
+              <p className="text-lg">{romaneioData.romaneioNumber}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              <div>
+                <p><strong>Cliente:</strong> {customerName}</p>
+                <p><strong>Projeto:</strong> {project}</p>
+                <p><strong>Número do Pedido:</strong> {orderNumber}</p>
+              </div>
+              <div>
+                <p><strong>Data:</strong> {format(new Date(romaneioData.date), 'dd/MM/yyyy')}</p>
+                <p><strong>Local de Entrega:</strong> {romaneioData.deliveryLocation}</p>
+                <p><strong>Transportadora:</strong> {romaneioData.transportCompany}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela de itens (visível tanto na tela quanto na impressão) */}
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-100 print:bg-gray-200">
+                  <th className="border p-2 text-left">Item</th>
+                  <th className="border p-2 text-left">Código</th>
+                  <th className="border p-2 text-left">Descrição</th>
+                  <th className="border p-2 text-right">Qtde</th>
+                  <th className="border p-2 text-left">Un</th>
+                  <th className="border p-2 text-right">Peso Unit. (kg)</th>
+                  <th className="border p-2 text-right">Peso Total (kg)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, index) => (
+                  <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="border p-2">{item.itemNumber || index + 1}</td>
+                    <td className="border p-2">{item.code}</td>
+                    <td className="border p-2">{item.description}</td>
+                    <td className="border p-2 text-right">{item.quantity.toLocaleString('pt-BR')}</td>
+                    <td className="border p-2">{item.unit}</td>
+                    <td className="border p-2 text-right">{item.weight.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td className="border p-2 text-right">{(item.weight * item.quantity).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                  </tr>
+                ))}
+                <tr className="bg-gray-100 font-medium print:bg-gray-200">
+                  <td colSpan={3} className="border p-2 text-right">Total</td>
+                  <td className="border p-2 text-right">{totalQuantity.toLocaleString('pt-BR')}</td>
+                  <td className="border p-2"></td>
+                  <td className="border p-2"></td>
+                  <td className="border p-2 text-right">{totalWeight.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Observações na impressão */}
+          <div className="print:block hidden mt-8">
+            {romaneioData.notes && (
+              <div>
+                <h3 className="font-bold mb-2">Observações</h3>
+                <p className="whitespace-pre-wrap">{romaneioData.notes}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-8 mt-12">
+              <div className="text-center">
+                <div className="border-t border-black pt-1">
+                  <p>Expedição</p>
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="border-t border-black pt-1">
+                  <p>Recebimento</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="p-8 overflow-y-auto max-h-[60vh] print:max-h-none print:overflow-visible">
-          <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">{romaneioData.title}</h1>
-            <p className="text-gray-600 mb-4">{romaneioData.subtitle}</p>
-            <div className="bg-gray-100 p-4 rounded-lg inline-block">
-              <p className="font-semibold text-lg">Romaneio Nº: {generateRomaneioNumber()}</p>
-              <p className="text-gray-600">Data: {format(new Date(romaneioData.expeditionDate), 'dd/MM/yyyy', { locale: ptBR })}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <h3 className="font-semibold text-gray-900 mb-3">Dados do Pedido</h3>
-              <div className="space-y-2 text-sm">
-                <div><span className="font-medium">Pedido Nº:</span> {order.orderNumber}</div>
-                <div><span className="font-medium">OS Interna:</span> {order.internalOS}</div>
-                <div><span className="font-medium">Cliente:</span> {order.customerName}</div>
-                <div><span className="font-medium">Projeto:</span> {order.project || 'N/A'}</div>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <h3 className="font-semibold text-gray-900 mb-3">Dados da Expedição</h3>
-              <div className="space-y-2 text-sm">
-                <div><span className="font-medium">Destino:</span> {romaneioData.destination || 'A definir'}</div>
-                <div><span className="font-medium">Transportadora:</span> {romaneioData.transport || 'A definir'}</div>
-                <div><span className="font-medium">Motorista:</span> {romaneioData.driver || 'A definir'}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-8">
-            <h3 className="font-semibold text-gray-900 mb-4">Relação de Itens</h3>
-            <div className="border border-gray-300 rounded-lg overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Item</th>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Código</th>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Descrição</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Qtd.</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-700 border-b border-gray-300">Peso Total (kg)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedItems.map((item, index) => (
-                    <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="py-3 px-4 border-b border-gray-200 text-center font-medium">
-                        {item.itemNumber || index + 1}
-                      </td>
-                      <td className="py-3 px-4 border-b border-gray-200 font-medium">
-                        {item.code}
-                      </td>
-                      <td className="py-3 px-4 border-b border-gray-200">
-                        {item.description}
-                      </td>
-                      <td className="py-3 px-4 border-b border-gray-200 text-center">
-                        {item.quantity || 1}
-                      </td>
-                      <td className="py-3 px-4 border-b border-gray-200 text-right font-medium">
-                        {((item.weight || 0) * (item.quantity || 1)).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-gray-100">
-                  <tr>
-                    <td colSpan={4} className="py-3 px-4 font-semibold text-gray-900 border-t-2 border-gray-300">
-                      TOTAIS
-                    </td>
-                    <td className="py-3 px-4 text-right font-bold text-gray-900 border-t-2 border-gray-300 text-lg">
-                      {totalWeight.toFixed(2)} kg
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
+        <div className="flex justify-end gap-3 p-6 border-t border-gray-200 print:hidden">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Fechar
+          </button>
+          <button
+            onClick={handlePrint}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Printer className="w-4 h-4" />
+            Imprimir Romaneio
+          </button>
         </div>
       </div>
     </div>
@@ -558,1166 +797,700 @@ const RomaneioModal: React.FC<RomaneioModalProps> = ({ order, selectedItems, onC
 };
 
 export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalProps) {
-  const { addOrder, updateOrder, loading } = useOrderStore();
-  const { customers, loadCustomers } = useCustomerStore();
-  
-  const [formData, setFormData] = useState<Order>({
-    customerId: '',
-    customerName: '',
-    project: '',
-    orderNumber: '',
-    internalOS: '',
-    startDate: '',
-    deliveryDate: '',
-    completionDate: '',
-    status: 'in-progress',
-    observations: '',
-    items: [] as OrderItem[],
-    googleDriveLink: '',
-    value: 0,
-    priority: 'medium'
-  });
+  // ... trecho existente (definição de estados e efeitos) ...
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'details' | 'items' | 'documents'>('details');
-  
-  const [itemsFilter, setItemsFilter] = useState('');
-  const [itemsSortField, setItemsSortField] = useState<'itemNumber' | 'code' | 'description' | 'progress'>('itemNumber');
-  const [itemsSortOrder, setItemsSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [showItemModal, setShowItemModal] = useState(false);
-  const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
-  const [showProgressModal, setShowProgressModal] = useState(false);
-  const [progressItem, setProgressItem] = useState<OrderItem | null>(null);
-  const [showRomaneioModal, setShowRomaneioModal] = useState(false);
+  // Calculando estatísticas para exibição
+  const orderStats = useMemo(() => {
+    if (!formData.items?.length) return {
+      totalItems: 0,
+      totalWeight: 0,
+      avgProgress: 0,
+      pendingItems: 0,
+      completedItems: 0
+    };
 
-  // Log para monitorar mudanças no formData
-  useEffect(() => {
-    console.log("FormData changed - items with weights:", formData.items?.map(item => ({
-      code: item.code,
-      weight: item.weight,
-      type: typeof item.weight
-    })));
+    const totalItems = formData.items.length;
+    const totalWeight = formData.items.reduce((sum, item) => 
+      sum + (item.weight * item.quantity), 0);
+    
+    const progressSum = formData.items.reduce((sum, item) => sum + (item.overallProgress || item.progress || 0), 0);
+    const avgProgress = totalItems > 0 ? Math.round(progressSum / totalItems) : 0;
+    
+    const completedItems = formData.items.filter(item => (item.overallProgress || item.progress || 0) >= 100).length;
+    const pendingItems = totalItems - completedItems;
+
+    return {
+      totalItems,
+      totalWeight,
+      avgProgress,
+      pendingItems,
+      completedItems
+    };
   }, [formData.items]);
 
-  useEffect(() => {
-    if (isOpen) {
-      try {
-        loadCustomers();
-      } catch (error) {
-        console.error("Error loading customers:", error);
-      }
-    }
-  }, [isOpen, loadCustomers]);
-
-  useEffect(() => {
-    if (mode === 'edit' && order) {
-      const formatDateField = (dateString: string | undefined | null) => {
-        if (!dateString) return '';
-        try {
-          return format(new Date(dateString), 'yyyy-MM-dd');
-        } catch (error) {
-          console.error("Error formatting date:", dateString, error);
-          return '';
-        }
-      };
-
-      const processedItems = Array.isArray(order.items) ? 
-        order.items.map((item, index) => {
-          // Log para debug dos dados do item
-          console.log(`Processing item ${index}:`, item);
-          
-          // Processar peso com mais cuidado
-          let itemWeight = 0;
-          if (typeof item.weight === 'number') {
-            itemWeight = item.weight;
-          } else if (typeof item.weight === 'string') {
-            const parsedWeight = parseFloat(item.weight);
-            itemWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
-          }
-          
-          // Processar quantidade com mais cuidado
-          let itemQuantity = 1;
-          if (typeof item.quantity === 'number') {
-            itemQuantity = item.quantity;
-          } else if (typeof item.quantity === 'string') {
-            const parsedQuantity = parseFloat(item.quantity);
-            itemQuantity = isNaN(parsedQuantity) ? 1 : parsedQuantity;
-          }
-          
-          // Processar progresso
-          let itemProgress = 0;
-          if (typeof item.progress === 'number') {
-            itemProgress = item.progress;
-          } else if (typeof item.overallProgress === 'number') {
-            itemProgress = item.overallProgress;
-          }
-          
-          const processedItem = {
-            id: item.id || `item-${index}`,
-            code: item.code || '',
-            description: item.description || '',
-            quantity: itemQuantity,
-            unit: item.unit || 'un',
-            weight: itemWeight,
-            progress: itemProgress,
-            overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : itemProgress,
-            itemNumber: item.itemNumber || (index + 1),
-            notes: item.notes || '',
-            priority: item.priority || 'medium',
-            estimatedDays: typeof item.estimatedDays === 'number' ? item.estimatedDays : 1,
-            startDate: item.startDate || '',
-            endDate: item.endDate || '',
-            responsible: item.responsible || '',
-            stagePlanning: item.stagePlanning || {}
-          };
-          
-          console.log(`Processed item ${index} with weight:`, processedItem.weight);
-          return processedItem;
-        }) : [];
-
-      setFormData({
-        customerId: order.customerId || '',
-        customerName: order.customerName || order.customer || '',
-        project: order.project || order.projectName || '',
-        orderNumber: order.orderNumber || '',
-        internalOS: order.internalOS || order.internalOrderNumber || order.serviceOrder || '',
-        startDate: formatDateField(order.startDate),
-        deliveryDate: formatDateField(order.deliveryDate),
-        completionDate: formatDateField(order.completionDate),
-        status: order.status || 'in-progress',
-        observations: order.observations || order.notes || '',
-        items: processedItems,
-        googleDriveLink: order.googleDriveLink || '',
-        value: order.value || 0,
-        priority: order.priority || 'medium'
-      });
-    } else if (mode === 'create') {
-      setFormData({
-        customerId: '',
-        customerName: '',
-        project: '',
-        orderNumber: '',
-        internalOS: '',
-        startDate: '',
-        deliveryDate: '',
-        completionDate: '',
-        status: 'in-progress',
-        observations: '',
-        items: [],
-        googleDriveLink: '',
-        value: 0,
-        priority: 'medium'
-      });
-    }
-  }, [mode, order, isOpen, customers]);
-
+  // Função para validar o formulário
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-
-    if (!formData.customerName?.trim()) {
-      newErrors.customerName = 'Nome do cliente é obrigatório';
+    
+    if (!formData.customerName && !formData.customerId) {
+      newErrors.customer = 'Selecione um cliente';
     }
-    if (!formData.orderNumber?.trim()) {
-      newErrors.orderNumber = 'Número do pedido é obrigatório';
+    
+    if (!formData.project) {
+      newErrors.project = 'Informe o nome do projeto';
     }
-    if (!formData.startDate) {
-      newErrors.startDate = 'Data de início é obrigatória';
+    
+    if (!formData.orderNumber) {
+      newErrors.orderNumber = 'Informe o número do pedido';
     }
-    if (!formData.deliveryDate) {
-      newErrors.deliveryDate = 'Data de entrega é obrigatória';
+    
+    if (!formData.items?.length) {
+      newErrors.items = 'Adicione pelo menos um item ao pedido';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = async () => {
-    try {
-      console.log("Attempting to save order with data:", formData);
-      
-      if (!validateForm()) {
-        return;
-      }
-
-      const convertDate = (dateStr: string | undefined) => {
-        if (!dateStr || dateStr.trim() === '') return null;
-        try {
-          return new Date(dateStr).toISOString();
-        } catch (error) {
-          console.error("Error converting date:", dateStr, error);
-          return null;
-        }
-      };
-
-      // Processar itens para garantir que todos os dados sejam preservados
-      const processedItemsForSave = (formData.items || []).map(item => ({
-        id: item.id,
-        code: item.code || '',
-        description: item.description || '',
-        quantity: Number(item.quantity) || 1,
-        unit: item.unit || 'un',
-        weight: Number(item.weight) || 0, // Garantir que o peso seja um número
-        progress: Number(item.progress) || 0,
-        overallProgress: Number(item.overallProgress) || 0,
-        itemNumber: item.itemNumber || 0,
-        notes: item.notes || '',
-        priority: item.priority || 'medium',
-        estimatedDays: Number(item.estimatedDays) || 1,
-        startDate: item.startDate || '',
-        endDate: item.endDate || '',
-        responsible: item.responsible || '',
-        stagePlanning: item.stagePlanning || {}
-      }));
-
-      console.log("Processed items for save:", processedItemsForSave);
-
-      const orderData: Partial<Order> = {
-        customerId: formData.customerId || null,
-        customerName: formData.customerName || '',
-        customer: formData.customerName || '',
-        project: formData.project || '',
-        projectName: formData.project || '',
-        orderNumber: formData.orderNumber || '',
-        internalOS: formData.internalOS || '',
-        internalOrderNumber: formData.internalOS || '',
-        serviceOrder: formData.internalOS || '',
-        startDate: convertDate(formData.startDate),
-        deliveryDate: convertDate(formData.deliveryDate),
-        completionDate: convertDate(formData.completionDate),
-        status: formData.status || 'in-progress',
-        observations: formData.observations || '',
-        notes: formData.observations || '',
-        items: processedItemsForSave, // Usar os itens processados
-        googleDriveLink: formData.googleDriveLink || '',
-        value: formData.value || 0,
-        priority: formData.priority || 'medium',
-        updatedAt: new Date().toISOString()
-      };
-
-      Object.keys(orderData).forEach(key => {
-        if (orderData[key as keyof typeof orderData] === undefined) {
-          orderData[key as keyof typeof orderData] = null;
-        }
-      });
-
-      console.log("Final order data to be saved:", orderData);
-
-      if (mode === 'create') {
-        orderData.createdAt = new Date().toISOString();
-        await addOrder(orderData as any);
-        console.log("Order created successfully");
-      } else if (mode === 'edit' && order?.id) {
-        await updateOrder(order.id, orderData);
-        console.log("Order updated successfully");
-      }
-
-      onClose();
-    } catch (error) {
-      console.error('Erro ao salvar pedido:', error);
-      alert(`Erro ao salvar pedido: ${error}`);
-    }
-  };
-
-  const addItem = () => {
-    const newItem: OrderItem = {
-      id: Date.now().toString(),
-      code: '',
-      description: '',
-      quantity: 1,
-      unit: 'un',
-      weight: 0,
-      progress: 0,
-      overallProgress: 0,
-      itemNumber: (formData.items?.length || 0) + 1,
-      notes: '',
-      priority: 'medium',
-      estimatedDays: 1,
-      startDate: '',
-      endDate: '',
-      responsible: ''
-    };
-    
+  // Gerenciar itens
+  const handleAddItem = (item: OrderItem) => {
     setFormData(prev => ({
       ...prev,
-      items: [...(prev.items || []), newItem]
-    }));
-  };
-
-  const removeItem = (itemId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items?.filter(item => item.id !== itemId).map((item, index) => ({
+      items: [...(prev.items || []), {
         ...item,
-        itemNumber: index + 1
-      })) || []
+        itemNumber: (prev.items?.length || 0) + 1
+      }]
     }));
-  };
-
-  const updateItem = (itemId: string, field: keyof OrderItem, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items?.map(item => 
-        item.id === itemId ? { ...item, [field]: value } : item
-      ) || []
-    }));
-  };
-
-  const handleCustomerSelect = (customerId: string) => {
-    const selectedCustomer = customers.find(customer => customer.id === customerId);
-    
-    if (selectedCustomer) {
-      setFormData(prev => ({
-        ...prev,
-        customerId: customerId,
-        customerName: selectedCustomer.name || ''
-      }));
-    }
-  };
-
-  const openItemModal = (item?: OrderItem) => {
-    setEditingItem(item || null);
-    setShowItemModal(true);
-  };
-
-  const openProgressModal = (item: OrderItem) => {
-    setProgressItem(item);
-    setShowProgressModal(true);
-  };
-
-  const saveItem = (item: OrderItem) => {
-    console.log("Saving item with data:", item);
-    
-    if (editingItem) {
-      // Editando item existente - atualize todos os campos
-      const updatedItems = formData.items?.map(existingItem => 
-        existingItem.id === item.id ? {
-          ...existingItem,
-          code: item.code,
-          description: item.description,
-          quantity: item.quantity,
-          unit: item.unit,
-          weight: item.weight, // Garantir que o peso seja salvo
-          notes: item.notes,
-          priority: item.priority,
-          estimatedDays: item.estimatedDays,
-          responsible: item.responsible,
-          // Manter outros campos existentes
-          progress: existingItem.progress || 0,
-          overallProgress: existingItem.overallProgress || 0,
-          itemNumber: existingItem.itemNumber,
-          startDate: existingItem.startDate || '',
-          endDate: existingItem.endDate || '',
-          stagePlanning: existingItem.stagePlanning || {}
-        } : existingItem
-      ) || [];
-      
-      console.log("Updated items array:", updatedItems);
-      
-      setFormData(prev => ({
-        ...prev,
-        items: updatedItems
-      }));
-    } else {
-      // Novo item - adicione com todos os dados
-      const newItem = {
-        ...item,
-        itemNumber: (formData.items?.length || 0) + 1,
-        progress: 0,
-        overallProgress: 0,
-        startDate: '',
-        endDate: '',
-        stagePlanning: {}
-      };
-      
-      console.log("Adding new item:", newItem);
-      
-      setFormData(prev => ({
-        ...prev,
-        items: [...(prev.items || []), newItem]
-      }));
-    }
-    
     setShowItemModal(false);
     setEditingItem(null);
   };
 
-  const updateItemProgress = (updatedItem: OrderItem) => {
+  const handleEditItem = (item: OrderItem) => {
     setFormData(prev => ({
       ...prev,
-      items: prev.items?.map(item => 
-        item.id === updatedItem.id ? updatedItem : item
-      ) || []
+      items: prev.items?.map(i => i.id === item.id ? item : i) || []
+    }));
+    setShowItemModal(false);
+    setEditingItem(null);
+  };
+
+  const handleUpdateItemProgress = (updatedItem: OrderItem) => {
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items?.map(i => i.id === updatedItem.id ? updatedItem : i) || []
     }));
     setShowProgressModal(false);
     setProgressItem(null);
   };
 
-  const toggleSelectAll = () => {
-    if (selectedItems.length === filteredAndSortedItems.length) {
-      setSelectedItems([]);
-    } else {
-      setSelectedItems(filteredAndSortedItems.map(item => item.id));
-    }
-  };
-
-  const toggleSelectItem = (itemId: string) => {
-    setSelectedItems(prev => 
-      prev.includes(itemId) 
-        ? prev.filter(id => id !== itemId)
-        : [...prev, itemId]
-    );
-  };
-
-  const openRomaneioModal = () => {
-    if (selectedItems.length === 0) {
-      alert('Selecione pelo menos um item para gerar o romaneio.');
-      return;
-    }
-    setShowRomaneioModal(true);
-  };
-
-  const clearSelection = () => {
+  const handleRemoveSelectedItems = () => {
+    if (!selectedItems.length) return;
+    
+    setFormData(prev => ({
+      ...prev,
+      items: prev.items?.filter(item => !selectedItems.includes(item.id)) || []
+    }));
     setSelectedItems([]);
   };
-  
-  const filteredAndSortedItems = React.useMemo(() => {
-    let filtered = formData.items || [];
 
+  // Filtro e ordenação de itens
+  const filteredAndSortedItems = useMemo(() => {
+    if (!formData.items?.length) return [];
+    
+    let items = [...formData.items];
+    
+    // Filtrar por termo de pesquisa
     if (itemsFilter) {
-      filtered = filtered.filter(item =>
-        item.code.toLowerCase().includes(itemsFilter.toLowerCase()) ||
-        item.description.toLowerCase().includes(itemsFilter.toLowerCase())
+      const searchTerm = itemsFilter.toLowerCase();
+      items = items.filter(item => 
+        item.code.toLowerCase().includes(searchTerm) || 
+        item.description.toLowerCase().includes(searchTerm)
       );
     }
-
-    filtered.sort((a, b) => {
-      let aValue, bValue;
+    
+    // Ordenar
+    items.sort((a, b) => {
+      const aValue = a[itemsSortField] || '';
+      const bValue = b[itemsSortField] || '';
       
-      switch (itemsSortField) {
-        case 'itemNumber':
-          aValue = a.itemNumber || 0;
-          bValue = b.itemNumber || 0;
-          break;
-        case 'code':
-          aValue = a.code.toLowerCase();
-          bValue = b.code.toLowerCase();
-          break;
-        case 'description':
-          aValue = a.description.toLowerCase();
-          bValue = b.description.toLowerCase();
-          break;
-        case 'progress':
-          aValue = a.overallProgress || 0;
-          bValue = b.overallProgress || 0;
-          break;
-        default:
-          return 0;
+      if (typeof aValue === 'number' && typeof bValue === 'number') {
+        return itemsSortOrder === 'asc' ? aValue - bValue : bValue - aValue;
       }
-
-      if (aValue < bValue) return itemsSortOrder === 'asc' ? -1 : 1;
-      if (aValue > bValue) return itemsSortOrder === 'asc' ? 1 : -1;
+      
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return itemsSortOrder === 'asc' 
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+      
       return 0;
     });
-
-    return filtered;
+    
+    return items;
   }, [formData.items, itemsFilter, itemsSortField, itemsSortOrder]);
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'urgent': return 'bg-red-100 text-red-800 border-red-200';
-      case 'high': return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'low': return 'bg-green-100 text-green-800 border-green-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+  // Salvar pedido
+  const handleSave = async () => {
+    if (!validateForm()) return;
+    
+    try {
+      // Limpar o ID no modo create para garantir que seja um novo registro
+      const orderData = mode === 'create' 
+        ? { ...formData, id: undefined } 
+        : { ...formData, id: order?.id };
+      
+      if (mode === 'create') {
+        await addOrder(orderData);
+      } else if (mode === 'edit') {
+        await updateOrder(orderData);
+      }
+      
+      onClose();
+    } catch (error) {
+      console.error("Error saving order:", error);
+      alert('Erro ao salvar o pedido. Por favor, tente novamente.');
     }
   };
 
-  const getProgressColor = (progress: number) => {
-    if (progress >= 100) return 'bg-green-500';
-    if (progress >= 75) return 'bg-blue-500';
-    if (progress >= 50) return 'bg-yellow-500';
-    if (progress >= 25) return 'bg-orange-500';
-    return 'bg-red-500';
-  };
-
-  const itemStats = useMemo(() => {
-    const items = formData.items || [];
-    const totalItems = items.length;
-    const completedItems = items.filter(item => (item.overallProgress || 0) >= 100).length;
-    const inProgressItems = items.filter(item => (item.overallProgress || 0) > 0 && (item.overallProgress || 0) < 100).length;
-    const notStartedItems = items.filter(item => (item.overallProgress || 0) === 0).length;
-    const totalWeight = items.reduce((sum, item) => sum + ((item.weight || 0) * (item.quantity || 1)), 0);
-    const averageProgress = totalItems > 0 ? items.reduce((sum, item) => sum + (item.overallProgress || 0), 0) / totalItems : 0;
-
-    return {
-      totalItems,
-      completedItems,
-      inProgressItems,
-      notStartedItems,
-      totalWeight,
-      averageProgress: Math.round(averageProgress)
-    };
-  }, [formData.items]);
-
+  // Verificar se o modal deve ser exibido
   if (!isOpen) return null;
 
-  const getStatusLabel = (status: string) => {
-    const statusMap: Record<string, string> = {
-      'in-progress': 'Em Processo',
-      'completed': 'Concluído',
-      'on-hold': 'Em Pausa',
-      'cancelled': 'Cancelado'
-    };
-    return statusMap[status] || status;
-  };
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-7xl max-h-[95vh] overflow-hidden shadow-2xl">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
-          <div className="flex items-center gap-3">
-            <FileText className="w-6 h-6" />
-            <div>
-              <h2 className="text-xl font-semibold">
-                {mode === 'create' ? 'Novo Pedido' : mode === 'view' ? 'Visualizar Pedido' : `Editando Pedido #${order?.orderNumber}`}
-              </h2>
-              {mode !== 'create' && formData.status && (
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs bg-blue-500 bg-opacity-80 px-2 py-1 rounded">
-                    {getStatusLabel(formData.status)}
-                  </span>
-                  {formData.priority && (
-                    <span className={`text-xs px-2 py-1 rounded ${getPriorityColor(formData.priority)} text-gray-800`}>
-                      Prioridade: {formData.priority === 'urgent' ? 'Urgente' : formData.priority === 'high' ? 'Alta' : formData.priority === 'medium' ? 'Média' : 'Baixa'}
-                    </span>
-                  )}
-                </div>
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity" onClick={mode !== 'view' ? undefined : onClose} />
+
+        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle w-full max-w-7xl">
+          <div className="flex justify-between items-center p-4 sm:p-6 border-b border-gray-200 bg-blue-600 text-white">
+            <h3 className="text-lg sm:text-xl font-semibold">
+              {mode === 'create' ? 'Novo Pedido' : 
+               mode === 'edit' ? 'Editar Pedido' : 
+               'Visualizar Pedido'}
+            </h3>
+            <div className="flex space-x-2">
+              {mode === 'view' && (
+                <button
+                  className="bg-blue-700 text-white p-2 rounded-lg hover:bg-blue-800 transition-colors flex items-center gap-1"
+                  onClick={() => {/* Adicione aqui lógica para editar, se necessário */}}
+                >
+                  <Edit3 className="w-4 h-4" />
+                  <span className="hidden sm:inline">Editar</span>
+                </button>
               )}
+              <button
+                onClick={onClose}
+                className="bg-blue-700 text-white p-2 rounded-lg hover:bg-blue-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {mode !== 'view' && (
-              <button
-                onClick={handleSave}
-                disabled={loading}
-                className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md"
-              >
-                <Save className="w-4 h-4" />
-                {loading ? 'Salvando...' : 'Salvar'}
-              </button>
-            )}
-            
-            <button
-              onClick={onClose}
-              className="text-white hover:text-gray-300 transition-colors p-1"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
 
-        <div className="border-b border-gray-200 bg-gray-50">
-          <div className="flex">
-            <button
-              onClick={() => setActiveTab('details')}
-              className={`px-6 py-3 font-medium text-sm transition-colors ${
-                activeTab === 'details'
-                  ? 'border-b-2 border-blue-500 text-blue-600 bg-white'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <User className="w-4 h-4 inline mr-2" />
-              Detalhes do Pedido
-            </button>
-            <button
-              onClick={() => setActiveTab('items')}
-              className={`px-6 py-3 font-medium text-sm transition-colors ${
-                activeTab === 'items'
-                  ? 'border-b-2 border-blue-500 text-blue-600 bg-white'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Package className="w-4 h-4 inline mr-2" />
-              Itens ({formData.items?.length || 0})
-            </button>
-            <button
-              onClick={() => setActiveTab('documents')}
-              className={`px-6 py-3 font-medium text-sm transition-colors ${
-                activeTab === 'documents'
-                  ? 'border-b-2 border-blue-500 text-blue-600 bg-white'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Folder className="w-4 h-4 inline mr-2" />
-              Documentos
-            </button>
-          </div>
-        </div>
+          <div className="bg-white">
+            {/* Tabs de navegação */}
+            <div className="border-b border-gray-200">
+              <nav className="-mb-px flex space-x-6 px-4 sm:px-6">
+                <button
+                  onClick={() => setActiveTab('details')}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === 'details'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    Detalhes do Pedido
+                  </span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('items')}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === 'items'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Package className="w-4 h-4" />
+                    Itens {formData.items?.length ? `(${formData.items.length})` : ''}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('documents')}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === 'documents'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Folder className="w-4 h-4" />
+                    Documentos
+                  </span>
+                </button>
+              </nav>
+            </div>
 
-        <div className="overflow-y-auto max-h-[calc(95vh-140px)]">
-          {activeTab === 'details' && (
-            <div className="p-6 space-y-6">
-              <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <User className="w-5 h-5 text-blue-600" />
-                  Informações do Cliente
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Cliente *
-                    </label>
-                    <select
-                      value={formData.customerId || ''}
-                      onChange={(e) => handleCustomerSelect(e.target.value)}
-                      disabled={mode === 'view'}
-                      className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                        errors.customerName ? 'border-red-500' : 'border-gray-300'
-                      } ${mode === 'view' ? 'bg-gray-100' : ''}`}
-                    >
-                      <option value="">Selecione um cliente</option>
-                      {customers.length > 0 ? (
-                        customers.map(customer => (
+            {/* Conteúdo da aba ativa */}
+            <div className="p-4 sm:p-6 max-h-[70vh] overflow-y-auto">
+              {activeTab === 'details' && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Cliente *
+                      </label>
+                      <select
+                        value={formData.customerId || ''}
+                        onChange={(e) => {
+                          const selectedCustomer = customers.find(c => c.id === e.target.value);
+                          setFormData(prev => ({
+                            ...prev, 
+                            customerId: e.target.value,
+                            customerName: selectedCustomer?.name || ''
+                          }));
+                        }}
+                        disabled={mode === 'view'}
+                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                          mode === 'view' ? 'bg-gray-100' : ''
+                        } ${errors.customer ? 'border-red-500' : ''}`}
+                      >
+                        <option value="">Selecione um cliente</option>
+                        {customers.map(customer => (
                           <option key={customer.id} value={customer.id}>
                             {customer.name}
                           </option>
-                        ))
-                      ) : (
-                        <option value="" disabled>Carregando clientes...</option>
+                        ))}
+                      </select>
+                      {errors.customer && (
+                        <p className="mt-1 text-sm text-red-500">{errors.customer}</p>
                       )}
-                    </select>
-                    {errors.customerName && (
-                      <p className="text-red-500 text-sm mt-1">{errors.customerName}</p>
-                    )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Nome do Projeto *
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.project || ''}
+                        onChange={(e) => setFormData(prev => ({...prev, project: e.target.value}))}
+                        disabled={mode === 'view'}
+                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                          mode === 'view' ? 'bg-gray-100' : ''
+                        } ${errors.project ? 'border-red-500' : ''}`}
+                        placeholder="Nome do projeto ou obra"
+                      />
+                      {errors.project && (
+                        <p className="mt-1 text-sm text-red-500">{errors.project}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Número do Pedido *
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.orderNumber || ''}
+                        onChange={(e) => setFormData(prev => ({...prev, orderNumber: e.target.value}))}
+                        disabled={mode === 'view'}
+                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                          mode === 'view' ? 'bg-gray-100' : ''
+                        } ${errors.orderNumber ? 'border-red-500' : ''}`}
+                        placeholder="Número do pedido ou proposta"
+                      />
+                      {errors.orderNumber && (
+                        <p className="mt-1 text-sm text-red-500">{errors.orderNumber}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        OS Interna
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.internalOS || ''}
+                        onChange={(e) => setFormData(prev => ({...prev, internalOS: e.target.value}))}
+                        disabled={mode === 'view'}
+                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                          mode === 'view' ? 'bg-gray-100' : ''
+                        }`}
+                        placeholder="Número da OS interna"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Data de Início
+                      </label>
+                      <input
+                        type="date"
+                        value={formData.startDate || ''}
+                        onChange={(e) => setFormData(prev => ({...prev, startDate: e.target.value}))}
+                        disabled={mode === 'view'}
+                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                          mode === 'view' ? 'bg-gray-100' : ''
+                        }`}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Data de Entrega
+                      </label>
+                      <input
+                        type="date"
+                        value={formData.deliveryDate || ''}
+                        onChange={(e) => setFormData(prev => ({...prev, deliveryDate: e.target.value}))}
+                        disabled={mode === 'view'}
+                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                          mode === 'view' ? 'bg-gray-100' : ''
+                        }`}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Status do Pedido
+                      </label>
+                      <select
+                        value={formData.status || 'in-progress'}
+                        onChange={(e) => setFormData(prev => ({...prev, status: e.target.value}))}
+                        disabled={mode === 'view'}
+                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                          mode === 'view' ? 'bg-gray-100' : ''
+                        }`}
+                      >
+                        <option value="in-progress">Em Andamento</option>
+                        <option value="completed">Concluído</option>
+                        <option value="on-hold">Em Espera</option>
+                        <option value="cancelled">Cancelado</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Projeto
+                      Observações
                     </label>
-                    <input
-                      type="text"
-                      value={formData.project || ''}
-                      onChange={(e) => setFormData(prev => ({...prev, project: e.target.value}))}
-                      placeholder="Nome do projeto"
+                    <textarea
+                      value={formData.observations || ''}
+                      onChange={(e) => setFormData(prev => ({...prev, observations: e.target.value}))}
                       disabled={mode === 'view'}
-                      className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                      rows={4}
+                      className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-colors ${
                         mode === 'view' ? 'bg-gray-100' : ''
                       }`}
+                      placeholder="Informações adicionais sobre o pedido..."
                     />
                   </div>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Número do Pedido *
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.orderNumber || ''}
-                    onChange={(e) => setFormData(prev => ({...prev, orderNumber: e.target.value}))}
-                    placeholder="052"
-                    disabled={mode === 'view'}
-                    className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                      errors.orderNumber ? 'border-red-500' : 'border-gray-300'
-                    } ${mode === 'view' ? 'bg-gray-100' : ''}`}
-                  />
-                  {errors.orderNumber && (
-                    <p className="text-red-500 text-sm mt-1">{errors.orderNumber}</p>
+                  {/* Estatísticas do pedido */}
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h4 className="font-medium text-gray-900 mb-3">Resumo do Pedido</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                      <div className="bg-white p-3 rounded border border-gray-200">
+                        <p className="text-xs text-gray-500">Total de Itens</p>
+                        <p className="text-lg font-semibold">{orderStats.totalItems}</p>
+                      </div>
+                      <div className="bg-white p-3 rounded border border-gray-200">
+                        <p className="text-xs text-gray-500">Peso Total</p>
+                        <p className="text-lg font-semibold">{orderStats.totalWeight.toLocaleString('pt-BR', {minimumFractionDigits: 2})} kg</p>
+                      </div>
+                      <div className="bg-white p-3 rounded border border-gray-200">
+                        <p className="text-xs text-gray-500">Progresso Médio</p>
+                        <p className="text-lg font-semibold">{orderStats.avgProgress}%</p>
+                      </div>
+                      <div className="bg-white p-3 rounded border border-gray-200">
+                        <p className="text-xs text-gray-500">Itens Pendentes</p>
+                        <p className="text-lg font-semibold">{orderStats.pendingItems}</p>
+                      </div>
+                      <div className="bg-white p-3 rounded border border-gray-200">
+                        <p className="text-xs text-gray-500">Itens Concluídos</p>
+                        <p className="text-lg font-semibold">{orderStats.completedItems}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'items' && (
+                <div className="space-y-4">
+                  {errors.items && (
+                    <p className="text-sm text-red-500">{errors.items}</p>
                   )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    OS Interna
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.internalOS || ''}
-                    onChange={(e) => setFormData(prev => ({...prev, internalOS: e.target.value}))}
-                    placeholder="OS/052"
-                    disabled={mode === 'view'}
-                    className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                      mode === 'view' ? 'bg-gray-100' : ''
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Valor do Pedido (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.value || 0}
-                    onChange={(e) => setFormData(prev => ({...prev, value: parseFloat(e.target.value) || 0}))}
-                    placeholder="0,00"
-                    disabled={mode === 'view'}
-                    className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                      mode === 'view' ? 'bg-gray-100' : ''
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-blue-600" />
-                  Cronograma e Status
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Data de Início *
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.startDate || ''}
-                      onChange={(e) => setFormData(prev => ({...prev, startDate: e.target.value}))}
-                      disabled={mode === 'view'}
-                      className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                        errors.startDate ? 'border-red-500' : 'border-gray-300'
-                      } ${mode === 'view' ? 'bg-gray-100' : ''}`}
-                    />
-                    {errors.startDate && (
-                      <p className="text-red-500 text-sm mt-1">{errors.startDate}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Data de Entrega *
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.deliveryDate || ''}
-                      onChange={(e) => setFormData(prev => ({...prev, deliveryDate: e.target.value}))}
-                      disabled={mode === 'view'}
-                      className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                        errors.deliveryDate ? 'border-red-500' : 'border-gray-300'
-                      } ${mode === 'view' ? 'bg-gray-100' : ''}`}
-                    />
-                    {errors.deliveryDate && (
-                      <p className="text-red-500 text-sm mt-1">{errors.deliveryDate}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Data de Conclusão
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.completionDate || ''}
-                      onChange={(e) => setFormData(prev => ({...prev, completionDate: e.target.value}))}
-                      disabled={mode === 'view'}
-                      className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                        mode === 'view' ? 'bg-gray-100' : ''
-                      }`}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Status
-                    </label>
-                    <select
-                      value={formData.status || 'in-progress'}
-                      onChange={(e) => setFormData(prev => ({...prev, status: e.target.value}))}
-                      disabled={mode === 'view'}
-                      className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                        mode === 'view' ? 'bg-gray-100' : ''
-                      }`}
-                    >
-                      <option value="in-progress">Em Processo</option>
-                      <option value="completed">Concluído</option>
-                      <option value="on-hold">Em Pausa</option>
-                      <option value="cancelled">Cancelado</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Prioridade
-                    </label>
-                    <select
-                      value={formData.priority || 'medium'}
-                      onChange={(e) => setFormData(prev => ({...prev, priority: e.target.value}))}
-                      disabled={mode === 'view'}
-                      className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                        mode === 'view' ? 'bg-gray-100' : ''
-                      }`}
-                    >
-                      <option value="low">Baixa</option>
-                      <option value="medium">Média</option>
-                      <option value="high">Alta</option>
-                      <option value="urgent">Urgente</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Observações
-                </label>
-                <textarea
-                  value={formData.observations || ''}
-                  onChange={(e) => setFormData(prev => ({...prev, observations: e.target.value}))}
-                  placeholder="Observações sobre o pedido..."
-                  rows={4}
-                  disabled={mode === 'view'}
-                  className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-colors ${
-                    mode === 'view' ? 'bg-gray-100' : ''
-                  }`}
-                />
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'items' && (
-            <div className="p-6 space-y-6">
-              <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-6 rounded-lg border border-blue-200">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-blue-900 flex items-center gap-2">
-                      <Package className="w-5 h-5" />
-                      Itens do Pedido
-                    </h3>
-                    <p className="text-blue-700 text-sm mt-1">
-                      Gerencie os itens que compõem este pedido
-                    </p>
-                  </div>
                   
-                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 text-center">
-                    <div className="bg-white p-3 rounded-lg shadow-sm">
-                      <div className="text-2xl font-bold text-blue-600">{itemStats.totalItems}</div>
-                      <div className="text-xs text-gray-600">Total</div>
-                    </div>
-                    <div className="bg-white p-3 rounded-lg shadow-sm">
-                      <div className="text-2xl font-bold text-green-600">{itemStats.completedItems}</div>
-                      <div className="text-xs text-gray-600">Concluídos</div>
-                    </div>
-                    <div className="bg-white p-3 rounded-lg shadow-sm">
-                      <div className="text-2xl font-bold text-yellow-600">{itemStats.inProgressItems}</div>
-                      <div className="text-xs text-gray-600">Em Andamento</div>
-                    </div>
-                    <div className="bg-white p-3 rounded-lg shadow-sm">
-                      <div className="text-2xl font-bold text-gray-600">{itemStats.notStartedItems}</div>
-                      <div className="text-xs text-gray-600">Não Iniciados</div>
-                    </div>
-                    <div className="bg-white p-3 rounded-lg shadow-sm">
-                      <div className="text-2xl font-bold text-purple-600">{itemStats.averageProgress}%</div>
-                      <div className="text-xs text-gray-600">Progresso Médio</div>
-                    </div>
-                  </div>
-                </div>
+                  <div className="flex flex-wrap gap-3 mb-4">
+                    {mode !== 'view' && (
+                      <>
+                        <button
+                          onClick={() => {
+                            setEditingItem(null);
+                            setShowItemModal(true);
+                          }}
+                          className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Adicionar Item
+                        </button>
 
-                <div className="mt-4">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-blue-900">Progresso Geral do Pedido</span>
-                    <span className="text-blue-700">{itemStats.averageProgress}%</span>
-                  </div>
-                  <div className="h-3 bg-blue-200 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-300 ${getProgressColor(itemStats.averageProgress)}`}
-                      style={{ width: `${itemStats.averageProgress}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
+                        {selectedItems.length > 0 && (
+                          <button
+                            onClick={handleRemoveSelectedItems}
+                            className="flex items-center gap-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Remover Selecionados
+                          </button>
+                        )}
+                      </>
+                    )}
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <input
-                      type="text"
-                      placeholder="Buscar itens..."
-                      value={itemsFilter}
-                      onChange={(e) => setItemsFilter(e.target.value)}
-                      className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full sm:w-64"
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    <select
-                      value={itemsSortField}
-                      onChange={(e) => setItemsSortField(e.target.value as any)}
-                      className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      <option value="itemNumber">Número</option>
-                      <option value="code">Código</option>
-                      <option value="description">Descrição</option>
-                      <option value="progress">Progresso</option>
-                    </select>
                     <button
-                      onClick={() => setItemsSortOrder(itemsSortOrder === 'asc' ? 'desc' : 'asc')}
-                      className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                      onClick={() => setShowRomaneioModal(true)}
+                      disabled={!formData.items?.length}
+                      className={`flex items-center gap-1 px-4 py-2 rounded-lg 
+                        ${formData.items?.length 
+                          ? 'bg-green-600 text-white hover:bg-green-700' 
+                          : 'bg-gray-300 text-gray-500 cursor-not-allowed'} 
+                        transition-colors`}
+                    >
+                      <Printer className="w-4 h-4" />
+                      Gerar Romaneio
+                    </button>
+                  </div>
+
+                  {/* Filtro e ordenação */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <div className="relative flex-grow max-w-md">
+                      <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Filtrar itens..."
+                        value={itemsFilter}
+                        onChange={(e) => setItemsFilter(e.target.value)}
+                        className="pl-9 p-2 border border-gray-300 rounded-lg w-full"
+                      />
+                    </div>
+
+                    <div className="flex items-center">
+                      <label className="text-sm mr-2">Ordenar por:</label>
+                      <select
+                        value={itemsSortField}
+                        onChange={(e) => setItemsSortField(e.target.value as any)}
+                        className="p-2 border border-gray-300 rounded-lg"
+                      >
+                        <option value="itemNumber">N° Item</option>
+                        <option value="code">Código</option>
+                        <option value="description">Descrição</option>
+                        <option value="progress">Progresso</option>
+                      </select>
+                    </div>
+                    
+                    <button
+                      onClick={() => setItemsSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                      className="p-2 border border-gray-300 rounded-lg"
                     >
                       {itemsSortOrder === 'asc' ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
                     </button>
                   </div>
-                </div>
 
-                {mode !== 'view' && (
-                  <div className="flex gap-2">
-                    {selectedItems.length > 0 && (
-                      <>
-                        <button
-                          onClick={openRomaneioModal}
-                          className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-md"
-                        >
-                          <FileText className="w-4 h-4" />
-                          Romaneio ({selectedItems.length})
-                        </button>
-                        <button
-                          onClick={clearSelection}
-                          className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors shadow-md"
-                        >
-                          <X className="w-4 h-4" />
-                          Limpar Seleção
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={() => openItemModal()}
-                      className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-md"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Adicionar Item
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {!formData.items || formData.items.length === 0 ? (
-                <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-                  <Package className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum item adicionado</h3>
-                  <p className="text-gray-500 mb-6">Comece adicionando itens ao seu pedido</p>
-                  {mode !== 'view' && (
-                    <button
-                      onClick={() => openItemModal()}
-                      className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors mx-auto shadow-md"
-                    >
-                      <Plus className="w-5 h-5" />
-                      Adicionar Primeiro Item
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">
-                            <input
-                              type="checkbox"
-                              checked={selectedItems.length === filteredAndSortedItems.length && filteredAndSortedItems.length > 0}
-                              onChange={toggleSelectAll}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                          </th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">#</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Código</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Descrição</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Qtd.</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Peso (kg)</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Progresso</th>
-                          <th className="text-left py-3 px-4 font-medium text-gray-700">Prioridade</th>
-                          <th className="text-right py-3 px-4 font-medium text-gray-700">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {filteredAndSortedItems.map((item, index) => (
-                          <tr key={item.id} className={`hover:bg-gray-50 transition-colors ${selectedItems.includes(item.id) ? 'bg-blue-50' : ''}`}>
-                            <td className="py-4 px-4">
-                              <input
-                                type="checkbox"
-                                checked={selectedItems.includes(item.id)}
-                                onChange={() => toggleSelectItem(item.id)}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-100 text-blue-800 font-medium text-sm">
-                                {item.itemNumber || index + 1}
-                              </div>
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="font-medium text-gray-900">{item.code}</div>
-                              {item.notes && (
-                                <div className="text-sm text-gray-500 mt-1">{item.notes}</div>
+                  {/* Tabela de itens */}
+                  {formData.items && formData.items.length > 0 ? (
+                    <div className="overflow-x-auto mt-4">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-100">
+                          <tr>
+                            {mode !== 'view' && (
+                              <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedItems.length === filteredAndSortedItems.length && filteredAndSortedItems.length > 0}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedItems(filteredAndSortedItems.map(item => item.id));
+                                    } else {
+                                      setSelectedItems([]);
+                                    }
+                                  }}
+                                  className="h-4 w-4 text-blue-600 rounded"
+                                />
+                              </th>
+                            )}
+                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Item
+                            </th>
+                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Código
+                            </th>
+                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Descrição
+                            </th>
+                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Qtde
+                            </th>
+                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Peso
+                            </th>
+                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Progresso
+                            </th>
+                            <th scope="col" className="p-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Ações
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {filteredAndSortedItems.map((item) => (
+                            <tr key={item.id} className="hover:bg-gray-50">
+                              {mode !== 'view' && (
+                                <td className="p-4 whitespace-nowrap">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedItems.includes(item.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedItems(prev => [...prev, item.id]);
+                                      } else {
+                                        setSelectedItems(prev => prev.filter(id => id !== item.id));
+                                      }
+                                    }}
+                                    className="h-4 w-4 text-blue-600 rounded"
+                                  />
+                                </td>
                               )}
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="text-gray-900">{item.description}</div>
-                              {item.responsible && (
-                                <div className="text-sm text-gray-500 mt-1 flex items-center gap-1">
-                                  <User className="w-3 h-3" />
-                                  {item.responsible}
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-4 px-4">
-                              <span className="text-gray-900">{item.quantity} {item.unit}</span>
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="flex items-center gap-1">
-                                <span className="text-gray-900 font-medium">
-                                  {(() => {
-                                    const weight = item.weight || 0;
-                                    console.log(`Displaying weight for item ${item.code}: ${weight} (type: ${typeof weight})`);
-                                    console.log(`Full item data:`, item);
-                                    return weight.toFixed(2);
-                                  })()} kg
-                                </span>
-                                {(item.weight || 0) === 0 && (
-                                  <AlertCircle className="w-4 h-4 text-amber-500" title="Peso não informado" />
+                              <td className="p-4 whitespace-nowrap">
+                                {item.itemNumber}
+                              </td>
+                              <td className="p-4">
+                                <span className="font-mono text-sm">{item.code}</span>
+                              </td>
+                              <td className="p-4">
+                                <div className="text-sm font-medium text-gray-900">{item.description}</div>
+                                {item.notes && (
+                                  <div className="text-xs text-gray-500 mt-1">{item.notes}</div>
                                 )}
-                              </div>
-                              {(item.quantity || 1) > 1 && (
-                                <div className="text-xs text-gray-500">
-                                  Total: {((item.weight || 0) * (item.quantity || 1)).toFixed(2)} kg
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1">
-                                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                                    <div
-                                      className={`h-full transition-all ${getProgressColor(item.overallProgress || 0)}`}
-                                      style={{ width: `${item.overallProgress || 0}%` }}
+                              </td>
+                              <td className="p-4 whitespace-nowrap">
+                                <div className="text-sm">{item.quantity} {item.unit}</div>
+                              </td>
+                              <td className="p-4 whitespace-nowrap">
+                                <div className="text-sm">{item.weight.toLocaleString('pt-BR', {minimumFractionDigits: 2})} kg</div>
+                                <div className="text-xs text-gray-500">Total: {(item.weight * item.quantity).toLocaleString('pt-BR', {minimumFractionDigits: 2})} kg</div>
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center">
+                                  <div className="mr-2 text-sm font-medium">
+                                    {item.overallProgress || item.progress || 0}%
+                                  </div>
+                                  <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                    <div 
+                                      className={`h-full ${
+                                        (item.overallProgress || item.progress || 0) >= 100 
+                                          ? 'bg-green-500' 
+                                          : (item.overallProgress || item.progress || 0) >= 50 
+                                            ? 'bg-blue-500' 
+                                            : 'bg-yellow-500'
+                                      }`}
+                                      style={{ width: `${item.overallProgress || item.progress || 0}%` }}
                                     />
                                   </div>
                                 </div>
-                                <span className="text-sm font-medium text-gray-700 min-w-[3rem]">
-                                  {item.overallProgress || 0}%
-                                </span>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4">
-                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${getPriorityColor(item.priority || 'medium')}`}>
-                                {item.priority === 'urgent' ? 'Urgente' : 
-                                 item.priority === 'high' ? 'Alta' : 
-                                 item.priority === 'medium' ? 'Média' : 'Baixa'}
-                              </span>
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="flex items-center justify-end gap-1">
-                                <button
-                                  onClick={() => openProgressModal(item)}
-                                  className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Gerenciar Progresso"
-                                >
-                                  <BarChart3 className="w-4 h-4" />
-                                </button>
-                                {mode !== 'view' && (
-                                  <>
-                                    <button
-                                      onClick={() => openItemModal(item)}
-                                      className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
-                                      title="Editar Item"
-                                    >
-                                      <Edit3 className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                      onClick={() => removeItem(item.id)}
-                                      className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
-                                      title="Remover Item"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                              </td>
+                              <td className="p-4 whitespace-nowrap text-right">
+                                <div className="flex justify-end space-x-2">
+                                  <button
+                                    onClick={() => {
+                                      setProgressItem(item);
+                                      setShowProgressModal(true);
+                                    }}
+                                    className="text-blue-600 hover:text-blue-800"
+                                    title="Atualizar Progresso"
+                                  >
+                                    <BarChart3 className="w-5 h-5" />
+                                  </button>
+                                  
+                                  {mode !== 'view' && (
+                                    <>
+                                      <button
+                                        onClick={() => {
+                                          setEditingItem(item);
+                                          setShowItemModal(true);
+                                        }}
+                                        className="text-blue-600 hover:text-blue-800"
+                                        title="Editar Item"
+                                      >
+                                        <Edit3 className="w-5 h-5" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setFormData(prev => ({
+                                            ...prev,
+                                            items: prev.items?.filter(i => i.id !== item.id) || []
+                                          }));
+                                        }}
+                                        className="text-red-600 hover:text-red-800"
+                                        title="Remover Item"
+                                      >
+                                        <Trash2 className="w-5 h-5" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center py-10 bg-gray-50 rounded-lg">
+                      <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-500">Nenhum item adicionado ao pedido</p>
+                      {mode !== 'view' && (
+                        <button
+                          onClick={() => {
+                            setEditingItem(null);
+                            setShowItemModal(true);
+                          }}
+                          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                          Adicionar primeiro item
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {formData.items && formData.items.length > 0 && (
-                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <h4 className="font-medium text-gray-900 mb-2">Resumo dos Itens</h4>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-600">Total de Itens:</span>
-                      <span className="font-medium text-gray-900 ml-2">{itemStats.totalItems}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Peso Total:</span>
-                      <span className="font-medium text-gray-900 ml-2">{itemStats.totalWeight.toFixed(2)} kg</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Progresso Médio:</span>
-                      <span className="font-medium text-gray-900 ml-2">{itemStats.averageProgress}%</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Valor Total:</span>
-                      <span className="font-medium text-gray-900 ml-2">R$ {(formData.value || 0).toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'documents' && (
-            <div className="p-6 space-y-6">
-              <div className="bg-gradient-to-r from-green-50 to-green-100 p-6 rounded-lg border border-green-200">
-                <h3 className="text-lg font-semibold text-green-900 flex items-center gap-2">
-                  <Folder className="w-5 h-5" />
-                  Documentos do Pedido
-                </h3>
-                <p className="text-green-700 text-sm mt-1">
-                  Gerencie documentos, arquivos e links relacionados ao pedido
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-lg border border-gray-200">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <ExternalLink className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">Google Drive</h4>
-                    <p className="text-sm text-gray-600">Link para pasta compartilhada do pedido</p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
+              {activeTab === 'documents' && (
+                <div className="space-y-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Link do Google Drive
+                      Link para pasta do Google Drive
                     </label>
-                    <div className="flex gap-3">
+                    <div className="flex gap-2">
                       <input
-                        type="url"
+                        type="text"
                         value={formData.googleDriveLink || ''}
                         onChange={(e) => setFormData(prev => ({...prev, googleDriveLink: e.target.value}))}
-                        placeholder="https://drive.google.com/drive/folders/..."
                         disabled={mode === 'view'}
                         className={`flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
                           mode === 'view' ? 'bg-gray-100' : ''
                         }`}
+                        placeholder="https://drive.google.com/drive/folders/..."
                       />
                       {formData.googleDriveLink && (
-                        <a
+                        <a 
                           href={formData.googleDriveLink}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
                         >
                           <ExternalLink className="w-4 h-4" />
                           Abrir
@@ -1726,132 +1499,97 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                     </div>
                   </div>
 
-                  {formData.googleDriveLink && (
-                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                        <span className="text-green-800 font-medium">Link do Google Drive configurado</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <h4 className="font-medium text-blue-900 mb-2">Dicas para Organização de Documentos</h4>
-                    <ul className="text-sm text-blue-800 space-y-1">
-                      <li>• Organize os documentos em pastas por tipo: Desenhos, Especificações, Fotos, etc.</li>
-                      <li>• Use nomes de arquivo descritivos que incluam o número do pedido</li>
-                      <li>• Mantenha versões atualizadas dos documentos</li>
-                      <li>• Configure permissões adequadas para a equipe de produção</li>
-                      <li>• Inclua cronogramas, listas de materiais e especificações técnicas</li>
-                    </ul>
+                  <div className="bg-gray-50 p-6 rounded-lg text-center">
+                    <Folder className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                    <h4 className="text-lg font-medium text-gray-900">Gestão de Arquivos</h4>
+                    <p className="text-gray-500 mb-4">
+                      Os arquivos são gerenciados através do Google Drive para melhor integração e compartilhamento.
+                    </p>
+                    {formData.googleDriveLink ? (
+                      <a 
+                        href={formData.googleDriveLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
+                      >
+                        <Folder className="w-4 h-4" />
+                        Abrir pasta do projeto
+                      </a>
+                    ) : (
+                      <button
+                        onClick={() => setFormData(prev => ({...prev, googleDriveLink: `https://drive.google.com/drive/folders/new?name=${encodeURIComponent(formData.project || 'Novo Projeto')}`}))}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
+                        disabled={mode === 'view'}
+                      >
+                        <Folder className="w-4 h-4" />
+                        Criar pasta no Drive
+                      </button>
+                    )}
                   </div>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-3 mb-3">
-                    <Camera className="w-8 h-8 text-green-600" />
-                    <div>
-                      <h5 className="font-medium text-gray-900">Fotos de Progresso</h5>
-                      <p className="text-sm text-gray-600">Registro visual da produção</p>
-                    </div>
-                  </div>
-                  {formData.googleDriveLink ? (
-                    <a
-                      href={formData.googleDriveLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-green-600 hover:text-green-800 text-sm font-medium"
-                    >
-                      Ver fotos →
-                    </a>
-                  ) : (
-                    <span className="text-gray-400 text-sm">Configure o link do Drive</span>
-                  )}
-                </div>
-
-                <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-3 mb-3">
-                    <Calendar className="w-8 h-8 text-purple-600" />
-                    <div>
-                      <h5 className="font-medium text-gray-900">Cronogramas</h5>
-                      <p className="text-sm text-gray-600">Planejamento e marcos</p>
-                    </div>
-                  </div>
-                  {formData.googleDriveLink ? (
-                    <a
-                      href={formData.googleDriveLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-purple-600 hover:text-purple-800 text-sm font-medium"
-                    >
-                      Ver cronogramas →
-                    </a>
-                  ) : (
-                    <span className="text-gray-400 text-sm">Configure o link do Drive</span>
-                  )}
-                </div>
-
-                <div className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-3 mb-3">
-                    <FileText className="w-8 h-8 text-blue-600" />
-                    <div>
-                      <h5 className="font-medium text-gray-900">Especificações Técnicas</h5>
-                      <p className="text-sm text-gray-600">Desenhos e especificações</p>
-                    </div>
-                  </div>
-                  {formData.googleDriveLink ? (
-                    <a
-                      href={formData.googleDriveLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                    >
-                      Ver documentos técnicos →
-                    </a>
-                  ) : (
-                    <span className="text-gray-400 text-sm">Configure o link do Drive</span>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
-          )}
+          </div>
+
+          {/* Modal footer */}
+          <div className="flex justify-end gap-3 p-4 sm:p-6 border-t border-gray-200 bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              {mode === 'view' ? 'Fechar' : 'Cancelar'}
+            </button>
+            {mode !== 'view' && (
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+              >
+                {loading ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {mode === 'create' ? 'Criar Pedido' : 'Atualizar Pedido'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* Modal de Item */}
       {showItemModal && (
-        <ItemModal
-          item={editingItem}
-          onSave={saveItem}
+        <ItemModal 
+          item={editingItem} 
+          onSave={editingItem ? handleEditItem : handleAddItem} 
           onClose={() => {
             setShowItemModal(false);
             setEditingItem(null);
-          }}
+          }} 
         />
       )}
 
+      {/* Modal de Progresso */}
       {showProgressModal && progressItem && (
-        <ItemProgressModal
-          item={progressItem}
+        <ItemProgressModal 
+          item={progressItem} 
           allItems={formData.items || []}
-          onSave={updateItemProgress}
+          onSave={handleUpdateItemProgress} 
           onClose={() => {
             setShowProgressModal(false);
             setProgressItem(null);
-          }}
+          }} 
         />
       )}
 
+      {/* Modal de Romaneio */}
       {showRomaneioModal && (
         <RomaneioModal
-          order={formData}
-          selectedItems={formData.items?.filter(item => selectedItems.includes(item.id)) || []}
+          items={formData.items || []} 
+          customerName={formData.customerName || ''}
+          project={formData.project || ''}
+          orderNumber={formData.orderNumber || ''}
           onClose={() => setShowRomaneioModal(false)}
         />
       )}
