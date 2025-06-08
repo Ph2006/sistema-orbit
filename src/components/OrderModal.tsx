@@ -614,24 +614,58 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
       };
 
       const processedItems = Array.isArray(order.items) ? 
-        order.items.map((item, index) => ({
-          id: item.id || `item-${index}`,
-          code: item.code || '',
-          description: item.description || '',
-          quantity: typeof item.quantity === 'number' ? item.quantity : 1,
-          unit: item.unit || 'un',
-          weight: typeof item.weight === 'number' ? item.weight : 0,
-          progress: typeof item.progress === 'number' ? item.progress : 0,
-          overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : (typeof item.progress === 'number' ? item.progress : 0),
-          itemNumber: item.itemNumber || (index + 1),
-          notes: item.notes || '',
-          priority: item.priority || 'medium',
-          estimatedDays: typeof item.estimatedDays === 'number' ? item.estimatedDays : 1,
-          startDate: item.startDate || '',
-          endDate: item.endDate || '',
-          responsible: item.responsible || '',
-          stagePlanning: item.stagePlanning || {}
-        })) : [];
+        order.items.map((item, index) => {
+          // Log para debug dos dados do item
+          console.log(`Processing item ${index}:`, item);
+          
+          // Processar peso com mais cuidado
+          let itemWeight = 0;
+          if (typeof item.weight === 'number') {
+            itemWeight = item.weight;
+          } else if (typeof item.weight === 'string') {
+            const parsedWeight = parseFloat(item.weight);
+            itemWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
+          }
+          
+          // Processar quantidade com mais cuidado
+          let itemQuantity = 1;
+          if (typeof item.quantity === 'number') {
+            itemQuantity = item.quantity;
+          } else if (typeof item.quantity === 'string') {
+            const parsedQuantity = parseFloat(item.quantity);
+            itemQuantity = isNaN(parsedQuantity) ? 1 : parsedQuantity;
+          }
+          
+          // Processar progresso
+          let itemProgress = 0;
+          if (typeof item.progress === 'number') {
+            itemProgress = item.progress;
+          } else if (typeof item.overallProgress === 'number') {
+            itemProgress = item.overallProgress;
+          }
+          
+          const processedItem = {
+            id: item.id || `item-${index}`,
+            code: item.code || '',
+            description: item.description || '',
+            quantity: itemQuantity,
+            unit: item.unit || 'un',
+            weight: itemWeight,
+            progress: itemProgress,
+            overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : itemProgress,
+            itemNumber: item.itemNumber || (index + 1),
+            notes: item.notes || '',
+            priority: item.priority || 'medium',
+            estimatedDays: typeof item.estimatedDays === 'number' ? item.estimatedDays : 1,
+            startDate: item.startDate || '',
+            endDate: item.endDate || '',
+            responsible: item.responsible || '',
+            stagePlanning: item.stagePlanning || {}
+          };
+          
+          console.log(`Processed item ${index} with weight:`, processedItem.weight);
+          return processedItem;
+        }) : [];
 
       setFormData({
         customerId: order.customerId || '',
@@ -691,6 +725,8 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
 
   const handleSave = async () => {
     try {
+      console.log("Attempting to save order with data:", formData);
+      
       if (!validateForm()) {
         return;
       }
@@ -704,6 +740,28 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
           return null;
         }
       };
+
+      // Processar itens para garantir que todos os dados sejam preservados
+      const processedItemsForSave = (formData.items || []).map(item => ({
+        id: item.id,
+        code: item.code || '',
+        description: item.description || '',
+        quantity: Number(item.quantity) || 1,
+        unit: item.unit || 'un',
+        weight: Number(item.weight) || 0, // Garantir que o peso seja um número
+        progress: Number(item.progress) || 0,
+        overallProgress: Number(item.overallProgress) || 0,
+        itemNumber: item.itemNumber || 0,
+        notes: item.notes || '',
+        priority: item.priority || 'medium',
+        estimatedDays: Number(item.estimatedDays) || 1,
+        startDate: item.startDate || '',
+        endDate: item.endDate || '',
+        responsible: item.responsible || '',
+        stagePlanning: item.stagePlanning || {}
+      }));
+
+      console.log("Processed items for save:", processedItemsForSave);
 
       const orderData: Partial<Order> = {
         customerId: formData.customerId || null,
@@ -721,7 +779,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
         status: formData.status || 'in-progress',
         observations: formData.observations || '',
         notes: formData.observations || '',
-        items: formData.items || [],
+        items: processedItemsForSave, // Usar os itens processados
         googleDriveLink: formData.googleDriveLink || '',
         value: formData.value || 0,
         priority: formData.priority || 'medium',
@@ -734,11 +792,15 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
         }
       });
 
+      console.log("Final order data to be saved:", orderData);
+
       if (mode === 'create') {
         orderData.createdAt = new Date().toISOString();
         await addOrder(orderData as any);
+        console.log("Order created successfully");
       } else if (mode === 'edit' && order?.id) {
         await updateOrder(order.id, orderData);
+        console.log("Order updated successfully");
       }
 
       onClose();
@@ -815,22 +877,58 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
   };
 
   const saveItem = (item: OrderItem) => {
+    console.log("Saving item with data:", item);
+    
     if (editingItem) {
-      updateItem(item.id, 'code', item.code);
-      updateItem(item.id, 'description', item.description);
-      updateItem(item.id, 'quantity', item.quantity);
-      updateItem(item.id, 'unit', item.unit);
-      updateItem(item.id, 'weight', item.weight);
-      updateItem(item.id, 'notes', item.notes);
-      updateItem(item.id, 'priority', item.priority);
-      updateItem(item.id, 'estimatedDays', item.estimatedDays);
-      updateItem(item.id, 'responsible', item.responsible);
-    } else {
+      // Editando item existente - atualize todos os campos
+      const updatedItems = formData.items?.map(existingItem => 
+        existingItem.id === item.id ? {
+          ...existingItem,
+          code: item.code,
+          description: item.description,
+          quantity: item.quantity,
+          unit: item.unit,
+          weight: item.weight, // Garantir que o peso seja salvo
+          notes: item.notes,
+          priority: item.priority,
+          estimatedDays: item.estimatedDays,
+          responsible: item.responsible,
+          // Manter outros campos existentes
+          progress: existingItem.progress || 0,
+          overallProgress: existingItem.overallProgress || 0,
+          itemNumber: existingItem.itemNumber,
+          startDate: existingItem.startDate || '',
+          endDate: existingItem.endDate || '',
+          stagePlanning: existingItem.stagePlanning || {}
+        } : existingItem
+      ) || [];
+      
+      console.log("Updated items array:", updatedItems);
+      
       setFormData(prev => ({
         ...prev,
-        items: [...(prev.items || []), item]
+        items: updatedItems
+      }));
+    } else {
+      // Novo item - adicione com todos os dados
+      const newItem = {
+        ...item,
+        itemNumber: (formData.items?.length || 0) + 1,
+        progress: 0,
+        overallProgress: 0,
+        startDate: '',
+        endDate: '',
+        stagePlanning: {}
+      };
+      
+      console.log("Adding new item:", newItem);
+      
+      setFormData(prev => ({
+        ...prev,
+        items: [...(prev.items || []), newItem]
       }));
     }
+    
     setShowItemModal(false);
     setEditingItem(null);
   };
