@@ -591,6 +591,15 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
   const [progressItem, setProgressItem] = useState<OrderItem | null>(null);
   const [showRomaneioModal, setShowRomaneioModal] = useState(false);
 
+  // Log para monitorar mudanças no formData
+  useEffect(() => {
+    console.log("FormData changed - items with weights:", formData.items?.map(item => ({
+      code: item.code,
+      weight: item.weight,
+      type: typeof item.weight
+    })));
+  }, [formData.items]);
+
   useEffect(() => {
     if (isOpen) {
       try {
