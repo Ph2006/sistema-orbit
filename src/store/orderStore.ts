@@ -25,6 +25,7 @@ interface OrderItem {
   unit: string;
   weight: number;
   progress: number;
+  overallProgress?: number; // Adicionado para compatibilidade
 }
 
 type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | string;
@@ -62,7 +63,7 @@ interface OrderState {
   fetchOrders: () => Promise<void>;
   getOrderById: (id: string) => Promise<Order | null>;
   addOrder: (order: Omit<Order, 'id'>) => Promise<string>;
-  updateOrder: (id: string, updates: Partial<Order>) => Promise<void>;
+  updateOrder: (orderData: Order) => Promise<void>; // CORRIGIDO: assinatura atualizada
   deleteOrder: (id: string) => Promise<void>;
   setSelectedOrder: (order: Order | null) => void;
   subscribeToOrders: () => () => void;
@@ -208,8 +209,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }
   },
 
-  // Atualizar pedido existente
-  updateOrder: async (id: string, updates: Partial<Order>) => {
+  // Atualizar pedido existente - CORRIGIDO
+  updateOrder: async (orderData: Order) => {
     try {
       set({ loading: true, error: null });
       
@@ -217,19 +218,41 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       if (!user || !companyId) {
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
-
-      const orderRef = doc(db, 'companies', companyId, 'orders', id);
+      
+      if (!orderData.id) {
+        throw new Error('ID do pedido é obrigatório para atualização');
+      }
+      
+      const orderRef = doc(db, 'companies', companyId, 'orders', orderData.id);
+      
+      // Extrair o ID e preparar os dados para atualização
+      const { id, ...updates } = orderData;
       
       // Converter datas para Timestamp do Firebase e substituir undefined por null
-      const updatesToSave: any = { ...updates, updatedAt: Timestamp.now(), updatedBy: user.uid };
-
+      const updatesToSave: any = { 
+        ...updates, 
+        updatedAt: Timestamp.now(), 
+        updatedBy: user.uid 
+      };
+      
       // Converter undefined para null em todos os campos
       Object.keys(updatesToSave).forEach(key => {
         if (updatesToSave[key] === undefined) {
           updatesToSave[key] = null;
         }
       });
-
+      
+      // Garantir que os itens sejam salvos corretamente
+      if (updates.items && Array.isArray(updates.items)) {
+        updatesToSave.items = updates.items.map(item => ({
+          ...item,
+          weight: typeof item.weight === 'number' ? item.weight : parseFloat(item.weight) || 0,
+          quantity: typeof item.quantity === 'number' ? item.quantity : parseFloat(item.quantity) || 1,
+          progress: typeof item.progress === 'number' ? item.progress : parseFloat(item.progress) || 0,
+          overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : parseFloat(item.overallProgress) || 0
+        }));
+      }
+      
       // Converter datas se existirem
       if (updates.startDate) {
         updatesToSave.startDate = Timestamp.fromDate(new Date(updates.startDate));
@@ -245,6 +268,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       }
 
       console.log("Updating order with data:", updatesToSave);
+      console.log("Items being saved:", updatesToSave.items);
+      
       await updateDoc(orderRef, updatesToSave);
       console.log("Order updated successfully");
       
