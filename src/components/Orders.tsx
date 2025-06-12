@@ -1237,7 +1237,7 @@ export default function Orders() {
         /* Lista de Pedidos */
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 print:shadow-none print:border-none">
           {loading ? (
-            <LoadingSpinner />
+            <LoadingSpinner orders={orders} />
           ) : processedOrders.length === 0 ? (
             <div className="text-center py-16 print:hidden">
               <Package className="w-20 h-20 text-gray-400 mx-auto mb-4" />
@@ -1819,3 +1819,115 @@ const LoadingSpinner: React.FC<{ orders?: Order[] }> = ({ orders = [] }) => (
     </div>
   </div>
 );
+
+// Estilos CSS para animações e responsividade
+const styles = `
+  @media print {
+    @page {
+      size: landscape;
+      margin: 10mm;
+    }
+    body {
+      font-size: 11pt;
+      line-height: 1.3;
+    }
+    .print\\:hidden {
+      display: none !important;
+    }
+    .print\\:shadow-none {
+      box-shadow: none !important;
+    }
+    .print\\:border-none {
+      border: none !important;
+    }
+    table {
+      font-size: 10pt;
+    }
+    th, td {
+      padding: 4px 8px !important;
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-out forwards;
+  }
+  
+  /* Scroll suave para tabelas responsivas */
+  .overflow-x-auto {
+    scrollbar-width: thin;
+    scrollbar-color: #CBD5E0 #F7FAFC;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar {
+    height: 6px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-track {
+    background: #F7FAFC;
+    border-radius: 3px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-thumb {
+    background: #CBD5E0;
+    border-radius: 3px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-thumb:hover {
+    background: #A0AEC0;
+  }
+  
+  /* Melhorias na responsividade */
+  @media (max-width: 768px) {
+    .grid-cols-2 {
+      grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+    
+    .lg\\:grid-cols-4 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    
+    .lg\\:grid-cols-8 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+  
+  /* Hover effects aprimorados */
+  .group:hover .group-hover\\:visible {
+    visibility: visible;
+  }
+  
+  .group .group-hover\\:visible {
+    visibility: hidden;
+  }
+  
+  /* Animações suaves para filtros */
+  .transition-all {
+    transition: all 0.2s ease-in-out;
+  }
+  
+  /* Cores personalizadas para urgência */
+  .bg-gradient-to-r {
+    background-image: linear-gradient(to right, var(--tw-gradient-stops));
+  }
+`;
+
+// Injetar estilos no componente
+if (typeof document !== 'undefined') {
+  const styleElement = document.createElement('style');
+  styleElement.textContent = styles;
+  if (!document.head.querySelector('style[data-orders-styles]')) {
+    styleElement.setAttribute('data-orders-styles', 'true');
+    document.head.appendChild(styleElement);
+  }
+}
