@@ -25,7 +25,14 @@ interface OrderItem {
   unit: string;
   weight: number;
   progress: number;
-  overallProgress?: number; // Adicionado para compatibilidade
+  overallProgress?: number;
+  itemNumber?: number;
+  notes?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  estimatedDays?: number;
+  startDate?: string;
+  endDate?: string;
+  responsible?: string;
 }
 
 type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | string;
@@ -34,22 +41,25 @@ interface Order {
   id: string;
   customerId?: string;
   customerName?: string;
-  customer?: string; // Campo de compatibilidade
+  customer?: string;
   project?: string;
-  projectName?: string; // Campo de compatibilidade
+  projectName?: string;
   orderNumber?: string;
   internalOS?: string;
-  internalOrderNumber?: string; // Campo de compatibilidade
-  serviceOrder?: string; // Campo de compatibilidade
+  internalOrderNumber?: string;
+  serviceOrder?: string;
   startDate?: string;
   deliveryDate?: string;
   completionDate?: string;
   status?: OrderStatus;
   observations?: string;
-  notes?: string; // Campo de compatibilidade
+  notes?: string;
   items?: OrderItem[];
   createdAt?: string;
   updatedAt?: string;
+  googleDriveLink?: string;
+  value?: number;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
   [key: string]: any;
 }
 
@@ -58,23 +68,154 @@ interface OrderState {
   selectedOrder: Order | null;
   loading: boolean;
   error: string | null;
+  connectionRetries: number;
   
   // Actions
   fetchOrders: () => Promise<void>;
   getOrderById: (id: string) => Promise<Order | null>;
   addOrder: (order: Omit<Order, 'id'>) => Promise<string>;
-  updateOrder: (orderData: Order) => Promise<void>; // CORRIGIDO: assinatura atualizada
+  updateOrder: (orderData: Order) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
   setSelectedOrder: (order: Order | null) => void;
   subscribeToOrders: () => () => void;
   clearError: () => void;
+  retryConnection: () => void;
 }
+
+// Função utilitária para processar itens de forma segura
+const processOrderItems = (items: any[]): OrderItem[] => {
+  if (!Array.isArray(items)) {
+    console.warn('Items is not an array:', items);
+    return [];
+  }
+
+  return items.map((item, index) => {
+    // Processar weight de forma robusta
+    let processedWeight = 0;
+    if (typeof item.weight === 'number' && !isNaN(item.weight)) {
+      processedWeight = item.weight;
+    } else if (typeof item.weight === 'string') {
+      const weightStr = item.weight.replace(',', '.').trim();
+      const parsedWeight = parseFloat(weightStr);
+      processedWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
+    } else if (item.unitWeight !== undefined) {
+      // Fallback para unitWeight se weight não estiver disponível
+      const unitWeight = typeof item.unitWeight === 'number' ? item.unitWeight : parseFloat(item.unitWeight) || 0;
+      processedWeight = unitWeight;
+    }
+
+    // Processar quantity de forma robusta
+    let processedQuantity = 1;
+    if (typeof item.quantity === 'number' && !isNaN(item.quantity)) {
+      processedQuantity = item.quantity;
+    } else if (typeof item.quantity === 'string') {
+      const quantityStr = item.quantity.replace(',', '.').trim();
+      const parsedQuantity = parseFloat(quantityStr);
+      processedQuantity = isNaN(parsedQuantity) ? 1 : parsedQuantity;
+    }
+
+    // Processar progress
+    let processedProgress = 0;
+    if (typeof item.progress === 'number' && !isNaN(item.progress)) {
+      processedProgress = Math.max(0, Math.min(100, item.progress));
+    } else if (typeof item.overallProgress === 'number' && !isNaN(item.overallProgress)) {
+      processedProgress = Math.max(0, Math.min(100, item.overallProgress));
+    }
+
+    // Processar overallProgress
+    let processedOverallProgress = processedProgress;
+    if (typeof item.overallProgress === 'number' && !isNaN(item.overallProgress)) {
+      processedOverallProgress = Math.max(0, Math.min(100, item.overallProgress));
+    }
+
+    const processedItem: OrderItem = {
+      id: item.id || `item-${index}-${Date.now()}`,
+      code: item.code || '',
+      description: item.description || item.name || '',
+      quantity: processedQuantity,
+      unit: item.unit || 'un',
+      weight: processedWeight,
+      progress: processedProgress,
+      overallProgress: processedOverallProgress,
+      itemNumber: item.itemNumber || (index + 1),
+      notes: item.notes || item.specifications || '',
+      priority: item.priority || 'medium',
+      estimatedDays: typeof item.estimatedDays === 'number' ? item.estimatedDays : 1,
+      startDate: item.startDate || '',
+      endDate: item.endDate || '',
+      responsible: item.responsible || ''
+    };
+
+    console.log(`Processed item ${index + 1}:`, {
+      original: { weight: item.weight, quantity: item.quantity },
+      processed: { weight: processedItem.weight, quantity: processedItem.quantity }
+    });
+
+    return processedItem;
+  });
+};
+
+// Função utilitária para processar dados do documento
+const processOrderData = (doc: any): Order => {
+  const data = doc.data();
+  
+  // Processar datas
+  const processDate = (dateField: any) => {
+    if (!dateField) return undefined;
+    if (dateField.toDate) return dateField.toDate().toISOString();
+    if (typeof dateField === 'string') return dateField;
+    return undefined;
+  };
+
+  // Processar itens
+  const processedItems = data.items ? processOrderItems(data.items) : [];
+
+  const processedOrder: Order = {
+    id: doc.id,
+    customerId: data.customerId || '',
+    customerName: data.customerName || data.customer || '',
+    customer: data.customer || data.customerName || '',
+    project: data.project || data.projectName || '',
+    projectName: data.projectName || data.project || '',
+    orderNumber: data.orderNumber || '',
+    internalOS: data.internalOS || data.internalOrderNumber || data.serviceOrder || '',
+    internalOrderNumber: data.internalOrderNumber || data.internalOS || '',
+    serviceOrder: data.serviceOrder || data.internalOS || '',
+    startDate: processDate(data.startDate),
+    deliveryDate: processDate(data.deliveryDate),
+    completionDate: processDate(data.completionDate),
+    status: data.status || 'in-progress',
+    observations: data.observations || data.notes || '',
+    notes: data.notes || data.observations || '',
+    items: processedItems,
+    createdAt: processDate(data.createdAt),
+    updatedAt: processDate(data.updatedAt),
+    googleDriveLink: data.googleDriveLink || '',
+    value: typeof data.value === 'number' ? data.value : 0,
+    priority: data.priority || 'medium'
+  };
+
+  console.log(`Processed order ${doc.id} with ${processedItems.length} items`);
+  return processedOrder;
+};
 
 export const useOrderStore = create<OrderState>((set, get) => ({
   orders: [],
   selectedOrder: null,
   loading: false,
   error: null,
+  connectionRetries: 0,
+
+  // Retry connection logic
+  retryConnection: () => {
+    const { connectionRetries } = get();
+    if (connectionRetries < 3) {
+      set({ connectionRetries: connectionRetries + 1 });
+      setTimeout(() => {
+        get().fetchOrders();
+      }, 1000 * Math.pow(2, connectionRetries)); // Exponential backoff
+    }
+  },
 
   // Buscar todos os pedidos
   fetchOrders: async () => {
@@ -94,26 +235,27 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       const orders: Order[] = [];
       
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        orders.push({
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-          updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
-          startDate: data.startDate?.toDate?.()?.toISOString() || data.startDate,
-          deliveryDate: data.deliveryDate?.toDate?.()?.toISOString() || data.deliveryDate,
-          completionDate: data.completionDate?.toDate?.()?.toISOString() || data.completionDate,
-        } as Order);
+        try {
+          const processedOrder = processOrderData(doc);
+          orders.push(processedOrder);
+        } catch (error) {
+          console.error(`Error processing order ${doc.id}:`, error);
+        }
       });
 
-      console.log(`Fetched ${orders.length} orders`);
-      set({ orders, loading: false });
+      console.log(`Successfully fetched and processed ${orders.length} orders`);
+      set({ orders, loading: false, connectionRetries: 0 });
     } catch (error: any) {
       console.error('Erro ao buscar pedidos:', error);
       set({ 
         error: error.message || 'Erro ao buscar pedidos', 
         loading: false 
       });
+      
+      // Retry logic for connection issues
+      if (error.code === 'unavailable' || error.message.includes('QUIC')) {
+        get().retryConnection();
+      }
     }
   },
 
@@ -132,18 +274,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         return null;
       }
 
-      const data = orderSnap.data();
-      const order: Order = {
-        id: orderSnap.id,
-        ...data,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
-        startDate: data.startDate?.toDate?.()?.toISOString() || data.startDate,
-        deliveryDate: data.deliveryDate?.toDate?.()?.toISOString() || data.deliveryDate,
-        completionDate: data.completionDate?.toDate?.()?.toISOString() || data.completionDate,
-      } as Order;
-
-      return order;
+      return processOrderData(orderSnap);
     } catch (error: any) {
       console.error('Erro ao buscar pedido:', error);
       throw error;
@@ -162,24 +293,27 @@ export const useOrderStore = create<OrderState>((set, get) => ({
 
       const ordersRef = collection(db, 'companies', companyId, 'orders');
       
-      // Converter valores undefined para null
-      const cleanedData = { ...orderData };
-      Object.keys(cleanedData).forEach(key => {
-        if (cleanedData[key as keyof typeof cleanedData] === undefined) {
-          cleanedData[key as keyof typeof cleanedData] = null;
-        }
-      });
+      // Processar itens antes de salvar
+      const processedItems = orderData.items ? processOrderItems(orderData.items) : [];
       
-      // Converter datas para Timestamp do Firebase
+      // Preparar dados para salvar
       const dataToSave: any = {
-        ...cleanedData,
+        ...orderData,
+        items: processedItems,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
         createdBy: user.uid,
         company: companyId
       };
 
-      // Converter datas se existirem e não forem null
+      // Converter undefined para null
+      Object.keys(dataToSave).forEach(key => {
+        if (dataToSave[key] === undefined) {
+          dataToSave[key] = null;
+        }
+      });
+
+      // Converter datas para Timestamp do Firebase
       if (orderData.startDate) {
         dataToSave.startDate = Timestamp.fromDate(new Date(orderData.startDate));
       }
@@ -191,6 +325,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       }
 
       console.log("Adding order with data:", dataToSave);
+      console.log("Processed items:", processedItems);
+      
       const docRef = await addDoc(ordersRef, dataToSave);
       console.log("Order added with ID:", docRef.id);
       
@@ -209,7 +345,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }
   },
 
-  // Atualizar pedido existente - CORRIGIDO
+  // Atualizar pedido existente
   updateOrder: async (orderData: Order) => {
     try {
       set({ loading: true, error: null });
@@ -228,9 +364,13 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       // Extrair o ID e preparar os dados para atualização
       const { id, ...updates } = orderData;
       
-      // Converter datas para Timestamp do Firebase e substituir undefined por null
+      // Processar itens antes de salvar
+      const processedItems = updates.items ? processOrderItems(updates.items) : [];
+      
+      // Preparar dados para atualização
       const updatesToSave: any = { 
-        ...updates, 
+        ...updates,
+        items: processedItems,
         updatedAt: Timestamp.now(), 
         updatedBy: user.uid 
       };
@@ -242,17 +382,6 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         }
       });
       
-      // Garantir que os itens sejam salvos corretamente
-      if (updates.items && Array.isArray(updates.items)) {
-        updatesToSave.items = updates.items.map(item => ({
-          ...item,
-          weight: typeof item.weight === 'number' ? item.weight : parseFloat(item.weight) || 0,
-          quantity: typeof item.quantity === 'number' ? item.quantity : parseFloat(item.quantity) || 1,
-          progress: typeof item.progress === 'number' ? item.progress : parseFloat(item.progress) || 0,
-          overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : parseFloat(item.overallProgress) || 0
-        }));
-      }
-      
       // Converter datas se existirem
       if (updates.startDate) {
         updatesToSave.startDate = Timestamp.fromDate(new Date(updates.startDate));
@@ -263,12 +392,11 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       if (updates.completionDate) {
         updatesToSave.completionDate = Timestamp.fromDate(new Date(updates.completionDate));
       } else {
-        // Garante que completionDate seja null e não undefined
         updatesToSave.completionDate = null;
       }
 
       console.log("Updating order with data:", updatesToSave);
-      console.log("Items being saved:", updatesToSave.items);
+      console.log("Processed items being saved:", processedItems);
       
       await updateDoc(orderRef, updatesToSave);
       console.log("Order updated successfully");
@@ -321,7 +449,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     set({ selectedOrder: order });
   },
 
-  // Subscrever a mudanças em tempo real
+  // Subscrever a mudanças em tempo real com retry logic
   subscribeToOrders: () => {
     const { user, companyId } = useAuthStore.getState();
     if (!user || !companyId) {
@@ -336,25 +464,32 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
-        const orders: Order[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          orders.push({
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-            updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
-            startDate: data.startDate?.toDate?.()?.toISOString() || data.startDate,
-            deliveryDate: data.deliveryDate?.toDate?.()?.toISOString() || data.deliveryDate,
-            completionDate: data.completionDate?.toDate?.()?.toISOString() || data.completionDate,
-          } as Order);
-        });
-        console.log(`Got ${orders.length} orders from subscription`);
-        set({ orders });
+        try {
+          const orders: Order[] = [];
+          querySnapshot.forEach((doc) => {
+            try {
+              const processedOrder = processOrderData(doc);
+              orders.push(processedOrder);
+            } catch (error) {
+              console.error(`Error processing order ${doc.id} in subscription:`, error);
+            }
+          });
+          
+          console.log(`Got ${orders.length} orders from subscription`);
+          set({ orders, connectionRetries: 0, error: null });
+        } catch (error: any) {
+          console.error('Error processing subscription data:', error);
+          set({ error: error.message });
+        }
       },
       (error) => {
         console.error('Erro na subscrição de pedidos:', error);
         set({ error: error.message });
+        
+        // Retry logic for subscription errors
+        if (error.code === 'unavailable' || error.message.includes('QUIC')) {
+          get().retryConnection();
+        }
       }
     );
 
@@ -363,6 +498,6 @@ export const useOrderStore = create<OrderState>((set, get) => ({
 
   // Limpar erro
   clearError: () => {
-    set({ error: null });
+    set({ error: null, connectionRetries: 0 });
   }
 }));
