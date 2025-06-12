@@ -20,15 +20,11 @@ import {
   BarChart2,
   Printer,
   CalendarDays,
-  TrendingUp,
-  TrendingDown,
   AlertTriangle,
   Target,
   Activity,
   Timer,
-  Settings,
   Eye,
-  Archive,
   RefreshCw,
   Zap,
   Bell,
@@ -39,13 +35,68 @@ import {
 } from 'lucide-react';
 import { useOrderStore } from '../store/orderStore';
 import { useAuthStore } from '../store/authStore';
-import { format, differenceInDays, isToday, isTomorrow, isYesterday, isThisWeek, isThisMonth, parseISO, startOfDay, endOfDay } from 'date-fns';
+import { format, differenceInDays, isToday, isTomorrow, isYesterday, isThisWeek, isThisMonth, parseISO, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import OrderModal from './OrderModal';
 import { useNavigate } from 'react-router-dom';
 
-// Definir os tipos Order e OrderStatus localmente para evitar problemas de importação
+// Constantes
+const ITEMS_PER_PAGE_OPTIONS = [10, 15, 25, 50];
+
+const URGENCY_COLORS = {
+  'overdue': 'bg-red-100 text-red-800 border-red-200',
+  'today': 'bg-orange-100 text-orange-800 border-orange-200',
+  'tomorrow': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'critical': 'bg-pink-100 text-pink-800 border-pink-200',
+  'urgent': 'bg-purple-100 text-purple-800 border-purple-200',
+  'soon': 'bg-blue-100 text-blue-800 border-blue-200',
+  'normal': 'bg-green-100 text-green-800 border-green-200',
+  'completed': 'bg-gray-100 text-gray-800 border-gray-200',
+  'unknown': 'bg-gray-100 text-gray-800 border-gray-200'
+};
+
+const URGENCY_TEXTS = {
+  'overdue': 'Atrasado',
+  'today': 'Entrega Hoje',
+  'tomorrow': 'Entrega Amanhã',
+  'critical': '≤ 3 dias',
+  'urgent': '≤ 7 dias',
+  'soon': '≤ 14 dias',
+  'normal': '> 14 dias',
+  'completed': 'Concluído',
+  'unknown': 'Data inválida'
+};
+
+const STATUS_COLORS = {
+  'completed': 'bg-green-100 text-green-800 border-green-200',
+  'in-progress': 'bg-blue-100 text-blue-800 border-blue-200',
+  'on-hold': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'cancelled': 'bg-red-100 text-red-800 border-red-200',
+  'shipped': 'bg-purple-100 text-purple-800 border-purple-200',
+  'delayed': 'bg-orange-100 text-orange-800 border-orange-200'
+};
+
+const STATUS_TEXTS = {
+  'in-progress': 'Em Processo',
+  'completed': 'Concluído',
+  'on-hold': 'Em Pausa',
+  'cancelled': 'Cancelado',
+  'shipped': 'Expedido',
+  'delayed': 'Atrasado'
+};
+
+const PRIORITY_COLORS = {
+  'urgent': 'bg-red-100 text-red-800 border-red-200',
+  'high': 'bg-orange-100 text-orange-800 border-orange-200',
+  'medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'low': 'bg-green-100 text-green-800 border-green-200'
+};
+
+// Tipos
 type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | 'delayed' | 'shipped' | string;
+type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'deliveryDate' | 'status' | 'priority' | 'value';
+type SortOrder = 'asc' | 'desc';
+type ViewMode = 'table' | 'calendar';
 
 interface OrderItem {
   id: string;
@@ -55,6 +106,14 @@ interface OrderItem {
   unit: string;
   weight: number;
   progress: number;
+  overallProgress?: number;
+  itemNumber?: number;
+  notes?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  estimatedDays?: number;
+  startDate?: string;
+  endDate?: string;
+  responsible?: string;
 }
 
 interface Order {
@@ -67,6 +126,7 @@ interface Order {
   orderNumber?: string;
   internalOS?: string;
   internalOrderNumber?: string;
+  serviceOrder?: string;
   startDate?: string;
   deliveryDate?: string;
   completionDate?: string;
@@ -77,13 +137,175 @@ interface Order {
   updatedAt?: string;
   priority?: 'low' | 'medium' | 'high' | 'urgent';
   value?: number;
+  googleDriveLink?: string;
   [key: string]: any;
 }
 
-// Tipo para organização da tabela
-type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'deliveryDate' | 'status' | 'priority' | 'value';
-type SortOrder = 'asc' | 'desc';
-type ViewMode = 'table' | 'calendar';
+// Utilitários
+const calculateOrderWeight = (order: Order): number => {
+  if (!order.items || !Array.isArray(order.items)) {
+    console.debug(`Order ${order.id} has no valid items array`);
+    return 0;
+  }
+  
+  return order.items.reduce((total, item) => {
+    // Validação mais robusta
+    const weight = typeof item.weight === 'number' && !isNaN(item.weight) && isFinite(item.weight) 
+      ? item.weight 
+      : 0;
+    const quantity = typeof item.quantity === 'number' && !isNaN(item.quantity) && isFinite(item.quantity) 
+      ? item.quantity 
+      : 1;
+    
+    const itemTotal = weight * quantity;
+    
+    // Log apenas se há inconsistências
+    if (item.weight && (weight === 0 || quantity === 1)) {
+      console.debug(`Weight issue for item ${item.id}:`, {
+        originalWeight: item.weight,
+        originalQuantity: item.quantity,
+        processedWeight: weight,
+        processedQuantity: quantity
+      });
+    }
+    
+    return total + itemTotal;
+  }, 0);
+};
+
+const calculateProductionStats = (orders: Order[]) => {
+  let totalProductionDays = 0;
+  let completedOrdersWithDates = 0;
+  
+  orders.forEach(order => {
+    if (order.status === 'completed' && order.startDate && order.completionDate) {
+      try {
+        const startDate = parseISO(order.startDate);
+        const completionDate = parseISO(order.completionDate);
+        const days = Math.ceil((completionDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (days > 0) { // Validar que os dias são positivos
+          totalProductionDays += days;
+          completedOrdersWithDates++;
+        }
+      } catch (error) {
+        console.warn(`Invalid dates for order ${order.id}:`, error);
+      }
+    }
+  });
+  
+  return {
+    averageProductionDays: completedOrdersWithDates > 0 
+      ? Math.round(totalProductionDays / completedOrdersWithDates) 
+      : 0,
+    completedOrdersCount: completedOrdersWithDates
+  };
+};
+
+const isValidDate = (dateString: string | undefined | null): boolean => {
+  if (!dateString) return false;
+  try {
+    const date = parseISO(dateString);
+    return date instanceof Date && !isNaN(date.getTime());
+  } catch {
+    return false;
+  }
+};
+
+const getDeliveryUrgency = (order: Order): string => {
+  if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return 'completed';
+  
+  try {
+    const deliveryDate = parseISO(order.deliveryDate);
+    const today = startOfDay(new Date());
+    const daysUntilDelivery = differenceInDays(deliveryDate, today);
+    
+    if (daysUntilDelivery < 0) return 'overdue';
+    if (daysUntilDelivery === 0) return 'today';
+    if (daysUntilDelivery === 1) return 'tomorrow';
+    if (daysUntilDelivery <= 3) return 'critical';
+    if (daysUntilDelivery <= 7) return 'urgent';
+    if (daysUntilDelivery <= 14) return 'soon';
+    return 'normal';
+  } catch {
+    return 'unknown';
+  }
+};
+
+const getUrgencyColor = (urgency: string): string => {
+  return URGENCY_COLORS[urgency] || URGENCY_COLORS['unknown'];
+};
+
+const getUrgencyText = (urgency: string): string => {
+  return URGENCY_TEXTS[urgency] || URGENCY_TEXTS['unknown'];
+};
+
+const getStatusText = (status: string | undefined): string => {
+  if (!status) return 'Desconhecido';
+  return STATUS_TEXTS[status.toLowerCase()] || status;
+};
+
+const getStatusColor = (status: string | undefined): string => {
+  if (!status) return 'bg-gray-100 text-gray-800';
+  
+  const normalizedStatus = status.toLowerCase();
+  return STATUS_COLORS[normalizedStatus] || 'bg-gray-100 text-gray-800 border-gray-200';
+};
+
+const getPriorityColor = (priority: string | undefined): string => {
+  return PRIORITY_COLORS[priority || 'medium'] || PRIORITY_COLORS.medium;
+};
+
+const safeField = (order: Order, fields: string[]): string => {
+  for (const field of fields) {
+    if (order[field] && typeof order[field] === 'string') {
+      return order[field] as string;
+    }
+  }
+  return '';
+};
+
+const formatDate = (dateString: string | undefined | null): string => {
+  if (!dateString) return '-';
+  try {
+    return format(parseISO(dateString), 'dd/MM/yyyy', { locale: ptBR });
+  } catch (error) {
+    console.error("Error formatting date:", dateString, error);
+    return '-';
+  }
+};
+
+const formatRelativeDate = (dateString: string | undefined | null): string => {
+  if (!dateString || !isValidDate(dateString)) return '-';
+  try {
+    const date = parseISO(dateString);
+    if (isToday(date)) return 'Hoje';
+    if (isTomorrow(date)) return 'Amanhã';
+    if (isYesterday(date)) return 'Ontem';
+    return format(date, 'dd/MM', { locale: ptBR });
+  } catch (error) {
+    return formatDate(dateString);
+  }
+};
+
+const isDateInFilter = (dateStr: string | undefined, filter: string): boolean => {
+  if (!dateStr || filter === 'all') return true;
+  
+  try {
+    const date = parseISO(dateStr);
+    const today = new Date();
+    
+    if (filter === 'today') return isToday(date);
+    if (filter === 'tomorrow') return isTomorrow(date);
+    if (filter === 'week') return isThisWeek(date, { weekStartsOn: 0 });
+    if (filter === 'month') return isThisMonth(date);
+    if (filter === 'overdue') return date < startOfDay(today);
+    
+    return true;
+  } catch (e) {
+    console.error("Error checking date filter:", e);
+    return true;
+  }
+};
 
 export default function Orders() {
   const navigate = useNavigate();
@@ -96,10 +318,11 @@ export default function Orders() {
     deleteOrder, 
     setSelectedOrder,
     subscribeToOrders,
-    clearError 
+    clearError,
+    retryConnection
   } = useOrderStore();
   
-  const { user, hasPermission } = useAuthStore();
+  const { user } = useAuthStore();
   
   // Estados para pesquisa e filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -145,67 +368,26 @@ export default function Orders() {
         }
       };
     }
-  }, [user, fetchOrders, subscribeToOrders]);
+  }, [user]);
 
   // Limpar erro quando componente desmonta
   useEffect(() => {
     return () => clearError();
   }, [clearError]);
 
-  // Função para calcular urgência da entrega
-  const getDeliveryUrgency = (order: Order) => {
-    if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return 'completed';
-    
-    try {
-      const deliveryDate = parseISO(order.deliveryDate);
-      const today = startOfDay(new Date());
-      const daysUntilDelivery = differenceInDays(deliveryDate, today);
-      
-      if (daysUntilDelivery < 0) return 'overdue';
-      if (daysUntilDelivery === 0) return 'today';
-      if (daysUntilDelivery === 1) return 'tomorrow';
-      if (daysUntilDelivery <= 3) return 'critical';
-      if (daysUntilDelivery <= 7) return 'urgent';
-      if (daysUntilDelivery <= 14) return 'soon';
-      return 'normal';
-    } catch {
-      return 'unknown';
-    }
-  };
-
-  // Função para obter cor da urgência
-  const getUrgencyColor = (urgency: string) => {
-    const urgencyColors = {
-      'overdue': 'bg-red-100 text-red-800 border-red-200',
-      'today': 'bg-orange-100 text-orange-800 border-orange-200',
-      'tomorrow': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-      'critical': 'bg-pink-100 text-pink-800 border-pink-200',
-      'urgent': 'bg-purple-100 text-purple-800 border-purple-200',
-      'soon': 'bg-blue-100 text-blue-800 border-blue-200',
-      'normal': 'bg-green-100 text-green-800 border-green-200',
-      'completed': 'bg-gray-100 text-gray-800 border-gray-200',
-      'unknown': 'bg-gray-100 text-gray-800 border-gray-200'
+  // Tratamento de clique fora do dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (activeDropdown && !(event.target as Element).closest('[data-dropdown]')) {
+        setActiveDropdown(null);
+      }
     };
-    return urgencyColors[urgency] || urgencyColors['unknown'];
-  };
 
-  // Função para obter texto da urgência
-  const getUrgencyText = (urgency: string) => {
-    const urgencyTexts = {
-      'overdue': 'Atrasado',
-      'today': 'Entrega Hoje',
-      'tomorrow': 'Entrega Amanhã',
-      'critical': '≤ 3 dias',
-      'urgent': '≤ 7 dias',
-      'soon': '≤ 14 dias',
-      'normal': '> 14 dias',
-      'completed': 'Concluído',
-      'unknown': 'Data inválida'
-    };
-    return urgencyTexts[urgency] || urgencyTexts['unknown'];
-  };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [activeDropdown]);
 
-  // Função para processar os dados dos clientes para o filtro
+  // Opções para filtros
   const clientOptions = useMemo(() => {
     const clients = new Set<string>();
     orders.forEach(order => {
@@ -215,7 +397,6 @@ export default function Orders() {
     return ['all', ...Array.from(clients).sort()];
   }, [orders]);
 
-  // Função para determinar as datas para o filtro
   const dateOptions = useMemo(() => {
     return [
       { value: 'all', label: 'Todas as datas', icon: Calendar },
@@ -227,7 +408,6 @@ export default function Orders() {
     ];
   }, []);
 
-  // Opções de urgência de entrega
   const urgencyOptions = useMemo(() => [
     { value: 'all', label: 'Todas as urgências', color: 'bg-gray-100 text-gray-800' },
     { value: 'overdue', label: 'Atrasados', color: 'bg-red-100 text-red-800' },
@@ -238,37 +418,6 @@ export default function Orders() {
     { value: 'soon', label: 'Em breve (≤ 14 dias)', color: 'bg-blue-100 text-blue-800' },
     { value: 'normal', label: 'Normal (> 14 dias)', color: 'bg-green-100 text-green-800' }
   ], []);
-
-  // Função para verificar se uma data está dentro do filtro selecionado
-  const isDateInFilter = (dateStr: string | undefined, filter: string): boolean => {
-    if (!dateStr || filter === 'all') return true;
-    
-    try {
-      const date = parseISO(dateStr);
-      const today = new Date();
-      
-      if (filter === 'today') return isToday(date);
-      if (filter === 'tomorrow') return isTomorrow(date);
-      if (filter === 'week') return isThisWeek(date, { weekStartsOn: 0 });
-      if (filter === 'month') return isThisMonth(date);
-      if (filter === 'overdue') return date < startOfDay(today);
-      
-      return true;
-    } catch (e) {
-      console.error("Error checking date filter:", e);
-      return true;
-    }
-  };
-
-  // Função auxiliar para campo seguro
-  const safeField = (order: Order, fields: string[]): string => {
-    for (const field of fields) {
-      if (order[field] && typeof order[field] === 'string') {
-        return order[field] as string;
-      }
-    }
-    return '';
-  };
 
   // Filtrar e ordenar pedidos
   const processedOrders = useMemo(() => {
@@ -292,8 +441,7 @@ export default function Orders() {
         const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
         
         // Filtro de cliente
-        const matchesClient = clientFilter === 'all' || 
-          customer === clientFilter;
+        const matchesClient = clientFilter === 'all' || customer === clientFilter;
         
         // Filtro de data
         const matchesDate = isDateInFilter(order.startDate, dateFilter);
@@ -324,22 +472,6 @@ export default function Orders() {
             : bValue.localeCompare(aValue);
         }
         
-        if (sortField === 'internalOS') {
-          const aValue = safeField(a, ['internalOS', 'internalOrderNumber', 'serviceOrder']);
-          const bValue = safeField(b, ['internalOS', 'internalOrderNumber', 'serviceOrder']);
-          return sortOrder === 'asc' 
-            ? aValue.localeCompare(bValue) 
-            : bValue.localeCompare(aValue);
-        }
-        
-        if (sortField === 'startDate') {
-          const aValue = a.startDate ? new Date(a.startDate).getTime() : 0;
-          const bValue = b.startDate ? new Date(b.startDate).getTime() : 0;
-          return sortOrder === 'asc' 
-            ? aValue - bValue 
-            : bValue - aValue;
-        }
-        
         if (sortField === 'deliveryDate') {
           const aValue = a.deliveryDate ? new Date(a.deliveryDate).getTime() : 0;
           const bValue = b.deliveryDate ? new Date(b.deliveryDate).getTime() : 0;
@@ -348,31 +480,7 @@ export default function Orders() {
             : bValue - aValue;
         }
         
-        if (sortField === 'status') {
-          const aValue = a.status || '';
-          const bValue = b.status || '';
-          return sortOrder === 'asc' 
-            ? aValue.localeCompare(bValue) 
-            : bValue.localeCompare(aValue);
-        }
-        
-        if (sortField === 'priority') {
-          const priorityOrder = { 'urgent': 4, 'high': 3, 'medium': 2, 'low': 1 };
-          const aValue = priorityOrder[a.priority || 'medium'] || 2;
-          const bValue = priorityOrder[b.priority || 'medium'] || 2;
-          return sortOrder === 'asc' 
-            ? aValue - bValue 
-            : bValue - aValue;
-        }
-        
-        if (sortField === 'value') {
-          const aValue = a.value || 0;
-          const bValue = b.value || 0;
-          return sortOrder === 'asc' 
-            ? aValue - bValue 
-            : bValue - aValue;
-        }
-        
+        // Outros campos de ordenação...
         return 0;
       });
   }, [orders, searchTerm, statusFilter, clientFilter, dateFilter, priorityFilter, deliveryUrgencyFilter, sortField, sortOrder]);
@@ -388,7 +496,7 @@ export default function Orders() {
     [processedOrders, itemsPerPage]
   );
 
-  // Handlers para o modal
+  // Handlers
   const handleCreateOrder = () => {
     setSelectedOrderState(null);
     setSelectedOrder(null);
@@ -412,7 +520,7 @@ export default function Orders() {
 
   const handleDeleteOrder = async (order: Order) => {
     if (!order.id) {
-      alert('ID do pedido não encontrado');
+      console.error('ID do pedido não encontrado');
       return;
     }
 
@@ -425,7 +533,6 @@ export default function Orders() {
         await deleteOrder(order.id);
       } catch (error) {
         console.error('Erro ao deletar pedido:', error);
-        alert('Erro ao deletar pedido');
       }
     }
   };
@@ -437,7 +544,6 @@ export default function Orders() {
     setActiveDropdown(null);
   };
 
-  // Função para alternar ordenação
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -447,148 +553,118 @@ export default function Orders() {
     }
   };
 
-  // Função para mostrar/esconder dropdown
   const toggleDropdown = (orderId: string) => {
     setActiveDropdown(activeDropdown === orderId ? null : orderId);
   };
 
-  // Função para exportar para Excel
   const handleExportToExcel = () => {
-    alert('Função de exportar para Excel estará disponível em breve!');
+    try {
+      // Preparar dados para exportação
+      const exportData = processedOrders.map(order => ({
+        'Número do Pedido': safeField(order, ['orderNumber', 'id']),
+        'Cliente': safeField(order, ['customerName', 'customer']),
+        'Projeto': safeField(order, ['project', 'projectName']),
+        'OS Interna': safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']),
+        'Data de Início': formatDate(order.startDate),
+        'Data de Entrega': formatDate(order.deliveryDate),
+        'Status': getStatusText(order.status),
+        'Prioridade': order.priority || 'Média',
+        'Peso Total (kg)': calculateOrderWeight(order).toFixed(2),
+        'Urgência': getUrgencyText(getDeliveryUrgency(order)),
+        'Observações': order.observations || ''
+      }));
+
+      // Converter para CSV
+      const headers = Object.keys(exportData[0] || {});
+      const csvContent = [
+        headers.join(','),
+        ...exportData.map(row => 
+          headers.map(header => `"${(row as any)[header] || ''}"`).join(',')
+        )
+      ].join('\n');
+
+      // Download do arquivo
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `pedidos_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log(`Exported ${exportData.length} orders to CSV`);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      console.log('Erro ao exportar dados. Tente novamente.');
+    }
   };
 
-  // Função para imprimir
   const handlePrint = () => {
     window.print();
   };
 
-  // Função para formatar data
-  const formatDate = (dateString: string | undefined | null) => {
-    if (!dateString) return '-';
+  const handleRetryConnection = () => {
+    clearError();
+    retryConnection();
+  };
+
+  // Funções de navegação melhoradas
+  const handleNavigateToReport = (orderId: string) => {
     try {
-      return format(parseISO(dateString), 'dd/MM/yyyy', { locale: ptBR });
+      navigate(`/item-report/${orderId}`);
+      setActiveDropdown(null);
     } catch (error) {
-      console.error("Error formatting date:", dateString, error);
-      return '-';
+      console.error('Error navigating to report:', error);
+      console.log('Erro ao abrir relatório. Tente novamente.');
     }
   };
 
-  // Função para formatar data relativa
-  const formatRelativeDate = (dateString: string | undefined | null) => {
-    if (!dateString) return '-';
+  const handleOpenPublicSchedule = (orderId: string) => {
     try {
-      const date = parseISO(dateString);
-      if (isToday(date)) return 'Hoje';
-      if (isTomorrow(date)) return 'Amanhã';
-      if (isYesterday(date)) return 'Ontem';
-      return format(date, 'dd/MM', { locale: ptBR });
+      const url = `${window.location.origin}/cronograma/${orderId}`;
+      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!newWindow) {
+        // Fallback se popup foi bloqueado
+        navigator.clipboard.writeText(url).then(() => {
+          console.log('Pop-up bloqueado. Link copiado para área de transferência.');
+        });
+      }
+      setActiveDropdown(null);
     } catch (error) {
-      return formatDate(dateString);
+      console.error('Error opening public schedule:', error);
+      console.log('Erro ao abrir cronograma público.');
     }
   };
 
-  // Verificar se um pedido está atrasado
-  const isOrderLate = (order: Order) => {
-    if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return false;
-    
+  const handleCopyPublicLink = (orderId: string) => {
     try {
-      const deliveryDate = parseISO(order.deliveryDate);
-      const today = startOfDay(new Date());
-      return deliveryDate < today;
-    } catch {
-      return false;
+      const url = `${window.location.origin}/cronograma/${orderId}`;
+      navigator.clipboard.writeText(url).then(() => {
+        console.log('Link copiado para a área de transferência!');
+        setActiveDropdown(null);
+      });
+    } catch (error) {
+      console.error('Error copying link:', error);
+      console.log('Erro ao copiar link.');
     }
   };
 
-  // Função para obter o texto do status
-  const getStatusText = (status: string | undefined) => {
-    if (!status) return 'Desconhecido';
-    
-    const statusMap: Record<string, string> = {
-      'in-progress': 'Em Processo',
-      'completed': 'Concluído',
-      'on-hold': 'Em Pausa',
-      'cancelled': 'Cancelado',
-      'shipped': 'Expedido',
-      'delayed': 'Atrasado'
-    };
-    
-    return statusMap[status.toLowerCase()] || status;
-  };
-
-  // Função para obter cor do status
-  const getStatusColor = (status: string | undefined) => {
-    if (!status) return 'bg-gray-100 text-gray-800';
-    
-    const normalizedStatus = status.toLowerCase();
-    
-    if (normalizedStatus.includes('conclu') || normalizedStatus === 'completed') {
-      return 'bg-green-100 text-green-800 border-green-200';
-    }
-    if (normalizedStatus.includes('processo') || normalizedStatus === 'in-progress') {
-      return 'bg-blue-100 text-blue-800 border-blue-200';
-    }
-    if (normalizedStatus.includes('pausa') || normalizedStatus === 'on-hold') {
-      return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-    }
-    if (normalizedStatus.includes('cancel') || normalizedStatus === 'cancelled') {
-      return 'bg-red-100 text-red-800 border-red-200';
-    }
-    if (normalizedStatus.includes('exped') || normalizedStatus === 'shipped') {
-      return 'bg-purple-100 text-purple-800 border-purple-200';
-    }
-    if (normalizedStatus.includes('atras') || normalizedStatus === 'delayed') {
-      return 'bg-orange-100 text-orange-800 border-orange-200';
-    }
-    
-    return 'bg-gray-100 text-gray-800 border-gray-200';
-  };
-
-  // Função para obter cor da prioridade
-  const getPriorityColor = (priority: string | undefined) => {
-    const priorityColors = {
-      'urgent': 'bg-red-100 text-red-800 border-red-200',
-      'high': 'bg-orange-100 text-orange-800 border-orange-200',
-      'medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-      'low': 'bg-green-100 text-green-800 border-green-200'
-    };
-    return priorityColors[priority || 'medium'] || priorityColors.medium;
-  };
-
-  // Componentes para o dashboard
+  // Componente Dashboard
   const OrdersDashboard = () => {
     const totalOrders = processedOrders.length;
     const inProgressOrders = processedOrders.filter(o => o.status === 'in-progress').length;
     const completedOrders = processedOrders.filter(o => o.status === 'completed').length;
     const onHoldOrders = processedOrders.filter(o => o.status === 'on-hold').length;
     
-    // Calcular urgências de entrega
     const overdueOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'overdue').length;
     const todayOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'today').length;
     const tomorrowOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'tomorrow').length;
     const criticalOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'critical').length;
     
-    // Calcular tempos médios
-    let totalProductionDays = 0;
-    let completedOrdersWithDates = 0;
-    
-    processedOrders.forEach(order => {
-      if (order.status === 'completed' && order.startDate && order.completionDate) {
-        try {
-          const startDate = parseISO(order.startDate);
-          const completionDate = parseISO(order.completionDate);
-          const days = Math.ceil((completionDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-          totalProductionDays += days;
-          completedOrdersWithDates++;
-        } catch {
-          // Ignorar pedidos com datas inválidas
-        }
-      }
-    });
-    
-    const averageProductionDays = completedOrdersWithDates > 0 
-      ? Math.round(totalProductionDays / completedOrdersWithDates) 
-      : 0;
+    const totalWeight = processedOrders.reduce((sum, order) => sum + calculateOrderWeight(order), 0);
+    const stats = useMemo(() => calculateProductionStats(processedOrders), [processedOrders]);
     
     return (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 animate-fadeIn">
@@ -600,8 +676,7 @@ export default function Orders() {
         </div>
         
         <div className="p-4">
-          {/* Métricas principais */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
             <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
               <div className="flex items-center justify-between">
                 <div>
@@ -650,23 +725,40 @@ export default function Orders() {
             <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 rounded-lg border border-purple-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-purple-600 font-medium">Tempo Médio</p>
+                  <p className="text-sm text-purple-600 font-medium">Peso Total</p>
                   <h4 className="text-2xl font-bold text-purple-700">
-                    {averageProductionDays}d
+                    {totalWeight.toLocaleString('pt-BR', {maximumFractionDigits: 0})}
                   </h4>
-                  <p className="text-xs text-purple-600">
-                    para conclusão
-                  </p>
+                  <p className="text-xs text-purple-600">kg em produção</p>
                 </div>
                 <div className="bg-purple-200 p-3 rounded-full">
-                  <Timer className="w-6 h-6 text-purple-600" />
+                  <Package className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-gradient-to-r from-indigo-50 to-indigo-100 p-4 rounded-lg border border-indigo-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-indigo-600 font-medium">Tempo Médio</p>
+                  <h4 className="text-2xl font-bold text-indigo-700">
+                    {stats.averageProductionDays}d
+                  </h4>
+                  <p className="text-xs text-indigo-600">
+                    {stats.completedOrdersCount > 0 
+                      ? `baseado em ${stats.completedOrdersCount} pedidos`
+                      : 'aguardando dados'
+                    }
+                  </p>
+                </div>
+                <div className="bg-indigo-200 p-3 rounded-full">
+                  <Timer className="w-6 h-6 text-indigo-600" />
                 </div>
               </div>
             </div>
           </div>
           
-          {/* Alertas de urgência */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
               <div className="flex items-center justify-between">
                 <div>
@@ -694,6 +786,16 @@ export default function Orders() {
                   <h4 className="text-xl font-bold text-pink-700">{criticalOrders}</h4>
                 </div>
                 <Zap className="w-5 h-5 text-pink-600" />
+              </div>
+            </div>
+            
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 font-medium">Em Pausa</p>
+                  <h4 className="text-xl font-bold text-gray-700">{onHoldOrders}</h4>
+                </div>
+                <Timer className="w-5 h-5 text-gray-600" />
               </div>
             </div>
           </div>
@@ -806,6 +908,10 @@ export default function Orders() {
             <span className="flex items-center gap-1">
               <Clock className="w-4 h-4 text-orange-500" />
               {processedOrders.filter(order => ['today', 'tomorrow', 'critical'].includes(getDeliveryUrgency(order))).length} urgentes
+            </span>
+            <span className="flex items-center gap-1">
+              <Package className="w-4 h-4 text-purple-500" />
+              {processedOrders.reduce((sum, order) => sum + calculateOrderWeight(order), 0).toLocaleString('pt-BR', {maximumFractionDigits: 0})} kg
             </span>
           </div>
         </div>
@@ -1104,19 +1210,22 @@ export default function Orders() {
 
       {/* Mensagem de erro */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 print:hidden animate-fadeIn">
-          <div className="flex items-center">
-            <AlertCircle className="text-red-400 mr-3 w-5 h-5" />
-            <div className="flex-1">
-              <h3 className="text-sm font-medium text-red-800">Erro no Sistema</h3>
-              <p className="text-sm text-red-700 mt-1">{error}</p>
+        <ErrorBoundary 
+          error={error}
+          onRetry={handleRetryConnection}
+          onClear={clearError}
+        />
+      )} text-sm underline"
+              >
+                Tentar novamente
+              </button>
+              <button 
+                onClick={clearError}
+                className="ml-auto text-red-400 hover:text-red-600 transition-colors"
+              >
+                ✕
+              </button>
             </div>
-            <button 
-              onClick={clearError}
-              className="ml-auto text-red-400 hover:text-red-600 transition-colors"
-            >
-              ✕
-            </button>
           </div>
         </div>
       )}
@@ -1128,10 +1237,7 @@ export default function Orders() {
         /* Lista de Pedidos */
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 print:shadow-none print:border-none">
           {loading ? (
-            <div className="flex items-center justify-center p-12 print:hidden">
-              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
-              <span className="ml-4 text-gray-600 text-lg">Carregando pedidos...</span>
-            </div>
+            <LoadingSpinner />
           ) : processedOrders.length === 0 ? (
             <div className="text-center py-16 print:hidden">
               <Package className="w-20 h-20 text-gray-400 mx-auto mb-4" />
@@ -1175,10 +1281,9 @@ export default function Orders() {
                         }}
                         className="border border-gray-300 rounded px-2 py-1 text-sm"
                       >
-                        <option value={10}>10</option>
-                        <option value={15}>15</option>
-                        <option value={25}>25</option>
-                        <option value={50}>50</option>
+                        {ITEMS_PER_PAGE_OPTIONS.map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -1198,7 +1303,8 @@ export default function Orders() {
                   </div>
                 </div>
               </div>
-              
+
+              {/* Tabela de pedidos */}
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50 border-b border-gray-200 print:bg-white">
@@ -1222,14 +1328,8 @@ export default function Orders() {
                         </div>
                       </th>
                       {!compactView && (
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
-                            onClick={() => handleSort('internalOS')}>
-                          <div className="flex items-center gap-1">
-                            OS Interna
-                            {sortField === 'internalOS' && (
-                              <ArrowUpDown className={`w-4 h-4 transition-transform ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
-                            )}
-                          </div>
+                        <th className="text-left py-3 px-4 font-medium text-gray-700">
+                          OS Interna
                         </th>
                       )}
                       <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
@@ -1252,15 +1352,17 @@ export default function Orders() {
                         </div>
                       </th>
                       {!compactView && (
-                        <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
-                            onClick={() => handleSort('priority')}>
-                          <div className="flex items-center gap-1">
+                        <>
+                          <th className="text-left py-3 px-4 font-medium text-gray-700">
                             Prioridade
-                            {sortField === 'priority' && (
-                              <ArrowUpDown className={`w-4 h-4 transition-transform ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
-                            )}
-                          </div>
-                        </th>
+                          </th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-700">
+                            <div className="flex items-center gap-1">
+                              <Package className="w-4 h-4 text-purple-600" />
+                              Peso (kg)
+                            </div>
+                          </th>
+                        </>
                       )}
                       <th className="text-right py-3 px-4 font-medium text-gray-700 print:hidden">Ações</th>
                     </tr>
@@ -1280,6 +1382,7 @@ export default function Orders() {
                       const urgencyText = getUrgencyText(urgency);
                       const priorityColor = getPriorityColor(order.priority);
                       const isLate = urgency === 'overdue';
+                      const orderWeight = calculateOrderWeight(order);
                       
                       return (
                         <tr key={order.id} className="hover:bg-gray-50 transition-colors group">
@@ -1293,6 +1396,11 @@ export default function Orders() {
                               )}
                               {compactView && internalOS && (
                                 <div className="text-xs text-gray-400 mt-1">OS: {internalOS}</div>
+                              )}
+                              {compactView && orderWeight > 0 && (
+                                <div className="text-xs text-purple-600 mt-1">
+                                  {orderWeight.toLocaleString('pt-BR', {maximumFractionDigits: 1})} kg
+                                </div>
                               )}
                             </div>
                           </td>
@@ -1333,11 +1441,26 @@ export default function Orders() {
                           </td>
                           
                           {!compactView && (
-                            <td className="py-3 px-4">
-                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${priorityColor}`}>
-                                {order.priority || 'Média'}
-                              </span>
-                            </td>
+                            <>
+                              <td className="py-3 px-4">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${priorityColor}`}>
+                                  {order.priority || 'Média'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center">
+                                  <Package className="w-4 h-4 text-purple-500 mr-2 flex-shrink-0" />
+                                  <span className="text-sm font-medium text-purple-700">
+                                    {orderWeight.toLocaleString('pt-BR', {maximumFractionDigits: 1})}
+                                  </span>
+                                </div>
+                                {order.items && order.items.length > 0 && (
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {order.items.length} {order.items.length === 1 ? 'item' : 'itens'}
+                                  </div>
+                                )}
+                              </td>
+                            </>
                           )}
                           
                           <td className={`py-3 px-4 print:hidden ${compactView ? 'py-2' : ''}`}>
@@ -1368,13 +1491,10 @@ export default function Orders() {
                                 </button>
                                 
                                 {activeDropdown === order.id && (
-                                  <div className="absolute right-0 z-20 mt-2 w-56 bg-white rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 border border-gray-200">
+                                  <div className="absolute right-0 z-20 mt-2 w-56 bg-white rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 border border-gray-200" data-dropdown>
                                     <div className="py-1" role="menu">
                                       <button
-                                        onClick={() => {
-                                          navigate(`/item-report/${order.id}`);
-                                          setActiveDropdown(null);
-                                        }}
+                                        onClick={() => handleNavigateToReport(order.id)}
                                         className="text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full transition-colors"
                                         title="Relatório de Produção"
                                       >
@@ -1385,10 +1505,7 @@ export default function Orders() {
                                       </button>
                                       
                                       <button
-                                        onClick={() => {
-                                          window.open(`/cronograma/${order.id}`, '_blank');
-                                          setActiveDropdown(null);
-                                        }}
+                                        onClick={() => handleOpenPublicSchedule(order.id)}
                                         className="text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full transition-colors"
                                         title="Cronograma Público"
                                       >
@@ -1399,11 +1516,7 @@ export default function Orders() {
                                       </button>
                                       
                                       <button
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(`${window.location.origin}/cronograma/${order.id}`);
-                                          alert('Link copiado para a área de transferência!');
-                                          setActiveDropdown(null);
-                                        }}
+                                        onClick={() => handleCopyPublicLink(order.id)}
                                         className="text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full transition-colors"
                                         title="Copiar Link Público"
                                       >
@@ -1595,10 +1708,10 @@ export default function Orders() {
               </div>
               
               <div className="flex flex-col">
-                <span className="text-2xl font-bold text-yellow-600">
-                  {processedOrders.filter(o => o.status === 'on-hold').length}
+                <span className="text-2xl font-bold text-purple-600">
+                  {processedOrders.reduce((sum, order) => sum + calculateOrderWeight(order), 0).toLocaleString('pt-BR', {maximumFractionDigits: 0})}
                 </span>
-                <span className="text-sm text-gray-600">Em Pausa</span>
+                <span className="text-sm text-gray-600">kg Total</span>
               </div>
               
               <div className="flex flex-col">
@@ -1619,108 +1732,90 @@ export default function Orders() {
         order={selectedOrder}
         mode={modalMode}
       />
-      
-      {/* Estilo para impressão e animações */}
-      <style jsx>{`
-        @media print {
-          @page {
-            size: landscape;
-            margin: 10mm;
-          }
-          body {
-            font-size: 11pt;
-            line-height: 1.3;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-          .print\\:shadow-none {
-            box-shadow: none !important;
-          }
-          .print\\:border-none {
-            border: none !important;
-          }
-          table {
-            font-size: 10pt;
-          }
-          th, td {
-            padding: 4px 8px !important;
-          }
-        }
-
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out forwards;
-        }
-        
-        /* Scroll suave para tabelas responsivas */
-        .overflow-x-auto {
-          scrollbar-width: thin;
-          scrollbar-color: #CBD5E0 #F7FAFC;
-        }
-        
-        .overflow-x-auto::-webkit-scrollbar {
-          height: 6px;
-        }
-        
-        .overflow-x-auto::-webkit-scrollbar-track {
-          background: #F7FAFC;
-          border-radius: 3px;
-        }
-        
-        .overflow-x-auto::-webkit-scrollbar-thumb {
-          background: #CBD5E0;
-          border-radius: 3px;
-        }
-        
-        .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-          background: #A0AEC0;
-        }
-        
-        /* Melhorias na responsividade */
-        @media (max-width: 768px) {
-          .grid-cols-2 {
-            grid-template-columns: repeat(1, minmax(0, 1fr));
-          }
-          
-          .lg\\:grid-cols-4 {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-          
-          .lg\\:grid-cols-8 {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-          }
-        }
-        
-        /* Hover effects aprimorados */
-        .group:hover .group-hover\\:visible {
-          visibility: visible;
-        }
-        
-        .group .group-hover\\:visible {
-          visibility: hidden;
-        }
-        
-        /* Animações suaves para filtros */
-        .transition-all {
-          transition: all 0.2s ease-in-out;
-        }
-        
-        /* Cores personalizadas para urgência */
-        .bg-gradient-to-r {
-          background-image: linear-gradient(to right, var(--tw-gradient-stops));
-        }
-      `}</style>
     </div>
   );
 }
+
+// Componentes auxiliares
+const ErrorBoundary: React.FC<{ error: string | null; onRetry: () => void; onClear: () => void }> = ({ 
+  error, 
+  onRetry, 
+  onClear 
+}) => {
+  if (!error) return null;
+
+  const isConnectionError = error.includes('QUIC') || 
+                           error.includes('network') || 
+                           error.includes('unavailable') ||
+                           error.includes('fetch');
+
+  return (
+    <div className={`rounded-lg p-4 print:hidden animate-fadeIn ${
+      isConnectionError 
+        ? 'bg-yellow-50 border border-yellow-200' 
+        : 'bg-red-50 border border-red-200'
+    }`}>
+      <div className="flex items-start">
+        <AlertCircle className={`mr-3 w-5 h-5 flex-shrink-0 ${
+          isConnectionError ? 'text-yellow-400' : 'text-red-400'
+        }`} />
+        <div className="flex-1">
+          <h3 className={`text-sm font-medium ${
+            isConnectionError ? 'text-yellow-800' : 'text-red-800'
+          }`}>
+            {isConnectionError ? 'Problema de Conexão' : 'Erro no Sistema'}
+          </h3>
+          <p className={`text-sm mt-1 ${
+            isConnectionError ? 'text-yellow-700' : 'text-red-700'
+          }`}>
+            {isConnectionError 
+              ? 'Verifique sua conexão com a internet e tente novamente.'
+              : error
+            }
+          </p>
+          {isConnectionError && (
+            <p className="text-xs text-yellow-600 mt-2">
+              💡 Os dados podem estar desatualizados. O sistema tentará reconectar automaticamente.
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2 ml-4">
+          {isConnectionError && (
+            <button 
+              onClick={onRetry}
+              className={`text-sm underline transition-colors ${
+                isConnectionError 
+                  ? 'text-yellow-600 hover:text-yellow-800' 
+                  : 'text-red-600 hover:text-red-800'
+              }`}
+            >
+              Tentar novamente
+            </button>
+          )}
+          <button 
+            onClick={onClear}
+            className={`ml-2 transition-colors ${
+              isConnectionError 
+                ? 'text-yellow-400 hover:text-yellow-600' 
+                : 'text-red-400 hover:text-red-600'
+            }`}
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const LoadingSpinner: React.FC<{ orders?: Order[] }> = ({ orders = [] }) => (
+  <div className="flex items-center justify-center p-12 print:hidden">
+    <div className="flex flex-col items-center">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+      <span className="text-gray-600 text-lg">Carregando pedidos...</span>
+      <span className="text-gray-400 text-sm mt-2">
+        {orders.length > 0 ? `${orders.length} pedidos carregados` : 'Conectando ao servidor...'}
+      </span>
+    </div>
+  </div>
+);
