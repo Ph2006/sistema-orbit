@@ -1,657 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Search, 
-  Filter, 
-  Plus, 
-  Edit, 
-  Trash2, 
-  Calendar, 
-  User, 
-  Package, 
-  MoreHorizontal,
-  FileText,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  Download,
-  ArrowUpDown,
-  ChevronLeft,
-  ChevronRight,
-  BarChart2,
-  Printer,
-  CalendarDays,
-  AlertTriangle,
-  Target,
-  Activity,
-  Timer,
-  Eye,
-  RefreshCw,
-  Zap,
-  Bell,
-  MapPin,
-  ListFilter,
-  Grid3X3,
-  Layers
-} from 'lucide-react';
-import { useOrderStore } from '../store/orderStore';
-import { useAuthStore } from '../store/authStore';
-import { format, differenceInDays, isToday, isTomorrow, isYesterday, isThisWeek, isThisMonth, parseISO, startOfDay } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import OrderModal from './OrderModal';
-import { useNavigate } from 'react-router-dom';
-
-// Constantes
-const ITEMS_PER_PAGE_OPTIONS = [10, 15, 25, 50];
-
-const URGENCY_COLORS = {
-  'overdue': 'bg-red-100 text-red-800 border-red-200',
-  'today': 'bg-orange-100 text-orange-800 border-orange-200',
-  'tomorrow': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  'critical': 'bg-pink-100 text-pink-800 border-pink-200',
-  'urgent': 'bg-purple-100 text-purple-800 border-purple-200',
-  'soon': 'bg-blue-100 text-blue-800 border-blue-200',
-  'normal': 'bg-green-100 text-green-800 border-green-200',
-  'completed': 'bg-gray-100 text-gray-800 border-gray-200',
-  'unknown': 'bg-gray-100 text-gray-800 border-gray-200'
-};
-
-const URGENCY_TEXTS = {
-  'overdue': 'Atrasado',
-  'today': 'Entrega Hoje',
-  'tomorrow': 'Entrega Amanhã',
-  'critical': '≤ 3 dias',
-  'urgent': '≤ 7 dias',
-  'soon': '≤ 14 dias',
-  'normal': '> 14 dias',
-  'completed': 'Concluído',
-  'unknown': 'Data inválida'
-};
-
-const STATUS_COLORS = {
-  'completed': 'bg-green-100 text-green-800 border-green-200',
-  'in-progress': 'bg-blue-100 text-blue-800 border-blue-200',
-  'on-hold': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  'cancelled': 'bg-red-100 text-red-800 border-red-200',
-  'shipped': 'bg-purple-100 text-purple-800 border-purple-200',
-  'delayed': 'bg-orange-100 text-orange-800 border-orange-200'
-};
-
-const STATUS_TEXTS = {
-  'in-progress': 'Em Processo',
-  'completed': 'Concluído',
-  'on-hold': 'Em Pausa',
-  'cancelled': 'Cancelado',
-  'shipped': 'Expedido',
-  'delayed': 'Atrasado'
-};
-
-const PRIORITY_COLORS = {
-  'urgent': 'bg-red-100 text-red-800 border-red-200',
-  'high': 'bg-orange-100 text-orange-800 border-orange-200',
-  'medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  'low': 'bg-green-100 text-green-800 border-green-200'
-};
-
-// Tipos
-type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | 'delayed' | 'shipped' | string;
-type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'deliveryDate' | 'status' | 'priority' | 'value';
-type SortOrder = 'asc' | 'desc';
-type ViewMode = 'table' | 'calendar';
-
-interface OrderItem {
-  id: string;
-  code: string;
-  description: string;
-  quantity: number;
-  unit: string;
-  weight: number;
-  progress: number;
-  overallProgress?: number;
-  itemNumber?: number;
-  notes?: string;
-  priority?: 'low' | 'medium' | 'high' | 'urgent';
-  estimatedDays?: number;
-  startDate?: string;
-  endDate?: string;
-  responsible?: string;
-}
-
-interface Order {
-  id: string;
-  customerId?: string;
-  customerName?: string;
-  customer?: string;
-  project?: string;
-  projectName?: string;
-  orderNumber?: string;
-  internalOS?: string;
-  internalOrderNumber?: string;
-  serviceOrder?: string;
-  startDate?: string;
-  deliveryDate?: string;
-  completionDate?: string;
-  status?: OrderStatus;
-  observations?: string;
-  items?: OrderItem[];
-  createdAt?: string;
-  updatedAt?: string;
-  priority?: 'low' | 'medium' | 'high' | 'urgent';
-  value?: number;
-  googleDriveLink?: string;
-  [key: string]: any;
-}
-
-// Utilitários
-const calculateOrderWeight = (order: Order): number => {
-  if (!order.items || !Array.isArray(order.items)) {
-    console.debug(`Order ${order.id} has no valid items array`);
-    return 0;
-  }
-  
-  return order.items.reduce((total, item) => {
-    // Validação mais robusta
-    const weight = typeof item.weight === 'number' && !isNaN(item.weight) && isFinite(item.weight) 
-      ? item.weight 
-      : 0;
-    const quantity = typeof item.quantity === 'number' && !isNaN(item.quantity) && isFinite(item.quantity) 
-      ? item.quantity 
-      : 1;
-    
-    const itemTotal = weight * quantity;
-    
-    // Log apenas se há inconsistências
-    if (item.weight && (weight === 0 || quantity === 1)) {
-      console.debug(`Weight issue for item ${item.id}:`, {
-        originalWeight: item.weight,
-        originalQuantity: item.quantity,
-        processedWeight: weight,
-        processedQuantity: quantity
-      });
-    }
-    
-    return total + itemTotal;
-  }, 0);
-};
-
-const calculateProductionStats = (orders: Order[]) => {
-  let totalProductionDays = 0;
-  let completedOrdersWithDates = 0;
-  
-  orders.forEach(order => {
-    if (order.status === 'completed' && order.startDate && order.completionDate) {
-      try {
-        const startDate = parseISO(order.startDate);
-        const completionDate = parseISO(order.completionDate);
-        const days = Math.ceil((completionDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (days > 0) { // Validar que os dias são positivos
-          totalProductionDays += days;
-          completedOrdersWithDates++;
-        }
-      } catch (error) {
-        console.warn(`Invalid dates for order ${order.id}:`, error);
-      }
-    }
-  });
-  
-  return {
-    averageProductionDays: completedOrdersWithDates > 0 
-      ? Math.round(totalProductionDays / completedOrdersWithDates) 
-      : 0,
-    completedOrdersCount: completedOrdersWithDates
-  };
-};
-
-const isValidDate = (dateString: string | undefined | null): boolean => {
-  if (!dateString) return false;
-  try {
-    const date = parseISO(dateString);
-    return date instanceof Date && !isNaN(date.getTime());
-  } catch {
-    return false;
-  }
-};
-
-const getDeliveryUrgency = (order: Order): string => {
-  if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return 'completed';
-  
-  try {
-    const deliveryDate = parseISO(order.deliveryDate);
-    const today = startOfDay(new Date());
-    const daysUntilDelivery = differenceInDays(deliveryDate, today);
-    
-    if (daysUntilDelivery < 0) return 'overdue';
-    if (daysUntilDelivery === 0) return 'today';
-    if (daysUntilDelivery === 1) return 'tomorrow';
-    if (daysUntilDelivery <= 3) return 'critical';
-    if (daysUntilDelivery <= 7) return 'urgent';
-    if (daysUntilDelivery <= 14) return 'soon';
-    return 'normal';
-  } catch {
-    return 'unknown';
-  }
-};
-
-const getUrgencyColor = (urgency: string): string => {
-  return URGENCY_COLORS[urgency] || URGENCY_COLORS['unknown'];
-};
-
-const getUrgencyText = (urgency: string): string => {
-  return URGENCY_TEXTS[urgency] || URGENCY_TEXTS['unknown'];
-};
-
-const getStatusText = (status: string | undefined): string => {
-  if (!status) return 'Desconhecido';
-  return STATUS_TEXTS[status.toLowerCase()] || status;
-};
-
-const getStatusColor = (status: string | undefined): string => {
-  if (!status) return 'bg-gray-100 text-gray-800';
-  
-  const normalizedStatus = status.toLowerCase();
-  return STATUS_COLORS[normalizedStatus] || 'bg-gray-100 text-gray-800 border-gray-200';
-};
-
-const getPriorityColor = (priority: string | undefined): string => {
-  return PRIORITY_COLORS[priority || 'medium'] || PRIORITY_COLORS.medium;
-};
-
-const safeField = (order: Order, fields: string[]): string => {
-  for (const field of fields) {
-    if (order[field] && typeof order[field] === 'string') {
-      return order[field] as string;
-    }
-  }
-  return '';
-};
-
-const formatDate = (dateString: string | undefined | null): string => {
-  if (!dateString) return '-';
-  try {
-    return format(parseISO(dateString), 'dd/MM/yyyy', { locale: ptBR });
-  } catch (error) {
-    console.error("Error formatting date:", dateString, error);
-    return '-';
-  }
-};
-
-const formatRelativeDate = (dateString: string | undefined | null): string => {
-  if (!dateString || !isValidDate(dateString)) return '-';
-  try {
-    const date = parseISO(dateString);
-    if (isToday(date)) return 'Hoje';
-    if (isTomorrow(date)) return 'Amanhã';
-    if (isYesterday(date)) return 'Ontem';
-    return format(date, 'dd/MM', { locale: ptBR });
-  } catch (error) {
-    return formatDate(dateString);
-  }
-};
-
-const isDateInFilter = (dateStr: string | undefined, filter: string): boolean => {
-  if (!dateStr || filter === 'all') return true;
-  
-  try {
-    const date = parseISO(dateStr);
-    const today = new Date();
-    
-    if (filter === 'today') return isToday(date);
-    if (filter === 'tomorrow') return isTomorrow(date);
-    if (filter === 'week') return isThisWeek(date, { weekStartsOn: 0 });
-    if (filter === 'month') return isThisMonth(date);
-    if (filter === 'overdue') return date < startOfDay(today);
-    
-    return true;
-  } catch (e) {
-    console.error("Error checking date filter:", e);
-    return true;
-  }
-};
-
-export default function Orders() {
-  const navigate = useNavigate();
-  
-  const { 
-    orders, 
-    loading, 
-    error, 
-    fetchOrders, 
-    deleteOrder, 
-    setSelectedOrder,
-    subscribeToOrders,
-    clearError,
-    retryConnection
-  } = useOrderStore();
-  
-  const { user } = useAuthStore();
-  
-  // Estados para pesquisa e filtros
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
-  const [clientFilter, setClientFilter] = useState<string>('all');
-  const [dateFilter, setDateFilter] = useState<string>('all');
-  const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  const [deliveryUrgencyFilter, setDeliveryUrgencyFilter] = useState<string>('all');
-  
-  // Estados para ordenação
-  const [sortField, setSortField] = useState<SortField>('deliveryDate');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  
-  // Estados para paginação
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(15);
-  
-  // Estados para modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit' | 'view'>('create');
-  const [selectedOrder, setSelectedOrderState] = useState<Order | null>(null);
-  
-  // Estados para interface
-  const [viewMode, setViewMode] = useState<ViewMode>('table');
-  const [showDashboard, setShowDashboard] = useState(true);
-  const [showFilters, setShowFilters] = useState(false);
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [compactView, setCompactView] = useState(false);
-
-  // Carregar pedidos ao montar o componente
-  useEffect(() => {
-    if (user) {
-      console.log("Orders component: Loading orders");
-      fetchOrders();
-      
-      // Subscrever a mudanças em tempo real
-      const unsubscribe = subscribeToOrders();
-      return () => {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error("Error unsubscribing from orders:", error);
-        }
-      };
-    }
-  }, [user]);
-
-  // Limpar erro quando componente desmonta
-  useEffect(() => {
-    return () => clearError();
-  }, [clearError]);
-
-  // Tratamento de clique fora do dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (activeDropdown && !(event.target as Element).closest('[data-dropdown]')) {
-        setActiveDropdown(null);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [activeDropdown]);
-
-  // Opções para filtros
-  const clientOptions = useMemo(() => {
-    const clients = new Set<string>();
-    orders.forEach(order => {
-      if (order.customerName) clients.add(order.customerName);
-      if (order.customer) clients.add(order.customer);
-    });
-    return ['all', ...Array.from(clients).sort()];
-  }, [orders]);
-
-  const dateOptions = useMemo(() => {
-    return [
-      { value: 'all', label: 'Todas as datas', icon: Calendar },
-      { value: 'today', label: 'Hoje', icon: Clock },
-      { value: 'tomorrow', label: 'Amanhã', icon: Timer },
-      { value: 'week', label: 'Esta semana', icon: CalendarDays },
-      { value: 'month', label: 'Este mês', icon: Calendar },
-      { value: 'overdue', label: 'Atrasados', icon: AlertTriangle }
-    ];
-  }, []);
-
-  const urgencyOptions = useMemo(() => [
-    { value: 'all', label: 'Todas as urgências', color: 'bg-gray-100 text-gray-800' },
-    { value: 'overdue', label: 'Atrasados', color: 'bg-red-100 text-red-800' },
-    { value: 'today', label: 'Entrega Hoje', color: 'bg-orange-100 text-orange-800' },
-    { value: 'tomorrow', label: 'Entrega Amanhã', color: 'bg-yellow-100 text-yellow-800' },
-    { value: 'critical', label: 'Crítico (≤ 3 dias)', color: 'bg-pink-100 text-pink-800' },
-    { value: 'urgent', label: 'Urgente (≤ 7 dias)', color: 'bg-purple-100 text-purple-800' },
-    { value: 'soon', label: 'Em breve (≤ 14 dias)', color: 'bg-blue-100 text-blue-800' },
-    { value: 'normal', label: 'Normal (> 14 dias)', color: 'bg-green-100 text-green-800' }
-  ], []);
-
-  // Filtrar e ordenar pedidos
-  const processedOrders = useMemo(() => {
-    return orders
-      .filter(order => {
-        if (!order) return false;
-        
-        // Busca textual
-        const orderNumber = safeField(order, ['orderNumber', 'id']);
-        const customer = safeField(order, ['customerName', 'customer']);
-        const project = safeField(order, ['project', 'projectName']);
-        const internalOS = safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']);
-        
-        const matchesSearch = searchTerm === '' || 
-          orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          project.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          internalOS.toLowerCase().includes(searchTerm.toLowerCase());
-        
-        // Filtro de status
-        const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
-        
-        // Filtro de cliente
-        const matchesClient = clientFilter === 'all' || customer === clientFilter;
-        
-        // Filtro de data
-        const matchesDate = isDateInFilter(order.startDate, dateFilter);
-        
-        // Filtro de prioridade
-        const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter;
-        
-        // Filtro de urgência de entrega
-        const urgency = getDeliveryUrgency(order);
-        const matchesUrgency = deliveryUrgencyFilter === 'all' || urgency === deliveryUrgencyFilter;
-        
-        return matchesSearch && matchesStatus && matchesClient && matchesDate && matchesPriority && matchesUrgency;
-      })
-      .sort((a, b) => {
-        if (sortField === 'orderNumber') {
-          const aValue = safeField(a, ['orderNumber', 'id']);
-          const bValue = safeField(b, ['orderNumber', 'id']);
-          return sortOrder === 'asc' 
-            ? aValue.localeCompare(bValue) 
-            : bValue.localeCompare(aValue);
-        }
-        
-        if (sortField === 'customer') {
-          const aValue = safeField(a, ['customerName', 'customer']);
-          const bValue = safeField(b, ['customerName', 'customer']);
-          return sortOrder === 'asc' 
-            ? aValue.localeCompare(bValue) 
-            : bValue.localeCompare(aValue);
-        }
-        
-        if (sortField === 'deliveryDate') {
-          const aValue = a.deliveryDate ? new Date(a.deliveryDate).getTime() : 0;
-          const bValue = b.deliveryDate ? new Date(b.deliveryDate).getTime() : 0;
-          return sortOrder === 'asc' 
-            ? aValue - bValue 
-            : bValue - aValue;
-        }
-        
-        // Outros campos de ordenação...
-        return 0;
-      });
-  }, [orders, searchTerm, statusFilter, clientFilter, dateFilter, priorityFilter, deliveryUrgencyFilter, sortField, sortOrder]);
-  
-  // Paginação
-  const paginatedOrders = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return processedOrders.slice(startIndex, startIndex + itemsPerPage);
-  }, [processedOrders, currentPage, itemsPerPage]);
-  
-  const totalPages = useMemo(() => 
-    Math.ceil(processedOrders.length / itemsPerPage),
-    [processedOrders, itemsPerPage]
-  );
-
-  // Handlers
-  const handleCreateOrder = () => {
-    setSelectedOrderState(null);
-    setSelectedOrder(null);
-    setModalMode('create');
-    setIsModalOpen(true);
-  };
-
-  const handleEditOrder = (order: Order) => {
-    setSelectedOrderState(order);
-    setSelectedOrder(order);
-    setModalMode('edit');
-    setIsModalOpen(true);
-  };
-
-  const handleViewOrder = (order: Order) => {
-    setSelectedOrderState(order);
-    setSelectedOrder(order);
-    setModalMode('view');
-    setIsModalOpen(true);
-  };
-
-  const handleDeleteOrder = async (order: Order) => {
-    if (!order.id) {
-      console.error('ID do pedido não encontrado');
-      return;
-    }
-
-    const confirmDelete = window.confirm(
-      `Tem certeza que deseja deletar o pedido #${order.orderNumber || order.id}?`
-    );
-    
-    if (confirmDelete) {
-      try {
-        await deleteOrder(order.id);
-      } catch (error) {
-        console.error('Erro ao deletar pedido:', error);
-      }
-    }
-  };
-
-  const handleModalClose = () => {
-    setIsModalOpen(false);
-    setSelectedOrderState(null);
-    setSelectedOrder(null);
-    setActiveDropdown(null);
-  };
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortOrder('asc');
-    }
-  };
-
-  const toggleDropdown = (orderId: string) => {
-    setActiveDropdown(activeDropdown === orderId ? null : orderId);
-  };
-
-  const handleExportToExcel = () => {
-    try {
-      // Preparar dados para exportação
-      const exportData = processedOrders.map(order => ({
-        'Número do Pedido': safeField(order, ['orderNumber', 'id']),
-        'Cliente': safeField(order, ['customerName', 'customer']),
-        'Projeto': safeField(order, ['project', 'projectName']),
-        'OS Interna': safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']),
-        'Data de Início': formatDate(order.startDate),
-        'Data de Entrega': formatDate(order.deliveryDate),
-        'Status': getStatusText(order.status),
-        'Prioridade': order.priority || 'Média',
-        'Peso Total (kg)': calculateOrderWeight(order).toFixed(2),
-        'Urgência': getUrgencyText(getDeliveryUrgency(order)),
-        'Observações': order.observations || ''
-      }));
-
-      // Converter para CSV
-      const headers = Object.keys(exportData[0] || {});
-      const csvContent = [
-        headers.join(','),
-        ...exportData.map(row => 
-          headers.map(header => `"${(row as any)[header] || ''}"`).join(',')
-        )
-      ].join('\n');
-
-      // Download do arquivo
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `pedidos_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.csv`);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      console.log(`Exported ${exportData.length} orders to CSV`);
-    } catch (error) {
-      console.error('Error exporting to Excel:', error);
-      console.log('Erro ao exportar dados. Tente novamente.');
-    }
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const handleRetryConnection = () => {
-    clearError();
-    retryConnection();
-  };
-
-  // Funções de navegação melhoradas
-  const handleNavigateToReport = (orderId: string) => {
-    try {
-      navigate(`/item-report/${orderId}`);
-      setActiveDropdown(null);
-    } catch (error) {
-      console.error('Error navigating to report:', error);
-      console.log('Erro ao abrir relatório. Tente novamente.');
-    }
-  };
-
-  const handleOpenPublicSchedule = (orderId: string) => {
-    try {
-      const url = `${window.location.origin}/cronograma/${orderId}`;
-      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!newWindow) {
-        // Fallback se popup foi bloqueado
-        navigator.clipboard.writeText(url).then(() => {
-          console.log('Pop-up bloqueado. Link copiado para área de transferência.');
-        });
-      }
-      setActiveDropdown(null);
-    } catch (error) {
-      console.error('Error opening public schedule:', error);
-      console.log('Erro ao abrir cronograma público.');
-    }
-  };
-
-  const handleCopyPublicLink = (orderId: string) => {
-    try {
-      const url = `${window.location.origin}/cronograma/${orderId}`;
-      navigator.clipboard.writeText(url).then(() => {
-        console.log('Link copiado para a área de transferência!');
-        setActiveDropdown(null);
-      });
-    } catch (error) {
-      console.error('Error copying link:', error);
-      console.log('Erro ao copiar link.');
-    }
-  };
-
-  // Componente Dashboard
+// Componente Dashboard
   const OrdersDashboard = () => {
     const totalOrders = processedOrders.length;
     const inProgressOrders = processedOrders.filter(o => o.status === 'in-progress').length;
@@ -667,7 +14,7 @@ export default function Orders() {
     const stats = useMemo(() => calculateProductionStats(processedOrders), [processedOrders]);
     
     return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 animate-fadeIn">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
         <div className="p-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold flex items-center">
             <BarChart2 className="w-5 h-5 mr-2 text-blue-600" />
@@ -887,6 +234,10 @@ export default function Orders() {
     );
   };
 
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
   return (
     <div className="space-y-4 lg:space-y-6 print:m-0 print:p-0">
       {/* Header Responsivo */}
@@ -917,7 +268,6 @@ export default function Orders() {
         </div>
         
         <div className="flex flex-wrap gap-2">
-          {/* Toggle Dashboard */}
           <button
             onClick={() => setShowDashboard(!showDashboard)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
@@ -931,7 +281,6 @@ export default function Orders() {
             <span className="hidden sm:inline">Dashboard</span>
           </button>
           
-          {/* Toggle Filtros */}
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
@@ -945,7 +294,6 @@ export default function Orders() {
             <span className="hidden sm:inline">Filtros</span>
           </button>
           
-          {/* View Mode Selector */}
           <div className="flex bg-white border border-gray-300 rounded-lg">
             <button
               onClick={() => setViewMode('table')}
@@ -973,7 +321,6 @@ export default function Orders() {
             </button>
           </div>
           
-          {/* Ações */}
           <button
             onClick={handleExportToExcel}
             className="flex items-center gap-2 bg-white border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
@@ -1018,7 +365,6 @@ export default function Orders() {
         </div>
         
         <div className="p-4 space-y-4">
-          {/* Linha 1: Busca */}
           <div className="w-full">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Busca Geral
@@ -1035,7 +381,6 @@ export default function Orders() {
             </div>
           </div>
           
-          {/* Linha 2: Filtros principais */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
@@ -1101,7 +446,6 @@ export default function Orders() {
             </div>
           </div>
           
-          {/* Linha 3: Filtro de urgência de entrega */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Urgência de Entrega
@@ -1123,7 +467,6 @@ export default function Orders() {
             </div>
           </div>
           
-          {/* Botões de ação dos filtros */}
           <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-200">
             <button
               onClick={() => {
@@ -1167,7 +510,7 @@ export default function Orders() {
         </div>
       </div>
 
-      {/* Filtros Rápidos (sempre visíveis em mobile) */}
+      {/* Filtros Rápidos */}
       <div className={`bg-white p-3 rounded-lg shadow-sm border border-gray-200 print:hidden ${
         showFilters ? 'lg:hidden' : ''
       }`}>
@@ -1215,26 +558,12 @@ export default function Orders() {
           onRetry={handleRetryConnection}
           onClear={clearError}
         />
-      )} text-sm underline"
-              >
-                Tentar novamente
-              </button>
-              <button 
-                onClick={clearError}
-                className="ml-auto text-red-400 hover:text-red-600 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Conteúdo Principal */}
       {viewMode === 'calendar' ? (
         <CalendarView />
       ) : (
-        /* Lista de Pedidos */
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 print:shadow-none print:border-none">
           {loading ? (
             <LoadingSpinner orders={orders} />
@@ -1342,14 +671,8 @@ export default function Orders() {
                           )}
                         </div>
                       </th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
-                          onClick={() => handleSort('status')}>
-                        <div className="flex items-center gap-1">
-                          Status
-                          {sortField === 'status' && (
-                            <ArrowUpDown className={`w-4 h-4 transition-transform ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
-                          )}
-                        </div>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">
+                        Status
                       </th>
                       {!compactView && (
                         <>
@@ -1608,7 +931,6 @@ export default function Orders() {
                           <ChevronLeft className="h-5 w-5" aria-hidden="true" />
                         </button>
                         
-                        {/* Paginação dinâmica */}
                         {Array.from({ length: totalPages }, (_, i) => i + 1)
                           .filter(page => 
                             page === 1 || 
@@ -1616,7 +938,6 @@ export default function Orders() {
                             Math.abs(page - currentPage) <= 1
                           )
                           .map((page, index, array) => {
-                            // Adicionar reticências se necessário
                             if (index > 0 && page > array[index - 1] + 1) {
                               return (
                                 <React.Fragment key={`ellipsis-${page}`}>
@@ -1734,9 +1055,325 @@ export default function Orders() {
       />
     </div>
   );
+}import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Search, 
+  Filter, 
+  Plus, 
+  Edit, 
+  Trash2, 
+  Calendar, 
+  User, 
+  Package, 
+  MoreHorizontal,
+  FileText,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  Download,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  BarChart2,
+  Printer,
+  CalendarDays,
+  AlertTriangle,
+  Target,
+  Activity,
+  Timer,
+  Eye,
+  RefreshCw,
+  Zap,
+  Bell,
+  MapPin,
+  ListFilter,
+  Grid3X3,
+  Layers
+} from 'lucide-react';
+import { useOrderStore } from '../store/orderStore';
+import { useAuthStore } from '../store/authStore';
+import { format, differenceInDays, isToday, isTomorrow, isYesterday, isThisWeek, isThisMonth, parseISO, startOfDay } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import OrderModal from './OrderModal';
+import { useNavigate } from 'react-router-dom';
+
+// ============================================================================
+// CONSTANTES
+// ============================================================================
+
+const ITEMS_PER_PAGE_OPTIONS = [10, 15, 25, 50];
+
+const URGENCY_COLORS = {
+  'overdue': 'bg-red-100 text-red-800 border-red-200',
+  'today': 'bg-orange-100 text-orange-800 border-orange-200',
+  'tomorrow': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'critical': 'bg-pink-100 text-pink-800 border-pink-200',
+  'urgent': 'bg-purple-100 text-purple-800 border-purple-200',
+  'soon': 'bg-blue-100 text-blue-800 border-blue-200',
+  'normal': 'bg-green-100 text-green-800 border-green-200',
+  'completed': 'bg-gray-100 text-gray-800 border-gray-200',
+  'unknown': 'bg-gray-100 text-gray-800 border-gray-200'
+};
+
+const URGENCY_TEXTS = {
+  'overdue': 'Atrasado',
+  'today': 'Entrega Hoje',
+  'tomorrow': 'Entrega Amanhã',
+  'critical': '≤ 3 dias',
+  'urgent': '≤ 7 dias',
+  'soon': '≤ 14 dias',
+  'normal': '> 14 dias',
+  'completed': 'Concluído',
+  'unknown': 'Data inválida'
+};
+
+const STATUS_COLORS = {
+  'completed': 'bg-green-100 text-green-800 border-green-200',
+  'in-progress': 'bg-blue-100 text-blue-800 border-blue-200',
+  'on-hold': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'cancelled': 'bg-red-100 text-red-800 border-red-200',
+  'shipped': 'bg-purple-100 text-purple-800 border-purple-200',
+  'delayed': 'bg-orange-100 text-orange-800 border-orange-200'
+};
+
+const STATUS_TEXTS = {
+  'in-progress': 'Em Processo',
+  'completed': 'Concluído',
+  'on-hold': 'Em Pausa',
+  'cancelled': 'Cancelado',
+  'shipped': 'Expedido',
+  'delayed': 'Atrasado'
+};
+
+const PRIORITY_COLORS = {
+  'urgent': 'bg-red-100 text-red-800 border-red-200',
+  'high': 'bg-orange-100 text-orange-800 border-orange-200',
+  'medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'low': 'bg-green-100 text-green-800 border-green-200'
+};
+
+// ============================================================================
+// TIPOS E INTERFACES
+// ============================================================================
+
+type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | 'delayed' | 'shipped' | string;
+type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'deliveryDate' | 'status' | 'priority' | 'value';
+type SortOrder = 'asc' | 'desc';
+type ViewMode = 'table' | 'calendar';
+
+interface OrderItem {
+  id: string;
+  code: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  weight: number;
+  progress: number;
+  overallProgress?: number;
+  itemNumber?: number;
+  notes?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  estimatedDays?: number;
+  startDate?: string;
+  endDate?: string;
+  responsible?: string;
 }
 
-// Componentes auxiliares
+interface Order {
+  id: string;
+  customerId?: string;
+  customerName?: string;
+  customer?: string;
+  project?: string;
+  projectName?: string;
+  orderNumber?: string;
+  internalOS?: string;
+  internalOrderNumber?: string;
+  serviceOrder?: string;
+  startDate?: string;
+  deliveryDate?: string;
+  completionDate?: string;
+  status?: OrderStatus;
+  observations?: string;
+  items?: OrderItem[];
+  createdAt?: string;
+  updatedAt?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  value?: number;
+  googleDriveLink?: string;
+  [key: string]: any;
+}
+
+// ============================================================================
+// FUNÇÕES UTILITÁRIAS
+// ============================================================================
+
+const calculateOrderWeight = (order: Order): number => {
+  if (!order.items || !Array.isArray(order.items)) {
+    console.debug(`Order ${order.id} has no valid items array`);
+    return 0;
+  }
+  
+  return order.items.reduce((total, item) => {
+    const weight = typeof item.weight === 'number' && !isNaN(item.weight) && isFinite(item.weight) 
+      ? item.weight 
+      : 0;
+    const quantity = typeof item.quantity === 'number' && !isNaN(item.quantity) && isFinite(item.quantity) 
+      ? item.quantity 
+      : 1;
+    
+    const itemTotal = weight * quantity;
+    
+    if (item.weight && (weight === 0 || quantity === 1)) {
+      console.debug(`Weight issue for item ${item.id}:`, {
+        originalWeight: item.weight,
+        originalQuantity: item.quantity,
+        processedWeight: weight,
+        processedQuantity: quantity
+      });
+    }
+    
+    return total + itemTotal;
+  }, 0);
+};
+
+const calculateProductionStats = (orders: Order[]) => {
+  let totalProductionDays = 0;
+  let completedOrdersWithDates = 0;
+  
+  orders.forEach(order => {
+    if (order.status === 'completed' && order.startDate && order.completionDate) {
+      try {
+        const startDate = parseISO(order.startDate);
+        const completionDate = parseISO(order.completionDate);
+        const days = Math.ceil((completionDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (days > 0) {
+          totalProductionDays += days;
+          completedOrdersWithDates++;
+        }
+      } catch (error) {
+        console.warn(`Invalid dates for order ${order.id}:`, error);
+      }
+    }
+  });
+  
+  return {
+    averageProductionDays: completedOrdersWithDates > 0 
+      ? Math.round(totalProductionDays / completedOrdersWithDates) 
+      : 0,
+    completedOrdersCount: completedOrdersWithDates
+  };
+};
+
+const isValidDate = (dateString: string | undefined | null): boolean => {
+  if (!dateString) return false;
+  try {
+    const date = parseISO(dateString);
+    return date instanceof Date && !isNaN(date.getTime());
+  } catch {
+    return false;
+  }
+};
+
+const getDeliveryUrgency = (order: Order): string => {
+  if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return 'completed';
+  
+  try {
+    const deliveryDate = parseISO(order.deliveryDate);
+    const today = startOfDay(new Date());
+    const daysUntilDelivery = differenceInDays(deliveryDate, today);
+    
+    if (daysUntilDelivery < 0) return 'overdue';
+    if (daysUntilDelivery === 0) return 'today';
+    if (daysUntilDelivery === 1) return 'tomorrow';
+    if (daysUntilDelivery <= 3) return 'critical';
+    if (daysUntilDelivery <= 7) return 'urgent';
+    if (daysUntilDelivery <= 14) return 'soon';
+    return 'normal';
+  } catch {
+    return 'unknown';
+  }
+};
+
+const getUrgencyColor = (urgency: string): string => {
+  return URGENCY_COLORS[urgency] || URGENCY_COLORS['unknown'];
+};
+
+const getUrgencyText = (urgency: string): string => {
+  return URGENCY_TEXTS[urgency] || URGENCY_TEXTS['unknown'];
+};
+
+const getStatusText = (status: string | undefined): string => {
+  if (!status) return 'Desconhecido';
+  return STATUS_TEXTS[status.toLowerCase()] || status;
+};
+
+const getStatusColor = (status: string | undefined): string => {
+  if (!status) return 'bg-gray-100 text-gray-800';
+  const normalizedStatus = status.toLowerCase();
+  return STATUS_COLORS[normalizedStatus] || 'bg-gray-100 text-gray-800 border-gray-200';
+};
+
+const getPriorityColor = (priority: string | undefined): string => {
+  return PRIORITY_COLORS[priority || 'medium'] || PRIORITY_COLORS.medium;
+};
+
+const safeField = (order: Order, fields: string[]): string => {
+  for (const field of fields) {
+    if (order[field] && typeof order[field] === 'string') {
+      return order[field] as string;
+    }
+  }
+  return '';
+};
+
+const formatDate = (dateString: string | undefined | null): string => {
+  if (!dateString) return '-';
+  try {
+    return format(parseISO(dateString), 'dd/MM/yyyy', { locale: ptBR });
+  } catch (error) {
+    console.error("Error formatting date:", dateString, error);
+    return '-';
+  }
+};
+
+const formatRelativeDate = (dateString: string | undefined | null): string => {
+  if (!dateString || !isValidDate(dateString)) return '-';
+  try {
+    const date = parseISO(dateString);
+    if (isToday(date)) return 'Hoje';
+    if (isTomorrow(date)) return 'Amanhã';
+    if (isYesterday(date)) return 'Ontem';
+    return format(date, 'dd/MM', { locale: ptBR });
+  } catch (error) {
+    return formatDate(dateString);
+  }
+};
+
+const isDateInFilter = (dateStr: string | undefined, filter: string): boolean => {
+  if (!dateStr || filter === 'all') return true;
+  
+  try {
+    const date = parseISO(dateStr);
+    const today = new Date();
+    
+    if (filter === 'today') return isToday(date);
+    if (filter === 'tomorrow') return isTomorrow(date);
+    if (filter === 'week') return isThisWeek(date, { weekStartsOn: 0 });
+    if (filter === 'month') return isThisMonth(date);
+    if (filter === 'overdue') return date < startOfDay(today);
+    
+    return true;
+  } catch (e) {
+    console.error("Error checking date filter:", e);
+    return true;
+  }
+};
+
+// ============================================================================
+// COMPONENTES AUXILIARES
+// ============================================================================
+
 const ErrorBoundary: React.FC<{ error: string | null; onRetry: () => void; onClear: () => void }> = ({ 
   error, 
   onRetry, 
@@ -1750,7 +1387,7 @@ const ErrorBoundary: React.FC<{ error: string | null; onRetry: () => void; onCle
                            error.includes('fetch');
 
   return (
-    <div className={`rounded-lg p-4 print:hidden animate-fadeIn ${
+    <div className={`rounded-lg p-4 print:hidden ${
       isConnectionError 
         ? 'bg-yellow-50 border border-yellow-200' 
         : 'bg-red-50 border border-red-200'
@@ -1783,11 +1420,7 @@ const ErrorBoundary: React.FC<{ error: string | null; onRetry: () => void; onCle
           {isConnectionError && (
             <button 
               onClick={onRetry}
-              className={`text-sm underline transition-colors ${
-                isConnectionError 
-                  ? 'text-yellow-600 hover:text-yellow-800' 
-                  : 'text-red-600 hover:text-red-800'
-              }`}
+              className="text-sm underline transition-colors text-yellow-600 hover:text-yellow-800"
             >
               Tentar novamente
             </button>
@@ -1820,114 +1453,352 @@ const LoadingSpinner: React.FC<{ orders?: Order[] }> = ({ orders = [] }) => (
   </div>
 );
 
-// Estilos CSS para animações e responsividade
-const styles = `
-  @media print {
-    @page {
-      size: landscape;
-      margin: 10mm;
-    }
-    body {
-      font-size: 11pt;
-      line-height: 1.3;
-    }
-    .print\\:hidden {
-      display: none !important;
-    }
-    .print\\:shadow-none {
-      box-shadow: none !important;
-    }
-    .print\\:border-none {
-      border: none !important;
-    }
-    table {
-      font-size: 10pt;
-    }
-    th, td {
-      padding: 4px 8px !important;
-    }
-  }
+// ============================================================================
+// COMPONENTE PRINCIPAL
+// ============================================================================
 
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
+export default function Orders() {
+  const navigate = useNavigate();
   
-  .animate-fadeIn {
-    animation: fadeIn 0.3s ease-out forwards;
-  }
+  const { 
+    orders, 
+    loading, 
+    error, 
+    fetchOrders, 
+    deleteOrder, 
+    setSelectedOrder,
+    subscribeToOrders,
+    clearError,
+    retryConnection
+  } = useOrderStore();
   
-  /* Scroll suave para tabelas responsivas */
-  .overflow-x-auto {
-    scrollbar-width: thin;
-    scrollbar-color: #CBD5E0 #F7FAFC;
-  }
+  const { user } = useAuthStore();
   
-  .overflow-x-auto::-webkit-scrollbar {
-    height: 6px;
-  }
+  // Estados para pesquisa e filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
+  const [clientFilter, setClientFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('all');
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [deliveryUrgencyFilter, setDeliveryUrgencyFilter] = useState<string>('all');
   
-  .overflow-x-auto::-webkit-scrollbar-track {
-    background: #F7FAFC;
-    border-radius: 3px;
-  }
+  // Estados para ordenação
+  const [sortField, setSortField] = useState<SortField>('deliveryDate');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   
-  .overflow-x-auto::-webkit-scrollbar-thumb {
-    background: #CBD5E0;
-    border-radius: 3px;
-  }
+  // Estados para paginação
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(15);
   
-  .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-    background: #A0AEC0;
-  }
+  // Estados para modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'create' | 'edit' | 'view'>('create');
+  const [selectedOrder, setSelectedOrderState] = useState<Order | null>(null);
   
-  /* Melhorias na responsividade */
-  @media (max-width: 768px) {
-    .grid-cols-2 {
-      grid-template-columns: repeat(1, minmax(0, 1fr));
-    }
-    
-    .lg\\:grid-cols-4 {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    
-    .lg\\:grid-cols-8 {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-  }
-  
-  /* Hover effects aprimorados */
-  .group:hover .group-hover\\:visible {
-    visibility: visible;
-  }
-  
-  .group .group-hover\\:visible {
-    visibility: hidden;
-  }
-  
-  /* Animações suaves para filtros */
-  .transition-all {
-    transition: all 0.2s ease-in-out;
-  }
-  
-  /* Cores personalizadas para urgência */
-  .bg-gradient-to-r {
-    background-image: linear-gradient(to right, var(--tw-gradient-stops));
-  }
-`;
+  // Estados para interface
+  const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [showDashboard, setShowDashboard] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [compactView, setCompactView] = useState(false);
 
-// Injetar estilos no componente
-if (typeof document !== 'undefined') {
-  const styleElement = document.createElement('style');
-  styleElement.textContent = styles;
-  if (!document.head.querySelector('style[data-orders-styles]')) {
-    styleElement.setAttribute('data-orders-styles', 'true');
-    document.head.appendChild(styleElement);
-  }
-}
+  // ============================================================================
+  // EFFECTS
+  // ============================================================================
+
+  // Carregar pedidos ao montar o componente
+  useEffect(() => {
+    if (user) {
+      console.log("Orders component: Loading orders");
+      fetchOrders();
+      
+      const unsubscribe = subscribeToOrders();
+      return () => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error("Error unsubscribing from orders:", error);
+        }
+      };
+    }
+  }, [user]);
+
+  // Limpar erro quando componente desmonta
+  useEffect(() => {
+    return () => clearError();
+  }, [clearError]);
+
+  // Tratamento de clique fora do dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (activeDropdown && !(event.target as Element).closest('[data-dropdown]')) {
+        setActiveDropdown(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [activeDropdown]);
+
+  // ============================================================================
+  // COMPUTED VALUES
+  // ============================================================================
+
+  // Opções para filtros
+  const clientOptions = useMemo(() => {
+    const clients = new Set<string>();
+    orders.forEach(order => {
+      if (order.customerName) clients.add(order.customerName);
+      if (order.customer) clients.add(order.customer);
+    });
+    return ['all', ...Array.from(clients).sort()];
+  }, [orders]);
+
+  const dateOptions = useMemo(() => [
+    { value: 'all', label: 'Todas as datas', icon: Calendar },
+    { value: 'today', label: 'Hoje', icon: Clock },
+    { value: 'tomorrow', label: 'Amanhã', icon: Timer },
+    { value: 'week', label: 'Esta semana', icon: CalendarDays },
+    { value: 'month', label: 'Este mês', icon: Calendar },
+    { value: 'overdue', label: 'Atrasados', icon: AlertTriangle }
+  ], []);
+
+  const urgencyOptions = useMemo(() => [
+    { value: 'all', label: 'Todas as urgências', color: 'bg-gray-100 text-gray-800' },
+    { value: 'overdue', label: 'Atrasados', color: 'bg-red-100 text-red-800' },
+    { value: 'today', label: 'Entrega Hoje', color: 'bg-orange-100 text-orange-800' },
+    { value: 'tomorrow', label: 'Entrega Amanhã', color: 'bg-yellow-100 text-yellow-800' },
+    { value: 'critical', label: 'Crítico (≤ 3 dias)', color: 'bg-pink-100 text-pink-800' },
+    { value: 'urgent', label: 'Urgente (≤ 7 dias)', color: 'bg-purple-100 text-purple-800' },
+    { value: 'soon', label: 'Em breve (≤ 14 dias)', color: 'bg-blue-100 text-blue-800' },
+    { value: 'normal', label: 'Normal (> 14 dias)', color: 'bg-green-100 text-green-800' }
+  ], []);
+
+  // Filtrar e ordenar pedidos
+  const processedOrders = useMemo(() => {
+    return orders
+      .filter(order => {
+        if (!order) return false;
+        
+        const orderNumber = safeField(order, ['orderNumber', 'id']);
+        const customer = safeField(order, ['customerName', 'customer']);
+        const project = safeField(order, ['project', 'projectName']);
+        const internalOS = safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']);
+        
+        const matchesSearch = searchTerm === '' || 
+          orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          project.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          internalOS.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
+        const matchesClient = clientFilter === 'all' || customer === clientFilter;
+        const matchesDate = isDateInFilter(order.startDate, dateFilter);
+        const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter;
+        
+        const urgency = getDeliveryUrgency(order);
+        const matchesUrgency = deliveryUrgencyFilter === 'all' || urgency === deliveryUrgencyFilter;
+        
+        return matchesSearch && matchesStatus && matchesClient && matchesDate && matchesPriority && matchesUrgency;
+      })
+      .sort((a, b) => {
+        if (sortField === 'orderNumber') {
+          const aValue = safeField(a, ['orderNumber', 'id']);
+          const bValue = safeField(b, ['orderNumber', 'id']);
+          return sortOrder === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
+        }
+        
+        if (sortField === 'customer') {
+          const aValue = safeField(a, ['customerName', 'customer']);
+          const bValue = safeField(b, ['customerName', 'customer']);
+          return sortOrder === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
+        }
+        
+        if (sortField === 'deliveryDate') {
+          const aValue = a.deliveryDate ? new Date(a.deliveryDate).getTime() : 0;
+          const bValue = b.deliveryDate ? new Date(b.deliveryDate).getTime() : 0;
+          return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+        }
+        
+        return 0;
+      });
+  }, [orders, searchTerm, statusFilter, clientFilter, dateFilter, priorityFilter, deliveryUrgencyFilter, sortField, sortOrder]);
+  
+  // Paginação
+  const paginatedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return processedOrders.slice(startIndex, startIndex + itemsPerPage);
+  }, [processedOrders, currentPage, itemsPerPage]);
+  
+  const totalPages = useMemo(() => 
+    Math.ceil(processedOrders.length / itemsPerPage),
+    [processedOrders, itemsPerPage]
+  );
+
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
+
+  const handleCreateOrder = () => {
+    setSelectedOrderState(null);
+    setSelectedOrder(null);
+    setModalMode('create');
+    setIsModalOpen(true);
+  };
+
+  const handleEditOrder = (order: Order) => {
+    setSelectedOrderState(order);
+    setSelectedOrder(order);
+    setModalMode('edit');
+    setIsModalOpen(true);
+  };
+
+  const handleViewOrder = (order: Order) => {
+    setSelectedOrderState(order);
+    setSelectedOrder(order);
+    setModalMode('view');
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteOrder = async (order: Order) => {
+    if (!order.id) {
+      console.error('ID do pedido não encontrado');
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      `Tem certeza que deseja deletar o pedido #${order.orderNumber || order.id}?`
+    );
+    
+    if (confirmDelete) {
+      try {
+        await deleteOrder(order.id);
+      } catch (error) {
+        console.error('Erro ao deletar pedido:', error);
+      }
+    }
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedOrderState(null);
+    setSelectedOrder(null);
+    setActiveDropdown(null);
+  };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const toggleDropdown = (orderId: string) => {
+    setActiveDropdown(activeDropdown === orderId ? null : orderId);
+  };
+
+  const handleExportToExcel = () => {
+    try {
+      const exportData = processedOrders.map(order => ({
+        'Número do Pedido': safeField(order, ['orderNumber', 'id']),
+        'Cliente': safeField(order, ['customerName', 'customer']),
+        'Projeto': safeField(order, ['project', 'projectName']),
+        'OS Interna': safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']),
+        'Data de Início': formatDate(order.startDate),
+        'Data de Entrega': formatDate(order.deliveryDate),
+        'Status': getStatusText(order.status),
+        'Prioridade': order.priority || 'Média',
+        'Peso Total (kg)': calculateOrderWeight(order).toFixed(2),
+        'Urgência': getUrgencyText(getDeliveryUrgency(order)),
+        'Observações': order.observations || ''
+      }));
+
+      const headers = Object.keys(exportData[0] || {});
+      const csvContent = [
+        headers.join(','),
+        ...exportData.map(row => 
+          headers.map(header => `"${(row as any)[header] || ''}"`).join(',')
+        )
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `pedidos_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log(`Exported ${exportData.length} orders to CSV`);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      console.log('Erro ao exportar dados. Tente novamente.');
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handleRetryConnection = () => {
+    clearError();
+    retryConnection();
+  };
+
+  const handleNavigateToReport = (orderId: string) => {
+    try {
+      navigate(`/item-report/${orderId}`);
+      setActiveDropdown(null);
+    } catch (error) {
+      console.error('Error navigating to report:', error);
+      console.log('Erro ao abrir relatório. Tente novamente.');
+    }
+  };
+
+  const handleOpenPublicSchedule = (orderId: string) => {
+    try {
+      const url = `${window.location.origin}/cronograma/${orderId}`;
+      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!newWindow) {
+        navigator.clipboard.writeText(url).then(() => {
+          console.log('Pop-up bloqueado. Link copiado para área de transferência.');
+        });
+      }
+      setActiveDropdown(null);
+    } catch (error) {
+      console.error('Error opening public schedule:', error);
+      console.log('Erro ao abrir cronograma público.');
+    }
+  };
+
+  const handleCopyPublicLink = (orderId: string) => {
+    try {
+      const url = `${window.location.origin}/cronograma/${orderId}`;
+      navigator.clipboard.writeText(url).then(() => {
+        console.log('Link copiado para a área de transferência!');
+        setActiveDropdown(null);
+      });
+    } catch (error) {
+      console.error('Error copying link:', error);
+      console.log('Erro ao copiar link.');
+    }
+  };
+
+  // ============================================================================
+  // COMPONENTES INTERNOS
+  // ============================================================================
+
+  // Componente Dashboard
+  const OrdersDashboard = () => {
+    const totalOrders = processedOrders.length;
+    const inProgressOrders = processedOrders.filter(o => o.status === 'in-progress').length;
+    const completedOrders = processedOrders.filter(o => o.status === 'completed').length;
+    const onHoldOrders = processedOrders.filter(o => o.status === 'on-hold').length;
+    
+    const overdueOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'overdue').length;
+    const todayOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'today').length;
+    const tomorrowOrders = processedOrders.filter(order => getDe
