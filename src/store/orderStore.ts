@@ -13,7 +13,7 @@ import {
   getDoc,
   Timestamp
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, firestoreOperation, debugFirestoreData, withRetry } from '../lib/firebase';
 import { useAuthStore } from './authStore';
 
 // Definição interna de tipo Order para evitar problemas de referência circular
@@ -228,19 +228,26 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       }
 
       console.log(`Fetching orders for company: ${companyId}`);
-      const ordersRef = collection(db, 'companies', companyId, 'orders');
-      const q = query(ordersRef, orderBy('createdAt', 'desc'));
       
-      const querySnapshot = await getDocs(q);
-      const orders: Order[] = [];
-      
-      querySnapshot.forEach((doc) => {
-        try {
-          const processedOrder = processOrderData(doc);
-          orders.push(processedOrder);
-        } catch (error) {
-          console.error(`Error processing order ${doc.id}:`, error);
-        }
+      // Usar firestoreOperation.withRetry para retry automático
+      const orders = await firestoreOperation.withRetry(async () => {
+        const ordersRef = collection(db, 'companies', companyId, 'orders');
+        const q = query(ordersRef, orderBy('createdAt', 'desc'));
+        
+        const querySnapshot = await getDocs(q);
+        const orders: Order[] = [];
+        
+        querySnapshot.forEach((doc) => {
+          try {
+            debugFirestoreData('Fetching Order', doc.data());
+            const processedOrder = processOrderData(doc);
+            orders.push(processedOrder);
+          } catch (error) {
+            console.error(`Error processing order ${doc.id}:`, error);
+          }
+        });
+
+        return orders;
       });
 
       console.log(`Successfully fetched and processed ${orders.length} orders`);
@@ -252,7 +259,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         loading: false 
       });
       
-      // Retry logic for connection issues
+      // Retry logic para problemas de conexão
       if (error.code === 'unavailable' || error.message.includes('QUIC')) {
         get().retryConnection();
       }
@@ -267,14 +274,17 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
-      const orderRef = doc(db, 'companies', companyId, 'orders', id);
-      const orderSnap = await getDoc(orderRef);
-      
-      if (!orderSnap.exists()) {
-        return null;
-      }
+      return await firestoreOperation.withRetry(async () => {
+        const orderRef = doc(db, 'companies', companyId, 'orders', id);
+        const orderSnap = await getDoc(orderRef);
+        
+        if (!orderSnap.exists()) {
+          return null;
+        }
 
-      return processOrderData(orderSnap);
+        debugFirestoreData('Fetching Single Order', orderSnap.data());
+        return processOrderData(orderSnap);
+      });
     } catch (error: any) {
       console.error('Erro ao buscar pedido:', error);
       throw error;
@@ -291,50 +301,48 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         throw new Error('Usuário não autenticado ou empresa não selecionada');
       }
 
-      const ordersRef = collection(db, 'companies', companyId, 'orders');
-      
-      // Processar itens antes de salvar
-      const processedItems = orderData.items ? processOrderItems(orderData.items) : [];
-      
-      // Preparar dados para salvar
-      const dataToSave: any = {
-        ...orderData,
-        items: processedItems,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-        createdBy: user.uid,
-        company: companyId
-      };
+      return await firestoreOperation.withRetry(async () => {
+        const ordersRef = collection(db, 'companies', companyId, 'orders');
+        
+        // Processar itens antes de salvar
+        const processedItems = orderData.items ? processOrderItems(orderData.items) : [];
+        
+        // Preparar dados para salvar
+        const dataToSave: any = {
+          ...orderData,
+          items: processedItems,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          createdBy: user.uid,
+          company: companyId
+        };
 
-      // Converter undefined para null
-      Object.keys(dataToSave).forEach(key => {
-        if (dataToSave[key] === undefined) {
-          dataToSave[key] = null;
+        // Converter undefined para null
+        Object.keys(dataToSave).forEach(key => {
+          if (dataToSave[key] === undefined) {
+            dataToSave[key] = null;
+          }
+        });
+
+        // Converter datas para Timestamp do Firebase
+        if (orderData.startDate) {
+          dataToSave.startDate = Timestamp.fromDate(new Date(orderData.startDate));
         }
+        if (orderData.deliveryDate) {
+          dataToSave.deliveryDate = Timestamp.fromDate(new Date(orderData.deliveryDate));
+        }
+        if (orderData.completionDate) {
+          dataToSave.completionDate = Timestamp.fromDate(new Date(orderData.completionDate));
+        }
+
+        debugFirestoreData('Adding Order', dataToSave);
+        console.log("Processed items:", processedItems);
+        
+        const docRef = await addDoc(ordersRef, dataToSave);
+        console.log("Order added with ID:", docRef.id);
+        
+        return docRef.id;
       });
-
-      // Converter datas para Timestamp do Firebase
-      if (orderData.startDate) {
-        dataToSave.startDate = Timestamp.fromDate(new Date(orderData.startDate));
-      }
-      if (orderData.deliveryDate) {
-        dataToSave.deliveryDate = Timestamp.fromDate(new Date(orderData.deliveryDate));
-      }
-      if (orderData.completionDate) {
-        dataToSave.completionDate = Timestamp.fromDate(new Date(orderData.completionDate));
-      }
-
-      console.log("Adding order with data:", dataToSave);
-      console.log("Processed items:", processedItems);
-      
-      const docRef = await addDoc(ordersRef, dataToSave);
-      console.log("Order added with ID:", docRef.id);
-      
-      // Atualizar lista local
-      await get().fetchOrders();
-      
-      set({ loading: false });
-      return docRef.id;
     } catch (error: any) {
       console.error('Erro ao adicionar pedido:', error);
       set({ 
@@ -342,6 +350,15 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         loading: false 
       });
       throw error;
+    } finally {
+      // Atualizar lista local após sucesso
+      try {
+        await get().fetchOrders();
+        set({ loading: false });
+      } catch (fetchError) {
+        console.error('Error refreshing orders after add:', fetchError);
+        set({ loading: false });
+      }
     }
   },
 
@@ -359,52 +376,49 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         throw new Error('ID do pedido é obrigatório para atualização');
       }
       
-      const orderRef = doc(db, 'companies', companyId, 'orders', orderData.id);
-      
-      // Extrair o ID e preparar os dados para atualização
-      const { id, ...updates } = orderData;
-      
-      // Processar itens antes de salvar
-      const processedItems = updates.items ? processOrderItems(updates.items) : [];
-      
-      // Preparar dados para atualização
-      const updatesToSave: any = { 
-        ...updates,
-        items: processedItems,
-        updatedAt: Timestamp.now(), 
-        updatedBy: user.uid 
-      };
-      
-      // Converter undefined para null em todos os campos
-      Object.keys(updatesToSave).forEach(key => {
-        if (updatesToSave[key] === undefined) {
-          updatesToSave[key] = null;
+      await firestoreOperation.withRetry(async () => {
+        const orderRef = doc(db, 'companies', companyId, 'orders', orderData.id);
+        
+        // Extrair o ID e preparar os dados para atualização
+        const { id, ...updates } = orderData;
+        
+        // Processar itens antes de salvar
+        const processedItems = updates.items ? processOrderItems(updates.items) : [];
+        
+        // Preparar dados para atualização
+        const updatesToSave: any = { 
+          ...updates,
+          items: processedItems,
+          updatedAt: Timestamp.now(), 
+          updatedBy: user.uid 
+        };
+        
+        // Converter undefined para null em todos os campos
+        Object.keys(updatesToSave).forEach(key => {
+          if (updatesToSave[key] === undefined) {
+            updatesToSave[key] = null;
+          }
+        });
+        
+        // Converter datas se existirem
+        if (updates.startDate) {
+          updatesToSave.startDate = Timestamp.fromDate(new Date(updates.startDate));
         }
-      });
-      
-      // Converter datas se existirem
-      if (updates.startDate) {
-        updatesToSave.startDate = Timestamp.fromDate(new Date(updates.startDate));
-      }
-      if (updates.deliveryDate) {
-        updatesToSave.deliveryDate = Timestamp.fromDate(new Date(updates.deliveryDate));
-      }
-      if (updates.completionDate) {
-        updatesToSave.completionDate = Timestamp.fromDate(new Date(updates.completionDate));
-      } else {
-        updatesToSave.completionDate = null;
-      }
+        if (updates.deliveryDate) {
+          updatesToSave.deliveryDate = Timestamp.fromDate(new Date(updates.deliveryDate));
+        }
+        if (updates.completionDate) {
+          updatesToSave.completionDate = Timestamp.fromDate(new Date(updates.completionDate));
+        } else {
+          updatesToSave.completionDate = null;
+        }
 
-      console.log("Updating order with data:", updatesToSave);
-      console.log("Processed items being saved:", processedItems);
-      
-      await updateDoc(orderRef, updatesToSave);
-      console.log("Order updated successfully");
-      
-      // Atualizar lista local
-      await get().fetchOrders();
-      
-      set({ loading: false });
+        debugFirestoreData('Updating Order', updatesToSave);
+        console.log("Processed items being saved:", processedItems);
+        
+        await updateDoc(orderRef, updatesToSave);
+        console.log("Order updated successfully");
+      });
     } catch (error: any) {
       console.error('Erro ao atualizar pedido:', error);
       set({ 
@@ -412,6 +426,15 @@ export const useOrderStore = create<OrderState>((set, get) => ({
         loading: false 
       });
       throw error;
+    } finally {
+      // Atualizar lista local após sucesso
+      try {
+        await get().fetchOrders();
+        set({ loading: false });
+      } catch (fetchError) {
+        console.error('Error refreshing orders after update:', fetchError);
+        set({ loading: false });
+      }
     }
   },
 
