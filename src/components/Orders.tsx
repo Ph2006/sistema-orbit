@@ -1215,7 +1215,7 @@ export default function Orders() {
           onRetry={handleRetryConnection}
           onClear={clearError}
         />
-      )} text-sm underline"
+      }`}
               >
                 Tentar novamente
               </button>
