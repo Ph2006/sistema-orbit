@@ -1,11 +1,103 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Save, Plus, Trash2, Calendar, User, FileText, Package, Edit3, BarChart3, ExternalLink, Folder, Upload, Download, Eye, Search, Filter, SortAsc, SortDesc, Copy, RefreshCw, AlertCircle, Check, Printer } from 'lucide-react';
+import { 
+  Search, 
+  Filter, 
+  Plus, 
+  Edit, 
+  Trash2, 
+  Calendar, 
+  User, 
+  Package, 
+  MoreHorizontal,
+  FileText,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  Download,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  BarChart2,
+  Printer,
+  CalendarDays,
+  AlertTriangle,
+  Target,
+  Activity,
+  Timer,
+  Eye,
+  RefreshCw,
+  Zap,
+  Bell,
+  MapPin,
+  ListFilter,
+  Grid3X3,
+  Layers
+} from 'lucide-react';
 import { useOrderStore } from '../store/orderStore';
-import { useCustomerStore } from '../store/customerStore';
-import { format } from 'date-fns';
+import { useAuthStore } from '../store/authStore';
+import { format, differenceInDays, isToday, isTomorrow, isYesterday, isThisWeek, isThisMonth, parseISO, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import OrderModal from './OrderModal';
+import { useNavigate } from 'react-router-dom';
 
-// Definição de tipo interna para OrderItem
+// Constantes
+const ITEMS_PER_PAGE_OPTIONS = [10, 15, 25, 50];
+
+const URGENCY_COLORS = {
+  'overdue': 'bg-red-100 text-red-800 border-red-200',
+  'today': 'bg-orange-100 text-orange-800 border-orange-200',
+  'tomorrow': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'critical': 'bg-pink-100 text-pink-800 border-pink-200',
+  'urgent': 'bg-purple-100 text-purple-800 border-purple-200',
+  'soon': 'bg-blue-100 text-blue-800 border-blue-200',
+  'normal': 'bg-green-100 text-green-800 border-green-200',
+  'completed': 'bg-gray-100 text-gray-800 border-gray-200',
+  'unknown': 'bg-gray-100 text-gray-800 border-gray-200'
+};
+
+const URGENCY_TEXTS = {
+  'overdue': 'Atrasado',
+  'today': 'Entrega Hoje',
+  'tomorrow': 'Entrega Amanhã',
+  'critical': '≤ 3 dias',
+  'urgent': '≤ 7 dias',
+  'soon': '≤ 14 dias',
+  'normal': '> 14 dias',
+  'completed': 'Concluído',
+  'unknown': 'Data inválida'
+};
+
+const STATUS_COLORS = {
+  'completed': 'bg-green-100 text-green-800 border-green-200',
+  'in-progress': 'bg-blue-100 text-blue-800 border-blue-200',
+  'on-hold': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'cancelled': 'bg-red-100 text-red-800 border-red-200',
+  'shipped': 'bg-purple-100 text-purple-800 border-purple-200',
+  'delayed': 'bg-orange-100 text-orange-800 border-orange-200'
+};
+
+const STATUS_TEXTS = {
+  'in-progress': 'Em Processo',
+  'completed': 'Concluído',
+  'on-hold': 'Em Pausa',
+  'cancelled': 'Cancelado',
+  'shipped': 'Expedido',
+  'delayed': 'Atrasado'
+};
+
+const PRIORITY_COLORS = {
+  'urgent': 'bg-red-100 text-red-800 border-red-200',
+  'high': 'bg-orange-100 text-orange-800 border-orange-200',
+  'medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'low': 'bg-green-100 text-green-800 border-green-200'
+};
+
+// Tipos
+type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | 'delayed' | 'shipped' | string;
+type SortField = 'orderNumber' | 'customer' | 'internalOS' | 'startDate' | 'deliveryDate' | 'status' | 'priority' | 'value';
+type SortOrder = 'asc' | 'desc';
+type ViewMode = 'table' | 'calendar';
+
 interface OrderItem {
   id: string;
   code: string;
@@ -15,7 +107,6 @@ interface OrderItem {
   weight: number;
   progress: number;
   overallProgress?: number;
-  stagePlanning?: Record<string, any>;
   itemNumber?: number;
   notes?: string;
   priority?: 'low' | 'medium' | 'high' | 'urgent';
@@ -25,611 +116,1691 @@ interface OrderItem {
   responsible?: string;
 }
 
-// Definição de tipo interna para OrderStatus
-type OrderStatus = 'in-progress' | 'completed' | 'on-hold' | 'cancelled' | string;
-
-// Definição de tipo interna para Order
 interface Order {
-  id?: string;
+  id: string;
   customerId?: string;
   customerName?: string;
+  customer?: string;
   project?: string;
+  projectName?: string;
   orderNumber?: string;
   internalOS?: string;
+  internalOrderNumber?: string;
+  serviceOrder?: string;
   startDate?: string;
   deliveryDate?: string;
   completionDate?: string;
   status?: OrderStatus;
   observations?: string;
   items?: OrderItem[];
-  googleDriveLink?: string;
-  value?: number;
+  createdAt?: string;
+  updatedAt?: string;
   priority?: 'low' | 'medium' | 'high' | 'urgent';
+  value?: number;
+  googleDriveLink?: string;
   [key: string]: any;
 }
 
-interface OrderModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  order?: Order | null;
-  mode: 'create' | 'edit' | 'view';
-}
-
-// Ícone Camera customizado
-const Camera = (props: any) => {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-      <circle cx="12" cy="13" r="3" />
-    </svg>
-  );
-};
-
-// Componente ItemModal
-interface ItemModalProps {
-  item?: OrderItem | null;
-  onSave: (item: OrderItem) => void;
-  onClose: () => void;
-}
-
-const ItemModal: React.FC<ItemModalProps> = ({ item, onSave, onClose }) => {
-  const [formData, setFormData] = useState<OrderItem>({
-    id: item?.id || Date.now().toString(),
-    code: item?.code || '',
-    description: item?.description || '',
-    quantity: item?.quantity || 1,
-    unit: item?.unit || 'un',
-    weight: item?.weight || 0,
-    progress: item?.progress || 0,
-    overallProgress: item?.overallProgress || 0,
-    itemNumber: item?.itemNumber || 1,
-    notes: item?.notes || '',
-    priority: item?.priority || 'medium',
-    estimatedDays: item?.estimatedDays || 1,
-    startDate: item?.startDate || '',
-    endDate: item?.endDate || '',
-    responsible: item?.responsible || ''
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave(formData);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 bg-blue-600 text-white">
-          <h3 className="text-lg font-semibold">
-            {item ? 'Editar Item' : 'Novo Item'}
-          </h3>
-          <button onClick={onClose} className="text-white hover:text-gray-300">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[calc(90vh-80px)]">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Código *
-              </label>
-              <input
-                type="text"
-                value={formData.code}
-                onChange={(e) => setFormData(prev => ({...prev, code: e.target.value}))}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Ex: 70133F173001-02"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Quantidade *
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={formData.quantity}
-                  onChange={(e) => setFormData(prev => ({...prev, quantity: parseFloat(e.target.value) || 1}))}
-                  className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  min="0.01"
-                  step="0.01"
-                  required
-                />
-                <select
-                  value={formData.unit}
-                  onChange={(e) => setFormData(prev => ({...prev, unit: e.target.value}))}
-                  className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="un">un</option>
-                  <option value="kg">kg</option>
-                  <option value="m">m</option>
-                  <option value="m2">m²</option>
-                  <option value="m3">m³</option>
-                  <option value="L">L</option>
-                  <option value="pc">pç</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Descrição *
-            </label>
-            <input
-              type="text"
-              value={formData.description}
-              onChange={(e) => setFormData(prev => ({...prev, description: e.target.value}))}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Ex: Longarina de alimentação"
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Peso (kg) *
-              </label>
-              <input
-                type="number"
-                value={formData.weight}
-                onChange={(e) => setFormData(prev => ({...prev, weight: parseFloat(e.target.value) || 0}))}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Prioridade
-              </label>
-              <select
-                value={formData.priority}
-                onChange={(e) => setFormData(prev => ({...prev, priority: e.target.value as any}))}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="low">Baixa</option>
-                <option value="medium">Média</option>
-                <option value="high">Alta</option>
-                <option value="urgent">Urgente</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Dias Estimados
-              </label>
-              <input
-                type="number"
-                value={formData.estimatedDays}
-                onChange={(e) => setFormData(prev => ({...prev, estimatedDays: parseFloat(e.target.value) || 1}))}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                step="0.5"
-                min="0.1"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Responsável
-              </label>
-              <input
-                type="text"
-                value={formData.responsible}
-                onChange={(e) => setFormData(prev => ({...prev, responsible: e.target.value}))}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Nome do responsável"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Observações
-            </label>
-            <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData(prev => ({...prev, notes: e.target.value}))}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-              rows={3}
-              placeholder="Observações sobre o item..."
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              {item ? 'Atualizar' : 'Adicionar'} Item
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-// Componente ItemProgressModal
-const ItemProgressModal: React.FC<{
-  item: OrderItem;
-  allItems: OrderItem[];
-  onSave: (item: OrderItem) => void;
-  onClose: () => void;
-}> = ({ item, allItems, onSave, onClose }) => {
-  const [progress, setProgress] = useState(item.overallProgress || 0);
-
-  const handleSave = () => {
-    const updatedItem = {
-      ...item,
-      overallProgress: progress,
-      progress: progress // Para compatibilidade
-    };
-    onSave(updatedItem);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-md">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold">Atualizar Progresso</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          <div>
-            <h4 className="font-medium text-gray-900">Item: {item.code}</h4>
-            <p className="text-sm text-gray-600">{item.description}</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Progresso Geral: {progress}%
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={progress}
-              onChange={(e) => setProgress(parseInt(e.target.value))}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>0%</span>
-              <span>50%</span>
-              <span>100%</span>
-            </div>
-          </div>
-
-          <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-            <div
-              className={`h-full transition-all ${
-                progress >= 100 ? 'bg-green-500' :
-                progress >= 75 ? 'bg-blue-500' :
-                progress >= 50 ? 'bg-yellow-500' :
-                progress >= 25 ? 'bg-orange-500' : 'bg-red-500'
-              }`}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-
-          <div className="bg-blue-50 p-3 rounded-lg">
-            <p className="text-sm text-blue-700">
-              💡 <strong>Dica:</strong> Use o sistema completo de gestão de progresso 
-              para controlar etapas detalhadas de fabricação. Este é apenas um controle básico.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Atualizar Progresso
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Componente RomaneioModal
-const RomaneioModal: React.FC<{
-  items: OrderItem[];
-  customerName: string;
-  project: string;
-  orderNumber: string;
-  onClose: () => void;
-}> = ({ items, customerName, project, orderNumber, onClose }) => {
-  
-  const [romaneioData, setRomaneioData] = useState({
-    romaneioNumber: generateRomaneioNumber(),
-    date: format(new Date(), 'yyyy-MM-dd'),
-    deliveryLocation: '',
-    transportCompany: '',
-    contactName: '',
-    contactPhone: '',
-    notes: ''
-  });
-
-  // Função para gerar número de romaneio (ex: ROM-20250608-001)
-  function generateRomaneioNumber() {
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const random = Math.floor(Math.random() * 999).toString().padStart(3, '0');
-    return `ROM-${year}${month}${day}-${random}`;
+// Utilitários
+const calculateOrderWeight = (order: Order): number => {
+  if (!order.items || !Array.isArray(order.items)) {
+    console.debug(`Order ${order.id} has no valid items array`);
+    return 0;
   }
+  
+  return order.items.reduce((total, item) => {
+    // Validação mais robusta
+    const weight = typeof item.weight === 'number' && !isNaN(item.weight) && isFinite(item.weight) 
+      ? item.weight 
+      : 0;
+    const quantity = typeof item.quantity === 'number' && !isNaN(item.quantity) && isFinite(item.quantity) 
+      ? item.quantity 
+      : 1;
+    
+    const itemTotal = weight * quantity;
+    
+    // Log apenas se há inconsistências
+    if (item.weight && (weight === 0 || quantity === 1)) {
+      console.debug(`Weight issue for item ${item.id}:`, {
+        originalWeight: item.weight,
+        originalQuantity: item.quantity,
+        processedWeight: weight,
+        processedQuantity: quantity
+      });
+    }
+    
+    return total + itemTotal;
+  }, 0);
+};
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setRomaneioData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+const calculateProductionStats = (orders: Order[]) => {
+  let totalProductionDays = 0;
+  let completedOrdersWithDates = 0;
+  
+  orders.forEach(order => {
+    if (order.status === 'completed' && order.startDate && order.completionDate) {
+      try {
+        const startDate = parseISO(order.startDate);
+        const completionDate = parseISO(order.completionDate);
+        const days = Math.ceil((completionDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (days > 0) { // Validar que os dias são positivos
+          totalProductionDays += days;
+          completedOrdersWithDates++;
+        }
+      } catch (error) {
+        console.warn(`Invalid dates for order ${order.id}:`, error);
+      }
+    }
+  });
+  
+  return {
+    averageProductionDays: completedOrdersWithDates > 0 
+      ? Math.round(totalProductionDays / completedOrdersWithDates) 
+      : 0,
+    completedOrdersCount: completedOrdersWithDates
+  };
+};
+
+const isValidDate = (dateString: string | undefined | null): boolean => {
+  if (!dateString) return false;
+  try {
+    const date = parseISO(dateString);
+    return date instanceof Date && !isNaN(date.getTime());
+  } catch {
+    return false;
+  }
+};
+
+const getDeliveryUrgency = (order: Order): string => {
+  if (!order.deliveryDate || order.status === 'completed' || order.status === 'cancelled') return 'completed';
+  
+  try {
+    const deliveryDate = parseISO(order.deliveryDate);
+    const today = startOfDay(new Date());
+    const daysUntilDelivery = differenceInDays(deliveryDate, today);
+    
+    if (daysUntilDelivery < 0) return 'overdue';
+    if (daysUntilDelivery === 0) return 'today';
+    if (daysUntilDelivery === 1) return 'tomorrow';
+    if (daysUntilDelivery <= 3) return 'critical';
+    if (daysUntilDelivery <= 7) return 'urgent';
+    if (daysUntilDelivery <= 14) return 'soon';
+    return 'normal';
+  } catch {
+    return 'unknown';
+  }
+};
+
+const getUrgencyColor = (urgency: string): string => {
+  return URGENCY_COLORS[urgency] || URGENCY_COLORS['unknown'];
+};
+
+const getUrgencyText = (urgency: string): string => {
+  return URGENCY_TEXTS[urgency] || URGENCY_TEXTS['unknown'];
+};
+
+const getStatusText = (status: string | undefined): string => {
+  if (!status) return 'Desconhecido';
+  return STATUS_TEXTS[status.toLowerCase()] || status;
+};
+
+const getStatusColor = (status: string | undefined): string => {
+  if (!status) return 'bg-gray-100 text-gray-800';
+  
+  const normalizedStatus = status.toLowerCase();
+  return STATUS_COLORS[normalizedStatus] || 'bg-gray-100 text-gray-800 border-gray-200';
+};
+
+const getPriorityColor = (priority: string | undefined): string => {
+  return PRIORITY_COLORS[priority || 'medium'] || PRIORITY_COLORS.medium;
+};
+
+const safeField = (order: Order, fields: string[]): string => {
+  for (const field of fields) {
+    if (order[field] && typeof order[field] === 'string') {
+      return order[field] as string;
+    }
+  }
+  return '';
+};
+
+const formatDate = (dateString: string | undefined | null): string => {
+  if (!dateString) return '-';
+  try {
+    return format(parseISO(dateString), 'dd/MM/yyyy', { locale: ptBR });
+  } catch (error) {
+    console.error("Error formatting date:", dateString, error);
+    return '-';
+  }
+};
+
+const formatRelativeDate = (dateString: string | undefined | null): string => {
+  if (!dateString || !isValidDate(dateString)) return '-';
+  try {
+    const date = parseISO(dateString);
+    if (isToday(date)) return 'Hoje';
+    if (isTomorrow(date)) return 'Amanhã';
+    if (isYesterday(date)) return 'Ontem';
+    return format(date, 'dd/MM', { locale: ptBR });
+  } catch (error) {
+    return formatDate(dateString);
+  }
+};
+
+const isDateInFilter = (dateStr: string | undefined, filter: string): boolean => {
+  if (!dateStr || filter === 'all') return true;
+  
+  try {
+    const date = parseISO(dateStr);
+    const today = new Date();
+    
+    if (filter === 'today') return isToday(date);
+    if (filter === 'tomorrow') return isTomorrow(date);
+    if (filter === 'week') return isThisWeek(date, { weekStartsOn: 0 });
+    if (filter === 'month') return isThisMonth(date);
+    if (filter === 'overdue') return date < startOfDay(today);
+    
+    return true;
+  } catch (e) {
+    console.error("Error checking date filter:", e);
+    return true;
+  }
+};
+
+export default function Orders() {
+  const navigate = useNavigate();
+  
+  const { 
+    orders, 
+    loading, 
+    error, 
+    fetchOrders, 
+    deleteOrder, 
+    setSelectedOrder,
+    subscribeToOrders,
+    clearError,
+    retryConnection
+  } = useOrderStore();
+  
+  const { user } = useAuthStore();
+  
+  // Estados para pesquisa e filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
+  const [clientFilter, setClientFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('all');
+  const [priorityFilter, setPriorityFilter] = useState<string>('all');
+  const [deliveryUrgencyFilter, setDeliveryUrgencyFilter] = useState<string>('all');
+  
+  // Estados para ordenação
+  const [sortField, setSortField] = useState<SortField>('deliveryDate');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  
+  // Estados para paginação
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(15);
+  
+  // Estados para modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'create' | 'edit' | 'view'>('create');
+  const [selectedOrder, setSelectedOrderState] = useState<Order | null>(null);
+  
+  // Estados para interface
+  const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [showDashboard, setShowDashboard] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [compactView, setCompactView] = useState(false);
+
+  // Carregar pedidos ao montar o componente
+  useEffect(() => {
+    if (user) {
+      console.log("Orders component: Loading orders");
+      fetchOrders();
+      
+      // Subscrever a mudanças em tempo real
+      const unsubscribe = subscribeToOrders();
+      return () => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error("Error unsubscribing from orders:", error);
+        }
+      };
+    }
+  }, [user]);
+
+  // Limpar erro quando componente desmonta
+  useEffect(() => {
+    return () => clearError();
+  }, [clearError]);
+
+  // Tratamento de clique fora do dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (activeDropdown && !(event.target as Element).closest('[data-dropdown]')) {
+        setActiveDropdown(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [activeDropdown]);
+
+  // Opções para filtros
+  const clientOptions = useMemo(() => {
+    const clients = new Set<string>();
+    orders.forEach(order => {
+      if (order.customerName) clients.add(order.customerName);
+      if (order.customer) clients.add(order.customer);
+    });
+    return ['all', ...Array.from(clients).sort()];
+  }, [orders]);
+
+  const dateOptions = useMemo(() => {
+    return [
+      { value: 'all', label: 'Todas as datas', icon: Calendar },
+      { value: 'today', label: 'Hoje', icon: Clock },
+      { value: 'tomorrow', label: 'Amanhã', icon: Timer },
+      { value: 'week', label: 'Esta semana', icon: CalendarDays },
+      { value: 'month', label: 'Este mês', icon: Calendar },
+      { value: 'overdue', label: 'Atrasados', icon: AlertTriangle }
+    ];
+  }, []);
+
+  const urgencyOptions = useMemo(() => [
+    { value: 'all', label: 'Todas as urgências', color: 'bg-gray-100 text-gray-800' },
+    { value: 'overdue', label: 'Atrasados', color: 'bg-red-100 text-red-800' },
+    { value: 'today', label: 'Entrega Hoje', color: 'bg-orange-100 text-orange-800' },
+    { value: 'tomorrow', label: 'Entrega Amanhã', color: 'bg-yellow-100 text-yellow-800' },
+    { value: 'critical', label: 'Crítico (≤ 3 dias)', color: 'bg-pink-100 text-pink-800' },
+    { value: 'urgent', label: 'Urgente (≤ 7 dias)', color: 'bg-purple-100 text-purple-800' },
+    { value: 'soon', label: 'Em breve (≤ 14 dias)', color: 'bg-blue-100 text-blue-800' },
+    { value: 'normal', label: 'Normal (> 14 dias)', color: 'bg-green-100 text-green-800' }
+  ], []);
+
+  // Filtrar e ordenar pedidos
+  const processedOrders = useMemo(() => {
+    return orders
+      .filter(order => {
+        if (!order) return false;
+        
+        // Busca textual
+        const orderNumber = safeField(order, ['orderNumber', 'id']);
+        const customer = safeField(order, ['customerName', 'customer']);
+        const project = safeField(order, ['project', 'projectName']);
+        const internalOS = safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']);
+        
+        const matchesSearch = searchTerm === '' || 
+          orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          project.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          internalOS.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        // Filtro de status
+        const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
+        
+        // Filtro de cliente
+        const matchesClient = clientFilter === 'all' || customer === clientFilter;
+        
+        // Filtro de data
+        const matchesDate = isDateInFilter(order.startDate, dateFilter);
+        
+        // Filtro de prioridade
+        const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter;
+        
+        // Filtro de urgência de entrega
+        const urgency = getDeliveryUrgency(order);
+        const matchesUrgency = deliveryUrgencyFilter === 'all' || urgency === deliveryUrgencyFilter;
+        
+        return matchesSearch && matchesStatus && matchesClient && matchesDate && matchesPriority && matchesUrgency;
+      })
+      .sort((a, b) => {
+        if (sortField === 'orderNumber') {
+          const aValue = safeField(a, ['orderNumber', 'id']);
+          const bValue = safeField(b, ['orderNumber', 'id']);
+          return sortOrder === 'asc' 
+            ? aValue.localeCompare(bValue) 
+            : bValue.localeCompare(aValue);
+        }
+        
+        if (sortField === 'customer') {
+          const aValue = safeField(a, ['customerName', 'customer']);
+          const bValue = safeField(b, ['customerName', 'customer']);
+          return sortOrder === 'asc' 
+            ? aValue.localeCompare(bValue) 
+            : bValue.localeCompare(aValue);
+        }
+        
+        if (sortField === 'deliveryDate') {
+          const aValue = a.deliveryDate ? new Date(a.deliveryDate).getTime() : 0;
+          const bValue = b.deliveryDate ? new Date(b.deliveryDate).getTime() : 0;
+          return sortOrder === 'asc' 
+            ? aValue - bValue 
+            : bValue - aValue;
+        }
+        
+        // Outros campos de ordenação...
+        return 0;
+      });
+  }, [orders, searchTerm, statusFilter, clientFilter, dateFilter, priorityFilter, deliveryUrgencyFilter, sortField, sortOrder]);
+  
+  // Paginação
+  const paginatedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return processedOrders.slice(startIndex, startIndex + itemsPerPage);
+  }, [processedOrders, currentPage, itemsPerPage]);
+  
+  const totalPages = useMemo(() => 
+    Math.ceil(processedOrders.length / itemsPerPage),
+    [processedOrders, itemsPerPage]
+  );
+
+  // Handlers
+  const handleCreateOrder = () => {
+    setSelectedOrderState(null);
+    setSelectedOrder(null);
+    setModalMode('create');
+    setIsModalOpen(true);
+  };
+
+  const handleEditOrder = (order: Order) => {
+    setSelectedOrderState(order);
+    setSelectedOrder(order);
+    setModalMode('edit');
+    setIsModalOpen(true);
+  };
+
+  const handleViewOrder = (order: Order) => {
+    setSelectedOrderState(order);
+    setSelectedOrder(order);
+    setModalMode('view');
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteOrder = async (order: Order) => {
+    if (!order.id) {
+      console.error('ID do pedido não encontrado');
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      `Tem certeza que deseja deletar o pedido #${order.orderNumber || order.id}?`
+    );
+    
+    if (confirmDelete) {
+      try {
+        await deleteOrder(order.id);
+      } catch (error) {
+        console.error('Erro ao deletar pedido:', error);
+      }
+    }
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setSelectedOrderState(null);
+    setSelectedOrder(null);
+    setActiveDropdown(null);
+  };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const toggleDropdown = (orderId: string) => {
+    setActiveDropdown(activeDropdown === orderId ? null : orderId);
+  };
+
+  const handleExportToExcel = () => {
+    try {
+      // Preparar dados para exportação
+      const exportData = processedOrders.map(order => ({
+        'Número do Pedido': safeField(order, ['orderNumber', 'id']),
+        'Cliente': safeField(order, ['customerName', 'customer']),
+        'Projeto': safeField(order, ['project', 'projectName']),
+        'OS Interna': safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']),
+        'Data de Início': formatDate(order.startDate),
+        'Data de Entrega': formatDate(order.deliveryDate),
+        'Status': getStatusText(order.status),
+        'Prioridade': order.priority || 'Média',
+        'Peso Total (kg)': calculateOrderWeight(order).toFixed(2),
+        'Urgência': getUrgencyText(getDeliveryUrgency(order)),
+        'Observações': order.observations || ''
+      }));
+
+      // Converter para CSV
+      const headers = Object.keys(exportData[0] || {});
+      const csvContent = [
+        headers.join(','),
+        ...exportData.map(row => 
+          headers.map(header => `"${(row as any)[header] || ''}"`).join(',')
+        )
+      ].join('\n');
+
+      // Download do arquivo
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `pedidos_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log(`Exported ${exportData.length} orders to CSV`);
+    } catch (error) {
+      console.error('Error exporting to Excel:', error);
+      console.log('Erro ao exportar dados. Tente novamente.');
+    }
   };
 
   const handlePrint = () => {
     window.print();
   };
 
-  // Calcular peso total
-  const totalWeight = items.reduce((sum, item) => {
-    return sum + (item.weight * item.quantity);
-  }, 0);
+  const handleRetryConnection = () => {
+    clearError();
+    retryConnection();
+  };
 
-  // Calcular quantidade total
-  const totalQuantity = items.reduce((sum, item) => {
-    return sum + item.quantity;
-  }, 0);
+  // Funções de navegação melhoradas
+  const handleNavigateToReport = (orderId: string) => {
+    try {
+      navigate(`/item-report/${orderId}`);
+      setActiveDropdown(null);
+    } catch (error) {
+      console.error('Error navigating to report:', error);
+      console.log('Erro ao abrir relatório. Tente novamente.');
+    }
+  };
+
+  const handleOpenPublicSchedule = (orderId: string) => {
+    try {
+      const url = `${window.location.origin}/cronograma/${orderId}`;
+      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!newWindow) {
+        // Fallback se popup foi bloqueado
+        navigator.clipboard.writeText(url).then(() => {
+          console.log('Pop-up bloqueado. Link copiado para área de transferência.');
+        });
+      }
+      setActiveDropdown(null);
+    } catch (error) {
+      console.error('Error opening public schedule:', error);
+      console.log('Erro ao abrir cronograma público.');
+    }
+  };
+
+  const handleCopyPublicLink = (orderId: string) => {
+    try {
+      const url = `${window.location.origin}/cronograma/${orderId}`;
+      navigator.clipboard.writeText(url).then(() => {
+        console.log('Link copiado para a área de transferência!');
+        setActiveDropdown(null);
+      });
+    } catch (error) {
+      console.error('Error copying link:', error);
+      console.log('Erro ao copiar link.');
+    }
+  };
+
+  // Componente Dashboard
+  const OrdersDashboard = () => {
+    const totalOrders = processedOrders.length;
+    const inProgressOrders = processedOrders.filter(o => o.status === 'in-progress').length;
+    const completedOrders = processedOrders.filter(o => o.status === 'completed').length;
+    const onHoldOrders = processedOrders.filter(o => o.status === 'on-hold').length;
+    
+    const overdueOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'overdue').length;
+    const todayOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'today').length;
+    const tomorrowOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'tomorrow').length;
+    const criticalOrders = processedOrders.filter(order => getDeliveryUrgency(order) === 'critical').length;
+    
+    const totalWeight = processedOrders.reduce((sum, order) => sum + calculateOrderWeight(order), 0);
+    const stats = useMemo(() => calculateProductionStats(processedOrders), [processedOrders]);
+    
+    return (
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 animate-fadeIn">
+        <div className="p-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold flex items-center">
+            <BarChart2 className="w-5 h-5 mr-2 text-blue-600" />
+            Dashboard de Pedidos
+          </h3>
+        </div>
+        
+        <div className="p-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-blue-600 font-medium">Em Processo</p>
+                  <h4 className="text-2xl font-bold text-blue-700">{inProgressOrders}</h4>
+                  <p className="text-xs text-blue-600">
+                    {Math.round((inProgressOrders / (totalOrders || 1)) * 100)}% do total
+                  </p>
+                </div>
+                <div className="bg-blue-200 p-3 rounded-full">
+                  <Activity className="w-6 h-6 text-blue-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg border border-green-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-green-600 font-medium">Concluídos</p>
+                  <h4 className="text-2xl font-bold text-green-700">{completedOrders}</h4>
+                  <p className="text-xs text-green-600">
+                    {Math.round((completedOrders / (totalOrders || 1)) * 100)}% do total
+                  </p>
+                </div>
+                <div className="bg-green-200 p-3 rounded-full">
+                  <CheckCircle className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-gradient-to-r from-red-50 to-red-100 p-4 rounded-lg border border-red-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-red-600 font-medium">Atrasados</p>
+                  <h4 className="text-2xl font-bold text-red-700">{overdueOrders}</h4>
+                  <p className="text-xs text-red-600">
+                    {Math.round((overdueOrders / (totalOrders || 1)) * 100)}% do total
+                  </p>
+                </div>
+                <div className="bg-red-200 p-3 rounded-full">
+                  <AlertTriangle className="w-6 h-6 text-red-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 rounded-lg border border-purple-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-purple-600 font-medium">Peso Total</p>
+                  <h4 className="text-2xl font-bold text-purple-700">
+                    {totalWeight.toLocaleString('pt-BR', {maximumFractionDigits: 0})}
+                  </h4>
+                  <p className="text-xs text-purple-600">kg em produção</p>
+                </div>
+                <div className="bg-purple-200 p-3 rounded-full">
+                  <Package className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-gradient-to-r from-indigo-50 to-indigo-100 p-4 rounded-lg border border-indigo-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-indigo-600 font-medium">Tempo Médio</p>
+                  <h4 className="text-2xl font-bold text-indigo-700">
+                    {stats.averageProductionDays}d
+                  </h4>
+                  <p className="text-xs text-indigo-600">
+                    {stats.completedOrdersCount > 0 
+                      ? `baseado em ${stats.completedOrdersCount} pedidos`
+                      : 'aguardando dados'
+                    }
+                  </p>
+                </div>
+                <div className="bg-indigo-200 p-3 rounded-full">
+                  <Timer className="w-6 h-6 text-indigo-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-orange-600 font-medium">Entrega Hoje</p>
+                  <h4 className="text-xl font-bold text-orange-700">{todayOrders}</h4>
+                </div>
+                <Bell className="w-5 h-5 text-orange-600" />
+              </div>
+            </div>
+            
+            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-yellow-600 font-medium">Entrega Amanhã</p>
+                  <h4 className="text-xl font-bold text-yellow-700">{tomorrowOrders}</h4>
+                </div>
+                <Clock className="w-5 h-5 text-yellow-600" />
+              </div>
+            </div>
+            
+            <div className="bg-pink-50 p-4 rounded-lg border border-pink-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-pink-600 font-medium">Críticos (≤3 dias)</p>
+                  <h4 className="text-xl font-bold text-pink-700">{criticalOrders}</h4>
+                </div>
+                <Zap className="w-5 h-5 text-pink-600" />
+              </div>
+            </div>
+            
+            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 font-medium">Em Pausa</p>
+                  <h4 className="text-xl font-bold text-gray-700">{onHoldOrders}</h4>
+                </div>
+                <Timer className="w-5 h-5 text-gray-600" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Componente Calendar View
+  const CalendarView = () => {
+    const currentDate = new Date();
+    const startOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const endOfCurrentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+    
+    const days = [];
+    for (let d = new Date(startOfCurrentMonth); d <= endOfCurrentMonth; d.setDate(d.getDate() + 1)) {
+      days.push(new Date(d));
+    }
+    
+    const getOrdersForDate = (date: Date) => {
+      return processedOrders.filter(order => {
+        if (!order.deliveryDate) return false;
+        try {
+          const orderDate = parseISO(order.deliveryDate);
+          return format(orderDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd');
+        } catch {
+          return false;
+        }
+      });
+    };
+    
+    return (
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="p-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold flex items-center">
+            <CalendarDays className="w-5 h-5 mr-2 text-blue-600" />
+            Calendário de Entregas - {format(currentDate, 'MMMM yyyy', { locale: ptBR })}
+          </h3>
+        </div>
+        
+        <div className="p-4">
+          <div className="grid grid-cols-7 gap-2 mb-4">
+            {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
+              <div key={day} className="text-center text-sm font-medium text-gray-500 py-2">
+                {day}
+              </div>
+            ))}
+          </div>
+          
+          <div className="grid grid-cols-7 gap-2">
+            {days.map(day => {
+              const ordersForDay = getOrdersForDate(day);
+              const isToday = format(day, 'yyyy-MM-dd') === format(currentDate, 'yyyy-MM-dd');
+              
+              return (
+                <div
+                  key={day.toISOString()}
+                  className={`min-h-[80px] p-2 border rounded-lg ${
+                    isToday ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <div className={`text-sm font-medium mb-1 ${
+                    isToday ? 'text-blue-700' : 'text-gray-700'
+                  }`}>
+                    {format(day, 'd')}
+                  </div>
+                  
+                  {ordersForDay.map(order => {
+                    const urgency = getDeliveryUrgency(order);
+                    const urgencyColor = getUrgencyColor(urgency);
+                    
+                    return (
+                      <div
+                        key={order.id}
+                        className={`text-xs p-1 mb-1 rounded cursor-pointer ${urgencyColor}`}
+                        onClick={() => handleViewOrder(order)}
+                        title={`${order.customerName || order.customer} - ${order.orderNumber}`}
+                      >
+                        #{safeField(order, ['orderNumber', 'id']).slice(0, 8)}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold">Gerar Romaneio de Entrega</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="bg-blue-50 p-4 rounded-lg print:hidden">
-            <p className="text-sm text-blue-700">
-              <AlertCircle className="inline-block w-4 h-4 mr-1" />
-              Preencha as informações abaixo e clique em "Imprimir Romaneio" para gerar o documento.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:hidden">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Número do Romaneio
-              </label>
-              <input
-                name="romaneioNumber"
-                type="text"
-                value={romaneioData.romaneioNumber}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                readOnly
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Data de Entrega
-              </label>
-              <input
-                name="date"
-                type="date"
-                value={romaneioData.date}
-                onChange={handleChange}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Local de Entrega
-              </label>
-              <input
-                name="deliveryLocation"
-                type="text"
-                value={romaneioData.deliveryLocation}
-                onChange={handleChange}
-                placeholder="Endereço completo de entrega"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Transportadora
-              </label>
-              <input
-                name="transportCompany"
-                type="text"
-                value={romaneioData.transportCompany}
-                onChange={handleChange}
-                placeholder="Nome da transportadora"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nome do Contato
-              </label>
-              <input
-                name="contactName"
-                type="text"
-                value={romaneioData.contactName}
-                onChange={handleChange}
-                placeholder="Nome de quem receberá a entrega"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Telefone de Contato
-              </label>
-              <input
-                name="contactPhone"
-                type="text"
-                value={romaneioData.contactPhone}
-                onChange={handleChange}
-                placeholder="(00) 00000-0000"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
-
-          <div className="print:hidden">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Observações
-            </label>
-            <textarea
-              name="notes"
-              value={romaneioData.notes}
-              onChange={handleChange}
-              rows={3}
-              placeholder="Informações adicionais para o romaneio..."
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-            />
-          </div>
-
-          {/* Parte visível na impressão */}
-          <div className="print:block hidden">
-            <div className="text-center mb-8">
-              <h1 className="text-2xl font-bold mb-1">ROMANEIO DE ENTREGA</h1>
-              <p className="text-lg">{romaneioData.romaneioNumber}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              <div>
-                <p><strong>Cliente:</strong> {customerName}</p>
-                <p><strong>Projeto:</strong> {project}</p>
-                <p><strong>Número do Pedido:</strong> {orderNumber}</p>
-              </div>
-              <div>
-                <p><strong>Data:</strong> {format(new Date(romaneioData.date), 'dd/MM/yyyy')}</p>
-                <p><strong>Local de Entrega:</strong> {romaneioData.deliveryLocation}</p>
-                <p><strong>Transportadora:</strong> {romaneioData.transportCompany}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Tabela de itens (visível tanto na tela quanto na impressão) */}
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-gray-100 print:bg-gray-200">
-                  <th className="border p-2 text-left">Item</th>
-                  <th className="border p-2 text-left">Código</th>
-                  <th className="border p-2 text-left">Descrição</th>
-                  <th className="border p-2 text-right">Qtde</th>
-                  <th className="border p-2 text-left">Un</th>
-                  <th className="border p-2 text-right">Peso Unit. (kg)</th>
-                  <th className="border p-2 text-right">Peso Total (kg)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, index) => (
-                  <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="border p-2">{item.itemNumber || index + 1}</td>
-                    <td className="border p-2">{item.code}</td>
-                    <td className="border p-2">{item.description}</td>
-                    <td className="border p-2 text-right">{item.quantity.toLocaleString('pt-BR')}</td>
-                    <td className="border p-2">{item.unit}</td>
-                    <td className="border p-2 text-right">{item.weight.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                    <td className="border p-2 text-right">{(item.weight * item.quantity).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                  </tr>
-                ))}
-                <tr className="bg-gray-100 font-medium print:bg-gray-200">
-                  <td colSpan={3} className="border p-2 text-right">Total</td>
-                  <td className="border p-2 text-right">{totalQuantity.toLocaleString('pt-BR')}</td>
-                  <td className="border p-2"></td>
-                  <td className="border p-2"></td>
-                  <td className="border p-2 text-right">{totalWeight.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Observações na impressão */}
-          <div className="print:block hidden mt-8">
-            {romaneioData.notes && (
-              <div>
-                <h3 className="font-bold mb-2">Observações</h3>
-                <p className="whitespace-pre-wrap">{romaneioData.notes}</p>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-8 mt-12">
-              <div className="text-center">
-                <div className="border-t border-black pt-1">
-                  <p>Expedição</p>
-                </div>
-              </div>
-              <div className="text-center">
-                <div className="border-t border-black pt-1">
-                  <p>Recebimento</p>
-                </div>
-              </div>
-            </div>
+    <div className="space-y-4 lg:space-y-6 print:m-0 print:p-0">
+      {/* Header Responsivo */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 print:hidden">
+        <div className="flex-1">
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">Gestão de Pedidos</h1>
+          <p className="text-gray-600 text-sm lg:text-base">
+            Sistema integrado de controle e monitoramento de pedidos
+          </p>
+          <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+            <span className="flex items-center gap-1">
+              <Package className="w-4 h-4" />
+              {processedOrders.length} pedidos
+            </span>
+            <span className="flex items-center gap-1">
+              <AlertTriangle className="w-4 h-4 text-red-500" />
+              {processedOrders.filter(order => getDeliveryUrgency(order) === 'overdue').length} atrasados
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="w-4 h-4 text-orange-500" />
+              {processedOrders.filter(order => ['today', 'tomorrow', 'critical'].includes(getDeliveryUrgency(order))).length} urgentes
+            </span>
+            <span className="flex items-center gap-1">
+              <Package className="w-4 h-4 text-purple-500" />
+              {processedOrders.reduce((sum, order) => sum + calculateOrderWeight(order), 0).toLocaleString('pt-BR', {maximumFractionDigits: 0})} kg
+            </span>
           </div>
         </div>
-
-        <div className="flex justify-end gap-3 p-6 border-t border-gray-200 print:hidden">
+        
+        <div className="flex flex-wrap gap-2">
+          {/* Toggle Dashboard */}
           <button
-            onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            onClick={() => setShowDashboard(!showDashboard)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+              showDashboard 
+                ? 'bg-blue-50 border-blue-200 text-blue-700' 
+                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+            }`}
+            title={showDashboard ? "Ocultar Dashboard" : "Mostrar Dashboard"}
           >
-            Fechar
+            <BarChart2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Dashboard</span>
           </button>
+          
+          {/* Toggle Filtros */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+              showFilters 
+                ? 'bg-purple-50 border-purple-200 text-purple-700' 
+                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+            }`}
+            title="Filtros Avançados"
+          >
+            <ListFilter className="w-4 h-4" />
+            <span className="hidden sm:inline">Filtros</span>
+          </button>
+          
+          {/* View Mode Selector */}
+          <div className="flex bg-white border border-gray-300 rounded-lg">
+            <button
+              onClick={() => setViewMode('table')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-l-lg transition-all ${
+                viewMode === 'table' 
+                  ? 'bg-gray-100 text-gray-900' 
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+              title="Visualização em Tabela"
+            >
+              <Layers className="w-4 h-4" />
+              <span className="hidden md:inline">Tabela</span>
+            </button>
+            <button
+              onClick={() => setViewMode('calendar')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-r-lg transition-all ${
+                viewMode === 'calendar' 
+                  ? 'bg-gray-100 text-gray-900' 
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+              title="Visualização em Calendário"
+            >
+              <CalendarDays className="w-4 h-4" />
+              <span className="hidden md:inline">Calendário</span>
+            </button>
+          </div>
+          
+          {/* Ações */}
+          <button
+            onClick={handleExportToExcel}
+            className="flex items-center gap-2 bg-white border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Exportar para Excel"
+          >
+            <Download className="w-4 h-4 text-gray-600" />
+            <span className="hidden md:inline">Exportar</span>
+          </button>
+          
           <button
             onClick={handlePrint}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+            className="flex items-center gap-2 bg-white border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Imprimir"
           >
-            <Printer className="w-4 h-4" />
-            Imprimir Romaneio
+            <Printer className="w-4 h-4 text-gray-600" />
+            <span className="hidden md:inline">Imprimir</span>
+          </button>
+          
+          <button
+            onClick={handleCreateOrder}
+            className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-2 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all shadow-md"
+            title="Novo Pedido"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Novo Pedido</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Dashboard (condicional) */}
+      {showDashboard && <OrdersDashboard />}
+
+      {/* Filtros Avançados */}
+      <div className={`bg-white rounded-lg shadow-sm border border-gray-200 transition-all duration-300 print:hidden ${
+        showFilters ? 'block' : 'hidden'
+      }`}>
+        <div className="p-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold flex items-center">
+            <Filter className="w-5 h-5 mr-2 text-purple-600" />
+            Filtros Avançados
+          </h3>
+        </div>
+        
+        <div className="p-4 space-y-4">
+          {/* Linha 1: Busca */}
+          <div className="w-full">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Busca Geral
+            </label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Buscar por número, cliente, projeto ou OS..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              />
+            </div>
+          </div>
+          
+          {/* Linha 2: Filtros principais */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as 'all' | OrderStatus)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                <option value="all">Todos os status</option>
+                <option value="in-progress">Em Processo</option>
+                <option value="completed">Concluído</option>
+                <option value="on-hold">Em Pausa</option>
+                <option value="cancelled">Cancelado</option>
+                <option value="shipped">Expedido</option>
+                <option value="delayed">Atrasado</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Cliente</label>
+              <select
+                value={clientFilter}
+                onChange={(e) => setClientFilter(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                <option value="all">Todos os clientes</option>
+                {clientOptions.slice(1).map((client, index) => (
+                  <option key={index} value={client}>
+                    {client}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Período</label>
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                {dateOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Prioridade</label>
+              <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                <option value="all">Todas as prioridades</option>
+                <option value="urgent">Urgente</option>
+                <option value="high">Alta</option>
+                <option value="medium">Média</option>
+                <option value="low">Baixa</option>
+              </select>
+            </div>
+          </div>
+          
+          {/* Linha 3: Filtro de urgência de entrega */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Urgência de Entrega
+            </label>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
+              {urgencyOptions.map(option => (
+                <button
+                  key={option.value}
+                  onClick={() => setDeliveryUrgencyFilter(option.value)}
+                  className={`px-3 py-2 text-sm rounded-lg border transition-all ${
+                    deliveryUrgencyFilter === option.value
+                      ? `${option.color} border-current`
+                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Botões de ação dos filtros */}
+          <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-200">
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setStatusFilter('all');
+                setClientFilter('all');
+                setDateFilter('all');
+                setPriorityFilter('all');
+                setDeliveryUrgencyFilter('all');
+              }}
+              className="flex items-center gap-2 bg-gray-100 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Limpar Filtros
+            </button>
+            
+            <button
+              onClick={() => setDeliveryUrgencyFilter('overdue')}
+              className="flex items-center gap-2 bg-red-100 text-red-700 px-3 py-2 rounded-lg hover:bg-red-200 transition-colors"
+            >
+              <AlertTriangle className="w-4 h-4" />
+              Ver Atrasados
+            </button>
+            
+            <button
+              onClick={() => setDeliveryUrgencyFilter('today')}
+              className="flex items-center gap-2 bg-orange-100 text-orange-700 px-3 py-2 rounded-lg hover:bg-orange-200 transition-colors"
+            >
+              <Clock className="w-4 h-4" />
+              Entrega Hoje
+            </button>
+            
+            <button
+              onClick={() => setDeliveryUrgencyFilter('critical')}
+              className="flex items-center gap-2 bg-pink-100 text-pink-700 px-3 py-2 rounded-lg hover:bg-pink-200 transition-colors"
+            >
+              <Zap className="w-4 h-4" />
+              Críticos
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filtros Rápidos (sempre visíveis em mobile) */}
+      <div className={`bg-white p-3 rounded-lg shadow-sm border border-gray-200 print:hidden ${
+        showFilters ? 'lg:hidden' : ''
+      }`}>
+        <div className="flex flex-wrap gap-2">
+          <div className="flex-1 min-w-[200px]">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Buscar pedidos..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              />
+            </div>
+          </div>
+          
+          <select
+            value={deliveryUrgencyFilter}
+            onChange={(e) => setDeliveryUrgencyFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+          >
+            <option value="all">Todas urgências</option>
+            <option value="overdue">Atrasados</option>
+            <option value="today">Hoje</option>
+            <option value="critical">Críticos</option>
+          </select>
+          
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | OrderStatus)}
+            className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+          >
+            <option value="all">Todos status</option>
+            <option value="in-progress">Em Processo</option>
+            <option value="completed">Concluído</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Mensagem de erro */}
+      {error && (
+        <ErrorBoundary 
+          error={error}
+          onRetry={handleRetryConnection}
+          onClear={clearError}
+        />
+      )} text-sm underline"
+              >
+                Tentar novamente
+              </button>
+              <button 
+                onClick={clearError}
+                className="ml-auto text-red-400 hover:text-red-600 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conteúdo Principal */}
+      {viewMode === 'calendar' ? (
+        <CalendarView />
+      ) : (
+        /* Lista de Pedidos */
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 print:shadow-none print:border-none">
+          {loading ? (
+            <LoadingSpinner orders={orders} />
+          ) : processedOrders.length === 0 ? (
+            <div className="text-center py-16 print:hidden">
+              <Package className="w-20 h-20 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-medium text-gray-900 mb-2">
+                {searchTerm || statusFilter !== 'all' || clientFilter !== 'all' || dateFilter !== 'all' 
+                  ? 'Nenhum pedido encontrado' 
+                  : 'Nenhum pedido cadastrado'}
+              </h3>
+              <p className="text-gray-500 mb-8 max-w-md mx-auto">
+                {searchTerm || statusFilter !== 'all' || clientFilter !== 'all' || dateFilter !== 'all' 
+                  ? 'Tente ajustar os filtros de busca ou criar um novo pedido'
+                  : 'Comece criando seu primeiro pedido para dar início ao controle de produção'
+                }
+              </p>
+              <button
+                onClick={handleCreateOrder}
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all mx-auto shadow-md"
+              >
+                <Plus className="w-5 h-5" />
+                {searchTerm || statusFilter !== 'all' || clientFilter !== 'all' || dateFilter !== 'all' 
+                  ? 'Criar Novo Pedido' 
+                  : 'Criar Primeiro Pedido'}
+              </button>
+            </div>
+          ) : (
+            <div>
+              {/* Header da tabela com controles */}
+              <div className="p-4 border-b border-gray-200 print:hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {processedOrders.length} pedido(s) encontrado(s)
+                    </h3>
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-gray-500">Itens por página:</span>
+                      <select
+                        value={itemsPerPage}
+                        onChange={(e) => {
+                          setItemsPerPage(Number(e.target.value));
+                          setCurrentPage(1);
+                        }}
+                        className="border border-gray-300 rounded px-2 py-1 text-sm"
+                      >
+                        {ITEMS_PER_PAGE_OPTIONS.map(option => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCompactView(!compactView)}
+                      className={`flex items-center gap-2 px-3 py-1 rounded text-sm transition-colors ${
+                        compactView 
+                          ? 'bg-blue-100 text-blue-700' 
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <Grid3X3 className="w-4 h-4" />
+                      Vista Compacta
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabela de pedidos */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200 print:bg-white">
+                    <tr>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
+                          onClick={() => handleSort('orderNumber')}>
+                        <div className="flex items-center gap-1">
+                          Pedido
+                          {sortField === 'orderNumber' && (
+                            <ArrowUpDown className={`w-4 h-4 transition-transform ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
+                          onClick={() => handleSort('customer')}>
+                        <div className="flex items-center gap-1">
+                          Cliente
+                          {sortField === 'customer' && (
+                            <ArrowUpDown className={`w-4 h-4 transition-transform ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+                          )}
+                        </div>
+                      </th>
+                      {!compactView && (
+                        <th className="text-left py-3 px-4 font-medium text-gray-700">
+                          OS Interna
+                        </th>
+                      )}
+                      <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
+                          onClick={() => handleSort('deliveryDate')}>
+                        <div className="flex items-center gap-1">
+                          <Target className="w-4 h-4 text-blue-600" />
+                          Entrega
+                          {sortField === 'deliveryDate' && (
+                            <ArrowUpDown className={`w-4 h-4 transition-transform ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors" 
+                          onClick={() => handleSort('status')}>
+                        <div className="flex items-center gap-1">
+                          Status
+                          {sortField === 'status' && (
+                            <ArrowUpDown className={`w-4 h-4 transition-transform ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
+                          )}
+                        </div>
+                      </th>
+                      {!compactView && (
+                        <>
+                          <th className="text-left py-3 px-4 font-medium text-gray-700">
+                            Prioridade
+                          </th>
+                          <th className="text-left py-3 px-4 font-medium text-gray-700">
+                            <div className="flex items-center gap-1">
+                              <Package className="w-4 h-4 text-purple-600" />
+                              Peso (kg)
+                            </div>
+                          </th>
+                        </>
+                      )}
+                      <th className="text-right py-3 px-4 font-medium text-gray-700 print:hidden">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {paginatedOrders.map((order) => {
+                      if (!order) return null;
+                      
+                      const orderNumber = safeField(order, ['orderNumber', 'id']);
+                      const customer = safeField(order, ['customerName', 'customer']);
+                      const project = safeField(order, ['project', 'projectName']);
+                      const internalOS = safeField(order, ['internalOS', 'internalOrderNumber', 'serviceOrder']);
+                      const statusText = getStatusText(order.status);
+                      const statusColorClass = getStatusColor(order.status);
+                      const urgency = getDeliveryUrgency(order);
+                      const urgencyColor = getUrgencyColor(urgency);
+                      const urgencyText = getUrgencyText(urgency);
+                      const priorityColor = getPriorityColor(order.priority);
+                      const isLate = urgency === 'overdue';
+                      const orderWeight = calculateOrderWeight(order);
+                      
+                      return (
+                        <tr key={order.id} className="hover:bg-gray-50 transition-colors group">
+                          <td className={`py-3 px-4 ${compactView ? 'py-2' : ''}`}>
+                            <div className="flex flex-col">
+                              <div className="font-medium text-gray-900">
+                                #{orderNumber}
+                              </div>
+                              {project && !compactView && (
+                                <div className="text-sm text-gray-500 mt-1">{project}</div>
+                              )}
+                              {compactView && internalOS && (
+                                <div className="text-xs text-gray-400 mt-1">OS: {internalOS}</div>
+                              )}
+                              {compactView && orderWeight > 0 && (
+                                <div className="text-xs text-purple-600 mt-1">
+                                  {orderWeight.toLocaleString('pt-BR', {maximumFractionDigits: 1})} kg
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          
+                          <td className={`py-3 px-4 ${compactView ? 'py-2' : ''}`}>
+                            <div className="flex items-center">
+                              <User className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
+                              <span className="text-gray-900 truncate">{customer || '-'}</span>
+                            </div>
+                          </td>
+                          
+                          {!compactView && (
+                            <td className="py-3 px-4">
+                              <span className="text-gray-600">{internalOS || '-'}</span>
+                            </td>
+                          )}
+                          
+                          <td className={`py-3 px-4 ${compactView ? 'py-2' : ''}`}>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center">
+                                <Calendar className={`w-4 h-4 mr-2 flex-shrink-0 ${
+                                  isLate ? 'text-red-500' : 'text-gray-400'
+                                }`} />
+                                <span className={`text-sm ${isLate ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
+                                  {formatRelativeDate(order.deliveryDate)}
+                                </span>
+                              </div>
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${urgencyColor}`}>
+                                {urgencyText}
+                              </span>
+                            </div>
+                          </td>
+                          
+                          <td className={`py-3 px-4 ${compactView ? 'py-2' : ''}`}>
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${statusColorClass}`}>
+                              {statusText}
+                            </span>
+                          </td>
+                          
+                          {!compactView && (
+                            <>
+                              <td className="py-3 px-4">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${priorityColor}`}>
+                                  {order.priority || 'Média'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center">
+                                  <Package className="w-4 h-4 text-purple-500 mr-2 flex-shrink-0" />
+                                  <span className="text-sm font-medium text-purple-700">
+                                    {orderWeight.toLocaleString('pt-BR', {maximumFractionDigits: 1})}
+                                  </span>
+                                </div>
+                                {order.items && order.items.length > 0 && (
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {order.items.length} {order.items.length === 1 ? 'item' : 'itens'}
+                                  </div>
+                                )}
+                              </td>
+                            </>
+                          )}
+                          
+                          <td className={`py-3 px-4 print:hidden ${compactView ? 'py-2' : ''}`}>
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => handleViewOrder(order)}
+                                className="p-1.5 text-gray-400 hover:text-blue-600 transition-colors rounded-lg hover:bg-blue-50"
+                                title="Visualizar"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              
+                              <button
+                                onClick={() => handleEditOrder(order)}
+                                className="p-1.5 text-gray-400 hover:text-green-600 transition-colors rounded-lg hover:bg-green-50"
+                                title="Editar"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              
+                              <div className="relative">
+                                <button
+                                  onClick={() => toggleDropdown(order.id)}
+                                  className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors rounded-lg hover:bg-gray-50"
+                                  title="Mais ações"
+                                >
+                                  <MoreHorizontal className="w-4 h-4" />
+                                </button>
+                                
+                                {activeDropdown === order.id && (
+                                  <div className="absolute right-0 z-20 mt-2 w-56 bg-white rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 border border-gray-200" data-dropdown>
+                                    <div className="py-1" role="menu">
+                                      <button
+                                        onClick={() => handleNavigateToReport(order.id)}
+                                        className="text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full transition-colors"
+                                        title="Relatório de Produção"
+                                      >
+                                        <span className="flex items-center">
+                                          <FileText className="w-4 h-4 mr-3 text-blue-500" />
+                                          Relatório de Produção
+                                        </span>
+                                      </button>
+                                      
+                                      <button
+                                        onClick={() => handleOpenPublicSchedule(order.id)}
+                                        className="text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full transition-colors"
+                                        title="Cronograma Público"
+                                      >
+                                        <span className="flex items-center">
+                                          <CalendarDays className="w-4 h-4 mr-3 text-purple-500" />
+                                          Cronograma Público
+                                        </span>
+                                      </button>
+                                      
+                                      <button
+                                        onClick={() => handleCopyPublicLink(order.id)}
+                                        className="text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full transition-colors"
+                                        title="Copiar Link Público"
+                                      >
+                                        <span className="flex items-center">
+                                          <MapPin className="w-4 h-4 mr-3 text-green-500" />
+                                          Copiar Link Público
+                                        </span>
+                                      </button>
+                                      
+                                      <div className="border-t border-gray-100 my-1"></div>
+                                      
+                                      <button
+                                        onClick={() => {
+                                          handleDeleteOrder(order);
+                                          setActiveDropdown(null);
+                                        }}
+                                        className="text-left block px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full transition-colors"
+                                        title="Deletar"
+                                      >
+                                        <span className="flex items-center">
+                                          <Trash2 className="w-4 h-4 mr-3" />
+                                          Deletar Pedido
+                                        </span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Paginação */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 sm:px-6 print:hidden">
+                  <div className="flex flex-1 justify-between sm:hidden">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      disabled={currentPage === 1}
+                      className={`relative inline-flex items-center rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                        currentPage === 1
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                      }`}
+                    >
+                      <ChevronLeft className="w-4 h-4 mr-1" />
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      disabled={currentPage === totalPages}
+                      className={`relative ml-3 inline-flex items-center rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+                        currentPage === totalPages
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                      }`}
+                    >
+                      Próximo
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </button>
+                  </div>
+                  
+                  <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm text-gray-700">
+                        Mostrando <span className="font-medium">{Math.min((currentPage - 1) * itemsPerPage + 1, processedOrders.length)}</span> a{' '}
+                        <span className="font-medium">{Math.min(currentPage * itemsPerPage, processedOrders.length)}</span> de{' '}
+                        <span className="font-medium">{processedOrders.length}</span> resultados
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                          disabled={currentPage === 1}
+                          className={`relative inline-flex items-center rounded-l-md px-2 py-2 transition-colors ${
+                            currentPage === 1
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                          }`}
+                        >
+                          <span className="sr-only">Anterior</span>
+                          <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+                        </button>
+                        
+                        {/* Paginação dinâmica */}
+                        {Array.from({ length: totalPages }, (_, i) => i + 1)
+                          .filter(page => 
+                            page === 1 || 
+                            page === totalPages || 
+                            Math.abs(page - currentPage) <= 1
+                          )
+                          .map((page, index, array) => {
+                            // Adicionar reticências se necessário
+                            if (index > 0 && page > array[index - 1] + 1) {
+                              return (
+                                <React.Fragment key={`ellipsis-${page}`}>
+                                  <span className="relative inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300">
+                                    ...
+                                  </span>
+                                  <button
+                                    onClick={() => setCurrentPage(page)}
+                                    className={`relative inline-flex items-center px-4 py-2 text-sm font-medium transition-colors ${
+                                      currentPage === page
+                                        ? 'bg-blue-50 text-blue-700 border-blue-500 z-10'
+                                        : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                                    }`}
+                                  >
+                                    {page}
+                                  </button>
+                                </React.Fragment>
+                              );
+                            }
+                            
+                            return (
+                              <button
+                                key={page}
+                                onClick={() => setCurrentPage(page)}
+                                className={`relative inline-flex items-center px-4 py-2 text-sm font-medium transition-colors ${
+                                  currentPage === page
+                                    ? 'bg-blue-50 text-blue-700 border-blue-500 z-10'
+                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                                }`}
+                              >
+                                {page}
+                              </button>
+                            );
+                          })}
+                        
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                          className={`relative inline-flex items-center rounded-r-md px-2 py-2 transition-colors ${
+                            currentPage === totalPages
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-300'
+                          }`}
+                        >
+                          <span className="sr-only">Próximo</span>
+                          <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                        </button>
+                      </nav>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Estatísticas de resumo */}
+      {processedOrders.length > 0 && viewMode === 'table' && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 print:hidden">
+          <div className="p-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-blue-600">
+                  {processedOrders.filter(o => o.status === 'in-progress').length}
+                </span>
+                <span className="text-sm text-gray-600">Em Processo</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-green-600">
+                  {processedOrders.filter(o => o.status === 'completed').length}
+                </span>
+                <span className="text-sm text-gray-600">Concluídos</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-red-600">
+                  {processedOrders.filter(order => getDeliveryUrgency(order) === 'overdue').length}
+                </span>
+                <span className="text-sm text-gray-600">Atrasados</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-orange-600">
+                  {processedOrders.filter(order => ['today', 'tomorrow'].includes(getDeliveryUrgency(order))).length}
+                </span>
+                <span className="text-sm text-gray-600">Urgentes</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-purple-600">
+                  {processedOrders.reduce((sum, order) => sum + calculateOrderWeight(order), 0).toLocaleString('pt-BR', {maximumFractionDigits: 0})}
+                </span>
+                <span className="text-sm text-gray-600">kg Total</span>
+              </div>
+              
+              <div className="flex flex-col">
+                <span className="text-2xl font-bold text-gray-600">
+                  {processedOrders.length}
+                </span>
+                <span className="text-sm text-gray-600">Total</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal */}
+      <OrderModal
+        isOpen={isModalOpen}
+        onClose={handleModalClose}
+        order={selectedOrder}
+        mode={modalMode}
+      />
+    </div>
+  );
+}
+
+// Componentes auxiliares
+const ErrorBoundary: React.FC<{ error: string | null; onRetry: () => void; onClear: () => void }> = ({ 
+  error, 
+  onRetry, 
+  onClear 
+}) => {
+  if (!error) return null;
+
+  const isConnectionError = error.includes('QUIC') || 
+                           error.includes('network') || 
+                           error.includes('unavailable') ||
+                           error.includes('fetch');
+
+  return (
+    <div className={`rounded-lg p-4 print:hidden animate-fadeIn ${
+      isConnectionError 
+        ? 'bg-yellow-50 border border-yellow-200' 
+        : 'bg-red-50 border border-red-200'
+    }`}>
+      <div className="flex items-start">
+        <AlertCircle className={`mr-3 w-5 h-5 flex-shrink-0 ${
+          isConnectionError ? 'text-yellow-400' : 'text-red-400'
+        }`} />
+        <div className="flex-1">
+          <h3 className={`text-sm font-medium ${
+            isConnectionError ? 'text-yellow-800' : 'text-red-800'
+          }`}>
+            {isConnectionError ? 'Problema de Conexão' : 'Erro no Sistema'}
+          </h3>
+          <p className={`text-sm mt-1 ${
+            isConnectionError ? 'text-yellow-700' : 'text-red-700'
+          }`}>
+            {isConnectionError 
+              ? 'Verifique sua conexão com a internet e tente novamente.'
+              : error
+            }
+          </p>
+          {isConnectionError && (
+            <p className="text-xs text-yellow-600 mt-2">
+              💡 Os dados podem estar desatualizados. O sistema tentará reconectar automaticamente.
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2 ml-4">
+          {isConnectionError && (
+            <button 
+              onClick={onRetry}
+              className={`text-sm underline transition-colors ${
+                isConnectionError 
+                  ? 'text-yellow-600 hover:text-yellow-800' 
+                  : 'text-red-600 hover:text-red-800'
+              }`}
+            >
+              Tentar novamente
+            </button>
+          )}
+          <button 
+            onClick={onClear}
+            className={`ml-2 transition-colors ${
+              isConnectionError 
+                ? 'text-yellow-400 hover:text-yellow-600' 
+                : 'text-red-400 hover:text-red-600'
+            }`}
+          >
+            ✕
           </button>
         </div>
       </div>
@@ -637,1042 +1808,126 @@ const RomaneioModal: React.FC<{
   );
 };
 
-export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalProps) {
-  const { addOrder, updateOrder, loading } = useOrderStore();
-  const { customers, loadCustomers } = useCustomerStore();
-  
-  const [formData, setFormData] = useState<Order>({
-    customerId: '',
-    customerName: '',
-    project: '',
-    orderNumber: '',
-    internalOS: '',
-    startDate: '',
-    deliveryDate: '',
-    completionDate: '',
-    status: 'in-progress',
-    observations: '',
-    items: [] as OrderItem[],
-    googleDriveLink: '',
-    value: 0,
-    priority: 'medium'
-  });
-
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'details' | 'items' | 'documents'>('details');
-  const [itemsFilter, setItemsFilter] = useState('');
-  const [itemsSortField, setItemsSortField] = useState<'itemNumber' | 'code' | 'description' | 'progress'>('itemNumber');
-  const [itemsSortOrder, setItemsSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [showItemModal, setShowItemModal] = useState(false);
-  const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
-  const [showProgressModal, setShowProgressModal] = useState(false);
-  const [progressItem, setProgressItem] = useState<OrderItem | null>(null);
-  const [showRomaneioModal, setShowRomaneioModal] = useState(false);
-  const [localLoading, setLocalLoading] = useState(false);
-
-  // Log para monitorar mudanças no formData
-  useEffect(() => {
-    console.log("FormData changed - items with weights:", formData.items?.map(item => ({
-      code: item.code,
-      weight: item.weight,
-      type: typeof item.weight
-    })));
-  }, [formData.items]);
-
-  useEffect(() => {
-    if (isOpen) {
-      try {
-        loadCustomers();
-      } catch (error) {
-        console.error("Error loading customers:", error);
-      }
-    }
-  }, [isOpen, loadCustomers]);
-
-  useEffect(() => {
-    if (mode === 'edit' && order) {
-      const formatDateField = (dateString: string | undefined | null) => {
-        if (!dateString) return '';
-        try {
-          return format(new Date(dateString), 'yyyy-MM-dd');
-        } catch (error) {
-          console.error("Error formatting date:", dateString, error);
-          return '';
-        }
-      };
-
-      const processedItems = Array.isArray(order.items)
-        ? order.items.map((item, index) => {
-            let itemWeight = 0;
-            if (typeof item.weight === 'number') {
-              itemWeight = item.weight;
-            } else if (typeof item.weight === 'string') {
-              const parsedWeight = parseFloat(item.weight.replace(',', '.').trim());
-              itemWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
-            } else if (item.weight == null) {
-              itemWeight = 0;
-            }
-
-            let itemQuantity = 1;
-            if (typeof item.quantity === 'number') {
-              itemQuantity = item.quantity;
-            } else if (typeof item.quantity === 'string') {
-              const parsedQuantity = parseFloat(item.quantity.replace(',', '.').trim());
-              itemQuantity = isNaN(parsedQuantity) ? 1 : parsedQuantity;
-            } else if (item.quantity == null) {
-              itemQuantity = 1;
-            }
-
-            let itemProgress = 0;
-            if (typeof item.progress === 'number') {
-              itemProgress = item.progress;
-            } else if (typeof item.overallProgress === 'number') {
-              itemProgress = item.overallProgress;
-            }
-
-            return {
-              id: item.id || `item-${index}`,
-              code: item.code || '',
-              description: item.description || '',
-              quantity: itemQuantity,
-              unit: item.unit || 'un',
-              weight: itemWeight,
-              progress: itemProgress,
-              overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : itemProgress,
-              itemNumber: item.itemNumber || (index + 1),
-              notes: item.notes || '',
-              priority: item.priority || 'medium',
-              estimatedDays: typeof item.estimatedDays === 'number'
-                ? item.estimatedDays
-                : 1,
-              startDate: item.startDate || '',
-              endDate: item.endDate || '',
-              responsible: item.responsible || '',
-              stagePlanning: item.stagePlanning || {}
-            };
-          })
-        : [];
-
-      setFormData({
-        customerId: order.customerId || '',
-        customerName: order.customerName || order.customer || '',
-        project: order.project || order.projectName || '',
-        orderNumber: order.orderNumber || '',
-        internalOS: order.internalOS || order.internalOrderNumber || order.serviceOrder || '',
-        startDate: formatDateField(order.startDate),
-        deliveryDate: formatDateField(order.deliveryDate),
-        completionDate: formatDateField(order.completionDate),
-        status: order.status || 'in-progress',
-        observations: order.observations || order.notes || '',
-        items: processedItems,
-        googleDriveLink: order.googleDriveLink || '',
-        value: order.value || 0,
-        priority: order.priority || 'medium'
-      });
-    } else if (mode === 'create') {
-      setFormData({
-        customerId: '',
-        customerName: '',
-        project: '',
-        orderNumber: '',
-        internalOS: '',
-        startDate: '',
-        deliveryDate: '',
-        completionDate: '',
-        status: 'in-progress',
-        observations: '',
-        items: [],
-        googleDriveLink: '',
-        value: 0,
-        priority: 'medium'
-      });
-    }
-  }, [mode, order, isOpen, customers]);
-
-  // Calculando estatísticas para exibição
-  const orderStats = useMemo(() => {
-    if (!formData.items?.length) return {
-      totalItems: 0,
-      totalWeight: 0,
-      avgProgress: 0,
-      pendingItems: 0,
-      completedItems: 0
-    };
-
-    const totalItems = formData.items.length;
-    const totalWeight = formData.items.reduce((sum, item) => 
-      sum + (item.weight * item.quantity), 0);
-    
-    const progressSum = formData.items.reduce((sum, item) => sum + (item.overallProgress || item.progress || 0), 0);
-    const avgProgress = totalItems > 0 ? Math.round(progressSum / totalItems) : 0;
-    
-    const completedItems = formData.items.filter(item => (item.overallProgress || item.progress || 0) >= 100).length;
-    const pendingItems = totalItems - completedItems;
-
-    return {
-      totalItems,
-      totalWeight,
-      avgProgress,
-      pendingItems,
-      completedItems
-    };
-  }, [formData.items]);
-
-  // Função de validação melhorada
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-    
-    // Validações obrigatórias
-    if (!formData.customerName && !formData.customerId) {
-      newErrors.customer = 'Selecione um cliente';
-    }
-    
-    if (!formData.project?.trim()) {
-      newErrors.project = 'Informe o nome do projeto';
-    }
-    
-    if (!formData.orderNumber?.trim()) {
-      newErrors.orderNumber = 'Informe o número do pedido';
-    }
-    
-    // Validar items
-    if (!formData.items?.length) {
-      newErrors.items = 'Adicione pelo menos um item ao pedido';
-    } else {
-      // Validar cada item
-      const itemErrors: string[] = [];
-      formData.items.forEach((item, index) => {
-        if (!item.code?.trim()) {
-          itemErrors.push(`Item ${index + 1}: Código é obrigatório`);
-        }
-        if (!item.description?.trim()) {
-          itemErrors.push(`Item ${index + 1}: Descrição é obrigatória`);
-        }
-        if (!item.quantity || item.quantity <= 0) {
-          itemErrors.push(`Item ${index + 1}: Quantidade deve ser maior que zero`);
-        }
-        if (typeof item.weight !== 'number' || item.weight < 0) {
-          itemErrors.push(`Item ${index + 1}: Peso deve ser um número válido`);
-        }
-      });
-      
-      if (itemErrors.length > 0) {
-        newErrors.items = itemErrors.join('; ');
-      }
-    }
-
-    console.log('Validation errors:', newErrors);
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  // Salvar pedido - FUNÇÃO CORRIGIDA
-  const handleSave = async () => {
-    console.log('🔄 Starting save process...');
-    console.log('FormData before validation:', {
-      mode,
-      hasItems: formData.items?.length || 0,
-      customerName: formData.customerName,
-      project: formData.project,
-      orderNumber: formData.orderNumber
-    });
-    
-    if (!validateForm()) {
-      console.error('❌ Validation failed');
-      return;
-    }
-    
-    try {
-      setLocalLoading(true);
-      
-      // Preparar dados para salvamento
-      const orderData = {
-        ...formData,
-        // Garantir que os campos obrigatórios estejam preenchidos
-        customerName: formData.customerName || '',
-        project: formData.project || '',
-        orderNumber: formData.orderNumber || '',
-        status: formData.status || 'in-progress',
-        items: formData.items?.map((item, index) => ({
-          ...item,
-          id: item.id || `item-${Date.now()}-${index}`,
-          itemNumber: item.itemNumber || (index + 1),
-          quantity: typeof item.quantity === 'number' ? item.quantity : parseFloat(item.quantity as any) || 1,
-          weight: typeof item.weight === 'number' ? item.weight : parseFloat(item.weight as any) || 0,
-          progress: typeof item.progress === 'number' ? item.progress : 0,
-          overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : (typeof item.progress === 'number' ? item.progress : 0)
-        })) || []
-      };
-      
-      console.log('💾 Saving order data:', {
-        mode,
-        orderId: order?.id,
-        itemsCount: orderData.items.length,
-        customer: orderData.customerName,
-        project: orderData.project
-      });
-      
-      if (mode === 'create') {
-        // Remover ID para garantir que seja um novo registro
-        const { id, createdAt, updatedAt, ...newOrderData } = orderData;
-        await addOrder(newOrderData);
-        console.log('✅ Order created successfully');
-      } else if (mode === 'edit' && order?.id) {
-        // Manter o ID original para update
-        const updateData = { ...orderData, id: order.id };
-        await updateOrder(updateData);
-        console.log('✅ Order updated successfully');
-      } else {
-        throw new Error('Invalid operation mode or missing order ID for edit');
-      }
-      
-      // Fechar modal apenas se salvamento foi bem-sucedido
-      onClose();
-      
-    } catch (error: any) {
-      console.error('❌ Error saving order:', error);
-      
-      // Exibir erro específico baseado no tipo
-      let errorMessage = 'Erro ao salvar o pedido. ';
-      
-      if (error.message.includes('permission-denied')) {
-        errorMessage += 'Você não tem permissão para realizar esta operação.';
-      } else if (error.message.includes('network')) {
-        errorMessage += 'Problema de conexão. Verifique sua internet e tente novamente.';
-      } else if (error.message.includes('Validation failed')) {
-        errorMessage += 'Dados inválidos: ' + error.message.replace('Validation failed: ', '');
-      } else {
-        errorMessage += error.message || 'Tente novamente em alguns instantes.';
-      }
-      
-      // Você pode usar um toast/notification ou alert
-      alert(errorMessage);
-      
-      // Não fechar o modal em caso de erro para permitir correções
-    } finally {
-      setLocalLoading(false);
-    }
-  };
-
-  // Gerenciar itens
-  const handleAddItem = (item: OrderItem) => {
-    setFormData(prev => ({
-      ...prev,
-      items: [...(prev.items || []), {
-        ...item,
-        itemNumber: (prev.items?.length || 0) + 1
-      }]
-    }));
-    setShowItemModal(false);
-    setEditingItem(null);
-  };
-
-  const handleEditItem = (item: OrderItem) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items?.map(i => i.id === item.id ? item : i) || []
-    }));
-    setShowItemModal(false);
-    setEditingItem(null);
-  };
-
-  const handleUpdateItemProgress = (updatedItem: OrderItem) => {
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items?.map(i => i.id === updatedItem.id ? updatedItem : i) || []
-    }));
-    setShowProgressModal(false);
-    setProgressItem(null);
-  };
-
-  const handleRemoveSelectedItems = () => {
-    if (!selectedItems.length) return;
-    
-    setFormData(prev => ({
-      ...prev,
-      items: prev.items?.filter(item => !selectedItems.includes(item.id)) || []
-    }));
-    setSelectedItems([]);
-  };
-
-  // Filtro e ordenação de itens
-  const filteredAndSortedItems = useMemo(() => {
-    if (!formData.items?.length) return [];
-    
-    let items = [...formData.items];
-    
-    // Filtrar por termo de pesquisa
-    if (itemsFilter) {
-      const searchTerm = itemsFilter.toLowerCase();
-      items = items.filter(item => 
-        item.code.toLowerCase().includes(searchTerm) || 
-        item.description.toLowerCase().includes(searchTerm)
-      );
-    }
-    
-    // Ordenar
-    items.sort((a, b) => {
-      const aValue = a[itemsSortField] || '';
-      const bValue = b[itemsSortField] || '';
-      
-      if (typeof aValue === 'number' && typeof bValue === 'number') {
-        return itemsSortOrder === 'asc' ? aValue - bValue : bValue - aValue;
-      }
-      
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return itemsSortOrder === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
-      
-      return 0;
-    });
-    
-    return items;
-  }, [formData.items, itemsFilter, itemsSortField, itemsSortOrder]);
-
-  // Verificar se o modal deve ser exibido
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity" onClick={mode !== 'view' ? undefined : onClose} />
-
-        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle w-full max-w-7xl">
-          <div className="flex justify-between items-center p-4 sm:p-6 border-b border-gray-200 bg-blue-600 text-white">
-            <h3 className="text-lg sm:text-xl font-semibold">
-              {mode === 'create' ? 'Novo Pedido' : 
-               mode === 'edit' ? 'Editar Pedido' : 
-               'Visualizar Pedido'}
-            </h3>
-            <div className="flex space-x-2">
-              {mode === 'view' && (
-                <button
-                  className="bg-blue-700 text-white p-2 rounded-lg hover:bg-blue-800 transition-colors flex items-center gap-1"
-                  onClick={() => {/* Adicione aqui lógica para editar, se necessário */}}
-                >
-                  <Edit3 className="w-4 h-4" />
-                  <span className="hidden sm:inline">Editar</span>
-                </button>
-              )}
-              <button
-                onClick={onClose}
-                className="bg-blue-700 text-white p-2 rounded-lg hover:bg-blue-800 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white">
-            {/* Tabs de navegação */}
-            <div className="border-b border-gray-200">
-              <nav className="-mb-px flex space-x-6 px-4 sm:px-6">
-                <button
-                  onClick={() => setActiveTab('details')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'details'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <FileText className="w-4 h-4" />
-                    Detalhes do Pedido
-                  </span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('items')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'items'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <Package className="w-4 h-4" />
-                    Itens {formData.items?.length ? `(${formData.items.length})` : ''}
-                  </span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('documents')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'documents'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <Folder className="w-4 h-4" />
-                    Documentos
-                  </span>
-                </button>
-              </nav>
-            </div>
-
-            {/* Conteúdo da aba ativa */}
-            <div className="p-4 sm:p-6 max-h-[70vh] overflow-y-auto">
-              {activeTab === 'details' && (
-                <div className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Cliente *
-                      </label>
-                      <select
-                        value={formData.customerId || ''}
-                        onChange={(e) => {
-                          const selectedCustomer = customers.find(c => c.id === e.target.value);
-                          setFormData(prev => ({
-                            ...prev, 
-                            customerId: e.target.value,
-                            customerName: selectedCustomer?.name || ''
-                          }));
-                        }}
-                        disabled={mode === 'view'}
-                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        } ${errors.customer ? 'border-red-500' : ''}`}
-                      >
-                        <option value="">Selecione um cliente</option>
-                        {customers.map(customer => (
-                          <option key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </option>
-                        ))}
-                      </select>
-                      {errors.customer && (
-                        <p className="mt-1 text-sm text-red-500">{errors.customer}</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Nome do Projeto *
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.project || ''}
-                        onChange={(e) => setFormData(prev => ({...prev, project: e.target.value}))}
-                        disabled={mode === 'view'}
-                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        } ${errors.project ? 'border-red-500' : ''}`}
-                        placeholder="Nome do projeto ou obra"
-                      />
-                      {errors.project && (
-                        <p className="mt-1 text-sm text-red-500">{errors.project}</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Número do Pedido *
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.orderNumber || ''}
-                        onChange={(e) => setFormData(prev => ({...prev, orderNumber: e.target.value}))}
-                        disabled={mode === 'view'}
-                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        } ${errors.orderNumber ? 'border-red-500' : ''}`}
-                        placeholder="Número do pedido ou proposta"
-                      />
-                      {errors.orderNumber && (
-                        <p className="mt-1 text-sm text-red-500">{errors.orderNumber}</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        OS Interna
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.internalOS || ''}
-                        onChange={(e) => setFormData(prev => ({...prev, internalOS: e.target.value}))}
-                        disabled={mode === 'view'}
-                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        }`}
-                        placeholder="Número da OS interna"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Data de Início
-                      </label>
-                      <input
-                        type="date"
-                        value={formData.startDate || ''}
-                        onChange={(e) => setFormData(prev => ({...prev, startDate: e.target.value}))}
-                        disabled={mode === 'view'}
-                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        }`}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Data de Entrega
-                      </label>
-                      <input
-                        type="date"
-                        value={formData.deliveryDate || ''}
-                        onChange={(e) => setFormData(prev => ({...prev, deliveryDate: e.target.value}))}
-                        disabled={mode === 'view'}
-                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        }`}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Status do Pedido
-                      </label>
-                      <select
-                        value={formData.status || 'in-progress'}
-                        onChange={(e) => setFormData(prev => ({...prev, status: e.target.value}))}
-                        disabled={mode === 'view'}
-                        className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        }`}
-                      >
-                        <option value="in-progress">Em Andamento</option>
-                        <option value="completed">Concluído</option>
-                        <option value="on-hold">Em Espera</option>
-                        <option value="cancelled">Cancelado</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Observações
-                    </label>
-                    <textarea
-                      value={formData.observations || ''}
-                      onChange={(e) => setFormData(prev => ({...prev, observations: e.target.value}))}
-                      disabled={mode === 'view'}
-                      rows={4}
-                      className={`w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-colors ${
-                        mode === 'view' ? 'bg-gray-100' : ''
-                      }`}
-                      placeholder="Informações adicionais sobre o pedido..."
-                    />
-                  </div>
-
-                  {/* Estatísticas do pedido */}
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h4 className="font-medium text-gray-900 mb-3">Resumo do Pedido</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                      <div className="bg-white p-3 rounded border border-gray-200">
-                        <p className="text-xs text-gray-500">Total de Itens</p>
-                        <p className="text-lg font-semibold">{orderStats.totalItems}</p>
-                      </div>
-                      <div className="bg-white p-3 rounded border border-gray-200">
-                        <p className="text-xs text-gray-500">Peso Total</p>
-                        <p className="text-lg font-semibold">{orderStats.totalWeight.toLocaleString('pt-BR', {minimumFractionDigits: 2})} kg</p>
-                      </div>
-                      <div className="bg-white p-3 rounded border border-gray-200">
-                        <p className="text-xs text-gray-500">Progresso Médio</p>
-                        <p className="text-lg font-semibold">{orderStats.avgProgress}%</p>
-                      </div>
-                      <div className="bg-white p-3 rounded border border-gray-200">
-                        <p className="text-xs text-gray-500">Itens Pendentes</p>
-                        <p className="text-lg font-semibold">{orderStats.pendingItems}</p>
-                      </div>
-                      <div className="bg-white p-3 rounded border border-gray-200">
-                        <p className="text-xs text-gray-500">Itens Concluídos</p>
-                        <p className="text-lg font-semibold">{orderStats.completedItems}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'items' && (
-                <div className="space-y-4">
-                  {errors.items && (
-                    <p className="text-sm text-red-500">{errors.items}</p>
-                  )}
-                  
-                  <div className="flex flex-wrap gap-3 mb-4">
-                    {mode !== 'view' && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setEditingItem(null);
-                            setShowItemModal(true);
-                          }}
-                          className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                          <Plus className="w-4 h-4" />
-                          Adicionar Item
-                        </button>
-
-                        {selectedItems.length > 0 && (
-                          <button
-                            onClick={handleRemoveSelectedItems}
-                            className="flex items-center gap-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            Remover Selecionados
-                          </button>
-                        )}
-                      </>
-                    )}
-
-                    <button
-                      onClick={() => setShowRomaneioModal(true)}
-                      disabled={!formData.items?.length}
-                      className={`flex items-center gap-1 px-4 py-2 rounded-lg 
-                        ${formData.items?.length 
-                          ? 'bg-green-600 text-white hover:bg-green-700' 
-                          : 'bg-gray-300 text-gray-500 cursor-not-allowed'} 
-                        transition-colors`}
-                    >
-                      <Printer className="w-4 h-4" />
-                      Gerar Romaneio
-                    </button>
-                  </div>
-
-                  {/* Filtro e ordenação */}
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <div className="relative flex-grow max-w-md">
-                      <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                      <input
-                        type="text"
-                        placeholder="Filtrar itens..."
-                        value={itemsFilter}
-                        onChange={(e) => setItemsFilter(e.target.value)}
-                        className="pl-9 p-2 border border-gray-300 rounded-lg w-full"
-                      />
-                    </div>
-
-                    <div className="flex items-center">
-                      <label className="text-sm mr-2">Ordenar por:</label>
-                      <select
-                        value={itemsSortField}
-                        onChange={(e) => setItemsSortField(e.target.value as any)}
-                        className="p-2 border border-gray-300 rounded-lg"
-                      >
-                        <option value="itemNumber">N° Item</option>
-                        <option value="code">Código</option>
-                        <option value="description">Descrição</option>
-                        <option value="progress">Progresso</option>
-                      </select>
-                    </div>
-                    
-                                        <button
-                      onClick={() => setItemsSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                      className="p-2 border border-gray-300 rounded-lg"
-                    >
-                      {itemsSortOrder === 'asc' ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
-                    </button>
-                  </div>
-
-                  {/* Tabela de itens */}
-                  {formData.items && formData.items.length > 0 ? (
-                    <div className="overflow-x-auto mt-4">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-100">
-                          <tr>
-                            {mode !== 'view' && (
-                              <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedItems.length === filteredAndSortedItems.length && filteredAndSortedItems.length > 0}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedItems(filteredAndSortedItems.map(item => item.id));
-                                    } else {
-                                      setSelectedItems([]);
-                                    }
-                                  }}
-                                  className="h-4 w-4 text-blue-600 rounded"
-                                />
-                              </th>
-                            )}
-                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Item
-                            </th>
-                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Código
-                            </th>
-                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Descrição
-                            </th>
-                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Qtde
-                            </th>
-                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Peso
-                            </th>
-                            <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Progresso
-                            </th>
-                            <th scope="col" className="p-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Ações
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {filteredAndSortedItems.map((item) => (
-                            <tr key={item.id} className="hover:bg-gray-50">
-                              {mode !== 'view' && (
-                                <td className="p-4 whitespace-nowrap">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedItems.includes(item.id)}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setSelectedItems(prev => [...prev, item.id]);
-                                      } else {
-                                        setSelectedItems(prev => prev.filter(id => id !== item.id));
-                                      }
-                                    }}
-                                    className="h-4 w-4 text-blue-600 rounded"
-                                  />
-                                </td>
-                              )}
-                              <td className="p-4 whitespace-nowrap">
-                                {item.itemNumber}
-                              </td>
-                              <td className="p-4">
-                                <span className="font-mono text-sm">{item.code}</span>
-                              </td>
-                              <td className="p-4">
-                                <div className="text-sm font-medium text-gray-900">{item.description}</div>
-                                {item.notes && (
-                                  <div className="text-xs text-gray-500 mt-1">{item.notes}</div>
-                                )}
-                              </td>
-                              <td className="p-4 whitespace-nowrap">
-                                <div className="text-sm">{item.quantity} {item.unit}</div>
-                              </td>
-                              <td className="p-4 whitespace-nowrap">
-                                <div className="text-sm">{item.weight.toLocaleString('pt-BR', {minimumFractionDigits: 2})} kg</div>
-                                <div className="text-xs text-gray-500">Total: {(item.weight * item.quantity).toLocaleString('pt-BR', {minimumFractionDigits: 2})} kg</div>
-                              </td>
-                              <td className="p-4">
-                                <div className="flex items-center">
-                                  <div className="mr-2 text-sm font-medium">
-                                    {item.overallProgress || item.progress || 0}%
-                                  </div>
-                                  <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                    <div 
-                                      className={`h-full ${
-                                        (item.overallProgress || item.progress || 0) >= 100 
-                                          ? 'bg-green-500' 
-                                          : (item.overallProgress || item.progress || 0) >= 50 
-                                            ? 'bg-blue-500' 
-                                            : 'bg-yellow-500'
-                                      }`}
-                                      style={{ width: `${item.overallProgress || item.progress || 0}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="p-4 whitespace-nowrap text-right">
-                                <div className="flex justify-end space-x-2">
-                                  <button
-                                    onClick={() => {
-                                      setProgressItem(item);
-                                      setShowProgressModal(true);
-                                    }}
-                                    className="text-blue-600 hover:text-blue-800"
-                                    title="Atualizar Progresso"
-                                  >
-                                    <BarChart3 className="w-5 h-5" />
-                                  </button>
-                                  
-                                  {mode !== 'view' && (
-                                    <>
-                                      <button
-                                        onClick={() => {
-                                          setEditingItem(item);
-                                          setShowItemModal(true);
-                                        }}
-                                        className="text-blue-600 hover:text-blue-800"
-                                        title="Editar Item"
-                                      >
-                                        <Edit3 className="w-5 h-5" />
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          setFormData(prev => ({
-                                            ...prev,
-                                            items: prev.items?.filter(i => i.id !== item.id) || []
-                                          }));
-                                        }}
-                                        className="text-red-600 hover:text-red-800"
-                                        title="Remover Item"
-                                      >
-                                        <Trash2 className="w-5 h-5" />
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="text-center py-10 bg-gray-50 rounded-lg">
-                      <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                      <p className="text-gray-500">Nenhum item adicionado ao pedido</p>
-                      {mode !== 'view' && (
-                        <button
-                          onClick={() => {
-                            setEditingItem(null);
-                            setShowItemModal(true);
-                          }}
-                          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                          Adicionar primeiro item
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {activeTab === 'documents' && (
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Link para pasta do Google Drive
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={formData.googleDriveLink || ''}
-                        onChange={(e) => setFormData(prev => ({...prev, googleDriveLink: e.target.value}))}
-                        disabled={mode === 'view'}
-                        className={`flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                          mode === 'view' ? 'bg-gray-100' : ''
-                        }`}
-                        placeholder="https://drive.google.com/drive/folders/..."
-                      />
-                      {formData.googleDriveLink && (
-                        <a 
-                          href={formData.googleDriveLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                          Abrir
-                        </a>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 p-6 rounded-lg text-center">
-                    <Folder className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                    <h4 className="text-lg font-medium text-gray-900">Gestão de Arquivos</h4>
-                    <p className="text-gray-500 mb-4">
-                      Os arquivos são gerenciados através do Google Drive para melhor integração e compartilhamento.
-                    </p>
-                    {formData.googleDriveLink ? (
-                      <a 
-                        href={formData.googleDriveLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
-                      >
-                        <Folder className="w-4 h-4" />
-                        Abrir pasta do projeto
-                      </a>
-                    ) : (
-                      <button
-                        onClick={() => setFormData(prev => ({...prev, googleDriveLink: `https://drive.google.com/drive/folders/new?name=${encodeURIComponent(formData.project || 'Novo Projeto')}`}))}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
-                        disabled={mode === 'view'}
-                      >
-                        <Folder className="w-4 h-4" />
-                        Criar pasta no Drive
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Modal footer */}
-          <div className="flex justify-end gap-3 p-4 sm:p-6 border-t border-gray-200 bg-gray-50">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              {mode === 'view' ? 'Fechar' : 'Cancelar'}
-            </button>
-            {mode !== 'view' && (
-              <button
-                onClick={handleSave}
-                disabled={loading || localLoading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {(loading || localLoading) ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Save className="w-4 h-4" />
-                )}
-                {mode === 'create' ? 'Criar Pedido' : 'Atualizar Pedido'}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Modal de Item */}
-      {showItemModal && (
-        <ItemModal 
-          item={editingItem} 
-          onSave={editingItem ? handleEditItem : handleAddItem} 
-          onClose={() => {
-            setShowItemModal(false);
-            setEditingItem(null);
-          }} 
-        />
-      )}
-
-      {/* Modal de Progresso */}
-      {showProgressModal && progressItem && (
-        <ItemProgressModal 
-          item={progressItem} 
-          allItems={formData.items || []}
-          onSave={handleUpdateItemProgress} 
-          onClose={() => {
-            setShowProgressModal(false);
-            setProgressItem(null);
-          }} 
-        />
-      )}
-
-      {/* Modal de Romaneio */}
-      {showRomaneioModal && (
-        <RomaneioModal
-          items={formData.items || []} 
-          customerName={formData.customerName || ''}
-          project={formData.project || ''}
-          orderNumber={formData.orderNumber || ''}
-          onClose={() => setShowRomaneioModal(false)}
-        />
-      )}
+const LoadingSpinner: React.FC<{ orders?: Order[] }> = ({ orders = [] }) => (
+  <div className="flex items-center justify-center p-12 print:hidden">
+    <div className="flex flex-col items-center">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+      <span className="text-gray-600 text-lg">Carregando pedidos...</span>
+      <span className="text-gray-400 text-sm mt-2">
+        {orders.length > 0 ? `${orders.length} pedidos carregados` : 'Conectando ao servidor...'}
+      </span>
     </div>
-  );
+  </div>
+);
+
+// Estilos CSS para animações e responsividade
+const styles = `
+  @media print {
+    @page {
+      size: landscape;
+      margin: 10mm;
+    }
+    body {
+      font-size: 11pt;
+      line-height: 1.3;
+    }
+    .print\\:hidden {
+      display: none !important;
+    }
+    .print\\:shadow-none {
+      box-shadow: none !important;
+    }
+    .print\\:border-none {
+      border: none !important;
+    }
+    table {
+      font-size: 10pt;
+    }
+    th, td {
+      padding: 4px 8px !important;
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-out forwards;
+  }
+  
+  /* Scroll suave para tabelas responsivas */
+  .overflow-x-auto {
+    scrollbar-width: thin;
+    scrollbar-color: #CBD5E0 #F7FAFC;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar {
+    height: 6px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-track {
+    background: #F7FAFC;
+    border-radius: 3px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-thumb {
+    background: #CBD5E0;
+    border-radius: 3px;
+  }
+  
+  .overflow-x-auto::-webkit-scrollbar-thumb:hover {
+    background: #A0AEC0;
+  }
+  
+  /* Melhorias na responsividade */
+  @media (max-width: 768px) {
+    .grid-cols-2 {
+      grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+    
+    .lg\\:grid-cols-4 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    
+    .lg\\:grid-cols-8 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+  
+  /* Hover effects aprimorados */
+  .group:hover .group-hover\\:visible {
+    visibility: visible;
+  }
+  
+  .group .group-hover\\:visible {
+    visibility: hidden;
+  }
+  
+  /* Animações suaves para filtros */
+  .transition-all {
+    transition: all 0.2s ease-in-out;
+  }
+  
+  /* Cores personalizadas para urgência */
+  .bg-gradient-to-r {
+    background-image: linear-gradient(to right, var(--tw-gradient-stops));
+  }
+`;
+
+// Injetar estilos no componente
+if (typeof document !== 'undefined') {
+  const styleElement = document.createElement('style');
+  styleElement.textContent = styles;
+  if (!document.head.querySelector('style[data-orders-styles]')) {
+    styleElement.setAttribute('data-orders-styles', 'true');
+    document.head.appendChild(styleElement);
+  }
 }
