@@ -95,44 +95,59 @@ window.addEventListener('offline', () => {
   disableNetwork(db).catch(console.error);
 });
 
-// Utilitário para retry de operações com problemas de conectividade
-const withRetry = async <T>(
+// Função melhorada para operações com retry
+export const firestoreOperationWithRetry = async <T>(
   operation: () => Promise<T>,
-  maxRetries: number = 3,
-  delay: number = 1000
+  operationName: string = 'operation'
 ): Promise<T> => {
+  const maxRetries = 3;
   let lastError: Error;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await operation();
+      console.log(`🔄 Attempting ${operationName} (${attempt}/${maxRetries})`);
+      const result = await operation();
+      console.log(`✅ ${operationName} completed successfully`);
+      return result;
     } catch (error: any) {
       lastError = error;
       
-      console.log(`Attempt ${attempt} failed:`, error.code, error.message);
+      console.error(`❌ ${operationName} failed (attempt ${attempt}):`, {
+        code: error.code,
+        message: error.message,
+        details: error
+      });
       
-      // Não fazer retry para erros de permissão ou dados inválidos
-      if (
-        error.code === 'permission-denied' ||
-        error.code === 'invalid-argument' ||
-        error.code === 'not-found' ||
-        error.code === 'already-exists'
-      ) {
+      // Não fazer retry para erros específicos
+      const noRetryErrors = [
+        'permission-denied',
+        'invalid-argument', 
+        'not-found',
+        'already-exists',
+        'unauthenticated'
+      ];
+      
+      if (noRetryErrors.includes(error.code)) {
+        console.error(`🚫 No retry for error: ${error.code}`);
         throw error;
       }
       
       // Para erros de conectividade, fazer retry
-      if (
-        error.code === 'unavailable' ||
-        error.code === 'deadline-exceeded' ||
-        error.code === 'cancelled' ||
-        error.message.includes('QUIC') ||
-        error.message.includes('network') ||
-        error.message.includes('fetch')
-      ) {
+      const retryableErrors = [
+        'unavailable',
+        'deadline-exceeded',
+        'cancelled',
+        'aborted'
+      ];
+      
+      if (retryableErrors.includes(error.code) || 
+          error.message.includes('network') ||
+          error.message.includes('fetch') ||
+          error.message.includes('QUIC')) {
+        
         if (attempt < maxRetries) {
-          const waitTime = delay * Math.pow(2, attempt - 1); // Exponential backoff
-          console.warn(`🔄 Retry attempt ${attempt}/${maxRetries} after ${waitTime}ms`);
+          const waitTime = 1000 * Math.pow(2, attempt - 1);
+          console.warn(`⏳ Waiting ${waitTime}ms before retry...`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
           continue;
         }
@@ -145,9 +160,18 @@ const withRetry = async <T>(
   throw lastError!;
 };
 
+// Utilitário para retry de operações com problemas de conectividade (mantido para compatibilidade)
+const withRetry = async <T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> => {
+  return firestoreOperationWithRetry(operation, 'legacy-retry-operation');
+};
+
 // Utilitário para operações Firestore com retry automático
 const firestoreOperation = {
-  withRetry: <T>(operation: () => Promise<T>) => withRetry(operation, 3, 1000)
+  withRetry: <T>(operation: () => Promise<T>) => firestoreOperationWithRetry(operation, 'firestore-operation')
 };
 
 // Função para verificar a saúde da conexão
@@ -209,18 +233,101 @@ if (typeof window !== 'undefined') {
   }, 1000);
 }
 
-// Helper function to get company-specific collection path
+// Helper function to get company-specific collection path - VERSÃO CORRIGIDA
 export const getCompanyCollection = (collectionName: string, companyId?: string) => {
-  // Obter companyId do parâmetro ou do localStorage, mas NÃO do authStore
-  const finalCompanyId = companyId || localStorage.getItem('companyId') || 'mecald';
+  // Obter companyId de forma mais robusta
+  const finalCompanyId = companyId || 
+                        localStorage.getItem('companyId') || 
+                        sessionStorage.getItem('companyId') || 
+                        'mecald';
   
   if (!finalCompanyId) {
     console.error('Company ID is not available when trying to access collection:', collectionName);
-    return `invalid/company/collection/${collectionName}`;
+    throw new Error(`Company ID is required for collection: ${collectionName}`);
   }
   
-  console.log(`Accessing collection: companies/${finalCompanyId}/${collectionName}`);
-  return `companies/${finalCompanyId}/${collectionName}`;
+  const collectionPath = `companies/${finalCompanyId}/${collectionName}`;
+  console.log(`✅ Accessing collection: ${collectionPath}`);
+  return collectionPath;
+};
+
+// Função para validar dados antes de salvar
+export const validateOrderData = (orderData: any): string[] => {
+  const errors: string[] = [];
+  
+  if (!orderData) {
+    errors.push('Order data is required');
+    return errors;
+  }
+  
+  // Validações obrigatórias
+  if (!orderData.customerName && !orderData.customerId) {
+    errors.push('Customer information is required');
+  }
+  
+  if (!orderData.project) {
+    errors.push('Project name is required');
+  }
+  
+  if (!orderData.orderNumber) {
+    errors.push('Order number is required');
+  }
+  
+  // Validar items se existirem
+  if (orderData.items && Array.isArray(orderData.items)) {
+    orderData.items.forEach((item: any, index: number) => {
+      if (!item.code) {
+        errors.push(`Item ${index + 1}: Code is required`);
+      }
+      if (!item.description) {
+        errors.push(`Item ${index + 1}: Description is required`);
+      }
+      if (typeof item.quantity !== 'number' || item.quantity <= 0) {
+        errors.push(`Item ${index + 1}: Valid quantity is required`);
+      }
+      if (typeof item.weight !== 'number' || item.weight < 0) {
+        errors.push(`Item ${index + 1}: Valid weight is required`);
+      }
+    });
+  }
+  
+  return errors;
+};
+
+// Função para sanitizar dados antes de salvar
+export const sanitizeOrderData = (orderData: any): any => {
+  const sanitized = { ...orderData };
+  
+  // Remover campos undefined ou null desnecessários
+  Object.keys(sanitized).forEach(key => {
+    if (sanitized[key] === undefined) {
+      delete sanitized[key];
+    }
+  });
+  
+  // Garantir que items seja um array válido
+  if (sanitized.items && Array.isArray(sanitized.items)) {
+    sanitized.items = sanitized.items.map((item: any) => ({
+      ...item,
+      id: item.id || `item-${Date.now()}-${Math.random()}`,
+      quantity: parseFloat(item.quantity) || 1,
+      weight: parseFloat(item.weight) || 0,
+      progress: parseFloat(item.progress) || 0,
+      overallProgress: parseFloat(item.overallProgress) || parseFloat(item.progress) || 0,
+      itemNumber: parseInt(item.itemNumber) || 1
+    }));
+  } else {
+    sanitized.items = [];
+  }
+  
+  // Adicionar timestamps
+  const now = new Date();
+  if (!sanitized.createdAt) {
+    sanitized.createdAt = now;
+  }
+  sanitized.updatedAt = now;
+  
+  return sanitized;
 };
 
 // Função auxiliar para debug de dados
