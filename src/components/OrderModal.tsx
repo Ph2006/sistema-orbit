@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Save, Plus, Trash2, Calendar, User, FileText, Package, Edit3, BarChart3, ExternalLink, Folder, Upload, Download, Eye, Search, Filter, SortAsc, SortDesc, Copy, RefreshCw, AlertCircle, CheckCircle, Printer } from 'lucide-react';
+import { X, Save, Plus, Trash2, Calendar, User, FileText, Package, Edit3, BarChart3, ExternalLink, Folder, Upload, Download, Eye, Search, Filter, SortAsc, SortDesc, Copy, RefreshCw, AlertCircle, Check, Printer } from 'lucide-react';
 import { useOrderStore } from '../store/orderStore';
 import { useCustomerStore } from '../store/customerStore';
 import { format } from 'date-fns';
@@ -277,165 +277,6 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onSave, onClose }) => {
   );
 };
 
-// Componente ItemProgressModal e RomaneioModal: não precisam de alteração, copie do seu código original
-
-// ... (copiar ItemProgressModal e RomaneioModal do seu arquivo original aqui) ...
-
-export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalProps) {
-  const { addOrder, updateOrder, loading } = useOrderStore();
-  const { customers, loadCustomers } = useCustomerStore();
-  
-  const [formData, setFormData] = useState<Order>({
-    customerId: '',
-    customerName: '',
-    project: '',
-    orderNumber: '',
-    internalOS: '',
-    startDate: '',
-    deliveryDate: '',
-    completionDate: '',
-    status: 'in-progress',
-    observations: '',
-    items: [] as OrderItem[],
-    googleDriveLink: '',
-    value: 0,
-    priority: 'medium'
-  });
-
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<'details' | 'items' | 'documents'>('details');
-  const [itemsFilter, setItemsFilter] = useState('');
-  const [itemsSortField, setItemsSortField] = useState<'itemNumber' | 'code' | 'description' | 'progress'>('itemNumber');
-  const [itemsSortOrder, setItemsSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [showItemModal, setShowItemModal] = useState(false);
-  const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
-  const [showProgressModal, setShowProgressModal] = useState(false);
-  const [progressItem, setProgressItem] = useState<OrderItem | null>(null);
-  const [showRomaneioModal, setShowRomaneioModal] = useState(false);
-
-  // Log para monitorar mudanças no formData
-  useEffect(() => {
-    console.log("FormData changed - items with weights:", formData.items?.map(item => ({
-      code: item.code,
-      weight: item.weight,
-      type: typeof item.weight
-    })));
-  }, [formData.items]);
-
-  useEffect(() => {
-    if (isOpen) {
-      try {
-        loadCustomers();
-      } catch (error) {
-        console.error("Error loading customers:", error);
-      }
-    }
-  }, [isOpen, loadCustomers]);
-
-  useEffect(() => {
-    if (mode === 'edit' && order) {
-      const formatDateField = (dateString: string | undefined | null) => {
-        if (!dateString) return '';
-        try {
-          return format(new Date(dateString), 'yyyy-MM-dd');
-        } catch (error) {
-          console.error("Error formatting date:", dateString, error);
-          return '';
-        }
-      };
-
-      const processedItems = Array.isArray(order.items)
-        ? order.items.map((item, index) => {
-            let itemWeight = 0;
-            if (typeof item.weight === 'number') {
-              itemWeight = item.weight;
-            } else if (typeof item.weight === 'string') {
-              const parsedWeight = parseFloat(item.weight.replace(',', '.').trim());
-              itemWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
-            } else if (item.weight == null) {
-              itemWeight = 0;
-            }
-
-            let itemQuantity = 1;
-            if (typeof item.quantity === 'number') {
-              itemQuantity = item.quantity;
-            } else if (typeof item.quantity === 'string') {
-              const parsedQuantity = parseFloat(item.quantity.replace(',', '.').trim());
-              itemQuantity = isNaN(parsedQuantity) ? 1 : parsedQuantity;
-            } else if (item.quantity == null) {
-              itemQuantity = 1;
-            }
-
-            let itemProgress = 0;
-            if (typeof item.progress === 'number') {
-              itemProgress = item.progress;
-            } else if (typeof item.overallProgress === 'number') {
-              itemProgress = item.overallProgress;
-            }
-
-            return {
-              id: item.id || `item-${index}`,
-              code: item.code || '',
-              description: item.description || '',
-              quantity: itemQuantity,
-              unit: item.unit || 'un',
-              weight: itemWeight,
-              progress: itemProgress,
-              overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : itemProgress,
-              itemNumber: item.itemNumber || (index + 1),
-              notes: item.notes || '',
-              priority: item.priority || 'medium',
-              estimatedDays: typeof item.estimatedDays === 'number'
-                ? item.estimatedDays
-                : 1,
-              startDate: item.startDate || '',
-              endDate: item.endDate || '',
-              responsible: item.responsible || '',
-              stagePlanning: item.stagePlanning || {}
-            };
-          })
-        : [];
-
-      setFormData({
-        customerId: order.customerId || '',
-        customerName: order.customerName || order.customer || '',
-        project: order.project || order.projectName || '',
-        orderNumber: order.orderNumber || '',
-        internalOS: order.internalOS || order.internalOrderNumber || order.serviceOrder || '',
-        startDate: formatDateField(order.startDate),
-        deliveryDate: formatDateField(order.deliveryDate),
-        completionDate: formatDateField(order.completionDate),
-        status: order.status || 'in-progress',
-        observations: order.observations || order.notes || '',
-        items: processedItems,
-        googleDriveLink: order.googleDriveLink || '',
-        value: order.value || 0,
-        priority: order.priority || 'medium'
-      });
-    } else if (mode === 'create') {
-      setFormData({
-        customerId: '',
-        customerName: '',
-        project: '',
-        orderNumber: '',
-        internalOS: '',
-        startDate: '',
-        deliveryDate: '',
-        completionDate: '',
-        status: 'in-progress',
-        observations: '',
-        items: [],
-        googleDriveLink: '',
-        value: 0,
-        priority: 'medium'
-      });
-    }
-  }, [mode, order, isOpen, customers]);
-
-  // ...restante do componente permanece igual ao seu código original (funções, JSX, etc)
-  // Por motivos de espaço, mantenha todo o restante do seu componente igual ao original.
-}
 // Componente ItemProgressModal
 const ItemProgressModal: React.FC<{
   item: OrderItem;
@@ -797,7 +638,157 @@ const RomaneioModal: React.FC<{
 };
 
 export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalProps) {
-  // ... trecho existente (definição de estados e efeitos) ...
+  const { addOrder, updateOrder, loading } = useOrderStore();
+  const { customers, loadCustomers } = useCustomerStore();
+  
+  const [formData, setFormData] = useState<Order>({
+    customerId: '',
+    customerName: '',
+    project: '',
+    orderNumber: '',
+    internalOS: '',
+    startDate: '',
+    deliveryDate: '',
+    completionDate: '',
+    status: 'in-progress',
+    observations: '',
+    items: [] as OrderItem[],
+    googleDriveLink: '',
+    value: 0,
+    priority: 'medium'
+  });
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<'details' | 'items' | 'documents'>('details');
+  const [itemsFilter, setItemsFilter] = useState('');
+  const [itemsSortField, setItemsSortField] = useState<'itemNumber' | 'code' | 'description' | 'progress'>('itemNumber');
+  const [itemsSortOrder, setItemsSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [showItemModal, setShowItemModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<OrderItem | null>(null);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [progressItem, setProgressItem] = useState<OrderItem | null>(null);
+  const [showRomaneioModal, setShowRomaneioModal] = useState(false);
+  const [localLoading, setLocalLoading] = useState(false);
+
+  // Log para monitorar mudanças no formData
+  useEffect(() => {
+    console.log("FormData changed - items with weights:", formData.items?.map(item => ({
+      code: item.code,
+      weight: item.weight,
+      type: typeof item.weight
+    })));
+  }, [formData.items]);
+
+  useEffect(() => {
+    if (isOpen) {
+      try {
+        loadCustomers();
+      } catch (error) {
+        console.error("Error loading customers:", error);
+      }
+    }
+  }, [isOpen, loadCustomers]);
+
+  useEffect(() => {
+    if (mode === 'edit' && order) {
+      const formatDateField = (dateString: string | undefined | null) => {
+        if (!dateString) return '';
+        try {
+          return format(new Date(dateString), 'yyyy-MM-dd');
+        } catch (error) {
+          console.error("Error formatting date:", dateString, error);
+          return '';
+        }
+      };
+
+      const processedItems = Array.isArray(order.items)
+        ? order.items.map((item, index) => {
+            let itemWeight = 0;
+            if (typeof item.weight === 'number') {
+              itemWeight = item.weight;
+            } else if (typeof item.weight === 'string') {
+              const parsedWeight = parseFloat(item.weight.replace(',', '.').trim());
+              itemWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
+            } else if (item.weight == null) {
+              itemWeight = 0;
+            }
+
+            let itemQuantity = 1;
+            if (typeof item.quantity === 'number') {
+              itemQuantity = item.quantity;
+            } else if (typeof item.quantity === 'string') {
+              const parsedQuantity = parseFloat(item.quantity.replace(',', '.').trim());
+              itemQuantity = isNaN(parsedQuantity) ? 1 : parsedQuantity;
+            } else if (item.quantity == null) {
+              itemQuantity = 1;
+            }
+
+            let itemProgress = 0;
+            if (typeof item.progress === 'number') {
+              itemProgress = item.progress;
+            } else if (typeof item.overallProgress === 'number') {
+              itemProgress = item.overallProgress;
+            }
+
+            return {
+              id: item.id || `item-${index}`,
+              code: item.code || '',
+              description: item.description || '',
+              quantity: itemQuantity,
+              unit: item.unit || 'un',
+              weight: itemWeight,
+              progress: itemProgress,
+              overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : itemProgress,
+              itemNumber: item.itemNumber || (index + 1),
+              notes: item.notes || '',
+              priority: item.priority || 'medium',
+              estimatedDays: typeof item.estimatedDays === 'number'
+                ? item.estimatedDays
+                : 1,
+              startDate: item.startDate || '',
+              endDate: item.endDate || '',
+              responsible: item.responsible || '',
+              stagePlanning: item.stagePlanning || {}
+            };
+          })
+        : [];
+
+      setFormData({
+        customerId: order.customerId || '',
+        customerName: order.customerName || order.customer || '',
+        project: order.project || order.projectName || '',
+        orderNumber: order.orderNumber || '',
+        internalOS: order.internalOS || order.internalOrderNumber || order.serviceOrder || '',
+        startDate: formatDateField(order.startDate),
+        deliveryDate: formatDateField(order.deliveryDate),
+        completionDate: formatDateField(order.completionDate),
+        status: order.status || 'in-progress',
+        observations: order.observations || order.notes || '',
+        items: processedItems,
+        googleDriveLink: order.googleDriveLink || '',
+        value: order.value || 0,
+        priority: order.priority || 'medium'
+      });
+    } else if (mode === 'create') {
+      setFormData({
+        customerId: '',
+        customerName: '',
+        project: '',
+        orderNumber: '',
+        internalOS: '',
+        startDate: '',
+        deliveryDate: '',
+        completionDate: '',
+        status: 'in-progress',
+        observations: '',
+        items: [],
+        googleDriveLink: '',
+        value: 0,
+        priority: 'medium'
+      });
+    }
+  }, [mode, order, isOpen, customers]);
 
   // Calculando estatísticas para exibição
   const orderStats = useMemo(() => {
@@ -828,28 +819,140 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
     };
   }, [formData.items]);
 
-  // Função para validar o formulário
+  // Função de validação melhorada
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
     
+    // Validações obrigatórias
     if (!formData.customerName && !formData.customerId) {
       newErrors.customer = 'Selecione um cliente';
     }
     
-    if (!formData.project) {
+    if (!formData.project?.trim()) {
       newErrors.project = 'Informe o nome do projeto';
     }
     
-    if (!formData.orderNumber) {
+    if (!formData.orderNumber?.trim()) {
       newErrors.orderNumber = 'Informe o número do pedido';
     }
     
+    // Validar items
     if (!formData.items?.length) {
       newErrors.items = 'Adicione pelo menos um item ao pedido';
+    } else {
+      // Validar cada item
+      const itemErrors: string[] = [];
+      formData.items.forEach((item, index) => {
+        if (!item.code?.trim()) {
+          itemErrors.push(`Item ${index + 1}: Código é obrigatório`);
+        }
+        if (!item.description?.trim()) {
+          itemErrors.push(`Item ${index + 1}: Descrição é obrigatória`);
+        }
+        if (!item.quantity || item.quantity <= 0) {
+          itemErrors.push(`Item ${index + 1}: Quantidade deve ser maior que zero`);
+        }
+        if (typeof item.weight !== 'number' || item.weight < 0) {
+          itemErrors.push(`Item ${index + 1}: Peso deve ser um número válido`);
+        }
+      });
+      
+      if (itemErrors.length > 0) {
+        newErrors.items = itemErrors.join('; ');
+      }
     }
 
+    console.log('Validation errors:', newErrors);
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  // Salvar pedido - FUNÇÃO CORRIGIDA
+  const handleSave = async () => {
+    console.log('🔄 Starting save process...');
+    console.log('FormData before validation:', {
+      mode,
+      hasItems: formData.items?.length || 0,
+      customerName: formData.customerName,
+      project: formData.project,
+      orderNumber: formData.orderNumber
+    });
+    
+    if (!validateForm()) {
+      console.error('❌ Validation failed');
+      return;
+    }
+    
+    try {
+      setLocalLoading(true);
+      
+      // Preparar dados para salvamento
+      const orderData = {
+        ...formData,
+        // Garantir que os campos obrigatórios estejam preenchidos
+        customerName: formData.customerName || '',
+        project: formData.project || '',
+        orderNumber: formData.orderNumber || '',
+        status: formData.status || 'in-progress',
+        items: formData.items?.map((item, index) => ({
+          ...item,
+          id: item.id || `item-${Date.now()}-${index}`,
+          itemNumber: item.itemNumber || (index + 1),
+          quantity: typeof item.quantity === 'number' ? item.quantity : parseFloat(item.quantity as any) || 1,
+          weight: typeof item.weight === 'number' ? item.weight : parseFloat(item.weight as any) || 0,
+          progress: typeof item.progress === 'number' ? item.progress : 0,
+          overallProgress: typeof item.overallProgress === 'number' ? item.overallProgress : (typeof item.progress === 'number' ? item.progress : 0)
+        })) || []
+      };
+      
+      console.log('💾 Saving order data:', {
+        mode,
+        orderId: order?.id,
+        itemsCount: orderData.items.length,
+        customer: orderData.customerName,
+        project: orderData.project
+      });
+      
+      if (mode === 'create') {
+        // Remover ID para garantir que seja um novo registro
+        const { id, createdAt, updatedAt, ...newOrderData } = orderData;
+        await addOrder(newOrderData);
+        console.log('✅ Order created successfully');
+      } else if (mode === 'edit' && order?.id) {
+        // Manter o ID original para update
+        const updateData = { ...orderData, id: order.id };
+        await updateOrder(updateData);
+        console.log('✅ Order updated successfully');
+      } else {
+        throw new Error('Invalid operation mode or missing order ID for edit');
+      }
+      
+      // Fechar modal apenas se salvamento foi bem-sucedido
+      onClose();
+      
+    } catch (error: any) {
+      console.error('❌ Error saving order:', error);
+      
+      // Exibir erro específico baseado no tipo
+      let errorMessage = 'Erro ao salvar o pedido. ';
+      
+      if (error.message.includes('permission-denied')) {
+        errorMessage += 'Você não tem permissão para realizar esta operação.';
+      } else if (error.message.includes('network')) {
+        errorMessage += 'Problema de conexão. Verifique sua internet e tente novamente.';
+      } else if (error.message.includes('Validation failed')) {
+        errorMessage += 'Dados inválidos: ' + error.message.replace('Validation failed: ', '');
+      } else {
+        errorMessage += error.message || 'Tente novamente em alguns instantes.';
+      }
+      
+      // Você pode usar um toast/notification ou alert
+      alert(errorMessage);
+      
+      // Não fechar o modal em caso de erro para permitir correções
+    } finally {
+      setLocalLoading(false);
+    }
   };
 
   // Gerenciar itens
@@ -928,29 +1031,6 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
     
     return items;
   }, [formData.items, itemsFilter, itemsSortField, itemsSortOrder]);
-
-  // Salvar pedido
-  const handleSave = async () => {
-    if (!validateForm()) return;
-    
-    try {
-      // Limpar o ID no modo create para garantir que seja um novo registro
-      const orderData = mode === 'create' 
-        ? { ...formData, id: undefined } 
-        : { ...formData, id: order?.id };
-      
-      if (mode === 'create') {
-        await addOrder(orderData);
-      } else if (mode === 'edit') {
-        await updateOrder(orderData);
-      }
-      
-      onClose();
-    } catch (error) {
-      console.error("Error saving order:", error);
-      alert('Erro ao salvar o pedido. Por favor, tente novamente.');
-    }
-  };
 
   // Verificar se o modal deve ser exibido
   if (!isOpen) return null;
@@ -1292,7 +1372,7 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
                       </select>
                     </div>
                     
-                    <button
+                                        <button
                       onClick={() => setItemsSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
                       className="p-2 border border-gray-300 rounded-lg"
                     >
@@ -1543,10 +1623,10 @@ export default function OrderModal({ isOpen, onClose, order, mode }: OrderModalP
             {mode !== 'view' && (
               <button
                 onClick={handleSave}
-                disabled={loading}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                disabled={loading || localLoading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? (
+                {(loading || localLoading) ? (
                   <RefreshCw className="w-4 h-4 animate-spin" />
                 ) : (
                   <Save className="w-4 h-4" />
