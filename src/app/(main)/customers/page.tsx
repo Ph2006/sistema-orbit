@@ -107,19 +107,19 @@ export default function CustomersPage() {
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
       const customersList = querySnapshot.docs.map((doc) => {
-        const data = doc.data() || {};
-        // This creates a complete customer object with fallbacks for any missing fields.
+        const data = doc.data();
+        // This robust mapping ensures that even incomplete data from Firestore is handled gracefully.
         return {
           id: doc.id,
-          razaoSocial: data.razaoSocial || "",
-          nomeFantasia: data.nomeFantasia || "Cliente sem nome",
-          cnpjCpf: data.cnpjCpf || "",
-          inscricaoEstadual: data.inscricaoEstadual || "",
-          inscricaoMunicipal: data.inscricaoMunicipal || "",
-          tipoCliente: data.tipoCliente || "Pessoa Jurídica",
-          contatoPrincipal: data.contatoPrincipal || "",
-          emailComercial: data.emailComercial || "",
-          telefone: data.telefone || "",
+          razaoSocial: data.razaoSocial ?? "",
+          nomeFantasia: data.nomeFantasia ?? "Cliente sem nome",
+          cnpjCpf: data.cnpjCpf ?? "",
+          inscricaoEstadual: data.inscricaoEstadual ?? "",
+          inscricaoMunicipal: data.inscricaoMunicipal ?? "",
+          tipoCliente: (data.tipoCliente === "Pessoa Jurídica" || data.tipoCliente === "Pessoa Física") ? data.tipoCliente : "Pessoa Jurídica",
+          contatoPrincipal: data.contatoPrincipal ?? "",
+          emailComercial: data.emailComercial ?? "",
+          telefone: data.telefone ?? "",
         } as Customer;
       });
       setCustomers(customersList);
@@ -417,5 +417,3 @@ export default function CustomersPage() {
     </div>
   );
 }
-
-    
