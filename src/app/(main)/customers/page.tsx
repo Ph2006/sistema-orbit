@@ -73,7 +73,7 @@ export default function CustomersPage() {
   const fetchCustomers = async () => {
     setIsLoading(true);
     try {
-      const querySnapshot = await getDocs(collection(db, "customers"));
+      const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
       const customersList = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
@@ -97,7 +97,7 @@ export default function CustomersPage() {
 
   const onSubmit = async (values: z.infer<typeof customerSchema>) => {
     try {
-      await addDoc(collection(db, "customers"), values);
+      await addDoc(collection(db, "companies", "mecald", "customers"), values);
       toast({
         title: "Cliente adicionado!",
         description: "O novo cliente foi adicionado com sucesso.",
