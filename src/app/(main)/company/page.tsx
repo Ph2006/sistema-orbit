@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const companySchema = z.object({
   nomeFantasia: z.string().min(3, "O nome fantasia é obrigatório."),
+  responsavel: z.string().min(3, "O nome do responsável é obrigatório."),
   cnpj: z.string().min(14, "O CNPJ deve ser válido."),
   inscricaoEstadual: z.string().optional(),
   email: z.string().email("O e-mail é inválido."),
@@ -39,6 +40,7 @@ export default function CompanyPage() {
     resolver: zodResolver(companySchema),
     defaultValues: {
       nomeFantasia: "",
+      responsavel: "",
       cnpj: "",
       inscricaoEstadual: "",
       email: "",
@@ -97,6 +99,14 @@ export default function CompanyPage() {
   };
 
   const onSubmit = async (values: z.infer<typeof companySchema>) => {
+    if (!user) {
+        toast({
+            variant: "destructive",
+            title: "Erro de Autenticação",
+            description: "Você precisa estar logado para salvar as alterações.",
+        });
+        return;
+    }
     try {
       const companyRef = doc(db, "companies", "mecald", "settings", "company");
       const dataToSave = {
@@ -185,6 +195,19 @@ export default function CompanyPage() {
                         <FormLabel>Nome Fantasia</FormLabel>
                         <FormControl>
                           <Input placeholder="Nome comercial da empresa" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="responsavel"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Responsável</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Nome do responsável pela empresa" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
