@@ -66,8 +66,8 @@ const customerSchema = z.object({
   razaoSocial: z.string().min(3, { message: "A razão social é obrigatória." }),
   nomeFantasia: z.string().min(3, { message: "O nome fantasia é obrigatório." }),
   cnpjCpf: z.string().min(11, { message: "O CNPJ/CPF deve ser válido." }),
-  inscricaoEstadual: z.string().optional().or(z.literal('')),
-  inscricaoMunicipal: z.string().optional().or(z.literal('')),
+  inscricaoEstadual: z.string().optional(),
+  inscricaoMunicipal: z.string().optional(),
   tipoCliente: z.enum(["Pessoa Jurídica", "Pessoa Física"], {
     required_error: "Selecione o tipo de cliente.",
   }),
@@ -106,22 +106,22 @@ export default function CustomersPage() {
     setIsLoading(true);
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
-      const customersList = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        // Fallback for old data that might not match the new schema
+      const customersList = querySnapshot.docs.map((doc) => {
+        const data = doc.data() || {};
+        // This creates a complete customer object with fallbacks for any missing fields.
         return {
           id: doc.id,
-          razaoSocial: data.razaoSocial || '',
-          nomeFantasia: data.nomeFantasia || 'Cliente sem nome',
-          cnpjCpf: data.cnpjCpf || '',
-          inscricaoEstadual: data.inscricaoEstadual || '',
-          inscricaoMunicipal: data.inscricaoMunicipal || '',
-          tipoCliente: data.tipoCliente || 'Pessoa Jurídica',
-          contatoPrincipal: data.contatoPrincipal || '',
-          emailComercial: data.emailComercial || '',
-          telefone: data.telefone || '',
-        };
-      }) as Customer[];
+          razaoSocial: data.razaoSocial || "",
+          nomeFantasia: data.nomeFantasia || "Cliente sem nome",
+          cnpjCpf: data.cnpjCpf || "",
+          inscricaoEstadual: data.inscricaoEstadual || "",
+          inscricaoMunicipal: data.inscricaoMunicipal || "",
+          tipoCliente: data.tipoCliente || "Pessoa Jurídica",
+          contatoPrincipal: data.contatoPrincipal || "",
+          emailComercial: data.emailComercial || "",
+          telefone: data.telefone || "",
+        } as Customer;
+      });
       setCustomers(customersList);
     } catch (error: any) {
       console.error("Detailed error fetching customers: ", error);
@@ -140,10 +140,10 @@ export default function CustomersPage() {
   };
 
   useEffect(() => {
-    if (user) {
+    if (!authLoading && user) {
       fetchCustomers();
     }
-  }, [user]);
+  }, [user, authLoading]);
 
   const onSubmit = async (values: z.infer<typeof customerSchema>) => {
     try {
@@ -310,7 +310,7 @@ export default function CustomersPage() {
                         <FormItem>
                           <FormLabel>Inscrição Estadual (Opcional)</FormLabel>
                           <FormControl>
-                            <Input placeholder="Número da Inscrição Estadual" {...field} />
+                            <Input placeholder="Número da Inscrição Estadual" {...field} value={field.value ?? ''} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -323,7 +323,7 @@ export default function CustomersPage() {
                         <FormItem>
                           <FormLabel>Inscrição Municipal (Opcional)</FormLabel>
                           <FormControl>
-                            <Input placeholder="Número da Inscrição Municipal" {...field} />
+                            <Input placeholder="Número da Inscrição Municipal" {...field} value={field.value ?? ''} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
