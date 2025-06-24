@@ -29,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -103,13 +104,14 @@ export default function QuotationsPage() {
 
                 // Handle backward compatibility for items/includedServices
                 let finalItems = data.items || [];
-                if (Array.isArray(data.includedServices) && data.includedServices.length > 0) {
+                if ((!finalItems || finalItems.length === 0) && Array.isArray(data.includedServices) && data.includedServices.length > 0) {
                     finalItems = data.includedServices.map((service: string) => ({
                         description: service,
                         quantity: 1,
                         unitPrice: 0,
                     }));
                 }
+
                 if (finalItems.length === 0) {
                     finalItems.push({ description: "Nenhum item/serviço especificado", quantity: 1, unitPrice: 0 });
                 }
@@ -442,7 +444,7 @@ export default function QuotationsPage() {
             </Dialog>
 
             <Sheet open={isViewSheetOpen} onOpenChange={setIsViewSheetOpen}>
-                <SheetContent className="sm:max-w-lg">
+                <SheetContent className="w-full sm:max-w-2xl">
                     {selectedQuotation && (
                         <>
                         <SheetHeader>
@@ -451,9 +453,79 @@ export default function QuotationsPage() {
                                 Cliente: {selectedQuotation.customer.name}
                             </SheetDescription>
                         </SheetHeader>
-                        <div className="space-y-4 py-6">
-                           {/* Details here */}
-                        </div>
+                        <ScrollArea className="h-[calc(100vh-8rem)]">
+                            <div className="space-y-6 py-6 pr-6">
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Detalhes do Orçamento</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-medium text-muted-foreground">Status</span>
+                                            <Badge variant={getStatusVariant(selectedQuotation.status)}>{selectedQuotation.status}</Badge>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-medium text-muted-foreground">Data de Criação</span>
+                                            <span className="text-sm">{format(selectedQuotation.createdAt.toDate(), "dd/MM/yyyy")}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-medium text-muted-foreground">Validade</span>
+                                            <span className="text-sm">{format(selectedQuotation.validity, "dd/MM/yyyy")}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-medium text-muted-foreground">Cond. Pagamento</span>
+                                            <span className="text-sm">{selectedQuotation.paymentTerms}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-medium text-muted-foreground">Prazo de Entrega</span>
+                                            <span className="text-sm">{selectedQuotation.deliveryTime}</span>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                
+                                <Card>
+                                    <CardHeader><CardTitle>Itens e Valores</CardTitle></CardHeader>
+                                    <CardContent>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Descrição</TableHead>
+                                                    <TableHead className="text-center w-[60px]">Qtd.</TableHead>
+                                                    <TableHead className="text-right w-[120px]">Valor Unit.</TableHead>
+                                                    <TableHead className="text-right w-[120px]">Subtotal</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {selectedQuotation.items.map((item, index) => (
+                                                    <TableRow key={index}>
+                                                        <TableCell className="font-medium">{item.description}</TableCell>
+                                                        <TableCell className="text-center">{item.quantity}</TableCell>
+                                                        <TableCell className="text-right">{item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                                                        <TableCell className="text-right">{(item.quantity * item.unitPrice).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                        <Separator className="my-4" />
+                                        <div className="flex justify-end items-center gap-4 text-lg font-bold pr-4">
+                                            <span>Total:</span>
+                                            <span>
+                                                {calculateTotal(selectedQuotation.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </span>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                {selectedQuotation.notes && (
+                                    <Card>
+                                        <CardHeader><CardTitle>Observações</CardTitle></CardHeader>
+                                        <CardContent>
+                                            <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedQuotation.notes}</p>
+                                        </CardContent>
+                                    </Card>
+                                )}
+                            </div>
+                        </ScrollArea>
                         </>
                     )}
                 </SheetContent>
