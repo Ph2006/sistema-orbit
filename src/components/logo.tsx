@@ -24,15 +24,25 @@ export function OrbitLogo(props: SVGProps<SVGSVGElement>) {
         strokeWidth="2"
         fill="none"
       />
-      <path
-        d="M 50,5 A 45,45 0 0 1 95,50"
-        stroke="url(#orbitGradient)"
-        strokeWidth="4"
-        fill="none"
-        strokeLinecap="round"
-      />
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 50 50"
+          to="360 50 50"
+          dur="10s"
+          repeatCount="indefinite"
+        />
+        <path
+          d="M 50,5 A 45,45 0 0 1 95,50"
+          stroke="url(#orbitGradient)"
+          strokeWidth="4"
+          fill="none"
+          strokeLinecap="round"
+        />
+        <circle cx="95" cy="50" r="6" fill="hsl(var(--accent))" />
+      </g>
       <circle cx="50" cy="50" r="15" fill="hsl(var(--primary))" />
-      <circle cx="95" cy="50" r="6" fill="hsl(var(--accent))" />
     </svg>
   );
 }
