@@ -108,17 +108,18 @@ export default function CustomersPage() {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
       const customersList = querySnapshot.docs.map((doc) => {
         const data = doc.data();
+        // Correctly map legacy (e.g., 'name') and new (e.g., 'razaoSocial') fields
         return {
           id: doc.id,
-          razaoSocial: data.razaoSocial ?? "",
-          nomeFantasia: data.nomeFantasia || data.razaoSocial || "Cliente sem nome",
-          cnpjCpf: data.cnpjCpf ?? "",
-          inscricaoEstadual: data.inscricaoEstadual ?? "",
-          inscricaoMunicipal: data.inscricaoMunicipal ?? "",
-          tipoCliente: (data.tipoCliente === "Pessoa Jurídica" || data.tipoCliente === "Pessoa Física") ? data.tipoCliente : "Pessoa Jurídica",
-          contatoPrincipal: data.contatoPrincipal ?? "",
-          emailComercial: data.emailComercial ?? "",
-          telefone: data.telefone ?? "",
+          razaoSocial: data.razaoSocial || data.name || "Razão Social não informada",
+          nomeFantasia: data.nomeFantasia || data.name || "Cliente sem nome",
+          cnpjCpf: data.cnpjCpf || data.cnpj || "",
+          inscricaoEstadual: data.inscricaoEstadual || "",
+          inscricaoMunicipal: data.inscricaoMunicipal || "",
+          tipoCliente: data.tipoCliente || "Pessoa Jurídica",
+          contatoPrincipal: data.contatoPrincipal || data.contactPerson || "",
+          emailComercial: data.emailComercial || data.email || "",
+          telefone: data.telefone || data.phone || "",
         } as Customer;
       });
       setCustomers(customersList);
