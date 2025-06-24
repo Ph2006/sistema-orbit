@@ -106,10 +106,22 @@ export default function CustomersPage() {
     setIsLoading(true);
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
-      const customersList = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Customer[];
+      const customersList = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        // Fallback for old data that might not match the new schema
+        return {
+          id: doc.id,
+          razaoSocial: data.razaoSocial || '',
+          nomeFantasia: data.nomeFantasia || 'Cliente sem nome',
+          cnpjCpf: data.cnpjCpf || '',
+          inscricaoEstadual: data.inscricaoEstadual || '',
+          inscricaoMunicipal: data.inscricaoMunicipal || '',
+          tipoCliente: data.tipoCliente || 'Pessoa Jurídica',
+          contatoPrincipal: data.contatoPrincipal || '',
+          emailComercial: data.emailComercial || '',
+          telefone: data.telefone || '',
+        };
+      }) as Customer[];
       setCustomers(customersList);
     } catch (error: any) {
       console.error("Detailed error fetching customers: ", error);
