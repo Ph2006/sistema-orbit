@@ -1,4 +1,7 @@
 "use client"
+import { useEffect } from "react";
+import { signInAnonymously } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import {
   SidebarProvider,
   Sidebar,
@@ -43,6 +46,19 @@ export default function MainLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+
+  useEffect(() => {
+    const signIn = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (error) {
+        console.error("Error signing in anonymously: ", error);
+      }
+    };
+    if (!auth.currentUser) {
+      signIn();
+    }
+  }, []);
 
   return (
     <SidebarProvider>
