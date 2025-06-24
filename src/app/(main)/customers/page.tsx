@@ -73,6 +73,7 @@ export default function CustomersPage() {
   });
 
   const fetchCustomers = async () => {
+    if (!user) return;
     setIsLoading(true);
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
@@ -81,12 +82,16 @@ export default function CustomersPage() {
         ...doc.data(),
       })) as Customer[];
       setCustomers(customersList);
-    } catch (error) {
-      console.error("Error fetching customers: ", error);
+    } catch (error: any) {
+      console.error("Detailed error fetching customers: ", error);
+      let description = "Ocorreu um erro ao buscar os dados.";
+      if (error.code === 'permission-denied') {
+        description = "Erro de permissão. Verifique as regras de segurança do seu Firestore e atualize a página.";
+      }
       toast({
         variant: "destructive",
         title: "Erro ao buscar clientes",
-        description: "Ocorreu um erro ao buscar os dados. Verifique o console para mais detalhes.",
+        description: description,
       });
     } finally {
       setIsLoading(false);
@@ -94,9 +99,7 @@ export default function CustomersPage() {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchCustomers();
-    }
+    fetchCustomers();
   }, [user]);
 
   const onSubmit = async (values: z.infer<typeof customerSchema>) => {
@@ -122,7 +125,7 @@ export default function CustomersPage() {
   const PageContent = () => {
     if (isLoading || authLoading) {
       return (
-        <div className="space-y-4">
+        <div className="space-y-4 p-4">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
@@ -158,7 +161,7 @@ export default function CustomersPage() {
     return (
       <div className="text-center text-muted-foreground py-8">
         <p>Nenhum cliente encontrado.</p>
-        <p className="text-sm">Clique em "Adicionar Cliente" para começar.</p>
+        <p className="text-sm">Você pode adicionar um novo cliente clicando no botão acima.</p>
       </div>
     );
   };
