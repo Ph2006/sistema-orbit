@@ -194,7 +194,7 @@ export default function CompanyPage() {
                       <FormItem>
                         <FormLabel>Nome Fantasia</FormLabel>
                         <FormControl>
-                          <Input placeholder="Nome comercial da empresa" {...field} />
+                          <Input placeholder="Nome comercial da empresa" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -207,7 +207,7 @@ export default function CompanyPage() {
                       <FormItem>
                         <FormLabel>Responsável</FormLabel>
                         <FormControl>
-                          <Input placeholder="Nome do responsável pela empresa" {...field} />
+                          <Input placeholder="Nome do responsável pela empresa" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -221,7 +221,7 @@ export default function CompanyPage() {
                         <FormItem>
                           <FormLabel>CNPJ</FormLabel>
                           <FormControl>
-                            <Input placeholder="00.000.000/0000-00" {...field} />
+                            <Input placeholder="00.000.000/0000-00" {...field} value={field.value ?? ''} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -249,7 +249,7 @@ export default function CompanyPage() {
                           <FormItem>
                             <FormLabel>E-mail</FormLabel>
                             <FormControl>
-                              <Input type="email" placeholder="contato@suaempresa.com" {...field} />
+                              <Input type="email" placeholder="contato@suaempresa.com" {...field} value={field.value ?? ''} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -262,7 +262,7 @@ export default function CompanyPage() {
                           <FormItem>
                             <FormLabel>Celular / WhatsApp</FormLabel>
                             <FormControl>
-                              <Input placeholder="(XX) XXXXX-XXXX" {...field} />
+                              <Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -280,6 +280,7 @@ export default function CompanyPage() {
                             placeholder="Rua, Número, Bairro, Cidade - Estado, CEP"
                             className="min-h-[100px]"
                             {...field}
+                            value={field.value ?? ''}
                           />
                         </FormControl>
                         <FormMessage />
