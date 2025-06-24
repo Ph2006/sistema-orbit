@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -35,6 +36,13 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Form,
   FormControl,
   FormField,
@@ -43,14 +51,29 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const customerSchema = z.object({
-  name: z.string().min(3, { message: "O nome deve ter pelo menos 3 caracteres." }),
-  email: z.string().email({ message: "Por favor, insira um email válido." }),
-  phone: z.string().optional(),
-  company: z.string().min(2, { message: "O nome da empresa é obrigatório." }),
+  razaoSocial: z.string().min(3, { message: "A razão social é obrigatória." }),
+  nomeFantasia: z.string().min(3, { message: "O nome fantasia é obrigatório." }),
+  cnpjCpf: z.string().min(11, { message: "O CNPJ/CPF deve ser válido." }),
+  inscricaoEstadual: z.string().optional().or(z.literal('')),
+  inscricaoMunicipal: z.string().optional().or(z.literal('')),
+  tipoCliente: z.enum(["Pessoa Jurídica", "Pessoa Física"], {
+    required_error: "Selecione o tipo de cliente.",
+  }),
+  contatoPrincipal: z.string().min(3, { message: "O nome do contato é obrigatório." }),
+  emailComercial: z.string().email({ message: "O e-mail comercial é inválido." }),
+  telefone: z.string().min(10, { message: "O telefone deve ser válido." }),
 });
 
 type Customer = z.infer<typeof customerSchema> & { id: string };
@@ -58,17 +81,23 @@ type Customer = z.infer<typeof customerSchema> & { id: string };
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isViewSheetOpen, setIsViewSheetOpen] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
 
   const form = useForm<z.infer<typeof customerSchema>>({
     resolver: zodResolver(customerSchema),
     defaultValues: {
-      name: "",
-      email: "",
-      phone: "",
-      company: "",
+      razaoSocial: "",
+      nomeFantasia: "",
+      cnpjCpf: "",
+      inscricaoEstadual: "",
+      inscricaoMunicipal: "",
+      contatoPrincipal: "",
+      emailComercial: "",
+      telefone: "",
     },
   });
 
@@ -99,7 +128,9 @@ export default function CustomersPage() {
   };
 
   useEffect(() => {
-    fetchCustomers();
+    if (user) {
+      fetchCustomers();
+    }
   }, [user]);
 
   const onSubmit = async (values: z.infer<typeof customerSchema>) => {
@@ -110,7 +141,7 @@ export default function CustomersPage() {
         description: "O novo cliente foi adicionado com sucesso.",
       });
       form.reset();
-      setIsDialogOpen(false);
+      setIsAddDialogOpen(false);
       await fetchCustomers();
     } catch (error) {
       console.error("Error adding customer: ", error);
@@ -121,7 +152,12 @@ export default function CustomersPage() {
       });
     }
   };
-  
+
+  const handleViewCustomer = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setIsViewSheetOpen(true);
+  };
+
   const PageContent = () => {
     if (isLoading || authLoading) {
       return (
@@ -138,19 +174,19 @@ export default function CustomersPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nome</TableHead>
-              <TableHead>Empresa</TableHead>
-              <TableHead>Email</TableHead>
+              <TableHead>Nome Fantasia</TableHead>
+              <TableHead>Contato</TableHead>
               <TableHead>Telefone</TableHead>
+              <TableHead>CNPJ/CPF</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {customers.map((customer) => (
-              <TableRow key={customer.id}>
-                <TableCell className="font-medium">{customer.name}</TableCell>
-                <TableCell>{customer.company}</TableCell>
-                <TableCell>{customer.email}</TableCell>
-                <TableCell>{customer.phone || "-"}</TableCell>
+              <TableRow key={customer.id} onClick={() => handleViewCustomer(customer)} className="cursor-pointer">
+                <TableCell className="font-medium">{customer.nomeFantasia}</TableCell>
+                <TableCell>{customer.contatoPrincipal}</TableCell>
+                <TableCell>{customer.telefone}</TableCell>
+                <TableCell>{customer.cnpjCpf}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -166,18 +202,25 @@ export default function CustomersPage() {
     );
   };
 
+  const DetailItem = ({ label, value }: { label: string, value?: string | null }) => (
+    <div className="grid grid-cols-[150px_1fr] items-center">
+      <span className="text-sm font-medium text-muted-foreground">{label}</span>
+      <span className="text-sm">{value || "-"}</span>
+    </div>
+  );
+
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
       <div className="flex items-center justify-between space-y-2">
         <h1 className="text-3xl font-bold tracking-tight font-headline">Clientes</h1>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <PlusCircle className="mr-2 h-4 w-4" />
               Adicionar Cliente
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Adicionar Novo Cliente</DialogTitle>
               <DialogDescription>
@@ -185,60 +228,137 @@ export default function CustomersPage() {
               </DialogDescription>
             </DialogHeader>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Nome</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Nome do cliente" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input placeholder="email@exemplo.com" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Telefone (Opcional)</FormLabel>
-                      <FormControl>
-                        <Input placeholder="(XX) XXXXX-XXXX" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="company"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Empresa</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Nome da empresa" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <DialogFooter>
+              <form onSubmit={form.handleSubmit(onSubmit)}>
+                <ScrollArea className="h-96 w-full pr-6">
+                  <div className="space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="tipoCliente"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Tipo de Cliente</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione Pessoa Física ou Jurídica" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="Pessoa Jurídica">Pessoa Jurídica</SelectItem>
+                              <SelectItem value="Pessoa Física">Pessoa Física</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="razaoSocial"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Razão Social</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Nome jurídico da empresa" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="nomeFantasia"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Nome Fantasia</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Nome comercial da empresa" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="cnpjCpf"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>CNPJ / CPF</FormLabel>
+                          <FormControl>
+                            <Input placeholder="00.000.000/0000-00" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="inscricaoEstadual"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Inscrição Estadual (Opcional)</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Número da Inscrição Estadual" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                     <FormField
+                      control={form.control}
+                      name="inscricaoMunicipal"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Inscrição Municipal (Opcional)</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Número da Inscrição Municipal" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="contatoPrincipal"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contato Principal</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Nome da pessoa de contato" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="emailComercial"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>E-mail Comercial</FormLabel>
+                          <FormControl>
+                            <Input placeholder="contato@empresa.com" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="telefone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Telefone / WhatsApp</FormLabel>
+                          <FormControl>
+                            <Input placeholder="(XX) XXXXX-XXXX" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </ScrollArea>
+                <DialogFooter className="pt-6">
                    <Button type="submit" disabled={form.formState.isSubmitting}>
                     {form.formState.isSubmitting ? "Salvando..." : "Salvar Cliente"}
                    </Button>
@@ -252,13 +372,38 @@ export default function CustomersPage() {
         <CardHeader>
           <CardTitle>Lista de Clientes</CardTitle>
           <CardDescription>
-            Aqui estão todos os clientes cadastrados no sistema.
+            Aqui estão todos os clientes cadastrados no sistema. Clique em um cliente para ver os detalhes.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <PageContent />
         </CardContent>
       </Card>
+
+      <Sheet open={isViewSheetOpen} onOpenChange={setIsViewSheetOpen}>
+        <SheetContent className="sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle className="font-headline">{selectedCustomer?.nomeFantasia}</SheetTitle>
+            <SheetDescription>
+              Detalhes completos do cliente.
+            </SheetDescription>
+          </SheetHeader>
+          {selectedCustomer && (
+            <div className="space-y-3 py-6">
+              <DetailItem label="Tipo de Cliente" value={selectedCustomer.tipoCliente} />
+              <DetailItem label="Razão Social" value={selectedCustomer.razaoSocial} />
+              <DetailItem label="CNPJ/CPF" value={selectedCustomer.cnpjCpf} />
+              <DetailItem label="Inscrição Estadual" value={selectedCustomer.inscricaoEstadual} />
+              <DetailItem label="Inscrição Municipal" value={selectedCustomer.inscricaoMunicipal} />
+              <DetailItem label="Contato Principal" value={selectedCustomer.contatoPrincipal} />
+              <DetailItem label="E-mail Comercial" value={selectedCustomer.emailComercial} />
+              <DetailItem label="Telefone" value={selectedCustomer.telefone} />
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
+
+    
