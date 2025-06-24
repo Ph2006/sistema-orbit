@@ -108,11 +108,10 @@ export default function CustomersPage() {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
       const customersList = querySnapshot.docs.map((doc) => {
         const data = doc.data();
-        // This robust mapping ensures that even incomplete data from Firestore is handled gracefully.
         return {
           id: doc.id,
           razaoSocial: data.razaoSocial ?? "",
-          nomeFantasia: data.nomeFantasia ?? "Cliente sem nome",
+          nomeFantasia: data.nomeFantasia || data.razaoSocial || "Cliente sem nome",
           cnpjCpf: data.cnpjCpf ?? "",
           inscricaoEstadual: data.inscricaoEstadual ?? "",
           inscricaoMunicipal: data.inscricaoMunicipal ?? "",
@@ -186,7 +185,7 @@ export default function CustomersPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nome Fantasia</TableHead>
+              <TableHead>Nome Fantasia / Razão Social</TableHead>
               <TableHead>Contato</TableHead>
               <TableHead>Telefone</TableHead>
               <TableHead>CNPJ/CPF</TableHead>
@@ -404,6 +403,7 @@ export default function CustomersPage() {
             <div className="space-y-3 py-6">
               <DetailItem label="Tipo de Cliente" value={selectedCustomer.tipoCliente} />
               <DetailItem label="Razão Social" value={selectedCustomer.razaoSocial} />
+              <DetailItem label="Nome Fantasia" value={selectedCustomer.nomeFantasia} />
               <DetailItem label="CNPJ/CPF" value={selectedCustomer.cnpjCpf} />
               <DetailItem label="Inscrição Estadual" value={selectedCustomer.inscricaoEstadual} />
               <DetailItem label="Inscrição Municipal" value={selectedCustomer.inscricaoMunicipal} />
