@@ -7,6 +7,7 @@ import * as z from "zod";
 import { collection, getDocs, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { PlusCircle } from "lucide-react";
+import { useAuth } from "../layout";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -59,6 +60,7 @@ export default function CustomersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
 
   const form = useForm<z.infer<typeof customerSchema>>({
     resolver: zodResolver(customerSchema),
@@ -92,8 +94,10 @@ export default function CustomersPage() {
   };
 
   useEffect(() => {
-    fetchCustomers();
-  }, []);
+    if (user) {
+      fetchCustomers();
+    }
+  }, [user]);
 
   const onSubmit = async (values: z.infer<typeof customerSchema>) => {
     try {
@@ -113,6 +117,50 @@ export default function CustomersPage() {
         description: "Ocorreu um erro ao salvar o cliente. Tente novamente.",
       });
     }
+  };
+  
+  const PageContent = () => {
+    if (isLoading || authLoading) {
+      return (
+        <div className="space-y-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+      );
+    }
+
+    if (customers.length > 0) {
+      return (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nome</TableHead>
+              <TableHead>Empresa</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Telefone</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {customers.map((customer) => (
+              <TableRow key={customer.id}>
+                <TableCell className="font-medium">{customer.name}</TableCell>
+                <TableCell>{customer.company}</TableCell>
+                <TableCell>{customer.email}</TableCell>
+                <TableCell>{customer.phone || "-"}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      );
+    }
+
+    return (
+      <div className="text-center text-muted-foreground py-8">
+        <p>Nenhum cliente encontrado.</p>
+        <p className="text-sm">Clique em "Adicionar Cliente" para começar.</p>
+      </div>
+    );
   };
 
   return (
@@ -205,39 +253,7 @@ export default function CustomersPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-             <div className="space-y-4">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-             </div>
-          ) : customers.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Telefone</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {customers.map((customer) => (
-                  <TableRow key={customer.id}>
-                    <TableCell className="font-medium">{customer.name}</TableCell>
-                    <TableCell>{customer.company}</TableCell>
-                    <TableCell>{customer.email}</TableCell>
-                    <TableCell>{customer.phone || "-"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <div className="text-center text-muted-foreground py-8">
-              <p>Nenhum cliente encontrado.</p>
-              <p className="text-sm">Clique em "Adicionar Cliente" para começar.</p>
-            </div>
-          )}
+          <PageContent />
         </CardContent>
       </Card>
     </div>
