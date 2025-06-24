@@ -100,16 +100,47 @@ export default function QuotationsPage() {
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "quotations"));
             const quotationsList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
+
+                // Handle backward compatibility for items/includedServices
+                let finalItems = data.items || [];
+                if (Array.isArray(data.includedServices) && data.includedServices.length > 0) {
+                    finalItems = data.includedServices.map((service: string) => ({
+                        description: service,
+                        quantity: 1,
+                        unitPrice: 0,
+                    }));
+                }
+                if (finalItems.length === 0) {
+                    finalItems.push({ description: "Nenhum item/serviço especificado", quantity: 1, unitPrice: 0 });
+                }
+
+                // Handle different date formats
+                const getCreatedAt = () => {
+                    if (!data.createdAt) return Timestamp.now();
+                    if (data.createdAt.toDate) return data.createdAt; // It's a Timestamp
+                    if (typeof data.createdAt === 'string') return Timestamp.fromDate(new Date(data.createdAt));
+                    return Timestamp.now();
+                }
+
+                const getValidity = () => {
+                    if (data.validity?.toDate) return data.validity.toDate();
+                    if (data.expiresAt) return new Date(data.expiresAt);
+                    return new Date();
+                }
+
                 return {
                     id: doc.id,
-                    customer: data.customer || { id: '', name: 'N/A' },
-                    status: data.status || 'Pendente',
-                    validity: data.validity?.toDate() || new Date(),
-                    paymentTerms: data.paymentTerms || '',
-                    deliveryTime: data.deliveryTime || '',
+                    customer: { 
+                        id: data.customerId || (data.customer?.id || ''), 
+                        name: data.customerName || (data.customer?.name || 'N/A') 
+                    },
+                    status: data.status || (data.approvedAt ? 'Aprovado' : 'Pendente'),
+                    validity: getValidity(),
+                    paymentTerms: data.paymentTerms || 'A combinar',
+                    deliveryTime: data.deliveryTerms || data.deliveryTime || 'A combinar',
                     notes: data.notes || '',
-                    items: data.items || [],
-                    createdAt: data.createdAt || Timestamp.now(),
+                    items: finalItems,
+                    createdAt: getCreatedAt(),
                 } as Quotation;
             });
             setQuotations(quotationsList.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()));
@@ -136,9 +167,13 @@ export default function QuotationsPage() {
         try {
             const dataToSave = {
                 ...values,
+                customerName: values.customer.name, // Save flat for compatibility
+                customerId: values.customer.id,
                 createdAt: selectedQuotation?.createdAt || Timestamp.now(),
                 updatedAt: Timestamp.now(),
             }
+            // @ts-ignore
+            delete dataToSave.customer; // Remove nested object before saving
 
             if (selectedQuotation) {
                 const quotationRef = doc(db, "companies", "mecald", "quotations", selectedQuotation.id);
@@ -271,7 +306,7 @@ export default function QuotationsPage() {
                                     {filteredQuotations.length > 0 ? (
                                         filteredQuotations.map((q) => (
                                             <TableRow key={q.id} onClick={() => handleViewQuotation(q)} className="cursor-pointer">
-                                                <TableCell className="font-medium truncate max-w-[120px]">{q.id}</TableCell>
+                                                <TableCell className="font-medium truncate max-w-[120px]">{q.id.substring(0,8)}</TableCell>
                                                 <TableCell>{q.customer.name}</TableCell>
                                                 <TableCell>{format(q.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
                                                 <TableCell>
@@ -443,6 +478,3 @@ export default function QuotationsPage() {
         </>
     );
 }
-
-
-    
