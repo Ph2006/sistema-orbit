@@ -100,27 +100,32 @@ export default function QuotationsPage() {
         if (!user) return;
         setIsLoading(true);
 
-        const mapStatus = (status?: string, approvedAt?: any): string => {
-            const newStatus = status?.trim();
-            if (!newStatus) {
-                return approvedAt ? "Aprovado" : "Aguardando Aprovação";
+        const mapStatus = (status?: string): string => {
+            const originalStatus = status?.trim();
+            if (!originalStatus) {
+                return "Aguardando Aprovação";
             }
-            switch(newStatus) {
-                case "Pendente":
-                    return "Aguardando Aprovação";
-                case "Recusado":
-                case "Cancelado":
-                    return "Reprovado";
-                case "Aprovado":
-                case "Aguardando Aprovação":
-                case "Enviado":
-                case "Reprovado":
-                case "Informativo":
-                    return newStatus;
-                default:
-                    return newStatus;
-            }
-        }
+            const lowerCaseStatus = originalStatus.toLowerCase();
+
+            const translations: { [key: string]: string } = {
+                'approved': 'Aprovado',
+                'aprovado': 'Aprovado',
+                'awaiting approval': 'Aguardando Aprovação',
+                'aguardando aprovação': 'Aguardando Aprovação',
+                'pending': 'Aguardando Aprovação',
+                'pendente': 'Aguardando Aprovação',
+                'rejected': 'Reprovado',
+                'reprovado': 'Reprovado',
+                'recusado': 'Reprovado',
+                'cancelado': 'Reprovado',
+                'sent': 'Enviado',
+                'enviado': 'Enviado',
+                'informative': 'Informativo',
+                'informativo': 'Informativo',
+            };
+
+            return translations[lowerCaseStatus] || originalStatus;
+        };
 
         try {
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "quotations"));
@@ -160,7 +165,7 @@ export default function QuotationsPage() {
                         id: data.customerId || (data.customer?.id || ''), 
                         name: data.customerName || (data.customer?.name || 'N/A') 
                     },
-                    status: mapStatus(data.status, data.approvedAt),
+                    status: mapStatus(data.status),
                     validity: getValidity(),
                     paymentTerms: data.paymentTerms || 'A combinar',
                     deliveryTime: data.deliveryTerms || data.deliveryTime || 'A combinar',
