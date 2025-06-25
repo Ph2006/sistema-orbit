@@ -16,15 +16,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -46,6 +48,11 @@ const orderSchema = z.object({
   internalOS: z.string().optional(),
   items: z.array(orderItemSchema),
   driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
+  documents: z.object({
+    drawings: z.boolean().default(false),
+    inspectionTestPlan: z.boolean().default(false),
+    paintPlan: z.boolean().default(false),
+  }).optional(),
 });
 
 type OrderItem = z.infer<typeof orderItemSchema>;
@@ -75,6 +82,11 @@ type Order = {
     createdAt: Date;
     deliveryDate?: Date;
     driveLink?: string;
+    documents: {
+        drawings: boolean;
+        inspectionTestPlan: boolean;
+        paintPlan: boolean;
+    };
 };
 
 
@@ -131,6 +143,43 @@ const getStatusProps = (status: string): { variant: "default" | "secondary" | "d
     }
 };
 
+function DocumentStatusIcons({ documents }: { documents?: Order['documents'] }) {
+    if (!documents) return null;
+    
+    const iconClass = (present?: boolean) => cn("h-4 w-4", present ? "text-green-500" : "text-muted-foreground/50");
+
+    return (
+        <TooltipProvider>
+            <div className="flex items-center justify-center gap-2">
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button className="focus:outline-none"><File className={iconClass(documents.drawings)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Desenhos {documents.drawings ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button className="focus:outline-none"><ClipboardCheck className={iconClass(documents.inspectionTestPlan)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Plano de Inspeção {documents.inspectionTestPlan ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                       <button className="focus:outline-none"><Palette className={iconClass(documents.paintPlan)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Plano de Pintura {documents.paintPlan ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+            </div>
+        </TooltipProvider>
+    );
+}
+
 function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: (order: Order) => void; }) {
     if (orders.length === 0) {
         return (
@@ -151,7 +200,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                     <TableHead className="w-[120px]">Nº Pedido</TableHead>
                     <TableHead className="w-[150px]">OS Interna</TableHead>
                     <TableHead>Cliente</TableHead>
-                    <TableHead className="w-[120px]">Data Criação</TableHead>
+                    <TableHead className="w-[100px] text-center">Docs</TableHead>
                     <TableHead className="w-[120px]">Data Entrega</TableHead>
                     <TableHead className="w-[180px] text-right">Peso Total</TableHead>
                     <TableHead className="w-[200px]">Status</TableHead>
@@ -165,7 +214,9 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
                             <TableCell className="font-medium">{order.internalOS || 'N/A'}</TableCell>
                             <TableCell>{order.customer?.name || 'Cliente não informado'}</TableCell>
-                            <TableCell>{order.createdAt ? format(order.createdAt, "dd/MM/yyyy") : 'N/A'}</TableCell>
+                            <TableCell>
+                                <DocumentStatusIcons documents={order.documents} />
+                            </TableCell>
                             <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
                             <TableCell className="text-right font-medium">
                                 {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
@@ -298,6 +349,7 @@ export default function OrdersPage() {
                     deliveryDate: deliveryDate,
                     totalWeight: calculateTotalWeight(enrichedItems),
                     driveLink: data.driveLink || '',
+                    documents: data.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
                 } as Order;
             }).sort((a, b) => (b.quotationNumber || 0) - (a.quotationNumber || 0));
             
@@ -323,7 +375,10 @@ export default function OrdersPage() {
 
     const handleViewOrder = (order: Order) => {
         setSelectedOrder(order);
-        form.reset(order);
+        form.reset({
+            ...order,
+            documents: order.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+        });
         setIsEditing(false);
         setSelectedItems(new Set());
         setIsSheetOpen(true);
@@ -354,6 +409,7 @@ export default function OrdersPage() {
                 totalWeight: totalWeight,
                 internalOS: values.internalOS,
                 driveLink: values.driveLink,
+                documents: values.documents,
             };
     
             await updateDoc(orderRef, dataToSave);
@@ -724,6 +780,40 @@ export default function OrdersPage() {
                                                         )}/>
                                                     </div>
                                                 </Card>
+
+                                                <Card>
+                                                    <CardHeader><CardTitle>Checklist de Documentos</CardTitle></CardHeader>
+                                                    <CardContent className="space-y-4">
+                                                        <FormField control={form.control} name="documents.drawings" render={({ field }) => (
+                                                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                                                <div className="space-y-0.5">
+                                                                    <FormLabel>Desenhos Técnicos</FormLabel>
+                                                                    <FormDescription>Marque se os desenhos foram recebidos e estão na pasta.</FormDescription>
+                                                                </div>
+                                                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField control={form.control} name="documents.inspectionTestPlan" render={({ field }) => (
+                                                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                                                <div className="space-y-0.5">
+                                                                    <FormLabel>Plano de Inspeção e Testes (PIT)</FormLabel>
+                                                                    <FormDescription>Marque se o plano de inspeção foi recebido.</FormDescription>
+                                                                </div>
+                                                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField control={form.control} name="documents.paintPlan" render={({ field }) => (
+                                                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                                                <div className="space-y-0.5">
+                                                                    <FormLabel>Plano de Pintura</FormLabel>
+                                                                    <FormDescription>Marque se o plano de pintura foi recebido.</FormDescription>
+                                                                </div>
+                                                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                                                            </FormItem>
+                                                        )}/>
+                                                    </CardContent>
+                                                </Card>
+
                                                 <Card>
                                                     <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
                                                     <CardContent className="space-y-4">
@@ -817,6 +907,24 @@ export default function OrdersPage() {
                                                     <div className="flex justify-between items-center font-bold text-lg">
                                                         <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
                                                         <span className="text-primary">{selectedOrder.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card>
+                                                <CardHeader><CardTitle>Checklist de Documentos</CardTitle></CardHeader>
+                                                <CardContent className="space-y-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <Label htmlFor="drawings-view" className="flex items-center gap-2 text-sm font-normal"><File className="h-4 w-4" />Desenhos Técnicos</Label>
+                                                        <Checkbox id="drawings-view" checked={selectedOrder.documents?.drawings} disabled />
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <Label htmlFor="inspection-view" className="flex items-center gap-2 text-sm font-normal"><ClipboardCheck className="h-4 w-4" />Plano de Inspeção e Testes (PIT)</Label>
+                                                        <Checkbox id="inspection-view" checked={selectedOrder.documents?.inspectionTestPlan} disabled />
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <Label htmlFor="paint-view" className="flex items-center gap-2 text-sm font-normal"><Palette className="h-4 w-4" />Plano de Pintura</Label>
+                                                        <Checkbox id="paint-view" checked={selectedOrder.documents?.paintPlan} disabled />
                                                     </div>
                                                 </CardContent>
                                             </Card>
