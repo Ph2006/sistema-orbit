@@ -58,7 +58,7 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
 
 
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
-    const lowerStatus = status.toLowerCase();
+    const lowerStatus = status ? status.toLowerCase() : '';
     if (lowerStatus.includes("produção") && !lowerStatus.includes("aguardando")) {
         return { variant: "default", icon: PlayCircle, label: "Em Produção", colorClass: "" };
     }
@@ -71,7 +71,7 @@ const getStatusProps = (status: string): { variant: "default" | "secondary" | "d
     if (lowerStatus.includes("cancelado")) {
         return { variant: "destructive", icon: XCircle, label: "Cancelado", colorClass: "" };
     }
-    return { variant: "outline", icon: Package, label: status, colorClass: "" };
+    return { variant: "outline", icon: Package, label: status || "Não definido", colorClass: "" };
 };
 
 function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: (order: Order) => void; }) {
@@ -103,7 +103,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
             </TableHeader>
             <TableBody>
                 {orders.map((order) => {
-                    const statusProps = getStatusProps(order.status || '');
+                    const statusProps = getStatusProps(order.status);
                     return (
                         <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
@@ -144,19 +144,37 @@ export default function OrdersPage() {
             const ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
                 
-                const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || Date.now());
+                const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
                 const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
                 const items = data.items || [];
+                
+                // Normalize customer data
+                let customerInfo = { id: '', name: 'Cliente não informado' };
+                if (data.customer && typeof data.customer === 'object' && data.customer.name) {
+                    customerInfo = { id: data.customer.id || '', name: data.customer.name };
+                } else if (typeof data.customerName === 'string') {
+                    customerInfo = { id: data.customerId || '', name: data.customerName };
+                } else if (typeof data.customer === 'string') { 
+                    customerInfo = { id: '', name: data.customer };
+                }
+
+                // Normalize order number
+                const orderNum = data.orderNumber || data.quotationNumber || 0;
 
                 return {
                     id: doc.id,
-                    ...data,
+                    quotationId: data.quotationId || '',
+                    quotationNumber: orderNum,
+                    customer: customerInfo,
                     items,
+                    totalValue: data.totalValue || 0,
+                    status: data.status || 'Status não definido',
                     createdAt: createdAtDate,
                     deliveryDate: deliveryDate,
                     totalWeight: calculateTotalWeight(items),
                 } as Order;
             }).sort((a, b) => (b.quotationNumber || 0) - (a.quotationNumber || 0));
+            
             setOrders(ordersList);
         } catch (error) {
             console.error("Error fetching orders:", error);
@@ -249,7 +267,7 @@ export default function OrdersPage() {
                                             <div className="flex justify-between items-center">
                                                 <span className="font-medium text-muted-foreground">Status</span>
                                                 {(() => {
-                                                    const statusProps = getStatusProps(selectedOrder.status || '');
+                                                    const statusProps = getStatusProps(selectedOrder.status);
                                                     return (
                                                         <Badge variant={statusProps.variant} className={statusProps.colorClass}>
                                                              <statusProps.icon className="mr-2 h-4 w-4" />
