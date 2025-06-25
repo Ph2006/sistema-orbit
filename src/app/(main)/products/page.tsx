@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { PlusCircle, Search, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { useAuth } from "../layout";
@@ -532,4 +532,3 @@ export default function ProductsPage() {
     </>
   );
 }
-
