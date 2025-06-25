@@ -35,6 +35,7 @@ const orderItemSchema = z.object({
 
 const orderSchema = z.object({
   id: z.string(),
+  internalOS: z.string().optional(),
   items: z.array(orderItemSchema),
 });
 
@@ -44,6 +45,7 @@ type Order = {
     id: string;
     quotationId: string;
     quotationNumber: number;
+    internalOS?: string;
     customer: {
         id: string;
         name: string;
@@ -88,7 +90,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
              <Table>
                 <TableBody>
                     <TableRow>
-                        <TableCell colSpan={6} className="h-24 text-center">Nenhum pedido encontrado.</TableCell>
+                        <TableCell colSpan={7} className="h-24 text-center">Nenhum pedido encontrado.</TableCell>
                     </TableRow>
                 </TableBody>
             </Table>
@@ -100,6 +102,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
             <TableHeader>
                 <TableRow>
                     <TableHead className="w-[120px]">Nº Pedido</TableHead>
+                    <TableHead className="w-[150px]">OS Interna</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead className="w-[120px]">Data Criação</TableHead>
                     <TableHead className="w-[120px]">Data Entrega</TableHead>
@@ -113,6 +116,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                     return (
                         <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
+                            <TableCell className="font-medium">{order.internalOS || 'N/A'}</TableCell>
                             <TableCell>{order.customer?.name || 'Cliente não informado'}</TableCell>
                             <TableCell>{order.createdAt ? format(order.createdAt, "dd/MM/yyyy") : 'N/A'}</TableCell>
                             <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
@@ -209,6 +213,7 @@ export default function OrdersPage() {
                     id: doc.id,
                     quotationId: data.quotationId || '',
                     quotationNumber: orderNum,
+                    internalOS: data.internalOS || '',
                     customer: customerInfo,
                     items: enrichedItems,
                     totalValue: data.totalValue || 0,
@@ -247,25 +252,44 @@ export default function OrdersPage() {
 
     const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
         if (!selectedOrder) return;
-
+    
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
-            const updatedItems = values.items.map(item => ({
-                ...item,
-                unitWeight: Number(item.unitWeight) || 0,
-                quantity: Number(item.quantity) || 0,
-            }));
+            
+            const updatedItems = values.items.map(item => {
+                const itemCode = item.code || item.product_code || '';
+                const cleanItem = { ...item, code: itemCode };
+                delete (cleanItem as any).product_code;
+    
+                return {
+                    ...cleanItem,
+                    unitWeight: Number(item.unitWeight) || 0,
+                    quantity: Number(item.quantity) || 0,
+                };
+            });
+    
             const totalWeight = calculateTotalWeight(updatedItems);
             
-            await updateDoc(orderRef, {
+            const dataToSave = {
                 items: updatedItems,
                 totalWeight: totalWeight,
-            });
-
+                internalOS: values.internalOS,
+            };
+    
+            await updateDoc(orderRef, dataToSave);
+    
             toast({
                 title: "Pedido atualizado!",
                 description: "Os dados do pedido foram salvos com sucesso.",
             });
+    
+            const updatedOrderInState = {
+                ...selectedOrder,
+                ...dataToSave,
+            };
+            setSelectedOrder(updatedOrderInState);
+            form.reset(updatedOrderInState);
+    
             setIsEditing(false);
             await fetchOrders();
         } catch (error) {
@@ -278,18 +302,20 @@ export default function OrdersPage() {
         }
     };
 
-    const filteredOrders = orders.filter(order => {
+    const filteredOrders = useMemo(() => orders.filter(order => {
         const query = searchQuery.toLowerCase();
         const customerName = order.customer?.name?.toLowerCase() || '';
         const status = order.status?.toLowerCase() || '';
         const quotationNumber = order.quotationNumber?.toString() || '';
+        const internalOS = order.internalOS?.toLowerCase() || '';
 
         return (
             quotationNumber.includes(query) ||
             customerName.includes(query) ||
-            status.includes(query)
+            status.includes(query) ||
+            internalOS.includes(query)
         );
-    });
+    }), [orders, searchQuery]);
     
     const watchedItems = form.watch("items");
     const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
@@ -302,10 +328,10 @@ export default function OrdersPage() {
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
-                            placeholder="Buscar por nº, cliente ou status..."
+                            placeholder="Buscar por nº, OS, cliente ou status..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-9 w-64"
+                            className="pl-9 w-80"
                         />
                     </div>
                 </div>
@@ -343,47 +369,58 @@ export default function OrdersPage() {
                                 <Form {...form}>
                                     <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-[calc(100%-4rem)]">
                                         <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
-                                            <Card>
-                                                <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
-                                                <CardContent className="space-y-4">
-                                                    {fields.map((field, index) => (
-                                                        <Card key={field.id} className="p-4 bg-secondary">
-                                                            <div className="space-y-4">
-                                                                <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
-                                                                    <FormItem>
-                                                                        <FormLabel>Descrição do Item {index + 1}</FormLabel>
-                                                                        <FormControl><Textarea placeholder="Descrição completa do item" {...field} /></FormControl>
-                                                                        <FormMessage />
-                                                                    </FormItem>
-                                                                )}/>
-                                                                <div className="grid grid-cols-3 gap-4">
-                                                                     <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                                            <div className="space-y-6">
+                                                <Card className="p-4 bg-secondary/50">
+                                                    <FormField control={form.control} name="internalOS" render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel>OS Interna</FormLabel>
+                                                            <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}/>
+                                                </Card>
+                                                <Card>
+                                                    <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
+                                                    <CardContent className="space-y-4">
+                                                        {fields.map((field, index) => (
+                                                            <Card key={field.id} className="p-4 bg-secondary">
+                                                                <div className="space-y-4">
+                                                                    <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
                                                                         <FormItem>
-                                                                            <FormLabel>Código</FormLabel>
-                                                                            <FormControl><Input placeholder="Cód. Produto" {...field} value={field.value || ''} /></FormControl>
+                                                                            <FormLabel>Descrição do Item {index + 1}</FormLabel>
+                                                                            <FormControl><Textarea placeholder="Descrição completa do item" {...field} /></FormControl>
                                                                             <FormMessage />
                                                                         </FormItem>
                                                                     )}/>
-                                                                     <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
-                                                                        <FormItem>
-                                                                            <FormLabel>Quantidade</FormLabel>
-                                                                            <FormControl><Input type="number" placeholder="0" {...field} /></FormControl>
-                                                                            <FormMessage />
-                                                                        </FormItem>
-                                                                    )}/>
-                                                                     <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
-                                                                        <FormItem>
-                                                                            <FormLabel>Peso Unit. (kg)</FormLabel>
-                                                                            <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl>
-                                                                            <FormMessage />
-                                                                        </FormItem>
-                                                                    )}/>
+                                                                    <div className="grid grid-cols-3 gap-4">
+                                                                         <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Código</FormLabel>
+                                                                                <FormControl><Input placeholder="Cód. Produto" {...field} value={field.value || ''} /></FormControl>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
+                                                                         <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Quantidade</FormLabel>
+                                                                                <FormControl><Input type="number" placeholder="0" {...field} /></FormControl>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
+                                                                         <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Peso Unit. (kg)</FormLabel>
+                                                                                <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        </Card>
-                                                    ))}
-                                                </CardContent>
-                                            </Card>
+                                                            </Card>
+                                                        ))}
+                                                    </CardContent>
+                                                </Card>
+                                            </div>
                                         </ScrollArea>
                                         <SheetFooter className="py-4 border-t">
                                             <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
@@ -401,6 +438,10 @@ export default function OrdersPage() {
                                             <Card>
                                                 <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
                                                 <CardContent className="space-y-3 text-sm">
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground">OS Interna</span>
+                                                        <span className="font-semibold text-primary">{selectedOrder.internalOS || 'Não definida'}</span>
+                                                    </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground">Status</span>
                                                         {(() => {
