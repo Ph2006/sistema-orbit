@@ -61,6 +61,57 @@ const getStatusProps = (status: string): { variant: "default" | "secondary" | "d
     return { variant: "outline", icon: Package, label: status, colorClass: "" };
 };
 
+function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: (order: Order) => void; }) {
+    if (orders.length === 0) {
+        return (
+             <Table>
+                <TableBody>
+                    <TableRow>
+                        <TableCell colSpan={5} className="h-24 text-center">
+                            Nenhum pedido encontrado.
+                        </TableCell>
+                    </TableRow>
+                </TableBody>
+            </Table>
+        );
+    }
+    
+    return (
+        <Table>
+            <TableHeader>
+                <TableRow>
+                    <TableHead className="w-[120px]">Nº Pedido</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="w-[120px]">Data Criação</TableHead>
+                    <TableHead className="w-[180px] text-right">Valor Total</TableHead>
+                    <TableHead className="w-[200px]">Status</TableHead>
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                {orders.map((order) => {
+                    const statusProps = getStatusProps(order.status || '');
+                    return (
+                        <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
+                            <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
+                            <TableCell>{order.customer?.name || 'N/A'}</TableCell>
+                            <TableCell>{order.createdAt ? format(order.createdAt.toDate(), "dd/MM/yyyy") : 'N/A'}</TableCell>
+                            <TableCell className="text-right">
+                                {(order.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant={statusProps.variant} className={statusProps.colorClass}>
+                                    <statusProps.icon className="mr-2 h-4 w-4" />
+                                    {statusProps.label}
+                                </Badge>
+                            </TableCell>
+                        </TableRow>
+                    );
+                })}
+            </TableBody>
+        </Table>
+    );
+}
+
 export default function OrdersPage() {
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -108,10 +159,14 @@ export default function OrdersPage() {
 
     const filteredOrders = orders.filter(order => {
         const query = searchQuery.toLowerCase();
+        const customerName = order.customer?.name?.toLowerCase() || '';
+        const status = order.status?.toLowerCase() || '';
+        const quotationNumber = order.quotationNumber?.toString() || '';
+
         return (
-            order.quotationNumber.toString().includes(query) ||
-            order.customer.name.toLowerCase().includes(query) ||
-            order.status.toLowerCase().includes(query)
+            quotationNumber.includes(query) ||
+            customerName.includes(query) ||
+            status.includes(query)
         );
     });
 
@@ -144,41 +199,7 @@ export default function OrdersPage() {
                                 <Skeleton className="h-10 w-full" />
                             </div>
                         ) : (
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="w-[120px]">Nº Pedido</TableHead>
-                                        <TableHead>Cliente</TableHead>
-                                        <TableHead className="w-[120px]">Data Criação</TableHead>
-                                        <TableHead className="w-[180px] text-right">Valor Total</TableHead>
-                                        <TableHead className="w-[200px]">Status</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {filteredOrders.length > 0 ? (
-                                        filteredOrders.map((order) => (
-                                            <TableRow key={order.id} onClick={() => handleViewOrder(order)} className="cursor-pointer">
-                                                <TableCell className="font-medium">{order.quotationNumber}</TableCell>
-                                                <TableCell>{order.customer.name}</TableCell>
-                                                <TableCell>{format(order.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
-                                                <TableCell className="text-right">
-                                                    {order.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <Badge variant={getStatusProps(order.status).variant} className={getStatusProps(order.status).colorClass}>
-                                                        <getStatusProps(order.status).icon className="mr-2 h-4 w-4" />
-                                                        {getStatusProps(order.status).label}
-                                                    </Badge>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={5} className="text-center h-24">Nenhum pedido encontrado.</TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
+                           <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
                         )}
                     </CardContent>
                 </Card>
@@ -191,7 +212,7 @@ export default function OrdersPage() {
                             <SheetHeader className="mb-4">
                                 <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
                                 <SheetDescription>
-                                    Cliente: <span className="font-medium text-foreground">{selectedOrder.customer.name}</span>
+                                    Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
                                 </SheetDescription>
                             </SheetHeader>
                             <ScrollArea className="h-[calc(100vh-8rem)] pr-6">
@@ -203,14 +224,19 @@ export default function OrdersPage() {
                                         <CardContent className="space-y-3 text-sm">
                                             <div className="flex justify-between items-center">
                                                 <span className="font-medium text-muted-foreground">Status</span>
-                                                <Badge variant={getStatusProps(selectedOrder.status).variant} className={getStatusProps(selectedOrder.status).colorClass}>
-                                                     <getStatusProps(selectedOrder.status).icon className="mr-2 h-4 w-4" />
-                                                     {getStatusProps(selectedOrder.status).label}
-                                                </Badge>
+                                                {(() => {
+                                                    const statusProps = getStatusProps(selectedOrder.status || '');
+                                                    return (
+                                                        <Badge variant={statusProps.variant} className={statusProps.colorClass}>
+                                                             <statusProps.icon className="mr-2 h-4 w-4" />
+                                                             {statusProps.label}
+                                                        </Badge>
+                                                    );
+                                                })()}
                                             </div>
                                             <div className="flex justify-between items-center">
                                                 <span className="font-medium text-muted-foreground">Data do Pedido</span>
-                                                <span>{format(selectedOrder.createdAt.toDate(), 'dd/MM/yyyy HH:mm')}</span>
+                                                <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt.toDate(), 'dd/MM/yyyy HH:mm') : 'N/A'}</span>
                                             </div>
                                              <div className="flex justify-between items-center">
                                                 <span className="font-medium text-muted-foreground">Orçamento de Origem</span>
@@ -218,7 +244,7 @@ export default function OrdersPage() {
                                             </div>
                                             <div className="flex justify-between items-center font-bold text-lg">
                                                 <span className="font-medium text-muted-foreground">Valor Total</span>
-                                                <span className="text-primary">{selectedOrder.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                <span className="text-primary">{(selectedOrder.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                             </div>
                                         </CardContent>
                                     </Card>
@@ -237,14 +263,14 @@ export default function OrdersPage() {
                                                     </TableRow>
                                                 </TableHeader>
                                                 <TableBody>
-                                                    {selectedOrder.items.map((item, index) => (
+                                                    {(selectedOrder.items || []).map((item, index) => (
                                                         <TableRow key={item.id || index}>
                                                             <TableCell className="font-medium">
                                                                 {item.description}
                                                                 {item.code && <span className="block text-xs text-muted-foreground">Cód: {item.code}</span>}
                                                             </TableCell>
                                                             <TableCell className="text-center">{item.quantity}</TableCell>
-                                                            <TableCell className="text-right">{item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                                                            <TableCell className="text-right">{(item.unitPrice || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                                                         </TableRow>
                                                     ))}
                                                 </TableBody>
