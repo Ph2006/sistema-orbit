@@ -44,7 +44,7 @@ const quotationSchema = z.object({
     id: z.string({ required_error: "Selecione um cliente." }),
     name: z.string(),
   }),
-  status: z.enum(["Aguardando Aprovação", "Aprovado", "Reprovado", "Informativo"], { required_error: "Selecione um status." }),
+  status: z.enum(["Aguardando Aprovação", "Enviado", "Aprovado", "Reprovado", "Informativo"], { required_error: "Selecione um status." }),
   validity: z.date({ required_error: "A data de validade é obrigatória." }),
   paymentTerms: z.string().min(3, "As condições de pagamento são obrigatórias."),
   deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
@@ -113,6 +113,7 @@ export default function QuotationsPage() {
                     return "Reprovado";
                 case "Aprovado":
                 case "Aguardando Aprovação":
+                case "Enviado":
                 case "Reprovado":
                 case "Informativo":
                     return newStatus;
@@ -314,6 +315,7 @@ export default function QuotationsPage() {
         switch (status) {
             case "Aprovado": return "default";
             case "Aguardando Aprovação": return "secondary";
+            case "Enviado": return "secondary";
             case "Reprovado": return "destructive";
             case "Informativo": return "outline";
             default: return "outline";
@@ -429,6 +431,7 @@ export default function QuotationsPage() {
                                                     <FormControl><SelectTrigger><SelectValue placeholder="Selecione um status" /></SelectTrigger></FormControl>
                                                     <SelectContent>
                                                         <SelectItem value="Aguardando Aprovação">Aguardando Aprovação</SelectItem>
+                                                        <SelectItem value="Enviado">Enviado</SelectItem>
                                                         <SelectItem value="Aprovado">Aprovado</SelectItem>
                                                         <SelectItem value="Reprovado">Reprovado</SelectItem>
                                                         <SelectItem value="Informativo">Informativo</SelectItem>
