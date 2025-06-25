@@ -164,7 +164,7 @@ export default function ProductsPage() {
                     if (item.code && typeof item.code === 'string' && item.code.trim() !== "") {
                         const productCode = item.code.trim();
 
-                        if (productCode.includes('/')) {
+                        if (productCode.includes('/') || productCode === '.' || productCode === '..') {
                             if (!skippedCodes.includes(productCode)) {
                                 skippedCodes.push(productCode);
                             }
@@ -203,7 +203,7 @@ export default function ProductsPage() {
 
         let description = `${productsToSync.size} produtos foram adicionados ou atualizados.`;
         if (skippedCodes.length > 0) {
-            description += ` ${skippedCodes.length} código(s) foram ignorados por conterem caracteres inválidos (/).`
+            description += ` ${skippedCodes.length} código(s) foram ignorados por conterem caracteres inválidos (ex: /).`
         }
 
         toast({ 
@@ -213,12 +213,18 @@ export default function ProductsPage() {
         });
         await fetchProducts();
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error syncing products from quotations: ", error);
+        let description = "Não foi possível sincronizar os produtos. Tente novamente.";
+        if (error.code === 'permission-denied') {
+            description = "Erro de permissão. Verifique as regras de segurança do seu Firestore.";
+        } else if (error.message && (error.message.includes('Document path') || error.message.includes('invalid'))) {
+            description = "Um ou mais produtos nos orçamentos possuem um código inválido. Corrija-os e tente novamente.";
+        }
         toast({
             variant: "destructive",
             title: "Erro na Sincronização",
-            description: "Não foi possível sincronizar os produtos. Verifique o console.",
+            description: description,
         });
     } finally {
         setIsSyncing(false);
