@@ -936,7 +936,7 @@ export default function OrdersPage() {
             const docSnap = await getDoc(companyRef);
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
     
-            const docPdf = new jsPDF();
+            const docPdf = new jsPDF({ orientation: 'landscape' });
             const pageWidth = docPdf.internal.pageSize.width;
             const pageHeight = docPdf.internal.pageSize.height;
             let yPos = 15;
@@ -1040,11 +1040,11 @@ export default function OrdersPage() {
                     fontStyle: 'bold' 
                 },
                 columnStyles: {
-                    0: { cellWidth: 125 },
-                    1: { cellWidth: 35, halign: 'center' },
-                    2: { cellWidth: 25, halign: 'center' },
-                    3: { cellWidth: 25, halign: 'center' },
-                    4: { cellWidth: 20, halign: 'center' },
+                    0: { cellWidth: 'auto' },
+                    1: { cellWidth: 30, halign: 'center' },
+                    2: { cellWidth: 30, halign: 'center' },
+                    3: { cellWidth: 30, halign: 'center' },
+                    4: { cellWidth: 25, halign: 'center' },
                 }
             });
             
@@ -1663,7 +1663,7 @@ export default function OrdersPage() {
                                                         </Button>
                                                     </PopoverTrigger>
                                                     <PopoverContent className="w-auto p-0">
-                                                        <Calendar mode="single" selected={stage.startDate ?? undefined} onSelect={(date) => handlePlanChange(index, 'startDate', date)} initialFocus />
+                                                        <Calendar mode="single" selected={stage.startDate ? new Date(stage.startDate) : undefined} onSelect={(date) => handlePlanChange(index, 'startDate', date)} initialFocus />
                                                     </PopoverContent>
                                                 </Popover>
                                             </div>
@@ -1677,7 +1677,7 @@ export default function OrdersPage() {
                                                         </Button>
                                                     </PopoverTrigger>
                                                     <PopoverContent className="w-auto p-0">
-                                                        <Calendar mode="single" selected={stage.completedDate ?? undefined} onSelect={(date) => handlePlanChange(index, 'completedDate', date)} initialFocus />
+                                                        <Calendar mode="single" selected={stage.completedDate ? new Date(stage.completedDate) : undefined} onSelect={(date) => handlePlanChange(index, 'completedDate', date)} initialFocus />
                                                     </PopoverContent>
                                                 </Popover>
                                             </div>
