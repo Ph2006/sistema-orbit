@@ -553,13 +553,16 @@ export default function ProductsPage() {
                                                 <div className="flex items-center gap-2">
                                                     <Input
                                                         type="number"
+                                                        step="any"
                                                         className="h-8 w-20"
                                                         placeholder="Dias"
-                                                        value={currentStage?.durationDays || ''}
+                                                        value={currentStage?.durationDays ?? ''}
                                                         onChange={(e) => {
+                                                            const value = e.target.value;
+                                                            const sanitizedValue = value.replace(',', '.');
                                                             const newPlan = (field.value || []).map(p => 
                                                                 p.stageName === stageName 
-                                                                ? { ...p, durationDays: e.target.value === '' ? undefined : Number(e.target.value) } 
+                                                                ? { ...p, durationDays: value === '' ? undefined : Number(sanitizedValue) } 
                                                                 : p
                                                             );
                                                             field.onChange(newPlan);
