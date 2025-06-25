@@ -1,39 +1,34 @@
+
 "use client";
 
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { ChartContainer, ChartTooltipContent } from "@/components/ui/chart";
 
-const chartData = [
-    { month: "Jan", production: 186, efficiency: 80 },
-    { month: "Fev", production: 305, efficiency: 75 },
-    { month: "Mar", production: 237, efficiency: 82 },
-    { month: "Abr", production: 273, efficiency: 85 },
-    { month: "Mai", production: 209, efficiency: 79 },
-    { month: "Jun", production: 250, efficiency: 88 },
-];
+interface MonthlyProductionChartProps {
+  data: {
+    month: string;
+    weight: number;
+  }[];
+}
 
 const chartConfig = {
-    production: {
-      label: "Produção (un)",
+    weight: {
+      label: "Peso (kg)",
       color: "hsl(var(--primary))",
     },
-    efficiency: {
-        label: "Eficiência (%)",
-        color: "hsl(var(--accent))",
-    }
 };
 
-export function KpiCharts() {
+export function MonthlyProductionChart({ data }: MonthlyProductionChartProps) {
   return (
     <Card className="h-full hover:shadow-lg transition-shadow duration-300">
       <CardHeader>
-        <CardTitle className="font-headline">Desempenho Semestral</CardTitle>
-        <CardDescription>Produção e eficiência nos últimos 6 meses</CardDescription>
+        <CardTitle className="font-headline">Produção Mensal (Peso Entregue)</CardTitle>
+        <CardDescription>Peso total de itens entregues nos últimos meses.</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="h-[300px] w-full">
-            <BarChart accessibilityLayer data={chartData}>
+            <BarChart accessibilityLayer data={data}>
                 <CartesianGrid vertical={false} />
                 <XAxis
                     dataKey="month"
@@ -42,21 +37,14 @@ export function KpiCharts() {
                     axisLine={false}
                 />
                  <YAxis 
-                    yAxisId="left" 
-                    orientation="left" 
                     stroke="hsl(var(--primary))" 
+                    tickFormatter={(value) => `${value / 1000}t`}
                 />
-                <YAxis 
-                    yAxisId="right" 
-                    orientation="right" 
-                    stroke="hsl(var(--accent))"
-                />
-                <ChartTooltip
+                <Tooltip
                     cursor={false}
-                    content={<ChartTooltipContent indicator="dot" />}
+                    content={<ChartTooltipContent formatter={(value) => `${Number(value).toLocaleString('pt-BR')} kg`} />}
                 />
-                <Bar dataKey="production" fill="var(--color-production)" radius={4} yAxisId="left" />
-                <Bar dataKey="efficiency" fill="var(--color-efficiency)" radius={4} yAxisId="right" />
+                <Bar dataKey="weight" fill="var(--color-weight)" radius={4} />
             </BarChart>
         </ChartContainer>
       </CardContent>
