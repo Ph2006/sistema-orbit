@@ -46,7 +46,6 @@ export default function ProductsPage() {
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
   
-  const [activeTab, setActiveTab] = useState("catalog");
   const [manufacturingStages, setManufacturingStages] = useState<string[]>([]);
   const [isLoadingStages, setIsLoadingStages] = useState(true);
   const [newStageName, setNewStageName] = useState("");
@@ -297,7 +296,7 @@ export default function ProductsPage() {
             </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs defaultValue="catalog" className="w-full">
             <TabsList>
                 <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
                 <TabsTrigger value="stages">Etapas de Fabricação</TabsTrigger>
