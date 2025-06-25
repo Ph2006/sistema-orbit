@@ -900,9 +900,10 @@ export default function OrdersPage() {
     
             const tableBody: any[] = [];
             selectedOrder.items.forEach(item => {
+                const itemHeaderText = `${item.description} (Qtd: ${item.quantity}${item.code ? `, Cód: ${item.code}` : ''})`;
                 tableBody.push([
                     { 
-                        content: item.description, 
+                        content: itemHeaderText, 
                         colSpan: 5, 
                         styles: { 
                             halign: 'left', 
@@ -952,9 +953,9 @@ export default function OrdersPage() {
                     fontStyle: 'bold' 
                 },
                 columnStyles: {
-                    0: { cellWidth: 'auto' },
+                    0: { cellWidth: 125 },
                     1: { cellWidth: 35, halign: 'center' },
-                    2: { cellWidth: 30, halign: 'center' },
+                    2: { cellWidth: 35, halign: 'center' },
                     3: { cellWidth: 35, halign: 'center' },
                     4: { cellWidth: 30, halign: 'center' },
                 }
