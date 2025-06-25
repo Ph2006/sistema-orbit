@@ -138,11 +138,22 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
 };
 
 const calculateItemProgress = (item: OrderItem): number => {
-    if (!item.productionPlan || item.productionPlan.length === 0) {
-        return 100;
+    // If a plan exists, calculate based on it.
+    if (item.productionPlan && item.productionPlan.length > 0) {
+        const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
+        return (completedStages / item.productionPlan.length) * 100;
     }
-    const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
-    return (completedStages / item.productionPlan.length) * 100;
+
+    // If no plan exists:
+    // If there is a non-empty product code, it implies a plan SHOULD exist but hasn't loaded.
+    // Show 0% to avoid misleading 100%. This is a safe fallback.
+    if (item.code && item.code.trim() !== "") {
+        return 0;
+    }
+    
+    // If there is no plan AND no valid product code, it's a manually described item.
+    // Considered "production complete" by default.
+    return 100;
 };
 
 const calculateOrderProgress = (order: Order): number => {
@@ -955,7 +966,15 @@ export default function OrdersPage() {
             }));
             
             const allItemsCompleted = updatedItemsForCheck.every(
-                (item: any) => calculateItemProgress(item) >= 100
+                (item: any) => {
+                    // An item is considered complete for the purposes of closing an order if:
+                    // 1. Its production plan is 100% finished.
+                    // 2. It has no production plan (it's a non-manufactured item).
+                    if (item.productionPlan && item.productionPlan.length > 0) {
+                         return item.productionPlan.every((p: any) => p.status === 'Concluído');
+                    }
+                    return true;
+                }
             );
 
             if (allItemsCompleted && selectedOrder.status !== 'Concluído') {
