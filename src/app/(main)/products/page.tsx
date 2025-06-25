@@ -167,21 +167,26 @@ export default function ProductsPage() {
     }
   }, [user, authLoading, fetchProducts, fetchStages]);
   
-  const syncProductsFromQuotations = useCallback(async () => {
+  const syncCatalog = useCallback(async () => {
     setIsSyncing(true);
-    toast({ title: "Sincronizando...", description: "Buscando produtos em orçamentos existentes." });
+    toast({ title: "Sincronizando...", description: "Buscando produtos em orçamentos e pedidos existentes." });
     
     try {
-        const quotationsSnapshot = await getDocs(collection(db, "companies", "mecald", "quotations"));
+        const [quotationsSnapshot, ordersSnapshot] = await Promise.all([
+            getDocs(collection(db, "companies", "mecald", "quotations")),
+            getDocs(collection(db, "companies", "mecald", "orders"))
+        ]);
+        
         const productsToSync = new Map<string, any>();
         const skippedCodes: string[] = [];
 
-        quotationsSnapshot.forEach((quotationDoc) => {
-            const quotationData = quotationDoc.data();
-            if (Array.isArray(quotationData.items)) {
-                quotationData.items.forEach((item: any) => {
-                    if (item.code && typeof item.code === 'string' && item.code.trim() !== "") {
-                        const productCode = item.code.trim();
+        const processDocumentItems = (doc: any) => {
+            const data = doc.data();
+            if (Array.isArray(data.items)) {
+                data.items.forEach((item: any) => {
+                    const productCodeRaw = item.code || item.product_code;
+                    if (productCodeRaw && typeof productCodeRaw === 'string' && productCodeRaw.trim() !== "") {
+                        const productCode = productCodeRaw.trim();
 
                         if (productCode.includes('/') || productCode === '.' || productCode === '..') {
                             if (!skippedCodes.includes(productCode)) {
@@ -189,18 +194,23 @@ export default function ProductsPage() {
                             }
                             return; 
                         }
+                        
+                        const existingData = productsToSync.get(productCode) || {};
 
                         const productData = {
                             code: productCode,
-                            description: item.description || "Sem descrição",
-                            unitPrice: Number(item.unitPrice) || 0,
-                            unitWeight: Number(item.unitWeight) || 0,
+                            description: item.description || existingData.description || "Sem descrição",
+                            unitPrice: Number(item.unitPrice) || existingData.unitPrice || 0,
+                            unitWeight: Number(item.unitWeight) || existingData.unitWeight || 0,
                         };
                         productsToSync.set(productCode, productData);
                     }
                 });
             }
-        });
+        };
+
+        quotationsSnapshot.forEach(processDocumentItems);
+        ordersSnapshot.forEach(processDocumentItems);
         
         if (productsToSync.size === 0 && skippedCodes.length === 0) {
             toast({ title: "Nenhum produto novo encontrado", description: "Seu catálogo já parece estar atualizado." });
@@ -233,12 +243,12 @@ export default function ProductsPage() {
         await fetchProducts();
 
     } catch (error: any) {
-        console.error("Error syncing products from quotations: ", error);
+        console.error("Error syncing catalog: ", error);
         let description = "Não foi possível sincronizar os produtos. Tente novamente.";
         if (error.code === 'permission-denied') {
             description = "Erro de permissão. Verifique as regras de segurança do seu Firestore.";
         } else if (error.message && (error.message.includes('Document path') || error.message.includes('invalid'))) {
-            description = "Um ou mais produtos nos orçamentos possuem um código inválido. Corrija-os e tente novamente.";
+            description = "Um ou mais produtos nos orçamentos ou pedidos possuem um código inválido. Corrija-os e tente novamente.";
         }
         toast({
             variant: "destructive",
@@ -374,7 +384,7 @@ export default function ProductsPage() {
                         className="pl-9 w-64"
                     />
                  </div>
-                 <Button onClick={syncProductsFromQuotations} variant="outline" disabled={isSyncing}>
+                 <Button onClick={syncCatalog} variant="outline" disabled={isSyncing}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
                     {isSyncing ? "Sincronizando..." : "Sincronizar Catálogo"}
                  </Button>
@@ -514,7 +524,7 @@ export default function ProductsPage() {
                       <FormItem>
                           <FormLabel>Código do Produto</FormLabel>
                           <FormControl><Input placeholder="Ex: PROD-001" {...field} /></FormControl>
-                          <FormDescription>O código do produto não pode conter '/'. Alterar o código criará um novo registro para o produto.</FormDescription>
+                          <FormDescription>Alterar o código criará um novo registro para o produto.</FormDescription>
                           <FormMessage />
                       </FormItem>
                   )} />
