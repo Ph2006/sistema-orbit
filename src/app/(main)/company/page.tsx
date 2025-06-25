@@ -32,6 +32,7 @@ const companySchema = z.object({
   email: z.string().email("O e-mail é inválido."),
   celular: z.string().min(10, "O celular deve ser válido."),
   endereco: z.string().min(10, "O endereço é obrigatório."),
+  website: z.string().url("O site deve ser uma URL válida.").optional(),
 });
 
 type CompanyData = z.infer<typeof companySchema> & { logo?: { preview?: string } };
@@ -71,6 +72,7 @@ export default function CompanyPage() {
       email: "",
       celular: "",
       endereco: "",
+      website: "",
     },
   });
 
@@ -379,6 +381,19 @@ export default function CompanyPage() {
                                 </div>
                                 <FormField
                                     control={companyForm.control}
+                                    name="website"
+                                    render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Website</FormLabel>
+                                        <FormControl>
+                                            <Input type="url" placeholder="https://suaempresa.com" {...field} value={field.value ?? ''}/>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={companyForm.control}
                                     name="endereco"
                                     render={({ field }) => (
                                     <FormItem>
@@ -537,5 +552,3 @@ export default function CompanyPage() {
     </>
   );
 }
-
-    

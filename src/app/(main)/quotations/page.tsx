@@ -5,13 +5,16 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useRouter } from "next/navigation";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +36,8 @@ import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -64,6 +69,15 @@ const quotationSchema = z.object({
 type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp, number: number };
 type Customer = { id: string, nomeFantasia: string };
 type Item = z.infer<typeof itemSchema>;
+type CompanyData = {
+    nomeFantasia?: string;
+    logo?: { preview?: string };
+    endereco?: string;
+    cnpj?: string;
+    email?: string;
+    celular?: string;
+    website?: string;
+};
 
 const serviceOptions = [
     { id: 'materialSupply', label: 'Fornecimento de Material' },
@@ -428,6 +442,145 @@ export default function QuotationsPage() {
                 title: "Erro ao gerar pedido",
                 description: "Ocorreu um erro ao criar o pedido. Tente novamente.",
             });
+        }
+    };
+
+    const handleExport = async (format: 'pdf' | 'excel') => {
+        if (!selectedQuotation) return;
+
+        toast({ title: "Exportando...", description: `Gerando ${format.toUpperCase()} do orçamento Nº ${selectedQuotation.number}.` });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            const { items, customer, number, validity, paymentTerms, deliveryTime, notes, includedServices } = selectedQuotation;
+            const grandTotal = calculateGrandTotal(items);
+
+            if (format === 'pdf') {
+                const docPdf = new jsPDF();
+                const pageHeight = docPdf.internal.pageSize.height;
+                let y = 20;
+
+                // Header
+                if (companyData.logo?.preview) {
+                    try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, 10, 30, 30); }
+                    catch (e) { console.error("Error adding logo to PDF:", e); }
+                }
+                docPdf.setFontSize(18);
+                docPdf.text(companyData.nomeFantasia || 'Orçamento', 60, 20);
+                docPdf.setFontSize(10);
+                docPdf.text(companyData.endereco || '', 60, 28);
+                docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 60, 33);
+                
+                y = 50;
+                docPdf.setFontSize(14).setFont(undefined, 'bold').text(`Orçamento Nº ${number}`, 15, y);
+                y += 10;
+                docPdf.setFontSize(11).setFont(undefined, 'normal');
+                docPdf.text(`Cliente: ${customer.name}`, 15, y);
+                docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, 140, y);
+                y += 5;
+                docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, 140, y);
+                y += 10;
+
+                // Items Table
+                const head = [['Item', 'Qtd', 'Preço Unit.', 'Imposto (%)', 'Total c/ Imp.']];
+                const body = items.map(item => [
+                    item.description,
+                    item.quantity,
+                    item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                    item.taxRate || 0,
+                    calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                ]);
+                autoTable(docPdf, { startY: y, head, body });
+                y = (docPdf as any).lastAutoTable.finalY + 10;
+                
+                // Total
+                docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 140, y);
+                y += 10;
+
+                // Services
+                if (includedServices && includedServices.length > 0) {
+                    docPdf.setFontSize(11).setFont(undefined, 'bold').text('Serviços Inclusos:', 15, y);
+                    y += 6;
+                    docPdf.setFontSize(10).setFont(undefined, 'normal');
+                    includedServices.forEach(serviceId => {
+                        const service = serviceOptions.find(s => s.id === serviceId);
+                        docPdf.text(`- ${service ? service.label : serviceId}`, 18, y);
+                        y += 5;
+                    });
+                }
+                
+                // Payment and Delivery
+                y += 5;
+                docPdf.setFontSize(11).setFont(undefined, 'bold').text('Condições Comerciais:', 15, y);
+                y += 6;
+                docPdf.setFontSize(10).setFont(undefined, 'normal');
+                docPdf.text(`Pagamento: ${paymentTerms}`, 18, y);
+                y+= 5;
+                docPdf.text(`Prazo de Entrega: ${deliveryTime}`, 18, y);
+                y += 10;
+
+                // Notes
+                if (notes) {
+                    docPdf.setFontSize(11).setFont(undefined, 'bold').text('Observações:', 15, y);
+                    y += 6;
+                    const splitNotes = docPdf.splitTextToSize(notes, 180);
+                    docPdf.setFontSize(10).setFont(undefined, 'normal').text(splitNotes, 15, y);
+                }
+
+                // Footer
+                if (companyData.website) {
+                    docPdf.setTextColor(0, 0, 255);
+                    docPdf.textWithLink(companyData.website, 15, pageHeight - 10, { url: companyData.website });
+                }
+
+                docPdf.save(`Orcamento_${number}.pdf`);
+
+            } else if (format === 'excel') {
+                const ws_data = [
+                    [companyData.nomeFantasia || ''],
+                    [companyData.endereco || ''],
+                    [`CNPJ: ${companyData.cnpj || ''}`],
+                    [],
+                    [`Orçamento Nº ${number}`],
+                    [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
+                    ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
+                    [],
+                    ['Item', 'Código', 'Qtd', 'Preço Unit.', 'Imposto (%)', 'Total c/ Imp.'],
+                    ...items.map(item => [
+                        item.description,
+                        item.code,
+                        item.quantity,
+                        item.unitPrice,
+                        item.taxRate || 0,
+                        calculateItemTotals(item).totalWithTax
+                    ]),
+                    [],
+                    ['', '', '', '', 'Valor Total:', grandTotal],
+                    [],
+                    ['Serviços Inclusos:'],
+                    ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
+                    [],
+                    ['Condições Comerciais:'],
+                    [`Pagamento: ${paymentTerms}`],
+                    [`Prazo de Entrega: ${deliveryTime}`],
+                    [],
+                    ['Observações:'],
+                    [notes || ''],
+                    [],
+                    [{v: companyData.website || 'Website não informado', l: { Target: companyData.website || '#' }}]
+                ];
+                const ws = XLSX.utils.aoa_to_sheet(ws_data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, `Orçamento ${number}`);
+                XLSX.writeFile(wb, `Orcamento_${number}.xlsx`);
+            }
+            toast({ title: "Exportação concluída!", description: "Seu arquivo foi baixado." });
+
+        } catch (error) {
+            console.error("Export error:", error);
+            toast({ variant: "destructive", title: "Erro na exportação", description: "Não foi possível gerar o arquivo." });
         }
     };
     
@@ -831,13 +984,25 @@ export default function QuotationsPage() {
                                 )}
                             </div>
                         </ScrollArea>
-                        <SheetFooter className="pt-4 pr-6 border-t">
+                        <SheetFooter className="pt-4 pr-6 border-t flex sm:justify-end gap-2">
                             {selectedQuotation.status === 'Aprovado' && (
                                 <Button onClick={() => handleGenerateOrder(selectedQuotation)} className="w-full sm:w-auto">
                                     <PackagePlus className="mr-2 h-4 w-4" />
-                                    Gerar Pedido de Produção
+                                    Gerar Pedido
                                 </Button>
                             )}
+                             <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" className="w-full sm:w-auto">
+                                        <FileDown className="mr-2 h-4 w-4" />
+                                        Exportar
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent>
+                                    <DropdownMenuItem onClick={() => handleExport('pdf')}>Exportar para PDF</DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleExport('excel')}>Exportar para Excel</DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                         </SheetFooter>
                         </>
                     )}
