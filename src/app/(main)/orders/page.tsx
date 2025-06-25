@@ -138,7 +138,6 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
 };
 
 const calculateItemProgress = (item: OrderItem): number => {
-    // If an item has no production plan, it is considered 100% complete by default.
     if (!item.productionPlan || item.productionPlan.length === 0) {
         return 100;
     }
@@ -356,11 +355,15 @@ export default function OrdersPage() {
         let ordersList: Order[] = [];
         try {
             const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
-            const productsMap = new Map<string, { unitWeight: number }>();
+            const productsMap = new Map<string, { unitWeight: number, productionPlanTemplate?: any[] }>();
             productsSnapshot.forEach(doc => {
                 const productCode = (doc.id || '').trim().toUpperCase();
                 if (productCode) {
-                    productsMap.set(productCode, { unitWeight: doc.data().unitWeight || 0 });
+                    const data = doc.data();
+                    productsMap.set(productCode, { 
+                        unitWeight: data.unitWeight || 0,
+                        productionPlanTemplate: data.productionPlanTemplate
+                    });
                 }
             });
 
@@ -381,21 +384,32 @@ export default function OrdersPage() {
 
                     enrichedItem.unitWeight = Number(enrichedItem.unitWeight) || 0;
 
+                    const productCodeToSearch = (itemCode).trim().toUpperCase();
+                    const productData = productCodeToSearch ? productsMap.get(productCodeToSearch) : undefined;
+                    
                     if (enrichedItem.unitWeight === 0) {
-                        const productCodeToSearch = (itemCode).trim().toUpperCase();
-                        if (productCodeToSearch) {
-                            const productData = productsMap.get(productCodeToSearch);
-                            if (productData && productData.unitWeight) {
-                                enrichedItem.unitWeight = Number(productData.unitWeight) || 0;
-                            }
+                        if (productData && productData.unitWeight) {
+                            enrichedItem.unitWeight = Number(productData.unitWeight) || 0;
                         }
                     }
 
-                    enrichedItem.productionPlan = (item.productionPlan || []).map((p: any) => ({
+                    let finalProductionPlan = (item.productionPlan || []).map((p: any) => ({
                         ...p,
                         startDate: p.startDate?.toDate ? p.startDate.toDate() : null,
                         completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
                     }));
+
+                    if (finalProductionPlan.length === 0) {
+                        if (productData && productData.productionPlanTemplate && productData.productionPlanTemplate.length > 0) {
+                            finalProductionPlan = productData.productionPlanTemplate.map((stage: any) => ({
+                                ...stage,
+                                status: "Pendente",
+                                startDate: null,
+                                completedDate: null,
+                            }));
+                        }
+                    }
+                    enrichedItem.productionPlan = finalProductionPlan;
 
                     return {
                         ...enrichedItem,
