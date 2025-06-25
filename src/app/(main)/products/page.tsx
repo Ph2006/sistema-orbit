@@ -26,7 +26,6 @@ const productSchema = z.object({
   description: z.string().min(3, { message: "A descrição é obrigatória." }),
   unitPrice: z.coerce.number().min(0, { message: "O preço unitário deve ser um número positivo." }),
   unitWeight: z.coerce.number().min(0).optional(),
-  taxRate: z.coerce.number().min(0).max(100).optional(),
 });
 
 type Product = z.infer<typeof productSchema> & { id: string };
@@ -50,7 +49,6 @@ export default function ProductsPage() {
       description: "",
       unitPrice: 0,
       unitWeight: 0,
-      taxRate: 0,
     },
   });
 
@@ -100,7 +98,6 @@ export default function ProductsPage() {
                             description: item.description || "Sem descrição",
                             unitPrice: Number(item.unitPrice) || 0,
                             unitWeight: Number(item.unitWeight) || 0,
-                            taxRate: Number(item.taxRate) || 0,
                         };
                         productsToSync.set(productData.code, productData);
                     }
@@ -170,7 +167,7 @@ export default function ProductsPage() {
   
   const handleAddClick = () => {
     setSelectedProduct(null);
-    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0, taxRate: 0 });
+    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0 });
     setIsFormOpen(true);
   };
   
@@ -319,7 +316,7 @@ export default function ProductsPage() {
                         <FormMessage />
                     </FormItem>
                 )} />
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="unitPrice" render={({ field }) => (
                         <FormItem>
                             <FormLabel>Preço Unitário (R$)</FormLabel>
@@ -330,13 +327,6 @@ export default function ProductsPage() {
                      <FormField control={form.control} name="unitWeight" render={({ field }) => (
                         <FormItem>
                             <FormLabel>Peso Unit. (kg)</FormLabel>
-                            <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                     <FormField control={form.control} name="taxRate" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Imposto (%)</FormLabel>
                             <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
                             <FormMessage />
                         </FormItem>
