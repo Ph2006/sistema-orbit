@@ -20,12 +20,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { StatCard } from "@/components/dashboard/stat-card";
 
 const orderItemSchema = z.object({
     id: z.string().optional(),
@@ -397,6 +398,28 @@ export default function OrdersPage() {
 
     const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter;
 
+    const dashboardStats = useMemo(() => {
+        const currentYear = new Date().getFullYear();
+        const ordersThisYear = orders.filter(order => order.createdAt.getFullYear() === currentYear);
+
+        const totalYearWeight = ordersThisYear.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        const inProductionWeight = ordersThisYear
+            .filter(order => order.status === 'Em Produção')
+            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        const completedWeight = ordersThisYear
+            .filter(order => order.status === 'Concluído')
+            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        const delayedWeight = ordersThisYear
+            .filter(order => order.status === 'Atrasado')
+            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+
+        return { totalYearWeight, inProductionWeight, completedWeight, delayedWeight };
+    }, [orders]);
+
+    const formatWeight = (weight: number) => {
+        return `${weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
+    };
+
     return (
         <>
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -411,6 +434,33 @@ export default function OrdersPage() {
                             className="pl-9 w-80"
                         />
                     </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <StatCard
+                        title="Peso Total (Ano)"
+                        value={formatWeight(dashboardStats.totalYearWeight)}
+                        icon={Scale}
+                        description={`Total de todos os pedidos em ${new Date().getFullYear()}`}
+                    />
+                    <StatCard
+                        title="Peso em Produção"
+                        value={formatWeight(dashboardStats.inProductionWeight)}
+                        icon={PlayCircle}
+                        description="Soma do peso de pedidos 'Em Produção'"
+                    />
+                    <StatCard
+                        title="Peso Concluído"
+                        value={formatWeight(dashboardStats.completedWeight)}
+                        icon={CheckCircle}
+                        description="Soma do peso de pedidos 'Concluído'"
+                    />
+                    <StatCard
+                        title="Peso Atrasado"
+                        value={formatWeight(dashboardStats.delayedWeight)}
+                        icon={AlertTriangle}
+                        description="Soma do peso de pedidos 'Atrasado'"
+                    />
                 </div>
 
                  <Card className="p-4">
@@ -634,7 +684,3 @@ export default function OrdersPage() {
         </>
     );
 }
-
-    
-
-    
