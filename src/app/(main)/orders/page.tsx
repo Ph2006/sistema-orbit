@@ -472,39 +472,41 @@ export default function OrdersPage() {
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
             
             const itemsToInclude = selectedOrder.items.filter(item => selectedItems.has(item.id!));
-            const totalWeight = itemsToInclude.reduce((acc, item) => acc + ((Number(item.quantity) || 0) * (Number(item.unitWeight) || 0)), 0);
+            const totalWeightOfSelection = calculateTotalWeight(itemsToInclude);
             
             const docPdf = new jsPDF();
-            const pageHeight = docPdf.internal.pageSize.height;
             const pageWidth = docPdf.internal.pageSize.width;
-            let y = 20;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let yPos = 15;
     
-            // Header
             if (companyData.logo?.preview) {
-                try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, 15, 25, 25); }
-                catch (e) { console.error("Error adding logo to PDF:", e); }
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 30, 30);
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
             }
-            docPdf.setFontSize(18);
-            docPdf.text(companyData.nomeFantasia || 'Romaneio', 45, 22);
-            docPdf.setFontSize(10);
-            docPdf.text(companyData.endereco || '', 45, 30);
-            docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 45, 35);
+            docPdf.setFontSize(18).setFont(undefined, 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', 50, yPos + 7);
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            docPdf.text(companyData.endereco || '', 50, yPos + 14);
+            docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 50, yPos + 19);
             
-            y = 50;
-            docPdf.setFontSize(14).setFont(undefined, 'bold').text(`ROMANEIO DE ENTREGA`, 15, y);
-            y += 10;
-            docPdf.setFontSize(11).setFont(undefined, 'normal');
-            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, y);
-            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 70, y);
-            y += 5;
-            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, 15, y);
-            y += 5;
-            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, y);
-            y += 10;
+            yPos = 60;
+            docPdf.setFontSize(14).setFont(undefined, 'bold');
+            docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
     
-            // Items Table
-            const head = [['Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']];
-            const body = itemsToInclude.map(item => {
+            docPdf.setFontSize(11).setFont(undefined, 'normal');
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, 15, yPos);
+            yPos += 7;
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
+            yPos += 12;
+    
+            const tableBody = itemsToInclude.map(item => {
                 const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
                 return [
                     item.code || '-',
@@ -514,32 +516,37 @@ export default function OrdersPage() {
                     itemTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
                 ];
             });
+            
             autoTable(docPdf, {
-                startY: y,
-                head: head,
+                startY: yPos,
+                head: [['Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
+                body: tableBody,
                 styles: { fontSize: 8 },
                 headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
                 columnStyles: {
-                    2: { halign: 'right' },
-                    3: { halign: 'right' },
-                    4: { halign: 'right' },
+                    0: { cellWidth: 20 },
+                    1: { cellWidth: 'auto' },
+                    2: { halign: 'right', cellWidth: 20 },
+                    3: { halign: 'right', cellWidth: 30 },
+                    4: { halign: 'right', cellWidth: 30 },
                 }
             });
     
-            y = (docPdf as any).lastAutoTable.finalY + 15;
+            yPos = (docPdf as any).lastAutoTable.finalY + 15;
     
-            // Total Weight Summary
             docPdf.setFontSize(12).setFont(undefined, 'bold');
-            docPdf.text(`Peso Total dos Itens: ${totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, pageWidth - 85, y);
-            y+=15;
+            docPdf.text(
+                `Peso Total dos Itens: ${totalWeightOfSelection.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, 
+                pageWidth - 15, yPos, { align: 'right' }
+            );
+            yPos += 20;
     
-            // Signature area
-            if (y > pageHeight - 50) { docPdf.addPage(); y = 20; }
+            if (yPos > pageHeight - 40) { docPdf.addPage(); yPos = 20; }
             docPdf.setFontSize(10).setFont(undefined, 'normal');
-            docPdf.text('Recebido por:', 15, y + 10);
-            docPdf.line(40, y + 10, 100, y + 10); // line for signature
-            docPdf.text('Data:', 15, y + 20);
-            docPdf.line(25, y + 20, 85, y + 20); // line for date
+            docPdf.text('Recebido por:', 15, yPos);
+            docPdf.line(40, yPos, 120, yPos);
+            docPdf.text('Data:', 15, yPos + 10);
+            docPdf.line(28, yPos + 10, 85, yPos + 10);
     
             docPdf.save(`Romaneio_${selectedOrder.quotationNumber}.pdf`);
             
@@ -818,8 +825,8 @@ export default function OrdersPage() {
                                                             </TableRow>
                                                         </TableHeader>
                                                         <TableBody>
-                                                            {selectedOrder.items.map((item, index) => (
-                                                                <TableRow key={item.id || index}>
+                                                            {selectedOrder.items.map((item) => (
+                                                                <TableRow key={item.id!}>
                                                                     <TableCell>
                                                                         <Checkbox
                                                                             checked={selectedItems.has(item.id!)}
