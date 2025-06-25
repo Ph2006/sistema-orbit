@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -78,6 +78,7 @@ const mapOrderStatus = (status?: string): string => {
         'in production': 'Em Produção',
         'em produção': 'Em Produção',
         'in progress': 'Em Produção',
+        'em progresso': 'Em Produção',
         'awaiting production': 'Aguardando Produção',
         'aguardando produção': 'Aguardando Produção',
         'pending': 'Aguardando Produção',
@@ -105,6 +106,8 @@ const getStatusProps = (status: string): { variant: "default" | "secondary" | "d
             return { variant: "default", icon: Truck, label: "Pronto para Entrega", colorClass: "bg-blue-500 hover:bg-blue-500/90" };
         case "Cancelado":
             return { variant: "destructive", icon: XCircle, label: "Cancelado", colorClass: "" };
+        case "Atrasado":
+            return { variant: "destructive", icon: AlertTriangle, label: "Atrasado", colorClass: "bg-orange-500 hover:bg-orange-500/90 border-transparent text-destructive-foreground" };
         default:
             return { variant: "outline", icon: Package, label: status || "Não definido", colorClass: "" };
     }
@@ -243,6 +246,14 @@ export default function OrdersPage() {
                     }
                     return enrichedItem;
                 });
+
+                let finalStatus = mapOrderStatus(data.status);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                if (deliveryDate && deliveryDate < today && !['Concluído', 'Cancelado'].includes(finalStatus)) {
+                    finalStatus = 'Atrasado';
+                }
                 
                 let customerInfo: CustomerInfo = { id: '', name: 'Cliente não informado' };
                 if (data.customer && typeof data.customer === 'object' && data.customer.name) {
@@ -263,7 +274,7 @@ export default function OrdersPage() {
                     customer: customerInfo,
                     items: enrichedItems,
                     totalValue: data.totalValue || 0,
-                    status: mapOrderStatus(data.status),
+                    status: finalStatus,
                     createdAt: createdAtDate,
                     deliveryDate: deliveryDate,
                     totalWeight: calculateTotalWeight(enrichedItems),
@@ -622,5 +633,7 @@ export default function OrdersPage() {
         </>
     );
 }
+
+    
 
     
