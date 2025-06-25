@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { collection, getDocs, Timestamp } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -41,7 +41,7 @@ type Order = {
     items: OrderItem[];
     totalValue: number;
     status: string;
-    createdAt: Timestamp;
+    createdAt: Date;
 };
 
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
@@ -94,7 +94,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                         <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
                             <TableCell>{order.customer?.name || 'N/A'}</TableCell>
-                            <TableCell>{order.createdAt ? format(order.createdAt.toDate(), "dd/MM/yyyy") : 'N/A'}</TableCell>
+                            <TableCell>{order.createdAt ? format(order.createdAt, "dd/MM/yyyy") : 'N/A'}</TableCell>
                             <TableCell className="text-right">
                                 {(order.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </TableCell>
@@ -128,9 +128,14 @@ export default function OrdersPage() {
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
+                const rawDate = data.createdAt;
+                // This ensures createdAt is a JS Date object, handling Firestore Timestamps or other formats.
+                const createdAtDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate || Date.now());
+
                 return {
                     id: doc.id,
-                    ...data
+                    ...data,
+                    createdAt: createdAtDate,
                 } as Order;
             }).sort((a, b) => (b.quotationNumber || 0) - (a.quotationNumber || 0));
             setOrders(ordersList);
@@ -236,7 +241,7 @@ export default function OrdersPage() {
                                             </div>
                                             <div className="flex justify-between items-center">
                                                 <span className="font-medium text-muted-foreground">Data do Pedido</span>
-                                                <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt.toDate(), 'dd/MM/yyyy HH:mm') : 'N/A'}</span>
+                                                <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy HH:mm') : 'N/A'}</span>
                                             </div>
                                              <div className="flex justify-between items-center">
                                                 <span className="font-medium text-muted-foreground">Orçamento de Origem</span>
