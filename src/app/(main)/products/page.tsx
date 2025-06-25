@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy } from "lucide-react";
 import { useAuth } from "../layout";
 
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const planStageSchema = z.object({
   stageName: z.string(),
@@ -55,6 +56,9 @@ export default function ProductsPage() {
   const [isLoadingStages, setIsLoadingStages] = useState(true);
   const [newStageName, setNewStageName] = useState("");
   const [activeTab, setActiveTab] = useState("catalog");
+
+  const [isCopyPopoverOpen, setIsCopyPopoverOpen] = useState(false);
+  const [copyFromSearch, setCopyFromSearch] = useState("");
 
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
@@ -333,6 +337,27 @@ export default function ProductsPage() {
     );
   });
 
+  const filteredProductsForCopy = useMemo(() => {
+    return products.filter(p => 
+        p.description.toLowerCase().includes(copyFromSearch.toLowerCase()) &&
+        p.id !== selectedProduct?.id
+    );
+  }, [products, copyFromSearch, selectedProduct]);
+
+  const handleCopySteps = (productToCopyFrom: Product) => {
+    const stepsToCopy = productToCopyFrom.productionPlanTemplate || [];
+    form.setValue('productionPlanTemplate', stepsToCopy, {
+        shouldValidate: true,
+        shouldDirty: true,
+    });
+    toast({
+        title: "Etapas copiadas!",
+        description: `As etapas de "${productToCopyFrom.description}" foram aplicadas.`,
+    });
+    setIsCopyPopoverOpen(false);
+  };
+
+
   return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -524,10 +549,53 @@ export default function ProductsPage() {
                     render={({ field }) => (
                         <FormItem>
                             <div className="mb-4">
-                                <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
-                                <FormDescription>
-                                    Selecione as etapas e defina a duração em dias para cada uma.
-                                </FormDescription>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
+                                        <FormDescription>
+                                            Selecione as etapas e defina a duração em dias para cada uma.
+                                        </FormDescription>
+                                    </div>
+                                    <Popover open={isCopyPopoverOpen} onOpenChange={setIsCopyPopoverOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button type="button" variant="outline" size="sm">
+                                                <Copy className="mr-2 h-3.5 w-3.5" />
+                                                Copiar de outro produto
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[350px] p-0" align="end">
+                                            <div className="p-2">
+                                                <Input
+                                                    placeholder="Buscar produto para copiar..."
+                                                    value={copyFromSearch}
+                                                    onChange={(e) => setCopyFromSearch(e.target.value)}
+                                                    className="h-9"
+                                                />
+                                            </div>
+                                            <Separator />
+                                            <ScrollArea className="h-64">
+                                                <div className="p-1">
+                                                    {filteredProductsForCopy.length > 0 ? (
+                                                        filteredProductsForCopy.map((product) => (
+                                                            <Button
+                                                                key={product.id}
+                                                                type="button"
+                                                                variant="ghost"
+                                                                className="w-full justify-start h-auto py-2 px-2 text-left"
+                                                                onClick={() => handleCopySteps(product)}
+                                                            >
+                                                                <span className="font-medium">{product.description}</span>
+                                                                <span className="text-xs text-muted-foreground ml-2">({product.code})</span>
+                                                            </Button>
+                                                        ))
+                                                    ) : (
+                                                        <p className="p-4 text-center text-sm text-muted-foreground">Nenhum outro produto encontrado.</p>
+                                                    )}
+                                                </div>
+                                            </ScrollArea>
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
                             </div>
                             <div className="space-y-3">
                                 {manufacturingStages.map((stageName) => {
@@ -610,5 +678,3 @@ export default function ProductsPage() {
     </>
   );
 }
-
-    
