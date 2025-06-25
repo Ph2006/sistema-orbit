@@ -27,9 +27,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-
 type Task = {
   orderId: string;
+  itemId: string;
   quotationNumber: number;
   internalOS: string;
   customerName: string;
@@ -40,9 +40,15 @@ type Task = {
   startDate: Date | null;
   dueDate: Date | null;
   status: string;
-  responsible: string; 
+  responsible: string;
+  resourceId: string | null;
   isOverdue: boolean;
 };
+
+type TeamMember = {
+    id: string;
+    name: string;
+}
 
 type CompanyData = {
     nomeFantasia?: string;
@@ -57,24 +63,40 @@ const resourceSchema = z.object({
 
 type Resource = z.infer<typeof resourceSchema> & { id: string };
 
+const assignmentSchema = z.object({
+  responsible: z.string({ required_error: "Selecione um responsável." }),
+  resourceId: z.string().nullable().optional(),
+});
+type AssignmentFormValues = z.infer<typeof assignmentSchema>;
+
 
 export default function TasksPage() {
   const [todaysTasks, setTodaysTasks] = useState<Task[]>([]);
   const [overdueTasks, setOverdueTasks] = useState<Task[]>([]);
   const [futureTasks, setFutureTasks] = useState<Task[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
+  // Resource Dialog State
   const [isResourceDialogOpen, setIsResourceDialogOpen] = useState(false);
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [resourceToDelete, setResourceToDelete] = useState<Resource | null>(null);
   const [isDeleteResourceAlertOpen, setIsDeleteResourceAlertOpen] = useState(false);
+  
+  // Assignment Dialog State
+  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+  const [taskToAssign, setTaskToAssign] = useState<Task | null>(null);
 
   const resourceForm = useForm<z.infer<typeof resourceSchema>>({
     resolver: zodResolver(resourceSchema),
     defaultValues: { name: "", type: "Máquina" },
+  });
+
+  const assignmentForm = useForm<AssignmentFormValues>({
+    resolver: zodResolver(assignmentSchema),
   });
 
   const fetchTasks = async () => {
@@ -85,7 +107,18 @@ export default function TasksPage() {
 
       ordersSnapshot.forEach(orderDoc => {
         const orderData = orderDoc.data();
-        (orderData.items || []).forEach((item: any) => {
+        
+        let customerName = 'N/A';
+        if (orderData.customer && typeof orderData.customer === 'object' && orderData.customer.name) {
+            customerName = orderData.customer.name;
+        } else if (typeof orderData.customerName === 'string') {
+            customerName = orderData.customerName;
+        } else if (typeof orderData.customer === 'string') {
+            customerName = orderData.customer;
+        }
+        const quotationNumber = orderData.quotationNumber || orderData.orderNumber || 0;
+
+        (orderData.items || []).forEach((item: any, itemIndex: number) => {
           (item.productionPlan || []).forEach((stage: any) => {
             const completedDate = stage.completedDate?.toDate ? stage.completedDate.toDate() : null;
             const startDate = stage.startDate?.toDate ? stage.startDate.toDate() : null;
@@ -93,9 +126,10 @@ export default function TasksPage() {
             if (stage.status !== 'Concluído') {
                 allTasks.push({
                     orderId: orderDoc.id,
-                    quotationNumber: orderData.quotationNumber || 0,
+                    itemId: item.id || `${orderDoc.id}-${itemIndex}`,
+                    quotationNumber: quotationNumber,
                     internalOS: orderData.internalOS || 'N/A',
-                    customerName: orderData.customer?.name || 'N/A',
+                    customerName: customerName,
                     itemName: item.description,
                     itemQuantity: item.quantity || 0,
                     itemWeight: (item.quantity || 0) * (item.unitWeight || 0),
@@ -103,7 +137,8 @@ export default function TasksPage() {
                     startDate: startDate,
                     dueDate: completedDate,
                     status: stage.status,
-                    responsible: 'Não atribuído',
+                    responsible: stage.responsible || 'Não atribuído',
+                    resourceId: stage.resourceId || null,
                     isOverdue: completedDate ? isPast(endOfDay(completedDate)) : false,
                 });
             }
@@ -149,7 +184,6 @@ export default function TasksPage() {
             setResources(docSnap.data().items || []);
         } else {
             setResources([]);
-            // Initialize document if it doesn't exist
             await setDoc(resourceDocRef, { items: [] });
         }
     } catch (error) {
@@ -158,25 +192,41 @@ export default function TasksPage() {
     }
   };
 
+  const fetchTeamMembers = async () => {
+    try {
+        const teamRef = doc(db, "companies", "mecald", "settings", "team");
+        const docSnap = await getDoc(teamRef);
+        if (docSnap.exists() && docSnap.data().members) {
+            const members = docSnap.data().members.map((m: any) => ({ id: m.id, name: m.name }));
+            setTeamMembers(members);
+        }
+    } catch (error) {
+        console.error("Error fetching team members:", error);
+    }
+  };
+
+
   useEffect(() => {
     if (!authLoading && user) {
       fetchTasks();
       fetchResources();
+      fetchTeamMembers();
     }
   }, [user, authLoading]);
 
   const onResourceSubmit = async (values: z.infer<typeof resourceSchema>) => {
     const resourceDocRef = doc(db, "companies", "mecald", "settings", "resources");
     try {
-        if (selectedResource) { // Editing existing resource
+        if (selectedResource) {
             const currentResources = [...resources];
             const index = currentResources.findIndex(r => r.id === selectedResource.id);
             if (index > -1) {
-                currentResources[index] = { ...selectedResource, ...values };
+                const updatedResource = { ...selectedResource, ...values };
+                currentResources[index] = updatedResource;
                 await updateDoc(resourceDocRef, { items: currentResources });
                 toast({ title: "Recurso atualizado!" });
             }
-        } else { // Adding new resource
+        } else {
             const newResource = { ...values, id: Date.now().toString() };
             await updateDoc(resourceDocRef, { items: arrayUnion(newResource) });
             toast({ title: "Recurso adicionado!" });
@@ -212,14 +262,69 @@ export default function TasksPage() {
     if (!resourceToDelete) return;
     const resourceDocRef = doc(db, "companies", "mecald", "settings", "resources");
     try {
-        await updateDoc(resourceDocRef, { items: arrayRemove(resourceToDelete) });
-        toast({ title: "Recurso removido!" });
+        const resourceData = resources.find(r => r.id === resourceToDelete.id);
+        if (resourceData) {
+            await updateDoc(resourceDocRef, { items: arrayRemove(resourceData) });
+            toast({ title: "Recurso removido!" });
+        }
         setIsDeleteResourceAlertOpen(false);
         setResourceToDelete(null);
         await fetchResources();
     } catch (error) {
         console.error("Error deleting resource:", error);
         toast({ variant: "destructive", title: "Erro ao remover recurso" });
+    }
+  };
+
+  const handleOpenAssignDialog = (task: Task) => {
+    setTaskToAssign(task);
+    assignmentForm.reset({
+        responsible: task.responsible !== 'Não atribuído' ? task.responsible : undefined,
+        resourceId: task.resourceId,
+    });
+    setIsAssignDialogOpen(true);
+  };
+
+  const handleSaveAssignment = async (values: AssignmentFormValues) => {
+    if (!taskToAssign) return;
+
+    try {
+        const orderRef = doc(db, "companies", "mecald", "orders", taskToAssign.orderId);
+        const orderSnap = await getDoc(orderRef);
+
+        if (!orderSnap.exists()) {
+            throw new Error("Pedido não encontrado.");
+        }
+
+        const orderData = orderSnap.data();
+        const items = [...(orderData.items || [])];
+        const itemIndex = items.findIndex((item: any) => item.id === taskToAssign.itemId);
+
+        if (itemIndex === -1) {
+            throw new Error("Item do pedido não encontrado.");
+        }
+        
+        const plan = [...(items[itemIndex].productionPlan || [])];
+        const stageIndex = plan.findIndex((stage: any) => stage.stageName === taskToAssign.stageName);
+        
+        if (stageIndex === -1) {
+            throw new Error("Etapa de produção não encontrada.");
+        }
+        
+        plan[stageIndex].responsible = values.responsible;
+        plan[stageIndex].resourceId = values.resourceId || null;
+
+        items[itemIndex].productionPlan = plan;
+
+        await updateDoc(orderRef, { items: items });
+
+        toast({ title: "Atribuição salva!", description: "A tarefa foi atualizada com sucesso." });
+        setIsAssignDialogOpen(false);
+        setTaskToAssign(null);
+        await fetchTasks();
+    } catch (error) {
+        console.error("Error saving assignment:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar", description: (error as Error).message });
     }
   };
 
@@ -291,7 +396,9 @@ export default function TasksPage() {
                     <TableHead className="w-[120px] text-right">Peso (kg)</TableHead>
                     <TableHead className="w-[120px]">Data Prevista</TableHead>
                     <TableHead className="w-[150px]">Responsável</TableHead>
+                    <TableHead className="w-[150px]">Recurso</TableHead>
                     <TableHead className="w-[120px]">Status</TableHead>
+                    <TableHead className="w-[80px] text-center">Ações</TableHead>
                 </TableRow>
             </TableHeader>
             <TableBody>
@@ -311,8 +418,14 @@ export default function TasksPage() {
                            (task.startDate ? `Início ${format(task.startDate, 'dd/MM/yyyy')}`: 'A definir')}
                         </TableCell>
                         <TableCell>{task.responsible}</TableCell>
+                        <TableCell>{resources.find(r => r.id === task.resourceId)?.name || 'N/A'}</TableCell>
                         <TableCell>
                             <Badge variant={task.isOverdue ? "destructive" : "secondary"}>{task.status}</Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                            <Button variant="ghost" size="icon" onClick={() => handleOpenAssignDialog(task)}>
+                                <Pencil className="h-4 w-4" />
+                            </Button>
                         </TableCell>
                     </TableRow>
                 ))}
@@ -487,6 +600,50 @@ export default function TasksPage() {
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsResourceDialogOpen(false)}>Cancelar</Button>
                   <Button type="submit">{selectedResource ? 'Salvar Alterações' : 'Adicionar Recurso'}</Button>
+                </DialogFooter>
+              </form>
+            </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Atribuir Tarefa</DialogTitle>
+              <DialogDescription>
+                Atribua um responsável e um recurso para a etapa <span className="font-bold">{taskToAssign?.stageName}</span> do item <span className="font-bold">{taskToAssign?.itemName}</span>.
+              </DialogDescription>
+            </DialogHeader>
+            <Form {...assignmentForm}>
+              <form onSubmit={assignmentForm.handleSubmit(handleSaveAssignment)} className="space-y-4 pt-4">
+                <FormField control={assignmentForm.control} name="responsible" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Responsável</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl>
+                        <SelectContent>
+                            {teamMembers.map(member => <SelectItem key={member.id} value={member.name}>{member.name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={assignmentForm.control} name="resourceId" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Recurso</FormLabel>
+                    <Select onValueChange={(value) => field.onChange(value === 'none' ? null : value)} defaultValue={field.value ?? undefined}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Selecione um recurso" /></SelectTrigger></FormControl>
+                        <SelectContent>
+                            <SelectItem value="none">Nenhum</SelectItem>
+                            {resources.map(resource => <SelectItem key={resource.id} value={resource.id}>{resource.name} ({resource.type})</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsAssignDialogOpen(false)}>Cancelar</Button>
+                  <Button type="submit">Salvar Atribuição</Button>
                 </DialogFooter>
               </form>
             </Form>
