@@ -308,7 +308,7 @@ export default function QuotationsPage() {
                                     {filteredQuotations.length > 0 ? (
                                         filteredQuotations.map((q) => (
                                             <TableRow key={q.id} onClick={() => handleViewQuotation(q)} className="cursor-pointer">
-                                                <TableCell className="font-medium truncate max-w-[120px]">{q.id.substring(0,8)}</TableCell>
+                                                <TableCell className="font-medium truncate max-w-[120px]">{q.id.substring(0,8).toUpperCase()}</TableCell>
                                                 <TableCell>{q.customer.name}</TableCell>
                                                 <TableCell>{format(q.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
                                                 <TableCell>
@@ -448,7 +448,7 @@ export default function QuotationsPage() {
                     {selectedQuotation && (
                         <>
                         <SheetHeader>
-                            <SheetTitle className="font-headline">Orçamento Nº {selectedQuotation.id.substring(0, 8)}</SheetTitle>
+                            <SheetTitle className="font-headline">Orçamento Nº {selectedQuotation.id.substring(0, 8).toUpperCase()}</SheetTitle>
                             <SheetDescription>
                                 Cliente: {selectedQuotation.customer.name}
                             </SheetDescription>
