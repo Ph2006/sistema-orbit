@@ -152,8 +152,8 @@ export default function OrdersPage() {
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
     const [customers, setCustomers] = useState<CustomerInfo[]>([]);
-    const [statusFilter, setStatusFilter] = useState<string>("");
-    const [customerFilter, setCustomerFilter] = useState<string>("");
+    const [statusFilter, setStatusFilter] = useState<string>("all");
+    const [customerFilter, setCustomerFilter] = useState<string>("all");
     const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
 
     const form = useForm<z.infer<typeof orderSchema>>({
@@ -343,8 +343,8 @@ export default function OrdersPage() {
             status.includes(query) ||
             internalOS.includes(query);
 
-        const statusMatch = !statusFilter || order.status === statusFilter;
-        const customerMatch = !customerFilter || order.customer.id === customerFilter;
+        const statusMatch = statusFilter === 'all' || order.status === statusFilter;
+        const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
         const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
 
         return textMatch && statusMatch && customerMatch && dateMatch;
@@ -355,12 +355,12 @@ export default function OrdersPage() {
 
     const clearFilters = () => {
         setSearchQuery("");
-        setStatusFilter("");
-        setCustomerFilter("");
+        setStatusFilter("all");
+        setCustomerFilter("all");
         setDateFilter(undefined);
     };
 
-    const hasActiveFilters = searchQuery || statusFilter || customerFilter || dateFilter;
+    const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter;
 
     return (
         <>
@@ -386,7 +386,7 @@ export default function OrdersPage() {
                                 <SelectValue placeholder="Status" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">Todos os Status</SelectItem>
+                                <SelectItem value="all">Todos os Status</SelectItem>
                                 {uniqueStatuses.map(status => (
                                     <SelectItem key={status} value={status}>{status}</SelectItem>
                                 ))}
@@ -398,7 +398,7 @@ export default function OrdersPage() {
                                 <SelectValue placeholder="Cliente" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">Todos os Clientes</SelectItem>
+                                <SelectItem value="all">Todos os Clientes</SelectItem>
                                 {customers.map(customer => (
                                     <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
                                 ))}
@@ -599,3 +599,5 @@ export default function OrdersPage() {
         </>
     );
 }
+
+    
