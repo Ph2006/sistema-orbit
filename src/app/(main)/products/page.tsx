@@ -155,41 +155,62 @@ export default function ProductsPage() {
     try {
         const quotationsSnapshot = await getDocs(collection(db, "companies", "mecald", "quotations"));
         const productsToSync = new Map<string, any>();
+        const skippedCodes: string[] = [];
 
         quotationsSnapshot.forEach((quotationDoc) => {
             const quotationData = quotationDoc.data();
             if (Array.isArray(quotationData.items)) {
                 quotationData.items.forEach((item: any) => {
                     if (item.code && typeof item.code === 'string' && item.code.trim() !== "") {
+                        const productCode = item.code.trim();
+
+                        if (productCode.includes('/')) {
+                            if (!skippedCodes.includes(productCode)) {
+                                skippedCodes.push(productCode);
+                            }
+                            return; 
+                        }
+
                         const productData = {
-                            code: item.code.trim(),
+                            code: productCode,
                             description: item.description || "Sem descrição",
                             unitPrice: Number(item.unitPrice) || 0,
                             unitWeight: Number(item.unitWeight) || 0,
                         };
-                        productsToSync.set(productData.code, productData);
+                        productsToSync.set(productCode, productData);
                     }
                 });
             }
         });
         
-        if (productsToSync.size === 0) {
+        if (productsToSync.size === 0 && skippedCodes.length === 0) {
             toast({ title: "Nenhum produto novo encontrado", description: "Seu catálogo já parece estar atualizado." });
             setIsSyncing(false);
             return;
         }
 
-        const batch = writeBatch(db);
-        const productsCollectionRef = collection(db, "companies", "mecald", "products");
+        if (productsToSync.size > 0) {
+            const batch = writeBatch(db);
+            const productsCollectionRef = collection(db, "companies", "mecald", "products");
+    
+            productsToSync.forEach((productData, productCode) => {
+                const productRef = doc(productsCollectionRef, productCode);
+                batch.set(productRef, { ...productData, updatedAt: Timestamp.now() }, { merge: true });
+            });
+    
+            await batch.commit();
+        }
 
-        productsToSync.forEach((productData, productCode) => {
-            const productRef = doc(productsCollectionRef, productCode);
-            batch.set(productRef, { ...productData, updatedAt: Timestamp.now() }, { merge: true });
+        let description = `${productsToSync.size} produtos foram adicionados ou atualizados.`;
+        if (skippedCodes.length > 0) {
+            description += ` ${skippedCodes.length} código(s) foram ignorados por conterem caracteres inválidos (/).`
+        }
+
+        toast({ 
+            title: "Sincronização Concluída!", 
+            description: description,
+            duration: skippedCodes.length > 0 ? 8000 : 5000,
         });
-
-        await batch.commit();
-
-        toast({ title: "Sincronização Concluída!", description: `${productsToSync.size} produtos foram adicionados ou atualizados.` });
         await fetchProducts();
 
     } catch (error) {
@@ -206,6 +227,15 @@ export default function ProductsPage() {
 
   const onSubmit = async (values: z.infer<typeof productSchema>) => {
     try {
+        if (values.code.includes('/')) {
+            toast({
+                variant: "destructive",
+                title: "Código Inválido",
+                description: "O código do produto não pode conter o caractere '/'."
+            });
+            return;
+        }
+
       const productRef = doc(db, "companies", "mecald", "products", values.code);
       
       if (selectedProduct && selectedProduct.id !== values.code) {
@@ -432,6 +462,7 @@ export default function ProductsPage() {
                     <FormItem>
                         <FormLabel>Código do Produto</FormLabel>
                         <FormControl><Input placeholder="Ex: PROD-001" {...field} disabled={!!selectedProduct} /></FormControl>
+                        <FormDescription>O código não pode conter '/' e não pode ser alterado após a criação.</FormDescription>
                         <FormMessage />
                     </FormItem>
                 )} />
