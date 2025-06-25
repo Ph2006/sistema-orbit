@@ -1,13 +1,13 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -31,6 +31,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
+import { StatCard } from "@/components/dashboard/stat-card";
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -54,6 +55,10 @@ const quotationSchema = z.object({
 
 type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp, number: number };
 type Customer = { id: string, nomeFantasia: string };
+
+const calculateTotal = (items: z.infer<typeof itemSchema>[]) => {
+    return items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+};
 
 export default function QuotationsPage() {
     const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -330,9 +335,34 @@ export default function QuotationsPage() {
         }
     };
 
-    const calculateTotal = (items: z.infer<typeof itemSchema>[]) => {
-        return items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
-    };
+    const dashboardStats = useMemo(() => {
+        if (!quotations || quotations.length === 0) {
+            return {
+                approvalRate: 0,
+                issuedValue: 0,
+                approvedValue: 0,
+                totalCount: 0,
+            };
+        }
+
+        const relevantQuotations = quotations.filter(q => q.status !== "Informativo");
+        const approvedQuotations = relevantQuotations.filter(q => q.status === "Aprovado");
+
+        const totalCount = relevantQuotations.length;
+        const approvedCount = approvedQuotations.length;
+
+        const approvalRate = totalCount > 0 ? (approvedCount / totalCount) * 100 : 0;
+
+        const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateTotal(q.items), 0);
+        const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateTotal(q.items), 0);
+
+        return {
+            approvalRate,
+            issuedValue,
+            approvedValue,
+            totalCount,
+        };
+    }, [quotations]);
 
     return (
         <>
@@ -350,6 +380,28 @@ export default function QuotationsPage() {
                         </Button>
                     </div>
                 </div>
+
+                <div className="mb-4 grid gap-4 md:grid-cols-3">
+                    <StatCard
+                        title="Taxa de Aprovação"
+                        value={`${dashboardStats.approvalRate.toFixed(1)}%`}
+                        icon={Percent}
+                        description={`Baseado em ${dashboardStats.totalCount} orçamentos válidos`}
+                    />
+                    <StatCard
+                        title="Valor Emitido (Total)"
+                        value={dashboardStats.issuedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        icon={FileText}
+                        description="Soma de todos os orçamentos válidos"
+                    />
+                    <StatCard
+                        title="Valor Aprovado"
+                        value={dashboardStats.approvedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        icon={DollarSign}
+                        description="Soma de todos os orçamentos aprovados"
+                    />
+                </div>
+
                 <Card>
                     <CardHeader>
                         <CardTitle>Lista de Orçamentos</CardTitle>
