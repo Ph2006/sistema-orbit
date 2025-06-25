@@ -259,6 +259,7 @@ export default function OrdersPage() {
     const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
     const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
     const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
+    const [isFetchingPlan, setIsFetchingPlan] = useState(false);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -660,15 +661,48 @@ export default function OrdersPage() {
         }
     };
 
-    const handleOpenProgressModal = (item: OrderItem) => {
+    const handleOpenProgressModal = async (item: OrderItem) => {
         setItemToTrack(item);
-        const planToEdit = (item.productionPlan || []).map(stage => ({
-            ...stage,
-            startDate: stage.startDate ? new Date(stage.startDate) : null,
-            completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
-        }));
-        setEditedPlan(planToEdit);
         setIsProgressModalOpen(true);
+        setEditedPlan([]);
+    
+        if (item.productionPlan && item.productionPlan.length > 0) {
+            const planToEdit = (item.productionPlan || []).map(stage => ({
+                ...stage,
+                startDate: stage.startDate ? new Date(stage.startDate) : null,
+                completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
+            }));
+            setEditedPlan(planToEdit);
+            return;
+        }
+    
+        if (item.code) {
+            setIsFetchingPlan(true);
+            try {
+                const productRef = doc(db, "companies", "mecald", "products", item.code);
+                const productSnap = await getDoc(productRef);
+                let newPlan: ProductionStage[] = [];
+                if (productSnap.exists()) {
+                    const productData = productSnap.data();
+                    const template = productData.productionPlanTemplate || [];
+                    if (template.length > 0) {
+                        newPlan = template.map((stage: any) => ({
+                            stageName: stage.stageName,
+                            status: "Pendente",
+                            startDate: null,
+                            completedDate: null,
+                        }));
+                    }
+                }
+                setEditedPlan(newPlan);
+            } catch (error) {
+                console.error("Error fetching production plan template:", error);
+                toast({ variant: "destructive", title: "Erro ao buscar plano", description: "Não foi possível carregar o plano de fabricação do produto." });
+                setEditedPlan([]);
+            } finally {
+                setIsFetchingPlan(false);
+            }
+        }
     };
 
     const handleProgressChange = (stageIndex: number, field: keyof ProductionStage, value: any) => {
@@ -1172,60 +1206,65 @@ export default function OrdersPage() {
                     </DialogHeader>
                     <ScrollArea className="max-h-[60vh]">
                         <div className="space-y-4 p-1 pr-4">
-                            {(editedPlan || []).map((stage, index) => (
-                                <Card key={index} className="p-4">
-                                    <CardTitle className="text-lg mb-4">{stage.stageName}</CardTitle>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <Label>Status</Label>
-                                            <Select 
-                                                value={stage.status} 
-                                                onValueChange={(value) => handleProgressChange(index, 'status', value)}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione o status" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="Pendente">Pendente</SelectItem>
-                                                    <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                                                    <SelectItem value="Concluído">Concluído</SelectItem>
-                                                </SelectContent>
-                                            </Select>
+                            {isFetchingPlan ? (
+                                <div className="flex justify-center items-center h-48">
+                                    <p>Buscando plano de fabricação...</p>
+                                </div>
+                            ) : (editedPlan && editedPlan.length > 0) ? (
+                                editedPlan.map((stage, index) => (
+                                    <Card key={index} className="p-4">
+                                        <CardTitle className="text-lg mb-4">{stage.stageName}</CardTitle>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="space-y-2">
+                                                <Label>Status</Label>
+                                                <Select 
+                                                    value={stage.status} 
+                                                    onValueChange={(value) => handleProgressChange(index, 'status', value)}
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Selecione o status" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="Pendente">Pendente</SelectItem>
+                                                        <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                                                        <SelectItem value="Concluído">Concluído</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                                        <div className="space-y-2">
-                                            <Label>Data de Início</Label>
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.startDate && "text-muted-foreground")}>
-                                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                                    </Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0">
-                                                    <Calendar mode="single" selected={stage.startDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'startDate', date)} initialFocus />
-                                                </PopoverContent>
-                                            </Popover>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                            <div className="space-y-2">
+                                                <Label>Data de Início</Label>
+                                                <Popover>
+                                                    <PopoverTrigger asChild>
+                                                        <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.startDate && "text-muted-foreground")}>
+                                                            <CalendarIcon className="mr-2 h-4 w-4" />
+                                                            {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-auto p-0">
+                                                        <Calendar mode="single" selected={stage.startDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'startDate', date)} initialFocus />
+                                                    </PopoverContent>
+                                                </Popover>
+                                            </div>
+                                             <div className="space-y-2">
+                                                <Label>Data de Conclusão</Label>
+                                                <Popover>
+                                                    <PopoverTrigger asChild>
+                                                        <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.completedDate && "text-muted-foreground")}>
+                                                            <CalendarIcon className="mr-2 h-4 w-4" />
+                                                            {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-auto p-0">
+                                                        <Calendar mode="single" selected={stage.completedDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'completedDate', date)} initialFocus />
+                                                    </PopoverContent>
+                                                </Popover>
+                                            </div>
                                         </div>
-                                         <div className="space-y-2">
-                                            <Label>Data de Conclusão</Label>
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.completedDate && "text-muted-foreground")}>
-                                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                                    </Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0">
-                                                    <Calendar mode="single" selected={stage.completedDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'completedDate', date)} initialFocus />
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-                                    </div>
-                                </Card>
-                            ))}
-                            {(editedPlan?.length === 0) && (
+                                    </Card>
+                                ))
+                            ) : (
                                 <div className="text-center text-muted-foreground py-8">
                                     <p>Nenhuma etapa de fabricação definida para este item.</p>
                                     <p className="text-sm">Você pode definir as etapas na tela de Produtos.</p>
