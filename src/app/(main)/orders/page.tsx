@@ -140,13 +140,33 @@ export default function OrdersPage() {
         if (!user) return;
         setIsLoading(true);
         try {
+            // First, fetch all products to create a weight reference map
+            const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
+            const productsMap = new Map<string, { unitWeight: number }>();
+            productsSnapshot.forEach(doc => {
+                // The document ID is the product code
+                productsMap.set(doc.id, { unitWeight: doc.data().unitWeight || 0 });
+            });
+
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
                 
                 const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
                 const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
-                const items = data.items || [];
+                
+                 // Enrich items with weight from products catalog if missing
+                const enrichedItems = (data.items || []).map((item: OrderItem) => {
+                    // If weight is missing or zero, and there's a product code, try to find it in the catalog
+                    if ((!item.unitWeight || item.unitWeight === 0) && item.code) {
+                        const productData = productsMap.get(item.code);
+                        if (productData && productData.unitWeight > 0) {
+                            // Return a new item object with the weight from the catalog
+                            return { ...item, unitWeight: productData.unitWeight };
+                        }
+                    }
+                    return item;
+                });
                 
                 // Normalize customer data
                 let customerInfo = { id: '', name: 'Cliente não informado' };
@@ -166,12 +186,12 @@ export default function OrdersPage() {
                     quotationId: data.quotationId || '',
                     quotationNumber: orderNum,
                     customer: customerInfo,
-                    items,
+                    items: enrichedItems,
                     totalValue: data.totalValue || 0,
                     status: data.status || 'Status não definido',
                     createdAt: createdAtDate,
                     deliveryDate: deliveryDate,
-                    totalWeight: calculateTotalWeight(items),
+                    totalWeight: calculateTotalWeight(enrichedItems),
                 } as Order;
             }).sort((a, b) => (b.quotationNumber || 0) - (a.quotationNumber || 0));
             
