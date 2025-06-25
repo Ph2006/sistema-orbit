@@ -140,12 +140,12 @@ export default function OrdersPage() {
         if (!user) return;
         setIsLoading(true);
         try {
-            // Step 1: Fetch all products to create a weight reference map.
+            // Step 1: Fetch all products and create a case-insensitive weight reference map.
             const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
             const productsMap = new Map<string, { unitWeight: number }>();
             productsSnapshot.forEach(doc => {
-                // The document ID is the product code.
-                productsMap.set(doc.id, { unitWeight: doc.data().unitWeight || 0 });
+                // The document ID is the product code. Store its uppercase version for reliable matching.
+                productsMap.set(doc.id.toUpperCase(), { unitWeight: doc.data().unitWeight || 0 });
             });
 
             // Step 2: Fetch all orders.
@@ -158,25 +158,26 @@ export default function OrdersPage() {
                 
                 // Step 3: Enrich items with weight from the product catalog for consistency.
                 const enrichedItems = (data.items || []).map((item: OrderItem) => {
-                    const currentWeight = Number(item.unitWeight) || 0;
-                    const hasCode = item.code && typeof item.code === 'string' && item.code.trim() !== '';
+                    const enrichedItem = { ...item };
+                    const currentWeight = Number(enrichedItem.unitWeight) || 0;
+                    const hasCode = enrichedItem.code && typeof enrichedItem.code === 'string' && enrichedItem.code.trim() !== '';
 
-                    // If weight is zero and a valid code exists, look it up in the product catalog.
+                    // If weight is missing (or zero) and a valid code exists, look it up in the product catalog.
                     if (currentWeight === 0 && hasCode) {
-                        const productCode = item.code.trim(); // Use trimmed code for lookup.
+                        // Use trimmed, uppercase code for case-insensitive lookup.
+                        const productCode = enrichedItem.code.trim().toUpperCase();
                         const productData = productsMap.get(productCode);
                         
                         if (productData) {
                             const catalogWeight = Number(productData.unitWeight) || 0;
+                            // If we found a valid weight in the catalog, update the item's weight.
                             if (catalogWeight > 0) {
-                                // Return a new item object with the weight from the catalog.
-                                return { ...item, unitWeight: catalogWeight };
+                                enrichedItem.unitWeight = catalogWeight;
                             }
                         }
                     }
                     
-                    // If no enrichment happened, return the original item.
-                    return item;
+                    return enrichedItem;
                 });
                 
                 // Normalize customer data
