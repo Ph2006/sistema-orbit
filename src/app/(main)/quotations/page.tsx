@@ -118,7 +118,7 @@ export default function QuotationsPage() {
                 case "Informativo":
                     return newStatus;
                 default:
-                    return "Aguardando Aprovação";
+                    return newStatus;
             }
         }
 
