@@ -431,18 +431,43 @@ export default function QuotationsPage() {
 
     const handleGenerateOrder = async (quotation: Quotation) => {
         if (!quotation) return;
-
-        const orderData = {
-            quotationId: quotation.id,
-            quotationNumber: quotation.number,
-            customer: quotation.customer,
-            items: quotation.items,
-            totalValue: calculateGrandTotal(quotation.items),
-            status: "Aguardando Produção", // Initial status for a production order
-            createdAt: Timestamp.now(),
-        };
-
+    
         try {
+            const productsRef = collection(db, "companies", "mecald", "products");
+            const itemsWithProductionPlan = await Promise.all(
+                quotation.items.map(async (item) => {
+                    let productionPlan: any[] = [];
+                    if (item.code) {
+                        const productDoc = await getDoc(doc(productsRef, item.code));
+                        if (productDoc.exists()) {
+                            const productData = productDoc.data();
+                            if (Array.isArray(productData.manufacturingStages)) {
+                                productionPlan = productData.manufacturingStages.map((stageName: string) => ({
+                                    stageName,
+                                    status: "Pendente",
+                                    startDate: null,
+                                    completedDate: null,
+                                }));
+                            }
+                        }
+                    }
+                    return {
+                        ...item,
+                        productionPlan,
+                    };
+                })
+            );
+    
+            const orderData = {
+                quotationId: quotation.id,
+                quotationNumber: quotation.number,
+                customer: quotation.customer,
+                items: itemsWithProductionPlan,
+                totalValue: calculateGrandTotal(quotation.items),
+                status: "Aguardando Produção",
+                createdAt: Timestamp.now(),
+            };
+    
             await addDoc(collection(db, "companies", "mecald", "orders"), orderData);
             toast({
                 title: "Pedido gerado com sucesso!",
@@ -1069,3 +1094,4 @@ export default function QuotationsPage() {
         </>
     );
 }
+

@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { PlusCircle, Search, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { useAuth } from "../layout";
@@ -15,17 +15,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 
 const productSchema = z.object({
   code: z.string().min(1, { message: "O código do produto é obrigatório." }),
   description: z.string().min(3, { message: "A descrição é obrigatória." }),
   unitPrice: z.coerce.number().min(0, { message: "O preço unitário deve ser um número positivo." }),
   unitWeight: z.coerce.number().min(0).optional(),
+  manufacturingStages: z.array(z.string()).optional(),
 });
 
 type Product = z.infer<typeof productSchema> & { id: string };
@@ -41,6 +45,10 @@ export default function ProductsPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
+  
+  const [manufacturingStages, setManufacturingStages] = useState<string[]>([]);
+  const [isLoadingStages, setIsLoadingStages] = useState(true);
+  const [newStageName, setNewStageName] = useState("");
 
   const form = useForm<z.infer<typeof productSchema>>({
     resolver: zodResolver(productSchema),
@@ -49,8 +57,58 @@ export default function ProductsPage() {
       description: "",
       unitPrice: 0,
       unitWeight: 0,
+      manufacturingStages: [],
     },
   });
+
+  const stagesDocRef = doc(db, "companies", "mecald", "settings", "manufacturingStages");
+
+  const fetchStages = async () => {
+    setIsLoadingStages(true);
+    try {
+      const docSnap = await getDoc(stagesDocRef);
+      if (docSnap.exists() && Array.isArray(docSnap.data().stages)) {
+        setManufacturingStages(docSnap.data().stages);
+      } else {
+        await setDoc(stagesDocRef, { stages: [] });
+        setManufacturingStages([]);
+      }
+    } catch (error) {
+      console.error("Error fetching manufacturing stages:", error);
+      toast({ variant: "destructive", title: "Erro ao buscar etapas" });
+    } finally {
+      setIsLoadingStages(false);
+    }
+  };
+
+  const handleAddStage = async () => {
+    if (!newStageName.trim()) return;
+    try {
+      await updateDoc(stagesDocRef, {
+        stages: arrayUnion(newStageName.trim())
+      });
+      setNewStageName("");
+      toast({ title: "Etapa adicionada!" });
+      await fetchStages();
+    } catch (error) {
+      console.error("Error adding stage:", error);
+      toast({ variant: "destructive", title: "Erro ao adicionar etapa" });
+    }
+  };
+
+  const handleDeleteStage = async (stageToDelete: string) => {
+    try {
+      await updateDoc(stagesDocRef, {
+        stages: arrayRemove(stageToDelete)
+      });
+      toast({ title: "Etapa removida!" });
+      await fetchStages();
+    } catch (error) {
+      console.error("Error deleting stage:", error);
+      toast({ variant: "destructive", title: "Erro ao remover etapa" });
+    }
+  };
+
 
   const fetchProducts = async () => {
     if (!user) return;
@@ -77,6 +135,7 @@ export default function ProductsPage() {
   useEffect(() => {
     if (!authLoading && user) {
       fetchProducts();
+      fetchStages();
     }
   }, [user, authLoading]);
   
@@ -167,13 +226,16 @@ export default function ProductsPage() {
   
   const handleAddClick = () => {
     setSelectedProduct(null);
-    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0 });
+    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0, manufacturingStages: [] });
     setIsFormOpen(true);
   };
   
   const handleEditClick = (product: Product) => {
     setSelectedProduct(product);
-    form.reset(product);
+    form.reset({
+      ...product,
+      manufacturingStages: product.manufacturingStages || []
+    });
     setIsFormOpen(true);
   };
   
@@ -212,7 +274,7 @@ export default function ProductsPage() {
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight font-headline">Catálogo de Produtos</h1>
+          <h1 className="text-3xl font-bold tracking-tight font-headline">Produtos e Etapas</h1>
             <div className="flex items-center gap-2">
                  <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -233,63 +295,118 @@ export default function ProductsPage() {
                  </Button>
             </div>
         </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>Produtos Cadastrados</CardTitle>
-            <CardDescription>
-              Gerencie os produtos e serviços que sua empresa oferece.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-4 p-4">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : (
-                <Table>
-                <TableHeader>
-                    <TableRow>
-                    <TableHead className="w-[200px]">Código</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead className="w-[180px] text-right">Preço Unitário (R$)</TableHead>
-                    <TableHead className="w-[100px] text-center">Ações</TableHead>
-                    </TableRow>
-                </TableHeader>
-                <TableBody>
-                    {filteredProducts.length > 0 ? (
-                    filteredProducts.map((product) => (
-                        <TableRow key={product.id}>
-                        <TableCell className="font-mono">{product.code}</TableCell>
-                        <TableCell className="font-medium">{product.description}</TableCell>
-                        <TableCell className="text-right">{product.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                        <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-2">
-                                <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
-                                    <Pencil className="h-4 w-4" />
-                                    <span className="sr-only">Editar</span>
-                                </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteClick(product)}>
-                                    <Trash2 className="h-4 w-4" />
-                                    <span className="sr-only">Excluir</span>
-                                </Button>
+
+        <Tabs defaultValue="catalog" className="w-full">
+            <TabsList>
+                <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
+                <TabsTrigger value="stages">Etapas de Fabricação</TabsTrigger>
+            </TabsList>
+            <TabsContent value="catalog" className="mt-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Produtos Cadastrados</CardTitle>
+                        <CardDescription>
+                        Gerencie os produtos e serviços que sua empresa oferece.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoading ? (
+                        <div className="space-y-4 p-4">
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
+                        </div>
+                        ) : (
+                            <Table>
+                            <TableHeader>
+                                <TableRow>
+                                <TableHead className="w-[200px]">Código</TableHead>
+                                <TableHead>Descrição</TableHead>
+                                <TableHead className="w-[180px] text-right">Preço Unitário (R$)</TableHead>
+                                <TableHead className="w-[100px] text-center">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredProducts.length > 0 ? (
+                                filteredProducts.map((product) => (
+                                    <TableRow key={product.id}>
+                                    <TableCell className="font-mono">{product.code}</TableCell>
+                                    <TableCell className="font-medium">{product.description}</TableCell>
+                                    <TableCell className="text-right">{product.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                    <TableCell className="text-center">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
+                                                <Pencil className="h-4 w-4" />
+                                                <span className="sr-only">Editar</span>
+                                            </Button>
+                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteClick(product)}>
+                                                <Trash2 className="h-4 w-4" />
+                                                <span className="sr-only">Excluir</span>
+                                            </Button>
+                                        </div>
+                                    </TableCell>
+                                    </TableRow>
+                                ))
+                                ) : (
+                                <TableRow>
+                                    <TableCell colSpan={4} className="text-center h-24">
+                                    Nenhum produto encontrado.
+                                    </TableCell>
+                                </TableRow>
+                                )}
+                            </TableBody>
+                            </Table>
+                        )}
+                    </CardContent>
+                </Card>
+            </TabsContent>
+            <TabsContent value="stages" className="mt-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Etapas de Fabricação</CardTitle>
+                        <CardDescription>
+                            Cadastre e gerencie as etapas do seu processo produtivo. Elas serão usadas para planejar o lead time dos produtos.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="flex items-center gap-2">
+                            <Input 
+                                placeholder="Nome da nova etapa (ex: Solda, Pintura)"
+                                value={newStageName}
+                                onChange={(e) => setNewStageName(e.target.value)}
+                            />
+                            <Button onClick={handleAddStage}>
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Adicionar Etapa
+                            </Button>
+                        </div>
+                        <Separator />
+                        {isLoadingStages ? (
+                            <Skeleton className="h-24 w-full" />
+                        ) : (
+                            <div>
+                                <h3 className="text-sm font-medium text-muted-foreground mb-4">ETAPAS CADASTRADAS</h3>
+                                {manufacturingStages.length > 0 ? (
+                                    <div className="space-y-2">
+                                    {manufacturingStages.map((stage) => (
+                                        <div key={stage} className="flex items-center justify-between rounded-md border p-3">
+                                            <p className="font-medium">{stage}</p>
+                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteStage(stage)}>
+                                                <Trash2 className="h-4 w-4" />
+                                                <span className="sr-only">Excluir etapa {stage}</span>
+                                            </Button>
+                                        </div>
+                                    ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-center text-muted-foreground py-4">Nenhuma etapa cadastrada.</p>
+                                )}
                             </div>
-                        </TableCell>
-                        </TableRow>
-                    ))
-                    ) : (
-                    <TableRow>
-                        <TableCell colSpan={4} className="text-center h-24">
-                        Nenhum produto encontrado.
-                        </TableCell>
-                    </TableRow>
-                    )}
-                </TableBody>
-                </Table>
-            )}
-          </CardContent>
-        </Card>
+                        )}
+                    </CardContent>
+                </Card>
+            </TabsContent>
+        </Tabs>
       </div>
 
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
@@ -332,6 +449,60 @@ export default function ProductsPage() {
                         </FormItem>
                     )} />
                 </div>
+                
+                <Separator />
+
+                <FormField
+                    control={form.control}
+                    name="manufacturingStages"
+                    render={() => (
+                        <FormItem>
+                            <div className="mb-4">
+                                <FormLabel className="text-base">Etapas de Fabricação</FormLabel>
+                                <FormDescription>
+                                    Selecione as etapas que este produto normalmente percorre.
+                                </FormDescription>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                {manufacturingStages.map((stage) => (
+                                    <FormField
+                                        key={stage}
+                                        control={form.control}
+                                        name="manufacturingStages"
+                                        render={({ field }) => {
+                                            return (
+                                                <FormItem
+                                                    key={stage}
+                                                    className="flex flex-row items-start space-x-3 space-y-0"
+                                                >
+                                                    <FormControl>
+                                                        <Checkbox
+                                                            checked={field.value?.includes(stage)}
+                                                            onCheckedChange={(checked) => {
+                                                                return checked
+                                                                    ? field.onChange([...(field.value || []), stage])
+                                                                    : field.onChange(
+                                                                        field.value?.filter(
+                                                                            (value) => value !== stage
+                                                                        )
+                                                                    )
+                                                            }}
+                                                        />
+                                                    </FormControl>
+                                                    <FormLabel className="font-normal">
+                                                        {stage}
+                                                    </FormLabel>
+                                                </FormItem>
+                                            )
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                            <FormMessage />
+                        </FormItem>
+                    )}
+                />
+
               <DialogFooter className="pt-6">
                  <Button type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "Salvando..." : "Salvar Produto"}
@@ -361,3 +532,4 @@ export default function ProductsPage() {
     </>
   );
 }
+
