@@ -66,6 +66,7 @@ const orderItemSchema = z.object({
 const orderSchema = z.object({
   id: z.string(),
   internalOS: z.string().optional(),
+  projectName: z.string().optional(),
   items: z.array(orderItemSchema),
   driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
   documents: z.object({
@@ -95,6 +96,7 @@ type Order = {
     quotationId: string;
     quotationNumber: number;
     internalOS?: string;
+    projectName?: string;
     customer: CustomerInfo;
     items: OrderItem[];
     totalValue: number;
@@ -207,7 +209,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
              <Table>
                 <TableBody>
                     <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
+                        <TableCell colSpan={8} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
                     </TableRow>
                 </TableBody>
             </Table>
@@ -220,10 +222,11 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                 <TableRow>
                     <TableHead className="w-[120px]">Nº Pedido</TableHead>
                     <TableHead className="w-[150px]">OS Interna</TableHead>
+                    <TableHead className="w-[200px]">Projeto Cliente</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead className="w-[100px] text-center">Docs</TableHead>
                     <TableHead className="w-[120px]">Data Entrega</TableHead>
-                    <TableHead className="w-[180px] text-right">Peso Total</TableHead>
+                    <TableHead className="w-[150px] text-right">Peso Total</TableHead>
                     <TableHead className="w-[200px]">Status</TableHead>
                 </TableRow>
             </TableHeader>
@@ -234,6 +237,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                         <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
                             <TableCell className="font-medium">{order.internalOS || 'N/A'}</TableCell>
+                            <TableCell>{order.projectName || 'N/A'}</TableCell>
                             <TableCell>{order.customer?.name || 'Cliente não informado'}</TableCell>
                             <TableCell>
                                 <DocumentStatusIcons documents={order.documents} />
@@ -377,6 +381,7 @@ export default function OrdersPage() {
                     quotationId: data.quotationId || '',
                     quotationNumber: orderNum,
                     internalOS: data.internalOS || '',
+                    projectName: data.projectName || '',
                     customer: customerInfo,
                     items: enrichedItems,
                     totalValue: data.totalValue || 0,
@@ -446,6 +451,7 @@ export default function OrdersPage() {
                 items: updatedItems,
                 totalWeight: totalWeight,
                 internalOS: values.internalOS,
+                projectName: values.projectName,
                 driveLink: values.driveLink,
                 documents: values.documents,
             };
@@ -487,11 +493,13 @@ export default function OrdersPage() {
         const status = order.status?.toLowerCase() || '';
         const quotationNumber = order.quotationNumber?.toString() || '';
         const internalOS = order.internalOS?.toLowerCase() || '';
+        const projectName = order.projectName?.toLowerCase() || '';
 
         const textMatch = quotationNumber.includes(query) ||
             customerName.includes(query) ||
             status.includes(query) ||
-            internalOS.includes(query);
+            internalOS.includes(query) ||
+            projectName.includes(query);
 
         const statusMatch = statusFilter === 'all' || order.status === statusFilter;
         const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
@@ -896,6 +904,8 @@ export default function OrdersPage() {
             yPos += 7;
             docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
             docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
+            docPdf.text(`Projeto do Cliente: ${selectedOrder.projectName || 'N/A'}`, 15, yPos);
             yPos += 12;
     
             const tableBody: any[] = [];
@@ -989,7 +999,7 @@ export default function OrdersPage() {
                      <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
-                            placeholder="Buscar por nº, OS, cliente ou status..."
+                            placeholder="Buscar por nº, OS, projeto, cliente..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="pl-9 w-80"
@@ -1107,7 +1117,7 @@ export default function OrdersPage() {
                                         <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
                                             <div className="space-y-6">
                                                 <Card className="p-4 bg-secondary/50">
-                                                    <div className="space-y-4">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                         <FormField control={form.control} name="internalOS" render={({ field }) => (
                                                             <FormItem>
                                                                 <FormLabel>OS Interna</FormLabel>
@@ -1115,6 +1125,15 @@ export default function OrdersPage() {
                                                                 <FormMessage />
                                                             </FormItem>
                                                         )}/>
+                                                        <FormField control={form.control} name="projectName" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Projeto do Cliente</FormLabel>
+                                                                <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                    </div>
+                                                    <div className="space-y-4 mt-4">
                                                         <FormField control={form.control} name="driveLink" render={({ field }) => (
                                                             <FormItem>
                                                                 <FormLabel>Link da Pasta (Google Drive)</FormLabel>
@@ -1220,6 +1239,10 @@ export default function OrdersPage() {
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground">OS Interna</span>
                                                         <span className="font-semibold text-primary">{selectedOrder.internalOS || 'Não definida'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground">Projeto Cliente</span>
+                                                        <span className="font-semibold">{selectedOrder.projectName || 'Não definido'}</span>
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground">Status</span>
