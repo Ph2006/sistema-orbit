@@ -509,27 +509,52 @@ export default function QuotationsPage() {
                 const docPdf = new jsPDF({ orientation: "landscape" });
                 const pageHeight = docPdf.internal.pageSize.height;
                 const pageWidth = docPdf.internal.pageSize.width;
-                let y = 20;
+                let y = 15;
     
-                // Header
+                // Header - Logo on left, Company Info on right
                 if (companyData.logo?.preview) {
-                    try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, 15, 25, 25); }
+                    try { 
+                        // A more rectangular logo space, and FAST compression
+                        docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 40, 20, undefined, 'FAST'); 
+                    }
                     catch (e) { console.error("Error adding logo to PDF:", e); }
                 }
-                docPdf.setFontSize(18);
-                docPdf.text(companyData.nomeFantasia || 'Orçamento', 45, 22);
-                docPdf.setFontSize(10);
-                docPdf.text(companyData.endereco || '', 45, 30);
-                docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 45, 35);
+
+                const rightColX = pageWidth - 15;
+                let companyInfoY = y + 5;
+                docPdf.setFontSize(16).setFont(undefined, 'bold');
+                docPdf.text(companyData.nomeFantasia || 'Sua Empresa', rightColX, companyInfoY, { align: 'right' });
                 
-                y = 50;
-                docPdf.setFontSize(14).setFont(undefined, 'bold').text(`Orçamento Nº ${number}`, 15, y);
-                y += 10;
+                docPdf.setFontSize(9).setFont(undefined, 'normal');
+                companyInfoY += 6;
+                if (companyData.endereco) {
+                    const addressLines = docPdf.splitTextToSize(companyData.endereco, 80);
+                    docPdf.text(addressLines, rightColX, companyInfoY, { align: 'right' });
+                    companyInfoY += (addressLines.length * 4);
+                }
+                if (companyData.cnpj) {
+                    docPdf.text(`CNPJ: ${companyData.cnpj}`, rightColX, companyInfoY, { align: 'right' });
+                    companyInfoY += 4;
+                }
+                if (companyData.email) {
+                    docPdf.text(`Email: ${companyData.email}`, rightColX, companyInfoY, { align: 'right' });
+                }
+
+                y = 60; // Start position for main content after header
+
+                // Title centered
+                docPdf.setFontSize(14).setFont(undefined, 'bold').text(`Orçamento Nº ${number}`, pageWidth / 2, y, { align: 'center' });
+                y += 15;
+
+                // Customer and Date info
                 docPdf.setFontSize(11).setFont(undefined, 'normal');
                 docPdf.text(`Cliente: ${customer.name}`, 15, y);
-                docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 60, y);
+                docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
                 y += 5;
-                docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, pageWidth - 60, y);
+                if (selectedQuotation.buyerName) {
+                    docPdf.text(`Comprador: ${selectedQuotation.buyerName}`, 15, y);
+                }
+                docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
                 y += 10;
     
                 // Items Table
@@ -562,7 +587,7 @@ export default function QuotationsPage() {
                 y = (docPdf as any).lastAutoTable.finalY + 10;
                 
                 // Total
-                docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, pageWidth - 90, y);
+                docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, pageWidth - 15, y, { align: 'right' });
                 y += 10;
     
                 // Services
