@@ -67,27 +67,28 @@ export default function ProductsPage() {
   const fetchStages = async () => {
     setIsLoadingStages(true);
     try {
-      const docSnap = await getDoc(stagesDocRef);
-      if (docSnap.exists() && Array.isArray(docSnap.data().stages)) {
-        setManufacturingStages(docSnap.data().stages);
-      } else {
-        await setDoc(stagesDocRef, { stages: [] });
-        setManufacturingStages([]);
-      }
+        const docSnap = await getDoc(stagesDocRef);
+        if (docSnap.exists() && Array.isArray(docSnap.data().stages)) {
+            setManufacturingStages(docSnap.data().stages);
+        } else {
+            setManufacturingStages([]);
+        }
     } catch (error) {
-      console.error("Error fetching manufacturing stages:", error);
-      toast({ variant: "destructive", title: "Erro ao buscar etapas" });
+        console.error("Error fetching manufacturing stages:", error);
+        toast({ variant: "destructive", title: "Erro ao buscar etapas" });
+        setManufacturingStages([]);
     } finally {
-      setIsLoadingStages(false);
+        setIsLoadingStages(false);
     }
   };
 
   const handleAddStage = async () => {
     if (!newStageName.trim()) return;
     try {
-      await updateDoc(stagesDocRef, {
+      await setDoc(stagesDocRef, {
         stages: arrayUnion(newStageName.trim())
-      });
+      }, { merge: true });
+      
       setNewStageName("");
       toast({ title: "Etapa adicionada!" });
       await fetchStages();
