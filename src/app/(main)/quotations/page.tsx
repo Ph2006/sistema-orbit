@@ -74,6 +74,7 @@ const serviceOptions = [
     { id: 'nonDestructiveTest', label: 'Ensaio Não Destrutivo' },
     { id: 'surfaceTreatment', label: 'Tratamento de Superfície' },
     { id: 'beneficiamento', label: 'Beneficiamento (Emborrachamento e Galvanização)' },
+    { id: 'fasteners', label: 'Itens de fixação' },
 ];
 
 const calculateItemTotals = (item: Item | any) => {
