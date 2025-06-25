@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -304,8 +304,7 @@ export default function OrdersPage() {
     const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
     const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
     const [isFetchingPlan, setIsFetchingPlan] = useState(false);
-    const [isCopyProgressModalOpen, setIsCopyProgressModalOpen] = useState(false);
-    const [sourceItemId, setSourceItemId] = useState<string | null>(null);
+    const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -699,9 +698,9 @@ export default function OrdersPage() {
                 columnStyles: {
                     0: { cellWidth: 20 },
                     1: { cellWidth: 'auto' },
-                    2: { halign: 'center', cellWidth: 20 },
-                    3: { halign: 'center', cellWidth: 30 },
-                    4: { halign: 'center', cellWidth: 30 },
+                    2: { cellWidth: 20, halign: 'center' },
+                    3: { cellWidth: 30, halign: 'center' },
+                    4: { cellWidth: 30, halign: 'center' },
                 }
             });
     
@@ -1030,41 +1029,35 @@ export default function OrdersPage() {
             });
         }
     };
-
-    const handleOpenCopyProgressModal = () => {
-      if (!selectedOrder || selectedItems.size < 2) {
-        toast({
-          variant: "destructive",
-          title: "Seleção inválida",
-          description: "Selecione pelo menos dois itens (um para copiar e um para colar).",
-        });
-        return;
-      }
-      setSourceItemId(null); // Reset source selection
-      setIsCopyProgressModalOpen(true);
-    };
     
-    const handleConfirmCopyProgress = async () => {
-        if (!selectedOrder || !sourceItemId || selectedItems.size < 2) {
+    const handleCopyProgress = (itemToCopy: OrderItem) => {
+        setProgressClipboard(itemToCopy);
+        toast({
+            title: "Progresso copiado!",
+            description: `Selecione 'Colar' no item de destino para aplicar as etapas de "${itemToCopy.description}".`,
+        });
+    };
+
+    const handleCancelCopy = () => {
+        setProgressClipboard(null);
+    };
+
+    const handlePasteProgress = async (targetItem: OrderItem) => {
+        if (!progressClipboard || !selectedOrder) {
+            toast({ variant: "destructive", title: "Erro", description: "Nenhum progresso na área de transferência." });
             return;
         }
-    
+
         try {
-            const sourceItem = selectedOrder.items.find(item => item.id === sourceItemId);
-            if (!sourceItem) {
-                throw new Error("Item de origem não encontrado.");
-            }
-    
-            const sourceProductionPlan = sourceItem.productionPlan || [];
-    
+            const sourceProductionPlan = progressClipboard.productionPlan || [];
+            
             const updatedItems = selectedOrder.items.map(item => {
-                if (selectedItems.has(item.id!) && item.id !== sourceItemId) {
-                    // Deep copy the plan to avoid reference issues
+                if (item.id === targetItem.id) {
                     return { ...item, productionPlan: JSON.parse(JSON.stringify(sourceProductionPlan)) };
                 }
                 return item;
             });
-    
+
             const itemsForFirestore = updatedItems.map(item => {
                 const planForFirestore = (item.productionPlan || []).map(p => ({
                     ...p,
@@ -1076,12 +1069,11 @@ export default function OrdersPage() {
                 delete cleanItem.product_code; 
                 return { ...cleanItem, productionPlan: planForFirestore };
             });
-    
+
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
             await updateDoc(orderRef, { items: itemsForFirestore });
-    
-            toast({ title: "Progresso copiado!", description: `As etapas foram copiadas para ${selectedItems.size - 1} item(ns).` });
-            setIsCopyProgressModalOpen(false);
+
+            toast({ title: "Progresso colado!", description: `Etapas aplicadas ao item "${targetItem.description}".` });
             
             const allOrders = await fetchOrders();
             const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
@@ -1089,10 +1081,10 @@ export default function OrdersPage() {
                 setSelectedOrder(updatedOrder);
                 form.reset(updatedOrder);
             }
-    
+
         } catch (error) {
-            console.error("Error copying progress:", error);
-            toast({ variant: "destructive", title: "Erro ao copiar", description: "Não foi possível copiar o progresso dos itens." });
+            console.error("Error pasting progress:", error);
+            toast({ variant: "destructive", title: "Erro ao colar", description: "Não foi possível colar o progresso." });
         }
     };
 
@@ -1205,8 +1197,8 @@ export default function OrdersPage() {
                 </Card>
             </div>
 
-            <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) { setIsEditing(false); setSelectedItems(new Set()); } }}>
-                <SheetContent className="w-full sm:max-w-3xl">
+            <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) { setIsEditing(false); setSelectedItems(new Set()); setProgressClipboard(null); } }}>
+                <SheetContent className="w-full sm:max-w-4xl">
                     {selectedOrder && (
                         <>
                             <SheetHeader>
@@ -1429,8 +1421,9 @@ export default function OrdersPage() {
                                                                 </TableHead>
                                                                 <TableHead>Descrição</TableHead>
                                                                 <TableHead className="text-center w-[80px]">Qtd.</TableHead>
-                                                                <TableHead className="text-center w-[150px]">Progresso</TableHead>
-                                                                <TableHead className="text-right w-[150px]">Peso Total</TableHead>
+                                                                <TableHead className="text-center w-[120px]">Progresso</TableHead>
+                                                                <TableHead className="text-right w-[120px]">Peso Total</TableHead>
+                                                                <TableHead className="text-center w-[120px]">Ações</TableHead>
                                                             </TableRow>
                                                         </TableHeader>
                                                         <TableBody>
@@ -1450,24 +1443,58 @@ export default function OrdersPage() {
                                                                         {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
                                                                     </TableCell>
                                                                     <TableCell className="text-center">{item.quantity}</TableCell>
-                                                                    <TableCell className="text-center">
-                                                                        <div className="flex items-center justify-center gap-2">
-                                                                            <span className="text-sm font-medium w-8">{Math.round(itemProgress)}%</span>
-                                                                            <TooltipProvider>
-                                                                                <Tooltip>
-                                                                                    <TooltipTrigger asChild>
-                                                                                        <Button variant="outline" size="icon" onClick={() => handleOpenProgressModal(item)}>
-                                                                                            <ListChecks className="h-4 w-4" />
-                                                                                        </Button>
-                                                                                    </TooltipTrigger>
-                                                                                    <TooltipContent>
-                                                                                        <p>Editar Progresso</p>
-                                                                                    </TooltipContent>
-                                                                                </Tooltip>
-                                                                            </TooltipProvider>
+                                                                    <TableCell>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Progress value={itemProgress} className="h-2 flex-1" />
+                                                                            <span className="text-sm font-medium w-8 text-right">{Math.round(itemProgress)}%</span>
                                                                         </div>
                                                                     </TableCell>
                                                                     <TableCell className="text-right font-semibold">{( (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0) ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                                                                    <TableCell className="text-center">
+                                                                        <div className="flex items-center justify-center gap-1">
+                                                                            <TooltipProvider>
+                                                                                <Tooltip>
+                                                                                    <TooltipTrigger asChild>
+                                                                                        <Button variant="ghost" size="icon" onClick={() => handleOpenProgressModal(item)}>
+                                                                                            <ListChecks className="h-4 w-4" />
+                                                                                        </Button>
+                                                                                    </TooltipTrigger>
+                                                                                    <TooltipContent><p>Editar Progresso</p></TooltipContent>
+                                                                                </Tooltip>
+                                                                            
+                                                                                {progressClipboard ? (
+                                                                                    progressClipboard.id === item.id ? (
+                                                                                        <Tooltip>
+                                                                                            <TooltipTrigger asChild>
+                                                                                                <Button variant="ghost" size="icon" onClick={handleCancelCopy} className="text-destructive hover:text-destructive">
+                                                                                                    <XCircle className="h-4 w-4" />
+                                                                                                </Button>
+                                                                                            </TooltipTrigger>
+                                                                                            <TooltipContent><p>Cancelar Cópia</p></TooltipContent>
+                                                                                        </Tooltip>
+                                                                                    ) : (
+                                                                                        <Tooltip>
+                                                                                            <TooltipTrigger asChild>
+                                                                                                <Button variant="ghost" size="icon" onClick={() => handlePasteProgress(item)}>
+                                                                                                    <ClipboardPaste className="h-4 w-4" />
+                                                                                                </Button>
+                                                                                            </TooltipTrigger>
+                                                                                            <TooltipContent><p>Colar progresso de "{progressClipboard.description}"</p></TooltipContent>
+                                                                                        </Tooltip>
+                                                                                    )
+                                                                                ) : (
+                                                                                    <Tooltip>
+                                                                                        <TooltipTrigger asChild>
+                                                                                            <Button variant="ghost" size="icon" onClick={() => handleCopyProgress(item)} disabled={!item.productionPlan || item.productionPlan.length === 0}>
+                                                                                                <Copy className="h-4 w-4" />
+                                                                                            </Button>
+                                                                                        </TooltipTrigger>
+                                                                                        <TooltipContent><p>Copiar Progresso</p></TooltipContent>
+                                                                                    </Tooltip>
+                                                                                )}
+                                                                            </TooltipProvider>
+                                                                        </div>
+                                                                    </TableCell>
                                                                 </TableRow>
                                                             )})}
                                                         </TableBody>
@@ -1491,14 +1518,6 @@ export default function OrdersPage() {
                                             >
                                                 <GanttChart className="mr-2 h-4 w-4" />
                                                 Exportar Cronograma
-                                            </Button>
-                                            <Button
-                                              onClick={handleOpenCopyProgressModal}
-                                              disabled={selectedItems.size < 2}
-                                              variant="outline"
-                                            >
-                                              <Copy className="mr-2 h-4 w-4" />
-                                              Copiar Progresso
                                             </Button>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -1616,42 +1635,6 @@ export default function OrdersPage() {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={isCopyProgressModalOpen} onOpenChange={setIsCopyProgressModalOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Copiar Progresso de Fabricação</DialogTitle>
-                        <DialogDescription>
-                            Selecione o item de ORIGEM. O progresso dele será copiado para todos os outros itens selecionados.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <ScrollArea className="max-h-[60vh]">
-                        <div className="py-4 pr-4">
-                            <RadioGroup value={sourceItemId ?? undefined} onValueChange={setSourceItemId} className="space-y-2">
-                                {selectedOrder && Array.from(selectedItems).map(itemId => {
-                                    const item = selectedOrder.items.find(i => i.id === itemId);
-                                    if (!item) return null;
-                                    return (
-                                        <Label key={item.id} htmlFor={`r-${item.id}`} className="flex items-center space-x-3 border p-3 rounded-md has-[:checked]:bg-secondary cursor-pointer">
-                                            <RadioGroupItem value={item.id!} id={`r-${item.id}`} />
-                                            <div className="flex-1">
-                                                <p className="font-medium">{item.description}</p>
-                                                <p className="text-xs text-muted-foreground">Cód: {item.code || 'N/A'}</p>
-                                            </div>
-                                        </Label>
-                                    );
-                                })}
-                            </RadioGroup>
-                        </div>
-                    </ScrollArea>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsCopyProgressModalOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleConfirmCopyProgress} disabled={!sourceItemId}>
-                            Confirmar Cópia
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
             <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -1671,6 +1654,3 @@ export default function OrdersPage() {
         </>
     );
 }
-
-
-    
