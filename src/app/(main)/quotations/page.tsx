@@ -44,7 +44,7 @@ const quotationSchema = z.object({
     id: z.string({ required_error: "Selecione um cliente." }),
     name: z.string(),
   }),
-  status: z.enum(["Aguardando Aprovação", "Enviado", "Aprovado", "Reprovado", "Informativo"], { required_error: "Selecione um status." }),
+  status: z.enum(["Aguardando Aprovação", "Enviado", "Aprovado", "Reprovado", "Informativo", "Expirado"], { required_error: "Selecione um status." }),
   validity: z.date({ required_error: "A data de validade é obrigatória." }),
   paymentTerms: z.string().min(3, "As condições de pagamento são obrigatórias."),
   deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
@@ -122,6 +122,8 @@ export default function QuotationsPage() {
                 'enviado': 'Enviado',
                 'informative': 'Informativo',
                 'informativo': 'Informativo',
+                'expired': 'Expirado',
+                'expirado': 'Expirado',
             };
 
             return translations[lowerCaseStatus] || originalStatus;
@@ -322,6 +324,7 @@ export default function QuotationsPage() {
             case "Aguardando Aprovação": return "secondary";
             case "Enviado": return "secondary";
             case "Reprovado": return "destructive";
+            case "Expirado": return "destructive";
             case "Informativo": return "outline";
             default: return "outline";
         }
@@ -439,6 +442,7 @@ export default function QuotationsPage() {
                                                         <SelectItem value="Enviado">Enviado</SelectItem>
                                                         <SelectItem value="Aprovado">Aprovado</SelectItem>
                                                         <SelectItem value="Reprovado">Reprovado</SelectItem>
+                                                        <SelectItem value="Expirado">Expirado</SelectItem>
                                                         <SelectItem value="Informativo">Informativo</SelectItem>
                                                     </SelectContent>
                                                 </Select><FormMessage />
