@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 
@@ -23,7 +23,7 @@ type OrderItem = {
     code?: string;
     description: string;
     quantity: number;
-    unitPrice: number;
+    unitPrice: number; // Kept for data model integrity
     unitWeight?: number;
     taxRate?: number;
     leadTimeDays?: number;
@@ -39,10 +39,23 @@ type Order = {
         name: string;
     };
     items: OrderItem[];
-    totalValue: number;
+    totalValue: number; // Kept for data model integrity
+    totalWeight: number; // New calculated field
     status: string;
     createdAt: Date;
+    deliveryDate?: Date;
 };
+
+// Helper function to calculate total weight
+const calculateTotalWeight = (items: OrderItem[]): number => {
+    if (!items || !Array.isArray(items)) return 0;
+    return items.reduce((acc, item) => {
+        const quantity = Number(item.quantity) || 0;
+        const unitWeight = Number(item.unitWeight) || 0;
+        return acc + (quantity * unitWeight);
+    }, 0);
+};
+
 
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
     const lowerStatus = status.toLowerCase();
@@ -67,7 +80,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
              <Table>
                 <TableBody>
                     <TableRow>
-                        <TableCell colSpan={5} className="h-24 text-center">
+                        <TableCell colSpan={6} className="h-24 text-center">
                             Nenhum pedido encontrado.
                         </TableCell>
                     </TableRow>
@@ -83,7 +96,8 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                     <TableHead className="w-[120px]">Nº Pedido</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead className="w-[120px]">Data Criação</TableHead>
-                    <TableHead className="w-[180px] text-right">Valor Total</TableHead>
+                    <TableHead className="w-[120px]">Data Entrega</TableHead>
+                    <TableHead className="w-[180px] text-right">Peso Total</TableHead>
                     <TableHead className="w-[200px]">Status</TableHead>
                 </TableRow>
             </TableHeader>
@@ -93,10 +107,11 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                     return (
                         <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
-                            <TableCell>{order.customer?.name || 'N/A'}</TableCell>
+                            <TableCell>{order.customer?.name || 'Cliente não informado'}</TableCell>
                             <TableCell>{order.createdAt ? format(order.createdAt, "dd/MM/yyyy") : 'N/A'}</TableCell>
-                            <TableCell className="text-right">
-                                {(order.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
+                            <TableCell className="text-right font-medium">
+                                {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                             </TableCell>
                             <TableCell>
                                 <Badge variant={statusProps.variant} className={statusProps.colorClass}>
@@ -128,14 +143,18 @@ export default function OrdersPage() {
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
-                const rawDate = data.createdAt;
-                // This ensures createdAt is a JS Date object, handling Firestore Timestamps or other formats.
-                const createdAtDate = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate || Date.now());
+                
+                const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || Date.now());
+                const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
+                const items = data.items || [];
 
                 return {
                     id: doc.id,
                     ...data,
+                    items,
                     createdAt: createdAtDate,
+                    deliveryDate: deliveryDate,
+                    totalWeight: calculateTotalWeight(items),
                 } as Order;
             }).sort((a, b) => (b.quotationNumber || 0) - (a.quotationNumber || 0));
             setOrders(ordersList);
@@ -240,16 +259,20 @@ export default function OrdersPage() {
                                                 })()}
                                             </div>
                                             <div className="flex justify-between items-center">
-                                                <span className="font-medium text-muted-foreground">Data do Pedido</span>
-                                                <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy HH:mm') : 'N/A'}</span>
+                                                <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
+                                                <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
                                             </div>
                                              <div className="flex justify-between items-center">
+                                                <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
+                                                <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center">
                                                 <span className="font-medium text-muted-foreground">Orçamento de Origem</span>
                                                 <span>Nº {selectedOrder.quotationNumber}</span>
                                             </div>
                                             <div className="flex justify-between items-center font-bold text-lg">
-                                                <span className="font-medium text-muted-foreground">Valor Total</span>
-                                                <span className="text-primary">{(selectedOrder.totalValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
+                                                <span className="text-primary">{(selectedOrder.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
                                             </div>
                                         </CardContent>
                                     </Card>
@@ -264,20 +287,25 @@ export default function OrdersPage() {
                                                     <TableRow>
                                                         <TableHead>Descrição</TableHead>
                                                         <TableHead className="text-center w-[80px]">Qtd.</TableHead>
-                                                        <TableHead className="text-right w-[120px]">Valor Unit.</TableHead>
+                                                        <TableHead className="text-right w-[120px]">Peso Unit.</TableHead>
+                                                        <TableHead className="text-right w-[120px]">Peso Total</TableHead>
                                                     </TableRow>
                                                 </TableHeader>
                                                 <TableBody>
-                                                    {(selectedOrder.items || []).map((item, index) => (
-                                                        <TableRow key={item.id || index}>
-                                                            <TableCell className="font-medium">
-                                                                {item.description}
-                                                                {item.code && <span className="block text-xs text-muted-foreground">Cód: {item.code}</span>}
-                                                            </TableCell>
-                                                            <TableCell className="text-center">{item.quantity}</TableCell>
-                                                            <TableCell className="text-right">{(item.unitPrice || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
-                                                        </TableRow>
-                                                    ))}
+                                                    {(selectedOrder.items || []).map((item, index) => {
+                                                        const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                                                        return(
+                                                            <TableRow key={item.id || index}>
+                                                                <TableCell className="font-medium">
+                                                                    {item.description}
+                                                                    {item.code && <span className="block text-xs text-muted-foreground">Cód: {item.code}</span>}
+                                                                </TableCell>
+                                                                <TableCell className="text-center">{item.quantity}</TableCell>
+                                                                <TableCell className="text-right">{(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                                                                <TableCell className="text-right font-medium">{itemTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                                                            </TableRow>
+                                                        )
+                                                    })}
                                                 </TableBody>
                                             </Table>
                                         </CardContent>
