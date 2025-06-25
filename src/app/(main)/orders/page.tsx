@@ -140,15 +140,12 @@ export default function OrdersPage() {
         if (!user) return;
         setIsLoading(true);
         try {
-            // Step 1: Fetch all products and create a case-insensitive weight reference map.
             const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
             const productsMap = new Map<string, { unitWeight: number }>();
             productsSnapshot.forEach(doc => {
-                // The document ID is the product code. Store its uppercase version for reliable matching.
                 productsMap.set(doc.id.toUpperCase(), { unitWeight: doc.data().unitWeight || 0 });
             });
 
-            // Step 2: Fetch all orders.
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
@@ -156,31 +153,23 @@ export default function OrdersPage() {
                 const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
                 const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
                 
-                // Step 3: Enrich items with weight from the product catalog for consistency.
-                const enrichedItems = (data.items || []).map((item: OrderItem) => {
+                const enrichedItems = (data.items || []).map((item: any) => {
                     const enrichedItem = { ...item };
-                    const currentWeight = Number(enrichedItem.unitWeight) || 0;
-                    const hasCode = enrichedItem.code && typeof enrichedItem.code === 'string' && enrichedItem.code.trim() !== '';
+                    enrichedItem.unitWeight = Number(enrichedItem.unitWeight) || 0;
 
-                    // If weight is missing (or zero) and a valid code exists, look it up in the product catalog.
-                    if (currentWeight === 0 && hasCode) {
-                        // Use trimmed, uppercase code for case-insensitive lookup.
-                        const productCode = enrichedItem.code.trim().toUpperCase();
-                        const productData = productsMap.get(productCode);
+                    if (enrichedItem.unitWeight === 0) {
+                        const itemCode = (item.code || item.product_code || '').trim().toUpperCase();
                         
-                        if (productData) {
-                            const catalogWeight = Number(productData.unitWeight) || 0;
-                            // If we found a valid weight in the catalog, update the item's weight.
-                            if (catalogWeight > 0) {
-                                enrichedItem.unitWeight = catalogWeight;
+                        if (itemCode) {
+                            const productData = productsMap.get(itemCode);
+                            if (productData && productData.unitWeight) {
+                                enrichedItem.unitWeight = Number(productData.unitWeight) || 0;
                             }
                         }
                     }
-                    
                     return enrichedItem;
                 });
                 
-                // Normalize customer data
                 let customerInfo = { id: '', name: 'Cliente não informado' };
                 if (data.customer && typeof data.customer === 'object' && data.customer.name) {
                     customerInfo = { id: data.customer.id || '', name: data.customer.name };
@@ -190,7 +179,6 @@ export default function OrdersPage() {
                     customerInfo = { id: '', name: data.customer };
                 }
 
-                // Normalize order number
                 const orderNum = data.orderNumber || data.quotationNumber || 0;
 
                 return {
