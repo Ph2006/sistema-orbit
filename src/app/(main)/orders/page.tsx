@@ -140,14 +140,15 @@ export default function OrdersPage() {
         if (!user) return;
         setIsLoading(true);
         try {
-            // First, fetch all products to create a weight reference map
+            // Step 1: Fetch all products to create a weight reference map.
             const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
             const productsMap = new Map<string, { unitWeight: number }>();
             productsSnapshot.forEach(doc => {
-                // The document ID is the product code
+                // The document ID is the product code.
                 productsMap.set(doc.id, { unitWeight: doc.data().unitWeight || 0 });
             });
 
+            // Step 2: Fetch all orders.
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
@@ -155,16 +156,26 @@ export default function OrdersPage() {
                 const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
                 const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
                 
-                 // Enrich items with weight from products catalog if missing
+                // Step 3: Enrich items with weight from the product catalog for consistency.
                 const enrichedItems = (data.items || []).map((item: OrderItem) => {
-                    // If weight is missing or zero, and there's a product code, try to find it in the catalog
-                    if ((!item.unitWeight || item.unitWeight === 0) && item.code) {
-                        const productData = productsMap.get(item.code);
-                        if (productData && productData.unitWeight > 0) {
-                            // Return a new item object with the weight from the catalog
-                            return { ...item, unitWeight: productData.unitWeight };
+                    const currentWeight = Number(item.unitWeight) || 0;
+                    const hasCode = item.code && typeof item.code === 'string' && item.code.trim() !== '';
+
+                    // If weight is zero and a valid code exists, look it up in the product catalog.
+                    if (currentWeight === 0 && hasCode) {
+                        const productCode = item.code.trim(); // Use trimmed code for lookup.
+                        const productData = productsMap.get(productCode);
+                        
+                        if (productData) {
+                            const catalogWeight = Number(productData.unitWeight) || 0;
+                            if (catalogWeight > 0) {
+                                // Return a new item object with the weight from the catalog.
+                                return { ...item, unitWeight: catalogWeight };
+                            }
                         }
                     }
+                    
+                    // If no enrichment happened, return the original item.
                     return item;
                 });
                 
