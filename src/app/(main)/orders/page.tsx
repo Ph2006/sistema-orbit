@@ -5,10 +5,12 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isSameDay } from "date-fns";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,13 +22,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2 } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { Checkbox } from "@/components/ui/checkbox";
+
 
 const orderItemSchema = z.object({
     id: z.string().optional(),
@@ -47,6 +51,16 @@ const orderSchema = z.object({
 type OrderItem = z.infer<typeof orderItemSchema>;
 
 type CustomerInfo = { id: string; name: string };
+
+type CompanyData = {
+    nomeFantasia?: string;
+    logo?: { preview?: string };
+    endereco?: string;
+    cnpj?: string;
+    email?: string;
+    celular?: string;
+    website?: string;
+};
 
 type Order = {
     id: string;
@@ -175,6 +189,7 @@ export default function OrdersPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
     const [isEditing, setIsEditing] = useState(false);
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
@@ -310,6 +325,7 @@ export default function OrdersPage() {
         setSelectedOrder(order);
         form.reset(order);
         setIsEditing(false);
+        setSelectedItems(new Set());
         setIsSheetOpen(true);
     };
 
@@ -424,6 +440,120 @@ export default function OrdersPage() {
         return `${weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
     };
 
+    const handleItemSelection = (itemId: string) => {
+        setSelectedItems(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(itemId)) {
+                newSet.delete(itemId);
+            } else {
+                newSet.add(itemId);
+            }
+            return newSet;
+        });
+    };
+
+    const handleSelectAll = (checked: boolean | 'indeterminate') => {
+        if (checked === true && selectedOrder) {
+            const allItemIds = new Set(selectedOrder.items.map(item => item.id!));
+            setSelectedItems(allItemIds);
+        } else {
+            setSelectedItems(new Set());
+        }
+    };
+    
+    const handleGeneratePackingSlip = async () => {
+        if (!selectedOrder || selectedItems.size === 0) return;
+    
+        toast({ title: "Gerando Romaneio...", description: "Por favor, aguarde." });
+    
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const itemsToInclude = selectedOrder.items.filter(item => selectedItems.has(item.id!));
+            const totalWeight = itemsToInclude.reduce((acc, item) => acc + ((Number(item.quantity) || 0) * (Number(item.unitWeight) || 0)), 0);
+            
+            const docPdf = new jsPDF();
+            const pageHeight = docPdf.internal.pageSize.height;
+            const pageWidth = docPdf.internal.pageSize.width;
+            let y = 20;
+    
+            // Header
+            if (companyData.logo?.preview) {
+                try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, 15, 25, 25); }
+                catch (e) { console.error("Error adding logo to PDF:", e); }
+            }
+            docPdf.setFontSize(18);
+            docPdf.text(companyData.nomeFantasia || 'Romaneio', 45, 22);
+            docPdf.setFontSize(10);
+            docPdf.text(companyData.endereco || '', 45, 30);
+            docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 45, 35);
+            
+            y = 50;
+            docPdf.setFontSize(14).setFont(undefined, 'bold').text(`ROMANEIO DE ENTREGA`, 15, y);
+            y += 10;
+            docPdf.setFontSize(11).setFont(undefined, 'normal');
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, y);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 70, y);
+            y += 5;
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, 15, y);
+            y += 5;
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, y);
+            y += 10;
+    
+            // Items Table
+            const head = [['Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']];
+            const body = itemsToInclude.map(item => {
+                const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                return [
+                    item.code || '-',
+                    item.description,
+                    item.quantity.toString(),
+                    (Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                    itemTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                ];
+            });
+            autoTable(docPdf, {
+                startY: y,
+                head: head,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+                columnStyles: {
+                    2: { halign: 'right' },
+                    3: { halign: 'right' },
+                    4: { halign: 'right' },
+                }
+            });
+    
+            y = (docPdf as any).lastAutoTable.finalY + 15;
+    
+            // Total Weight Summary
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text(`Peso Total dos Itens: ${totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, pageWidth - 85, y);
+            y+=15;
+    
+            // Signature area
+            if (y > pageHeight - 50) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            docPdf.text('Recebido por:', 15, y + 10);
+            docPdf.line(40, y + 10, 100, y + 10); // line for signature
+            docPdf.text('Data:', 15, y + 20);
+            docPdf.line(25, y + 20, 85, y + 20); // line for date
+    
+            docPdf.save(`Romaneio_${selectedOrder.quotationNumber}.pdf`);
+            
+        } catch (error) {
+            console.error("Error generating packing slip:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar romaneio",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
+
+
     return (
         <>
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -532,7 +662,7 @@ export default function OrdersPage() {
                 </Card>
             </div>
 
-            <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) setIsEditing(false); }}>
+            <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) { setIsEditing(false); setSelectedItems(new Set()); } }}>
                 <SheetContent className="w-full sm:max-w-3xl">
                     {selectedOrder && (
                         <>
@@ -670,6 +800,17 @@ export default function OrdersPage() {
                                                     <Table>
                                                         <TableHeader>
                                                             <TableRow>
+                                                                <TableHead className="w-12">
+                                                                    <Checkbox
+                                                                        checked={
+                                                                            selectedItems.size > 0 &&
+                                                                            (selectedOrder.items.length === selectedItems.size
+                                                                                ? true
+                                                                                : 'indeterminate')
+                                                                        }
+                                                                        onCheckedChange={handleSelectAll}
+                                                                    />
+                                                                </TableHead>
                                                                 <TableHead>Descrição</TableHead>
                                                                 <TableHead className="text-center w-[80px]">Qtd.</TableHead>
                                                                 <TableHead className="text-right w-[120px]">Peso Unit.</TableHead>
@@ -678,7 +819,14 @@ export default function OrdersPage() {
                                                         </TableHeader>
                                                         <TableBody>
                                                             {selectedOrder.items.map((item, index) => (
-                                                                <TableRow key={index}>
+                                                                <TableRow key={item.id || index}>
+                                                                    <TableCell>
+                                                                        <Checkbox
+                                                                            checked={selectedItems.has(item.id!)}
+                                                                            onCheckedChange={() => handleItemSelection(item.id!)}
+                                                                            aria-label={`Select item ${item.description}`}
+                                                                        />
+                                                                    </TableCell>
                                                                     <TableCell className="font-medium">
                                                                         {item.description}
                                                                         {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
@@ -694,7 +842,14 @@ export default function OrdersPage() {
                                             </Card>
                                         </div>
                                     </ScrollArea>
-                                    <SheetFooter className="pt-4 pr-6 border-t flex sm:justify-end">
+                                    <SheetFooter className="pt-4 pr-6 border-t flex sm:justify-between items-center">
+                                        <Button 
+                                            onClick={handleGeneratePackingSlip} 
+                                            disabled={selectedItems.size === 0}
+                                        >
+                                            <FileText className="mr-2 h-4 w-4" />
+                                            Emitir Romaneio ({selectedItems.size})
+                                        </Button>
                                         <Button onClick={() => setIsEditing(true)}>
                                             <Edit className="mr-2 h-4 w-4" />
                                             Editar Pedido
