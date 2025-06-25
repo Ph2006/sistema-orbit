@@ -138,8 +138,9 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
 };
 
 const calculateItemProgress = (item: OrderItem): number => {
+    // If an item has no production plan, it is considered 100% complete by default.
     if (!item.productionPlan || item.productionPlan.length === 0) {
-        return 0;
+        return 100;
     }
     const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
     return (completedStages / item.productionPlan.length) * 100;
@@ -902,8 +903,13 @@ export default function OrdersPage() {
     
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
-            
-            const itemsForFirestore = selectedOrder.items.map(item => {
+            const currentOrderSnap = await getDoc(orderRef);
+            if (!currentOrderSnap.exists()) {
+                throw new Error("Pedido não encontrado no banco de dados.");
+            }
+            const currentOrderData = currentOrderSnap.data();
+
+            const itemsForFirestore = currentOrderData.items.map((item: any) => {
                 let planForFirestore: any[];
     
                 if (item.id === itemToTrack.id) {
@@ -913,7 +919,7 @@ export default function OrdersPage() {
                         completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
                     }));
                 } else {
-                    planForFirestore = (item.productionPlan || []).map(p => ({
+                    planForFirestore = (item.productionPlan || []).map((p: any) => ({
                         ...p,
                         startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
                         completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
@@ -925,15 +931,17 @@ export default function OrdersPage() {
     
             await updateDoc(orderRef, { items: itemsForFirestore });
 
-            const updatedItemsForCheck = selectedOrder.items.map(item => {
-                if (item.id === itemToTrack!.id) {
-                    return { ...item, productionPlan: editedPlan };
-                }
-                return item;
-            });
+            const updatedItemsForCheck = itemsForFirestore.map((item: any) => ({
+                ...item,
+                productionPlan: (item.productionPlan || []).map((p: any) => ({
+                    ...p,
+                    startDate: p.startDate?.toDate ? p.startDate.toDate() : p.startDate,
+                    completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : p.completedDate,
+                }))
+            }));
             
             const allItemsCompleted = updatedItemsForCheck.every(
-                item => calculateItemProgress(item) >= 100
+                (item: any) => calculateItemProgress(item) >= 100
             );
 
             if (allItemsCompleted && selectedOrder.status !== 'Concluído') {
