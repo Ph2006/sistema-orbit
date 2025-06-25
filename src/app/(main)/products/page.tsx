@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 const planStageSchema = z.object({
   stageName: z.string(),
@@ -480,101 +481,104 @@ export default function ProductsPage() {
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
-                <FormField control={form.control} name="code" render={({ field }) => (
-                    <FormItem>
-                        <FormLabel>Código do Produto</FormLabel>
-                        <FormControl><Input placeholder="Ex: PROD-001" {...field} disabled={!!selectedProduct} /></FormControl>
-                        <FormDescription>O código não pode conter '/' e não pode ser alterado após a criação.</FormDescription>
-                        <FormMessage />
-                    </FormItem>
-                )} />
-                 <FormField control={form.control} name="description" render={({ field }) => (
-                    <FormItem>
-                        <FormLabel>Descrição</FormLabel>
-                        <FormControl><Textarea placeholder="Descrição detalhada do produto ou serviço" {...field} /></FormControl>
-                        <FormMessage />
-                    </FormItem>
-                )} />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={form.control} name="unitPrice" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Preço Unitário (R$)</FormLabel>
-                            <FormControl><Input type="number" placeholder="0.00" {...field} /></FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                     <FormField control={form.control} name="unitWeight" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Peso Unit. (kg)</FormLabel>
-                            <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                </div>
-                
-                <Separator />
-
-                <FormField
-                  control={form.control}
-                  name="productionPlanTemplate"
-                  render={({ field }) => (
+            <form onSubmit={form.handleSubmit(onSubmit)}>
+              <ScrollArea className="h-[70vh] pr-6">
+                <div className="space-y-4 pt-4">
+                  <FormField control={form.control} name="code" render={({ field }) => (
                       <FormItem>
-                          <div className="mb-4">
-                              <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
-                              <FormDescription>
-                                  Selecione as etapas e defina a duração em dias para cada uma.
-                              </FormDescription>
-                          </div>
-                          <div className="space-y-3">
-                              {manufacturingStages.map((stageName) => {
-                                  const currentStage = field.value?.find(p => p.stageName === stageName);
-                                  const isChecked = !!currentStage;
-
-                                  return (
-                                      <div key={stageName} className="flex items-center gap-4 rounded-md border p-3">
-                                          <Checkbox
-                                              id={`stage-checkbox-${stageName}`}
-                                              checked={isChecked}
-                                              onCheckedChange={(checked) => {
-                                                  const newValue = checked
-                                                      ? [...(field.value || []), { stageName: stageName, durationDays: 0 }]
-                                                      : (field.value || []).filter(p => p.stageName !== stageName);
-                                                  field.onChange(newValue.sort((a,b) => manufacturingStages.indexOf(a.stageName) - manufacturingStages.indexOf(b.stageName)));
-                                              }}
-                                          />
-                                          <Label htmlFor={`stage-checkbox-${stageName}`} className="flex-1 font-normal cursor-pointer">
-                                              {stageName}
-                                          </Label>
-                                          {isChecked && (
-                                              <div className="flex items-center gap-2">
-                                                  <Input
-                                                      type="number"
-                                                      className="h-8 w-20"
-                                                      placeholder="Dias"
-                                                      value={currentStage?.durationDays || ''}
-                                                      onChange={(e) => {
-                                                          const newPlan = (field.value || []).map(p => 
-                                                              p.stageName === stageName 
-                                                              ? { ...p, durationDays: e.target.value === '' ? undefined : Number(e.target.value) } 
-                                                              : p
-                                                          );
-                                                          field.onChange(newPlan);
-                                                      }}
-                                                  />
-                                                  <span className="text-sm text-muted-foreground">dias</span>
-                                              </div>
-                                          )}
-                                      </div>
-                                  );
-                              })}
-                          </div>
+                          <FormLabel>Código do Produto</FormLabel>
+                          <FormControl><Input placeholder="Ex: PROD-001" {...field} disabled={!!selectedProduct} /></FormControl>
+                          <FormDescription>O código não pode conter '/' e não pode ser alterado após a criação.</FormDescription>
                           <FormMessage />
                       </FormItem>
-                  )}
-              />
+                  )} />
+                  <FormField control={form.control} name="description" render={({ field }) => (
+                      <FormItem>
+                          <FormLabel>Descrição</FormLabel>
+                          <FormControl><Textarea placeholder="Descrição detalhada do produto ou serviço" {...field} /></FormControl>
+                          <FormMessage />
+                      </FormItem>
+                  )} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField control={form.control} name="unitPrice" render={({ field }) => (
+                          <FormItem>
+                              <FormLabel>Preço Unitário (R$)</FormLabel>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                      )} />
+                      <FormField control={form.control} name="unitWeight" render={({ field }) => (
+                          <FormItem>
+                              <FormLabel>Peso Unit. (kg)</FormLabel>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                      )} />
+                  </div>
+                  
+                  <Separator />
 
-              <DialogFooter className="pt-6">
+                  <FormField
+                    control={form.control}
+                    name="productionPlanTemplate"
+                    render={({ field }) => (
+                        <FormItem>
+                            <div className="mb-4">
+                                <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
+                                <FormDescription>
+                                    Selecione as etapas e defina a duração em dias para cada uma.
+                                </FormDescription>
+                            </div>
+                            <div className="space-y-3">
+                                {manufacturingStages.map((stageName) => {
+                                    const currentStage = field.value?.find(p => p.stageName === stageName);
+                                    const isChecked = !!currentStage;
+
+                                    return (
+                                        <div key={stageName} className="flex items-center gap-4 rounded-md border p-3">
+                                            <Checkbox
+                                                id={`stage-checkbox-${stageName}`}
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => {
+                                                    const newValue = checked
+                                                        ? [...(field.value || []), { stageName: stageName, durationDays: 0 }]
+                                                        : (field.value || []).filter(p => p.stageName !== stageName);
+                                                    field.onChange(newValue.sort((a,b) => manufacturingStages.indexOf(a.stageName) - manufacturingStages.indexOf(b.stageName)));
+                                                }}
+                                            />
+                                            <Label htmlFor={`stage-checkbox-${stageName}`} className="flex-1 font-normal cursor-pointer">
+                                                {stageName}
+                                            </Label>
+                                            {isChecked && (
+                                                <div className="flex items-center gap-2">
+                                                    <Input
+                                                        type="number"
+                                                        className="h-8 w-20"
+                                                        placeholder="Dias"
+                                                        value={currentStage?.durationDays || ''}
+                                                        onChange={(e) => {
+                                                            const newPlan = (field.value || []).map(p => 
+                                                                p.stageName === stageName 
+                                                                ? { ...p, durationDays: e.target.value === '' ? undefined : Number(e.target.value) } 
+                                                                : p
+                                                            );
+                                                            field.onChange(newPlan);
+                                                        }}
+                                                    />
+                                                    <span className="text-sm text-muted-foreground">dias</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <FormMessage />
+                        </FormItem>
+                    )}
+                />
+                </div>
+              </ScrollArea>
+              <DialogFooter className="pt-6 border-t mt-4">
                  <Button type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "Salvando..." : "Salvar Produto"}
                  </Button>
@@ -603,3 +607,5 @@ export default function ProductsPage() {
     </>
   );
 }
+
+    
