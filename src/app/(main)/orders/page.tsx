@@ -902,6 +902,7 @@ export default function OrdersPage() {
     
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            
             const itemsForFirestore = selectedOrder.items.map(item => {
                 let planForFirestore: any[];
     
@@ -923,19 +924,41 @@ export default function OrdersPage() {
             });
     
             await updateDoc(orderRef, { items: itemsForFirestore });
-            toast({ title: "Progresso salvo!", description: "As etapas de produção foram atualizadas." });
+
+            const updatedItemsForCheck = selectedOrder.items.map(item => {
+                if (item.id === itemToTrack!.id) {
+                    return { ...item, productionPlan: editedPlan };
+                }
+                return item;
+            });
+            
+            const allItemsCompleted = updatedItemsForCheck.every(
+                item => calculateItemProgress(item) >= 100
+            );
+
+            if (allItemsCompleted && selectedOrder.status !== 'Concluído') {
+                await updateDoc(orderRef, { status: "Concluído" });
+                toast({ 
+                    title: "Pedido Concluído!", 
+                    description: "Todos os itens foram finalizados e o status do pedido foi atualizado automaticamente." 
+                });
+            } else {
+                toast({ title: "Progresso salvo!", description: "As etapas de produção foram atualizadas." });
+            }
+            
             setIsProgressModalOpen(false);
             setItemToTrack(null);
-
+    
             const allOrders = await fetchOrders();
-            const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
-            if (updatedOrder) {
-                setSelectedOrder(updatedOrder);
+            const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
+            if (updatedOrderInList) {
+                setSelectedOrder(updatedOrderInList);
                  form.reset({
-                    ...updatedOrder,
-                    status: updatedOrder.status as any,
+                    ...updatedOrderInList,
+                    status: updatedOrderInList.status as any,
                 });
             }
+
         } catch (error) {
             console.error("Error saving progress:", error);
             toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar o progresso do item." });
