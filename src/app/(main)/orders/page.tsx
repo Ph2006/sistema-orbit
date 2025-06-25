@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isSameDay, addDays } from "date-fns";
@@ -16,6 +16,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -24,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -255,6 +265,8 @@ export default function OrdersPage() {
     const [isEditing, setIsEditing] = useState(false);
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
 
     // Progress tracking state
     const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
@@ -499,6 +511,30 @@ export default function OrdersPage() {
     };
 
     const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter;
+
+    const handleDeleteClick = (order: Order) => {
+        setOrderToDelete(order);
+        setIsDeleteDialogOpen(true);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!orderToDelete) return;
+        try {
+            await deleteDoc(doc(db, "companies", "mecald", "orders", orderToDelete.id));
+            toast({ title: "Pedido excluído!", description: "O pedido foi removido do sistema." });
+            setOrderToDelete(null);
+            setIsDeleteDialogOpen(false);
+            setIsSheetOpen(false);
+            await fetchOrders();
+        } catch (error) {
+            console.error("Error deleting order: ", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao excluir pedido",
+                description: "Não foi possível remover o pedido. Tente novamente.",
+            });
+        }
+    };
 
     const dashboardStats = useMemo(() => {
         const currentYear = new Date().getFullYear();
@@ -1248,10 +1284,16 @@ export default function OrdersPage() {
                                                 Exportar Cronograma
                                             </Button>
                                         </div>
-                                        <Button onClick={() => setIsEditing(true)}>
-                                            <Edit className="mr-2 h-4 w-4" />
-                                            Editar Pedido
-                                        </Button>
+                                        <div className="flex items-center gap-2">
+                                            <Button onClick={() => setIsEditing(true)}>
+                                                <Edit className="mr-2 h-4 w-4" />
+                                                Editar Pedido
+                                            </Button>
+                                            <Button variant="destructive" onClick={() => selectedOrder && handleDeleteClick(selectedOrder)}>
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Excluir
+                                            </Button>
+                                        </div>
                                     </SheetFooter>
                                 </>
                             )}
@@ -1356,6 +1398,23 @@ export default function OrdersPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta ação não pode ser desfeita. Isso excluirá permanentemente o pedido Nº <span className="font-bold">{orderToDelete?.quotationNumber}</span> do sistema.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
+                            Sim, excluir pedido
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
 }
