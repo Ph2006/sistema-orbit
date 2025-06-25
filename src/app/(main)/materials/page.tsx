@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -20,7 +20,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { PlusCircle, Trash2, FileSignature } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -49,13 +48,11 @@ type Order = {
   status: string;
   deliveryDate?: Date;
   items: any[];
-  requisitionStatus: 'Pendente' | 'Criada';
 };
 
 // Main Component
 export default function MaterialsPage() {
-    const [pendingOrders, setPendingOrders] = useState<Order[]>([]);
-    const [createdOrders, setCreatedOrders] = useState<Order[]>([]);
+    const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isRequisitionOpen, setIsRequisitionOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -76,17 +73,12 @@ export default function MaterialsPage() {
         name: "materials"
     });
 
-    const fetchOrdersAndRequisitions = async () => {
+    const fetchOrders = async () => {
         if (!user) return;
         setIsLoading(true);
         try {
-            const [ordersSnapshot, requisitionsSnapshot] = await Promise.all([
-                getDocs(collection(db, "companies", "mecald", "orders")),
-                getDocs(collection(db, "companies", "mecald", "materialRequisitions"))
-            ]);
+            const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             
-            const requisitionIds = new Set(requisitionsSnapshot.docs.map(doc => doc.id));
-
             const ordersList: Order[] = ordersSnapshot.docs
                 .filter(doc => doc.data().status !== 'Concluído' && doc.data().status !== 'Cancelado')
                 .map(doc => {
@@ -98,7 +90,6 @@ export default function MaterialsPage() {
                         status: data.status || 'N/A',
                         deliveryDate: data.deliveryDate?.toDate(),
                         items: data.items || [],
-                        requisitionStatus: requisitionIds.has(doc.id) ? 'Criada' : 'Pendente',
                     };
                 })
                 .sort((a, b) => {
@@ -107,15 +98,11 @@ export default function MaterialsPage() {
                     return dateA - dateB;
                 });
             
-            const pendingList = ordersList.filter(o => o.requisitionStatus === 'Pendente');
-            const createdList = ordersList.filter(o => o.requisitionStatus === 'Criada');
-            
-            setPendingOrders(pendingList);
-            setCreatedOrders(createdList);
+            setOrders(ordersList);
 
         } catch (error) {
-            console.error("Error fetching data:", error);
-            toast({ variant: "destructive", title: "Erro ao carregar dados", description: "Não foi possível buscar os pedidos e requisições." });
+            console.error("Error fetching orders:", error);
+            toast({ variant: "destructive", title: "Erro ao carregar pedidos", description: "Não foi possível buscar os pedidos de produção." });
         } finally {
             setIsLoading(false);
         }
@@ -123,7 +110,7 @@ export default function MaterialsPage() {
     
     useEffect(() => {
         if (user && !authLoading) {
-            fetchOrdersAndRequisitions();
+            fetchOrders();
         }
     }, [user, authLoading]);
 
@@ -138,7 +125,6 @@ export default function MaterialsPage() {
                 const data = requisitionSnap.data() as RequisitionData;
                 form.reset(data);
             } else {
-                // Generate a default requisition based on order items
                 const defaultMaterials = order.items.map((item, index) => ({
                     id: `${order.id}-mat-${index}`,
                     description: `Material para: ${item.description}`,
@@ -164,54 +150,14 @@ export default function MaterialsPage() {
         try {
             const requisitionRef = doc(db, "companies", "mecald", "materialRequisitions", selectedOrder.id);
             await setDoc(requisitionRef, { ...values, orderId: selectedOrder.id }, { merge: true });
-            toast({ title: "Requisição salva!", description: `A requisição para o pedido ${selectedOrder.quotationNumber} foi atualizada.` });
+            
+            toast({ title: "Requisição salva!", description: `A requisição para o pedido ${selectedOrder.quotationNumber} foi salva com sucesso.` });
             setIsRequisitionOpen(false);
-            await fetchOrdersAndRequisitions(); // Refresh list to update status
         } catch (error) {
             console.error("Error saving requisition:", error);
             toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar os dados da requisição." });
         }
     };
-
-    const renderOrdersTable = (orders: Order[], emptyMessage: string) => (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    <TableHead>Nº Pedido</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Data de Entrega</TableHead>
-                    <TableHead>Status da Requisição</TableHead>
-                    <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {orders.length > 0 ? (
-                    orders.map(order => (
-                        <TableRow key={order.id}>
-                            <TableCell className="font-medium">{order.quotationNumber}</TableCell>
-                            <TableCell>{order.customerName}</TableCell>
-                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</TableCell>
-                            <TableCell>
-                                <Badge variant={order.requisitionStatus === 'Criada' ? 'default' : 'secondary'}>
-                                    {order.requisitionStatus}
-                                </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                                <Button onClick={() => handleManageRequisition(order)}>
-                                    <FileSignature className="mr-2 h-4 w-4" />
-                                    {order.requisitionStatus === 'Pendente' ? 'Criar Requisição' : 'Ver / Gerenciar'}
-                                </Button>
-                            </TableCell>
-                        </TableRow>
-                    ))
-                ) : (
-                    <TableRow>
-                        <TableCell colSpan={5} className="h-24 text-center">{emptyMessage}</TableCell>
-                    </TableRow>
-                )}
-            </TableBody>
-        </Table>
-    );
 
     return (
         <>
@@ -221,47 +167,70 @@ export default function MaterialsPage() {
                 </div>
                 <Card>
                     <CardHeader>
-                        <CardTitle>Controle de Requisições de Pedidos</CardTitle>
+                        <CardTitle>Pedidos de Produção Ativos</CardTitle>
                         <CardDescription>
-                            Gerencie a lista de materiais e o plano de corte para cada pedido de produção ativo.
+                            Gerencie a lista de materiais e o plano de corte para cada pedido de produção.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
                         {isLoading ? (
                             <Skeleton className="h-64 w-full" />
                         ) : (
-                            <Tabs defaultValue="pending" className="space-y-4">
-                                <TabsList>
-                                    <TabsTrigger value="pending">Aguardando Requisição ({pendingOrders.length})</TabsTrigger>
-                                    <TabsTrigger value="created">Requisições Criadas ({createdOrders.length})</TabsTrigger>
-                                </TabsList>
-                                <TabsContent value="pending">
-                                    {renderOrdersTable(pendingOrders, "Nenhum pedido aguardando requisição.")}
-                                </TabsContent>
-                                <TabsContent value="created">
-                                    {renderOrdersTable(createdOrders, "Nenhuma requisição de material foi criada ainda.")}
-                                </TabsContent>
-                            </Tabs>
+                             <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Nº Pedido</TableHead>
+                                        <TableHead>Cliente</TableHead>
+                                        <TableHead>Data de Entrega</TableHead>
+                                        <TableHead>Status do Pedido</TableHead>
+                                        <TableHead className="text-right">Ações</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {orders.length > 0 ? (
+                                        orders.map(order => (
+                                            <TableRow key={order.id}>
+                                                <TableCell className="font-medium">{order.quotationNumber}</TableCell>
+                                                <TableCell>{order.customerName}</TableCell>
+                                                <TableCell>{order.deliveryDate ? format(order.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</TableCell>
+                                                <TableCell>
+                                                    <span className="text-sm">{order.status}</span>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button onClick={() => handleManageRequisition(order)}>
+                                                        <FileSignature className="mr-2 h-4 w-4" />
+                                                        Gerenciar Requisição
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={5} className="h-24 text-center">Nenhum pedido de produção ativo encontrado.</TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
                         )}
                     </CardContent>
                 </Card>
             </div>
 
             <Dialog open={isRequisitionOpen} onOpenChange={setIsRequisitionOpen}>
-                <DialogContent className="max-w-4xl">
+                <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
                     <DialogHeader>
                         <DialogTitle>Requisição - Pedido Nº {selectedOrder?.quotationNumber}</DialogTitle>
                         <DialogDescription>Gerencie a lista de materiais e o plano de corte para este pedido.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
-                        <form onSubmit={form.handleSubmit(onSubmit)}>
-                            <Tabs defaultValue="materials" className="mt-4">
+                        <form onSubmit={form.handleSubmit(onSubmit)} className="flex-grow flex flex-col min-h-0">
+                            <Tabs defaultValue="materials" className="flex-grow flex flex-col min-h-0">
                                 <TabsList>
                                     <TabsTrigger value="materials">Lista de Materiais</TabsTrigger>
                                     <TabsTrigger value="cuttingPlan">Plano de Corte</TabsTrigger>
                                 </TabsList>
-                                <ScrollArea className="h-[60vh] mt-4">
-                                    <div className="pr-6">
+                                <div className="flex-grow mt-4 overflow-hidden">
+                                    <ScrollArea className="h-full pr-6">
                                         <TabsContent value="materials">
                                             <Card>
                                                 <CardHeader>
@@ -290,13 +259,13 @@ export default function MaterialsPage() {
                                                                         <FormItem><FormLabel>Unidade</FormLabel><FormControl><Input placeholder="kg, m, pç" {...field} /></FormControl><FormMessage /></FormItem>
                                                                     )} />
                                                                 </div>
-                                                                 <FormField control={form.control} name={`materials.${index}.notes`} render={({ field }) => (
+                                                                <FormField control={form.control} name={`materials.${index}.notes`} render={({ field }) => (
                                                                     <FormItem><FormLabel>Observações</FormLabel><FormControl><Input placeholder="Detalhes adicionais (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                                 )} />
                                                             </div>
                                                         </Card>
                                                     ))}
-                                                     {fields.length === 0 && <p className="text-center text-muted-foreground p-4">Nenhum material adicionado.</p>}
+                                                    {fields.length === 0 && <p className="text-center text-muted-foreground p-4">Nenhum material adicionado.</p>}
                                                 </CardContent>
                                             </Card>
                                         </TabsContent>
@@ -309,7 +278,7 @@ export default function MaterialsPage() {
                                                             <FormLabel>Instruções e Detalhes</FormLabel>
                                                             <FormControl>
                                                                 <Textarea placeholder="Descreva o aproveitamento de chapas, sobras, sequência de corte, etc." 
-                                                                    className="min-h-[300px]" {...field} value={field.value ?? ''} />
+                                                                    className="min-h-[400px]" {...field} value={field.value ?? ''} />
                                                             </FormControl>
                                                             <FormMessage />
                                                         </FormItem>
@@ -317,15 +286,14 @@ export default function MaterialsPage() {
                                                 </CardContent>
                                             </Card>
                                         </TabsContent>
-                                    </div>
-                                </ScrollArea>
-                            
-                                <DialogFooter className="pt-6 border-t mt-4">
-                                    <Button type="submit" disabled={form.formState.isSubmitting}>
-                                        {form.formState.isSubmitting ? "Salvando..." : "Salvar Requisição"}
-                                    </Button>
-                                </DialogFooter>
+                                    </ScrollArea>
+                                </div>
                             </Tabs>
+                            <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0">
+                                <Button type="submit" disabled={form.formState.isSubmitting}>
+                                    {form.formState.isSubmitting ? "Salvando..." : "Salvar Requisição"}
+                                </Button>
+                            </DialogFooter>
                         </form>
                     </Form>
                 </DialogContent>
