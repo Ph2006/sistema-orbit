@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc } from "firebase/firestore";
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown } from "lucide-react";
 import { useAuth } from "../layout";
@@ -353,6 +353,24 @@ export default function QuotationsPage() {
                 await addDoc(collection(db, "companies", "mecald", "quotations"), dataToSave);
                 toast({ title: "Orçamento criado!" });
             }
+
+            // Update products catalog
+            const productsCollectionRef = collection(db, "companies", "mecald", "products");
+            for (const item of values.items) {
+                if (item.code && item.code.trim() !== "") {
+                    const productRef = doc(productsCollectionRef, item.code);
+                    const productData = {
+                        code: item.code,
+                        description: item.description,
+                        unitPrice: item.unitPrice,
+                        unitWeight: item.unitWeight || 0,
+                        taxRate: item.taxRate || 0,
+                        updatedAt: Timestamp.now(),
+                    };
+                    await setDoc(productRef, productData, { merge: true });
+                }
+            }
+            
             form.reset();
             setIsFormOpen(false);
             setSelectedQuotation(null);
