@@ -54,7 +54,8 @@ type Order = {
 
 // Main Component
 export default function MaterialsPage() {
-    const [orders, setOrders] = useState<Order[]>([]);
+    const [pendingOrders, setPendingOrders] = useState<Order[]>([]);
+    const [createdOrders, setCreatedOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isRequisitionOpen, setIsRequisitionOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -101,14 +102,16 @@ export default function MaterialsPage() {
                     };
                 })
                 .sort((a, b) => {
-                    if (a.requisitionStatus === 'Pendente' && b.requisitionStatus !== 'Pendente') return -1;
-                    if (a.requisitionStatus !== 'Pendente' && b.requisitionStatus === 'Pendente') return 1;
                     const dateA = a.deliveryDate ? a.deliveryDate.getTime() : 0;
                     const dateB = b.deliveryDate ? b.deliveryDate.getTime() : 0;
                     return dateA - dateB;
                 });
             
-            setOrders(ordersList);
+            const pendingList = ordersList.filter(o => o.requisitionStatus === 'Pendente');
+            const createdList = ordersList.filter(o => o.requisitionStatus === 'Criada');
+            
+            setPendingOrders(pendingList);
+            setCreatedOrders(createdList);
 
         } catch (error) {
             console.error("Error fetching data:", error);
@@ -160,7 +163,7 @@ export default function MaterialsPage() {
         if (!selectedOrder) return;
         try {
             const requisitionRef = doc(db, "companies", "mecald", "materialRequisitions", selectedOrder.id);
-            await setDoc(requisitionRef, values, { merge: true });
+            await setDoc(requisitionRef, { ...values, orderId: selectedOrder.id }, { merge: true });
             toast({ title: "Requisição salva!", description: `A requisição para o pedido ${selectedOrder.quotationNumber} foi atualizada.` });
             setIsRequisitionOpen(false);
             await fetchOrdersAndRequisitions(); // Refresh list to update status
@@ -170,6 +173,46 @@ export default function MaterialsPage() {
         }
     };
 
+    const renderOrdersTable = (orders: Order[], emptyMessage: string) => (
+        <Table>
+            <TableHeader>
+                <TableRow>
+                    <TableHead>Nº Pedido</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Data de Entrega</TableHead>
+                    <TableHead>Status da Requisição</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                {orders.length > 0 ? (
+                    orders.map(order => (
+                        <TableRow key={order.id}>
+                            <TableCell className="font-medium">{order.quotationNumber}</TableCell>
+                            <TableCell>{order.customerName}</TableCell>
+                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</TableCell>
+                            <TableCell>
+                                <Badge variant={order.requisitionStatus === 'Criada' ? 'default' : 'secondary'}>
+                                    {order.requisitionStatus}
+                                </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                                <Button onClick={() => handleManageRequisition(order)}>
+                                    <FileSignature className="mr-2 h-4 w-4" />
+                                    {order.requisitionStatus === 'Pendente' ? 'Criar Requisição' : 'Ver / Gerenciar'}
+                                </Button>
+                            </TableCell>
+                        </TableRow>
+                    ))
+                ) : (
+                    <TableRow>
+                        <TableCell colSpan={5} className="h-24 text-center">{emptyMessage}</TableCell>
+                    </TableRow>
+                )}
+            </TableBody>
+        </Table>
+    );
+
     return (
         <>
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -178,7 +221,7 @@ export default function MaterialsPage() {
                 </div>
                 <Card>
                     <CardHeader>
-                        <CardTitle>Pedidos Aguardando Requisição</CardTitle>
+                        <CardTitle>Controle de Requisições de Pedidos</CardTitle>
                         <CardDescription>
                             Gerencie a lista de materiais e o plano de corte para cada pedido de produção ativo.
                         </CardDescription>
@@ -187,43 +230,18 @@ export default function MaterialsPage() {
                         {isLoading ? (
                             <Skeleton className="h-64 w-full" />
                         ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Nº Pedido</TableHead>
-                                    <TableHead>Cliente</TableHead>
-                                    <TableHead>Data de Entrega</TableHead>
-                                    <TableHead>Status da Requisição</TableHead>
-                                    <TableHead className="text-right">Ações</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {orders.length > 0 ? (
-                                    orders.map(order => (
-                                        <TableRow key={order.id}>
-                                            <TableCell className="font-medium">{order.quotationNumber}</TableCell>
-                                            <TableCell>{order.customerName}</TableCell>
-                                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</TableCell>
-                                            <TableCell>
-                                                <Badge variant={order.requisitionStatus === 'Criada' ? 'default' : 'secondary'}>
-                                                    {order.requisitionStatus}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Button onClick={() => handleManageRequisition(order)}>
-                                                    <FileSignature className="mr-2 h-4 w-4" />
-                                                    Ver / Gerenciar
-                                                </Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))
-                                ) : (
-                                    <TableRow>
-                                        <TableCell colSpan={5} className="h-24 text-center">Nenhum pedido ativo que necessite de requisição.</TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
+                            <Tabs defaultValue="pending" className="space-y-4">
+                                <TabsList>
+                                    <TabsTrigger value="pending">Aguardando Requisição ({pendingOrders.length})</TabsTrigger>
+                                    <TabsTrigger value="created">Requisições Criadas ({createdOrders.length})</TabsTrigger>
+                                </TabsList>
+                                <TabsContent value="pending">
+                                    {renderOrdersTable(pendingOrders, "Nenhum pedido aguardando requisição.")}
+                                </TabsContent>
+                                <TabsContent value="created">
+                                    {renderOrdersTable(createdOrders, "Nenhuma requisição de material foi criada ainda.")}
+                                </TabsContent>
+                            </Tabs>
                         )}
                     </CardContent>
                 </Card>
