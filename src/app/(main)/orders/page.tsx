@@ -645,6 +645,18 @@ export default function OrdersPage() {
                                                         <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
                                                         <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
                                                     </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><FolderGit2 className="mr-2 h-4 w-4" />Pasta no Drive</span>
+                                                        {selectedOrder.driveLink ? (
+                                                            <Button variant="link" asChild className="p-0 h-auto text-base">
+                                                                <a href={selectedOrder.driveLink} target="_blank" rel="noopener noreferrer">
+                                                                    Abrir Link
+                                                                </a>
+                                                            </Button>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">Não definido</span>
+                                                        )}
+                                                    </div>
                                                     <div className="flex justify-between items-center font-bold text-lg">
                                                         <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
                                                         <span className="text-primary">{selectedOrder.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
@@ -682,17 +694,7 @@ export default function OrdersPage() {
                                             </Card>
                                         </div>
                                     </ScrollArea>
-                                    <SheetFooter className="pt-4 pr-6 border-t flex flex-col sm:flex-row sm:justify-between sm:items-center">
-                                        <div>
-                                            {selectedOrder.driveLink && (
-                                                <Button variant="outline" asChild>
-                                                    <a href={selectedOrder.driveLink} target="_blank" rel="noopener noreferrer">
-                                                        <FolderGit2 className="mr-2 h-4 w-4" />
-                                                        Abrir pasta no Drive
-                                                    </a>
-                                                </Button>
-                                            )}
-                                        </div>
+                                    <SheetFooter className="pt-4 pr-6 border-t flex sm:justify-end">
                                         <Button onClick={() => setIsEditing(true)}>
                                             <Edit className="mr-2 h-4 w-4" />
                                             Editar Pedido
