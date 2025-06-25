@@ -1,34 +1,44 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { useState, useEffect, useMemo } from "react";
+import { useForm, useFieldArray } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 
+const orderItemSchema = z.object({
+    id: z.string().optional(),
+    code: z.string().optional(),
+    product_code: z.string().optional(),
+    description: z.string().min(1, "A descrição é obrigatória."),
+    quantity: z.coerce.number().min(0, "A quantidade não pode ser negativa."),
+    unitWeight: z.coerce.number().min(0, "O peso não pode ser negativo.").optional(),
+});
 
-type OrderItem = {
-    id?: string;
-    code?: string;
-    description: string;
-    quantity: number;
-    unitPrice: number; // Kept for data model integrity
-    unitWeight?: number;
-    taxRate?: number;
-    leadTimeDays?: number;
-    notes?: string;
-};
+const orderSchema = z.object({
+  id: z.string(),
+  items: z.array(orderItemSchema),
+});
+
+type OrderItem = z.infer<typeof orderItemSchema>;
 
 type Order = {
     id: string;
@@ -39,14 +49,13 @@ type Order = {
         name: string;
     };
     items: OrderItem[];
-    totalValue: number; // Kept for data model integrity
-    totalWeight: number; // New calculated field
+    totalValue: number;
+    totalWeight: number;
     status: string;
     createdAt: Date;
     deliveryDate?: Date;
 };
 
-// Helper function to calculate total weight
 const calculateTotalWeight = (items: OrderItem[]): number => {
     if (!items || !Array.isArray(items)) return 0;
     return items.reduce((acc, item) => {
@@ -55,7 +64,6 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
         return acc + (quantity * unitWeight);
     }, 0);
 };
-
 
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
     const lowerStatus = status ? status.toLowerCase() : '';
@@ -80,9 +88,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
              <Table>
                 <TableBody>
                     <TableRow>
-                        <TableCell colSpan={6} className="h-24 text-center">
-                            Nenhum pedido encontrado.
-                        </TableCell>
+                        <TableCell colSpan={6} className="h-24 text-center">Nenhum pedido encontrado.</TableCell>
                     </TableRow>
                 </TableBody>
             </Table>
@@ -136,6 +142,15 @@ export default function OrdersPage() {
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
 
+    const form = useForm<z.infer<typeof orderSchema>>({
+        resolver: zodResolver(orderSchema),
+    });
+
+    const { fields } = useFieldArray({
+        control: form.control,
+        name: "items"
+    });
+
     const fetchOrders = async () => {
         if (!user) return;
         setIsLoading(true);
@@ -143,23 +158,21 @@ export default function OrdersPage() {
             const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
             const productsMap = new Map<string, { unitWeight: number }>();
             productsSnapshot.forEach(doc => {
-                productsMap.set(doc.id.toUpperCase(), { unitWeight: doc.data().unitWeight || 0 });
+                productsMap.set(doc.id.trim().toUpperCase(), { unitWeight: doc.data().unitWeight || 0 });
             });
 
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
-                
                 const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
                 const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
                 
-                const enrichedItems = (data.items || []).map((item: any) => {
-                    const enrichedItem = { ...item };
+                const enrichedItems = (data.items || []).map((item: any, index: number) => {
+                    const enrichedItem = { ...item, id: item.id || `${doc.id}-${index}`};
                     enrichedItem.unitWeight = Number(enrichedItem.unitWeight) || 0;
 
                     if (enrichedItem.unitWeight === 0) {
                         const itemCode = (item.code || item.product_code || '').trim().toUpperCase();
-                        
                         if (itemCode) {
                             const productData = productsMap.get(itemCode);
                             if (productData && productData.unitWeight) {
@@ -216,7 +229,41 @@ export default function OrdersPage() {
 
     const handleViewOrder = (order: Order) => {
         setSelectedOrder(order);
+        form.reset(order);
         setIsSheetOpen(true);
+    };
+
+    const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
+        if (!selectedOrder) return;
+
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            const updatedItems = values.items.map(item => ({
+                ...item,
+                unitWeight: Number(item.unitWeight) || 0,
+                quantity: Number(item.quantity) || 0,
+            }));
+            const totalWeight = calculateTotalWeight(updatedItems);
+            
+            await updateDoc(orderRef, {
+                items: updatedItems,
+                totalWeight: totalWeight,
+            });
+
+            toast({
+                title: "Pedido atualizado!",
+                description: "Os dados do pedido foram salvos com sucesso.",
+            });
+            setIsSheetOpen(false);
+            await fetchOrders(); // Refresh data
+        } catch (error) {
+            console.error("Error updating order:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao salvar",
+                description: "Não foi possível atualizar o pedido.",
+            });
+        }
     };
 
     const filteredOrders = orders.filter(order => {
@@ -231,6 +278,9 @@ export default function OrdersPage() {
             status.includes(query)
         );
     });
+    
+    const watchedItems = form.watch("items");
+    const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
 
     return (
         <>
@@ -256,9 +306,7 @@ export default function OrdersPage() {
                     <CardContent>
                         {isLoading ? (
                             <div className="space-y-4">
-                                <Skeleton className="h-10 w-full" />
-                                <Skeleton className="h-10 w-full" />
-                                <Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" />
                             </div>
                         ) : (
                            <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
@@ -268,88 +316,87 @@ export default function OrdersPage() {
             </div>
 
             <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-                <SheetContent className="w-full sm:max-w-2xl">
+                <SheetContent className="w-full sm:max-w-3xl">
                     {selectedOrder && (
                         <>
-                            <SheetHeader className="mb-4">
+                            <SheetHeader>
                                 <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
                                 <SheetDescription>
                                     Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
                                 </SheetDescription>
                             </SheetHeader>
-                            <ScrollArea className="h-[calc(100vh-8rem)] pr-6">
-                                <div className="space-y-6">
-                                    <Card>
-                                        <CardHeader>
-                                            <CardTitle>Detalhes do Pedido</CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="space-y-3 text-sm">
-                                            <div className="flex justify-between items-center">
-                                                <span className="font-medium text-muted-foreground">Status</span>
-                                                {(() => {
-                                                    const statusProps = getStatusProps(selectedOrder.status);
-                                                    return (
-                                                        <Badge variant={statusProps.variant} className={statusProps.colorClass}>
-                                                             <statusProps.icon className="mr-2 h-4 w-4" />
-                                                             {statusProps.label}
-                                                        </Badge>
-                                                    );
-                                                })()}
-                                            </div>
-                                            <div className="flex justify-between items-center">
-                                                <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
-                                                <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
-                                            </div>
-                                             <div className="flex justify-between items-center">
-                                                <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
-                                                <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
-                                            </div>
-                                            <div className="flex justify-between items-center">
-                                                <span className="font-medium text-muted-foreground">Orçamento de Origem</span>
-                                                <span>Nº {selectedOrder.quotationNumber}</span>
-                                            </div>
-                                            <div className="flex justify-between items-center font-bold text-lg">
-                                                <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
-                                                <span className="text-primary">{(selectedOrder.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
+                            <Form {...form}>
+                                <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-full">
+                                    <ScrollArea className="flex-1 pr-6 -mr-6">
+                                        <div className="space-y-6 py-6">
+                                            <Card>
+                                                <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
+                                                <CardContent className="space-y-3 text-sm">
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground">Status</span>
+                                                        {(() => {
+                                                            const statusProps = getStatusProps(selectedOrder.status);
+                                                            return <Badge variant={statusProps.variant} className={statusProps.colorClass}><statusProps.icon className="mr-2 h-4 w-4" />{statusProps.label}</Badge>;
+                                                        })()}
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
+                                                        <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
+                                                        <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center font-bold text-lg">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
+                                                        <span className="text-primary">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
 
-                                    <Card>
-                                        <CardHeader>
-                                            <CardTitle>Itens do Pedido</CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <Table>
-                                                <TableHeader>
-                                                    <TableRow>
-                                                        <TableHead>Descrição</TableHead>
-                                                        <TableHead className="text-center w-[80px]">Qtd.</TableHead>
-                                                        <TableHead className="text-right w-[120px]">Peso Unit.</TableHead>
-                                                        <TableHead className="text-right w-[120px]">Peso Total</TableHead>
-                                                    </TableRow>
-                                                </TableHeader>
-                                                <TableBody>
-                                                    {(selectedOrder.items || []).map((item, index) => {
-                                                        const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
-                                                        return(
-                                                            <TableRow key={item.id || index}>
-                                                                <TableCell className="font-medium">
-                                                                    {item.description}
-                                                                    {item.code && <span className="block text-xs text-muted-foreground">Cód: {item.code}</span>}
-                                                                </TableCell>
-                                                                <TableCell className="text-center">{item.quantity}</TableCell>
-                                                                <TableCell className="text-right">{(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
-                                                                <TableCell className="text-right font-medium">{itemTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
-                                                            </TableRow>
-                                                        )
-                                                    })}
-                                                </TableBody>
-                                            </Table>
-                                        </CardContent>
-                                    </Card>
-                                </div>
-                            </ScrollArea>
+                                            <Card>
+                                                <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
+                                                <CardContent className="space-y-4">
+                                                    {fields.map((field, index) => (
+                                                        <Card key={field.id} className="p-4 bg-secondary">
+                                                            <div className="space-y-4">
+                                                                <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
+                                                                    <FormItem>
+                                                                        <FormLabel>Descrição do Item {index + 1}</FormLabel>
+                                                                        <FormControl><Textarea placeholder="Descrição completa do item" {...field} /></FormControl>
+                                                                        <FormMessage />
+                                                                    </FormItem>
+                                                                )}/>
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                     <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
+                                                                        <FormItem>
+                                                                            <FormLabel>Quantidade</FormLabel>
+                                                                            <FormControl><Input type="number" placeholder="0" {...field} /></FormControl>
+                                                                            <FormMessage />
+                                                                        </FormItem>
+                                                                    )}/>
+                                                                     <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
+                                                                        <FormItem>
+                                                                            <FormLabel>Peso Unit. (kg)</FormLabel>
+                                                                            <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl>
+                                                                            <FormMessage />
+                                                                        </FormItem>
+                                                                    )}/>
+                                                                </div>
+                                                            </div>
+                                                        </Card>
+                                                    ))}
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+                                    </ScrollArea>
+                                    <SheetFooter className="py-4 border-t">
+                                        <Button type="submit" disabled={form.formState.isSubmitting}>
+                                            {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                                        </Button>
+                                    </SheetFooter>
+                                </form>
+                            </Form>
                         </>
                     )}
                 </SheetContent>
