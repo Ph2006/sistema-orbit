@@ -49,6 +49,7 @@ export default function ProductsPage() {
   const [manufacturingStages, setManufacturingStages] = useState<string[]>([]);
   const [isLoadingStages, setIsLoadingStages] = useState(true);
   const [newStageName, setNewStageName] = useState("");
+  const [activeTab, setActiveTab] = useState("catalog");
 
   const form = useForm<z.infer<typeof productSchema>>({
     resolver: zodResolver(productSchema),
@@ -296,7 +297,7 @@ export default function ProductsPage() {
             </div>
         </div>
 
-        <Tabs defaultValue="catalog" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList>
                 <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
                 <TabsTrigger value="stages">Etapas de Fabricação</TabsTrigger>
