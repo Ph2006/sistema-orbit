@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -43,13 +43,14 @@ export default function ProductsPage() {
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
-  const { toast } = useToast();
-  const { user, loading: authLoading } = useAuth();
   
   const [manufacturingStages, setManufacturingStages] = useState<string[]>([]);
   const [isLoadingStages, setIsLoadingStages] = useState(true);
   const [newStageName, setNewStageName] = useState("");
   const [activeTab, setActiveTab] = useState("catalog");
+
+  const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
 
   const form = useForm<z.infer<typeof productSchema>>({
     resolver: zodResolver(productSchema),
@@ -62,9 +63,9 @@ export default function ProductsPage() {
     },
   });
 
-  const stagesDocRef = doc(db, "companies", "mecald", "settings", "manufacturingStages");
+  const stagesDocRef = useMemo(() => doc(db, "companies", "mecald", "settings", "manufacturingStages"), []);
 
-  const fetchStages = async () => {
+  const fetchStages = useCallback(async () => {
     setIsLoadingStages(true);
     try {
         const docSnap = await getDoc(stagesDocRef);
@@ -80,13 +81,21 @@ export default function ProductsPage() {
     } finally {
         setIsLoadingStages(false);
     }
-  };
+  }, [stagesDocRef, toast]);
 
-  const handleAddStage = async () => {
-    if (!newStageName.trim()) return;
+  const handleAddStage = useCallback(async () => {
+    const stageToAdd = newStageName.trim();
+    if (!stageToAdd) {
+        toast({
+            variant: "destructive",
+            title: "Campo vazio",
+            description: "Por favor, digite o nome da etapa para adicionar.",
+        });
+        return;
+    }
     try {
       await setDoc(stagesDocRef, {
-        stages: arrayUnion(newStageName.trim())
+        stages: arrayUnion(stageToAdd)
       }, { merge: true });
       
       setNewStageName("");
@@ -96,9 +105,9 @@ export default function ProductsPage() {
       console.error("Error adding stage:", error);
       toast({ variant: "destructive", title: "Erro ao adicionar etapa" });
     }
-  };
+  }, [newStageName, stagesDocRef, fetchStages, toast]);
 
-  const handleDeleteStage = async (stageToDelete: string) => {
+  const handleDeleteStage = useCallback(async (stageToDelete: string) => {
     try {
       await updateDoc(stagesDocRef, {
         stages: arrayRemove(stageToDelete)
@@ -109,11 +118,9 @@ export default function ProductsPage() {
       console.error("Error deleting stage:", error);
       toast({ variant: "destructive", title: "Erro ao remover etapa" });
     }
-  };
+  }, [stagesDocRef, fetchStages, toast]);
 
-
-  const fetchProducts = async () => {
-    if (!user) return;
+  const fetchProducts = useCallback(async () => {
     setIsLoading(true);
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
@@ -132,16 +139,16 @@ export default function ProductsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     if (!authLoading && user) {
       fetchProducts();
       fetchStages();
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, fetchProducts, fetchStages]);
   
-  const syncProductsFromQuotations = async () => {
+  const syncProductsFromQuotations = useCallback(async () => {
     setIsSyncing(true);
     toast({ title: "Sincronizando...", description: "Buscando produtos em orçamentos existentes." });
     
@@ -195,7 +202,7 @@ export default function ProductsPage() {
     } finally {
         setIsSyncing(false);
     }
-  };
+  }, [toast, fetchProducts]);
 
   const onSubmit = async (values: z.infer<typeof productSchema>) => {
     try {
