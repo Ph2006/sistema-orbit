@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -32,6 +32,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const itemSchema = z.object({
   id: z.string().optional(),
@@ -57,12 +58,22 @@ const quotationSchema = z.object({
   deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
   notes: z.string().optional(),
   items: z.array(itemSchema).min(1, "Adicione pelo menos um item ao orçamento."),
+  includedServices: z.array(z.string()).optional(),
 });
 
 type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp, number: number };
 type Customer = { id: string, nomeFantasia: string };
 type Item = z.infer<typeof itemSchema>;
 
+const serviceOptions = [
+    { id: 'materialSupply', label: 'Fornecimento de Material' },
+    { id: 'machining', label: 'Usinagem' },
+    { id: 'heatTreatment', label: 'Tratamento Térmico' },
+    { id: 'certification', label: 'Certificação' },
+    { id: 'manufacture', label: 'Fabricação' },
+    { id: 'nonDestructiveTest', label: 'Ensaio Não Destrutivo' },
+    { id: 'surfaceTreatment', label: 'Tratamento de Superfície' },
+];
 
 const calculateItemTotals = (item: Item | any) => {
     const quantity = Number(item.quantity) || 0;
@@ -165,6 +176,7 @@ export default function QuotationsPage() {
         defaultValues: {
             status: "Aguardando Aprovação",
             items: [],
+            includedServices: [],
         }
     });
 
@@ -272,6 +284,7 @@ export default function QuotationsPage() {
                     deliveryTime: data.deliveryTerms || data.deliveryTime || 'A combinar',
                     notes: data.notes || '',
                     items: finalItems,
+                    includedServices: data.includedServices || [],
                     createdAt: getCreatedAt(),
                 } as Quotation;
             });
@@ -348,6 +361,7 @@ export default function QuotationsPage() {
             deliveryTime: "A combinar",
             notes: "",
             items: [{ description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' }],
+            includedServices: [],
         });
         setIsFormOpen(true);
     };
@@ -620,6 +634,56 @@ export default function QuotationsPage() {
                                         </CardContent>
                                     </Card>
 
+                                    <Card>
+                                        <CardHeader><CardTitle>Serviços Inclusos</CardTitle></CardHeader>
+                                        <CardContent>
+                                            <FormField
+                                                control={form.control}
+                                                name="includedServices"
+                                                render={() => (
+                                                    <FormItem>
+                                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                                            {serviceOptions.map((item) => (
+                                                                <FormField
+                                                                    key={item.id}
+                                                                    control={form.control}
+                                                                    name="includedServices"
+                                                                    render={({ field }) => {
+                                                                        return (
+                                                                            <FormItem
+                                                                                key={item.id}
+                                                                                className="flex flex-row items-start space-x-3 space-y-0"
+                                                                            >
+                                                                                <FormControl>
+                                                                                    <Checkbox
+                                                                                        checked={field.value?.includes(item.id)}
+                                                                                        onCheckedChange={(checked) => {
+                                                                                            return checked
+                                                                                                ? field.onChange([...(field.value || []), item.id])
+                                                                                                : field.onChange(
+                                                                                                    field.value?.filter(
+                                                                                                        (value) => value !== item.id
+                                                                                                    )
+                                                                                                )
+                                                                                        }}
+                                                                                    />
+                                                                                </FormControl>
+                                                                                <FormLabel className="font-normal">
+                                                                                    {item.label}
+                                                                                </FormLabel>
+                                                                            </FormItem>
+                                                                        )
+                                                                    }}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        </CardContent>
+                                    </Card>
+
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <FormField control={form.control} name="paymentTerms" render={({ field }) => (
                                             <FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
@@ -740,6 +804,20 @@ export default function QuotationsPage() {
                                         </div>
                                     </CardContent>
                                 </Card>
+
+                                {selectedQuotation.includedServices && selectedQuotation.includedServices.length > 0 && (
+                                    <Card>
+                                        <CardHeader><CardTitle>Serviços Inclusos</CardTitle></CardHeader>
+                                        <CardContent>
+                                            <ul className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
+                                                {selectedQuotation.includedServices.map(serviceId => {
+                                                    const service = serviceOptions.find(s => s.id === serviceId);
+                                                    return <li key={serviceId} className="flex items-center gap-2"><Check className="h-4 w-4 text-primary" /> {service ? service.label : serviceId}</li>
+                                                })}
+                                            </ul>
+                                        </CardContent>
+                                    </Card>
+                                )}
 
                                 {selectedQuotation.notes && (
                                     <Card>
