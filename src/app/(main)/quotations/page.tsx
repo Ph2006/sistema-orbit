@@ -69,10 +69,11 @@ const serviceOptions = [
     { id: 'materialSupply', label: 'Fornecimento de Material' },
     { id: 'machining', label: 'Usinagem' },
     { id: 'heatTreatment', label: 'Tratamento Térmico' },
-    { id: 'certification', label: 'Certificação' },
+    { id: 'certification', label: 'Documentação para Data Book' },
     { id: 'manufacture', label: 'Fabricação' },
     { id: 'nonDestructiveTest', label: 'Ensaio Não Destrutivo' },
     { id: 'surfaceTreatment', label: 'Tratamento de Superfície' },
+    { id: 'beneficiamento', label: 'Beneficiamento (Emborrachamento e Galvanização)' },
 ];
 
 const calculateItemTotals = (item: Item | any) => {
