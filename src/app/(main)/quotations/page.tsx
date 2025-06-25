@@ -35,9 +35,14 @@ import { StatCard } from "@/components/dashboard/stat-card";
 
 const itemSchema = z.object({
   id: z.string().optional(),
+  code: z.string().optional(),
   description: z.string().min(3, "A descrição é obrigatória."),
   quantity: z.coerce.number().min(1, "A quantidade deve ser pelo menos 1."),
   unitPrice: z.coerce.number().min(0, "O preço não pode ser negativo."),
+  unitWeight: z.coerce.number().min(0).optional(),
+  taxRate: z.coerce.number().min(0).optional(),
+  leadTimeDays: z.coerce.number().min(0).optional(),
+  notes: z.string().optional(),
 });
 
 const quotationSchema = z.object({
@@ -45,6 +50,7 @@ const quotationSchema = z.object({
     id: z.string({ required_error: "Selecione um cliente." }),
     name: z.string(),
   }),
+  buyerName: z.string().optional(),
   status: z.enum(["Aguardando Aprovação", "Enviado", "Aprovado", "Reprovado", "Informativo", "Expirado"], { required_error: "Selecione um status." }),
   validity: z.date({ required_error: "A data de validade é obrigatória." }),
   paymentTerms: z.string().min(3, "As condições de pagamento são obrigatórias."),
@@ -55,10 +61,90 @@ const quotationSchema = z.object({
 
 type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp, number: number };
 type Customer = { id: string, nomeFantasia: string };
+type Item = z.infer<typeof itemSchema>;
 
-const calculateTotal = (items: z.infer<typeof itemSchema>[]) => {
-    return items.reduce((acc, item) => acc + (item.quantity * item.unitPrice), 0);
+
+const calculateItemTotals = (item: Item | any) => {
+    const quantity = Number(item.quantity) || 0;
+    const unitPrice = Number(item.unitPrice) || 0;
+    const taxRate = Number(item.taxRate) || 0;
+
+    const totalPrice = quantity * unitPrice;
+    const taxAmount = totalPrice * (taxRate / 100);
+    const totalWithTax = totalPrice + taxAmount;
+    
+    return { totalPrice, taxAmount, totalWithTax };
 };
+
+const calculateGrandTotal = (items: Item[] | any[]) => {
+    if (!items) return 0;
+    return items.reduce((acc, item) => {
+        const { totalWithTax } = calculateItemTotals(item);
+        return acc + totalWithTax;
+    }, 0);
+};
+
+const ItemFormCard = ({ index, control, remove, watchedItems }: { index: number, control: any, remove: (index: number) => void, watchedItems: any[] }) => {
+    const currentItem = watchedItems[index] || {};
+    const { totalPrice, taxAmount, totalWithTax } = calculateItemTotals(currentItem);
+
+    return (
+        <Card className="p-4 relative">
+            <div className="flex justify-between items-start mb-4">
+                <h4 className="font-semibold text-md pt-2">Item {index + 1}</h4>
+                <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive -mt-2 -mr-2" onClick={() => remove(index)}>
+                    <X className="h-4 w-4" />
+                </Button>
+            </div>
+            <div className="space-y-4">
+                <FormField control={control} name={`items.${index}.description`} render={({ field }) => (
+                    <FormItem><FormLabel>Descrição</FormLabel><FormControl><Textarea placeholder="Descrição completa do item, serviço ou produto" {...field} /></FormControl><FormMessage /></FormItem>
+                )}/>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <FormField control={control} name={`items.${index}.code`} render={({ field }) => (
+                        <FormItem><FormLabel>Código</FormLabel><FormControl><Input placeholder="Cód. do produto" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={control} name={`items.${index}.quantity`} render={({ field }) => (
+                        <FormItem><FormLabel>Quantidade</FormLabel><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={control} name={`items.${index}.unitPrice`} render={({ field }) => (
+                        <FormItem><FormLabel>Preço Unit. (R$)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                     <FormField control={control} name={`items.${index}.taxRate`} render={({ field }) => (
+                        <FormItem><FormLabel>Imposto (%)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                </div>
+                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <FormField control={control} name={`items.${index}.unitWeight`} render={({ field }) => (
+                        <FormItem><FormLabel>Peso Unit. (kg)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={control} name={`items.${index}.leadTimeDays`} render={({ field }) => (
+                        <FormItem><FormLabel>Prazo (dias)</FormLabel><FormControl><Input type="number" placeholder="Ex: 15" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                    )}/>
+                 </div>
+                 <FormField control={control} name={`items.${index}.notes`} render={({ field }) => (
+                    <FormItem><FormLabel>Notas do Item</FormLabel><FormControl><Input placeholder="Observações específicas para este item" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                )}/>
+                <Separator />
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                        <span className="text-muted-foreground">Subtotal: </span>
+                        <span className="font-medium">{totalPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    </div>
+                     <div>
+                        <span className="text-muted-foreground">Valor Imposto: </span>
+                        <span className="font-medium">{taxAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    </div>
+                     <div>
+                        <span className="text-muted-foreground">Total do Item: </span>
+                        <span className="font-bold text-primary">{totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    </div>
+                </div>
+            </div>
+        </Card>
+    );
+};
+
 
 export default function QuotationsPage() {
     const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -78,7 +164,7 @@ export default function QuotationsPage() {
         resolver: zodResolver(quotationSchema),
         defaultValues: {
             status: "Aguardando Aprovação",
-            items: [{ description: "", quantity: 1, unitPrice: 0 }],
+            items: [],
         }
     });
 
@@ -86,6 +172,10 @@ export default function QuotationsPage() {
         control: form.control,
         name: "items"
     });
+    
+    const watchedItems = form.watch("items");
+    const grandTotal = useMemo(() => calculateGrandTotal(watchedItems), [watchedItems]);
+
 
     const fetchCustomers = async () => {
         if (!user) return;
@@ -113,22 +203,13 @@ export default function QuotationsPage() {
             const lowerCaseStatus = originalStatus.toLowerCase();
 
             const translations: { [key: string]: string } = {
-                'approved': 'Aprovado',
-                'aprovado': 'Aprovado',
-                'awaiting approval': 'Aguardando Aprovação',
-                'aguardando aprovação': 'Aguardando Aprovação',
-                'pending': 'Aguardando Aprovação',
-                'pendente': 'Aguardando Aprovação',
-                'rejected': 'Reprovado',
-                'reprovado': 'Reprovado',
-                'recusado': 'Reprovado',
-                'cancelado': 'Reprovado',
-                'sent': 'Enviado',
-                'enviado': 'Enviado',
-                'informative': 'Informativo',
-                'informativo': 'Informativo',
-                'expired': 'Expirado',
-                'expirado': 'Expirado',
+                'approved': 'Aprovado', 'aprovado': 'Aprovado',
+                'awaiting approval': 'Aguardando Aprovação', 'aguardando aprovação': 'Aguardando Aprovação',
+                'pending': 'Aguardando Aprovação', 'pendente': 'Aguardando Aprovação',
+                'rejected': 'Reprovado', 'reprovado': 'Reprovado', 'recusado': 'Reprovado', 'cancelado': 'Reprovado',
+                'sent': 'Enviado', 'enviado': 'Enviado',
+                'informative': 'Informativo', 'informativo': 'Informativo',
+                'expired': 'Expirado', 'expirado': 'Expirado',
             };
 
             return translations[lowerCaseStatus] || originalStatus;
@@ -139,12 +220,24 @@ export default function QuotationsPage() {
             const quotationsList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
 
-                let finalItems = data.items || [];
-                if ((!finalItems || finalItems.length === 0) && Array.isArray(data.includedServices) && data.includedServices.length > 0) {
+                let finalItems = (data.items || []).map((item: any) => ({
+                    id: item.id || undefined,
+                    code: item.code || '',
+                    description: item.description || '',
+                    quantity: item.quantity || 1,
+                    unitPrice: item.unitPrice || 0,
+                    unitWeight: item.unitWeight || 0,
+                    taxRate: item.taxRate || 0,
+                    leadTimeDays: item.leadTimeDays || undefined,
+                    notes: item.notes || '',
+                }));
+
+                if (finalItems.length === 0 && Array.isArray(data.includedServices) && data.includedServices.length > 0) {
                     finalItems = data.includedServices.map((service: string) => ({
                         description: service,
                         quantity: 1,
                         unitPrice: 0,
+                        code: '', unitWeight: 0, taxRate: 0, notes: ''
                     }));
                 }
 
@@ -172,6 +265,7 @@ export default function QuotationsPage() {
                         id: data.customerId || (data.customer?.id || ''), 
                         name: data.customerName || (data.customer?.name || 'N/A') 
                     },
+                    buyerName: data.buyerName || '',
                     status: mapStatus(data.status),
                     validity: getValidity(),
                     paymentTerms: data.paymentTerms || 'A combinar',
@@ -203,8 +297,14 @@ export default function QuotationsPage() {
     
     const onSubmit = async (values: z.infer<typeof quotationSchema>) => {
         try {
+            const itemsWithTotals = values.items.map(item => {
+                const { totalPrice, taxAmount, totalWithTax } = calculateItemTotals(item);
+                return { ...item, totalPrice, taxAmount, totalWithTax, totalWeight: (item.quantity || 0) * (item.unitWeight || 0) };
+            });
+
             let dataToSave: any = {
                 ...values,
+                items: itemsWithTotals,
                 customerName: values.customer.name,
                 customerId: values.customer.id,
                 updatedAt: Timestamp.now(),
@@ -241,12 +341,13 @@ export default function QuotationsPage() {
         setSelectedQuotation(null);
         form.reset({
             customer: undefined,
+            buyerName: "",
             status: "Aguardando Aprovação",
             validity: new Date(new Date().setDate(new Date().getDate() + 15)),
             paymentTerms: "A combinar",
             deliveryTime: "A combinar",
             notes: "",
-            items: [{ description: "", quantity: 1, unitPrice: 0 }],
+            items: [{ description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' }],
         });
         setIsFormOpen(true);
     };
@@ -291,7 +392,7 @@ export default function QuotationsPage() {
             quotationNumber: quotation.number,
             customer: quotation.customer,
             items: quotation.items,
-            totalValue: calculateTotal(quotation.items),
+            totalValue: calculateGrandTotal(quotation.items),
             status: "Aguardando Produção", // Initial status for a production order
             createdAt: Timestamp.now(),
         };
@@ -337,12 +438,7 @@ export default function QuotationsPage() {
 
     const dashboardStats = useMemo(() => {
         if (!quotations || quotations.length === 0) {
-            return {
-                approvalRate: 0,
-                issuedValue: 0,
-                approvedValue: 0,
-                totalCount: 0,
-            };
+            return { approvalRate: 0, issuedValue: 0, approvedValue: 0, totalCount: 0 };
         }
 
         const relevantQuotations = quotations.filter(q => q.status !== "Informativo");
@@ -350,18 +446,12 @@ export default function QuotationsPage() {
 
         const totalCount = relevantQuotations.length;
         const approvedCount = approvedQuotations.length;
-
         const approvalRate = totalCount > 0 ? (approvedCount / totalCount) * 100 : 0;
 
-        const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateTotal(q.items), 0);
-        const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateTotal(q.items), 0);
+        const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
+        const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
 
-        return {
-            approvalRate,
-            issuedValue,
-            approvedValue,
-            totalCount,
-        };
+        return { approvalRate, issuedValue, approvedValue, totalCount };
     }, [quotations]);
 
     return (
@@ -434,7 +524,7 @@ export default function QuotationsPage() {
                                                 <TableCell>{q.customer.name}</TableCell>
                                                 <TableCell>{format(q.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
                                                 <TableCell>
-                                                    {calculateTotal(q.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    {calculateGrandTotal(q.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant={getStatusVariant(q.status)}>{q.status}</Badge>
@@ -471,11 +561,11 @@ export default function QuotationsPage() {
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)}>
-                            <ScrollArea className="h-[70vh] pr-6">
+                            <ScrollArea className="h-[75vh] pr-6">
                                 <div className="space-y-6 p-1">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <FormField control={form.control} name="customer" render={({ field }) => (
-                                            <FormItem className="md:col-span-2"><FormLabel>Cliente</FormLabel>
+                                            <FormItem><FormLabel>Cliente</FormLabel>
                                                 <Select onValueChange={(value) => {
                                                     const selectedCustomer = customers.find(c => c.id === value);
                                                     field.onChange({ id: value, name: selectedCustomer?.nomeFantasia || '' });
@@ -485,6 +575,9 @@ export default function QuotationsPage() {
                                                 </Select><FormMessage />
                                             </FormItem>
                                         )} />
+                                        <FormField control={form.control} name="buyerName" render={({ field }) => (
+                                            <FormItem><FormLabel>Nome do Comprador</FormLabel><FormControl><Input placeholder="Contato que solicitou" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem>
+                                        )}/>
                                         <FormField control={form.control} name="status" render={({ field }) => (
                                             <FormItem><FormLabel>Status</FormLabel>
                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
@@ -503,25 +596,27 @@ export default function QuotationsPage() {
                                     </div>
                                     
                                     <Card>
-                                        <CardHeader><CardTitle>Itens do Orçamento</CardTitle></CardHeader>
-                                        <CardContent className="space-y-4">
-                                            {fields.map((field, index) => (
-                                                <div key={field.id} className="grid grid-cols-[1fr_100px_150px_40px] gap-2 items-start">
-                                                    <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
-                                                        <FormItem><FormLabel className={cn(index !== 0 && "sr-only")}>Descrição</FormLabel><FormControl><Input placeholder="Descrição do item" {...field} /></FormControl><FormMessage /></FormItem>
-                                                    )}/>
-                                                    <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
-                                                        <FormItem><FormLabel className={cn(index !== 0 && "sr-only")}>Qtd.</FormLabel><FormControl><Input type="number" placeholder="Qtd." {...field} /></FormControl><FormMessage /></FormItem>
-                                                    )}/>
-                                                     <FormField control={form.control} name={`items.${index}.unitPrice`} render={({ field }) => (
-                                                        <FormItem><FormLabel className={cn(index !== 0 && "sr-only")}>Preço Unit.</FormLabel><FormControl><Input type="number" placeholder="Preço" {...field} /></FormControl><FormMessage /></FormItem>
-                                                    )}/>
-                                                    <Button type="button" variant="ghost" size="icon" className="mt-8 text-destructive hover:text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
-                                                </div>
-                                            ))}
-                                            <Button type="button" variant="outline" size="sm" onClick={() => append({ description: "", quantity: 1, unitPrice: 0 })}>
+                                        <CardHeader className="flex flex-row items-center justify-between">
+                                            <CardTitle>Itens do Orçamento</CardTitle>
+                                            <Button type="button" variant="outline" size="sm" onClick={() => append({ description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' })}>
                                                 <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
                                             </Button>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            {fields.map((field, index) => (
+                                                <ItemFormCard key={field.id} index={index} control={form.control} remove={remove} watchedItems={watchedItems} />
+                                            ))}
+                                            {fields.length > 0 && (
+                                                <>
+                                                    <Separator className="my-4" />
+                                                    <div className="flex justify-end items-center gap-4 text-lg font-bold pr-4">
+                                                        <span>Total Geral:</span>
+                                                        <span className="text-primary">
+                                                            {grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                        </span>
+                                                    </div>
+                                                </>
+                                            )}
                                         </CardContent>
                                     </Card>
 
@@ -553,11 +648,11 @@ export default function QuotationsPage() {
                                         )} />
                                     </div>
                                      <FormField control={form.control} name="notes" render={({ field }) => (
-                                        <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea placeholder="Observações adicionais, detalhes técnicos, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                        <FormItem><FormLabel>Observações Gerais</FormLabel><FormControl><Textarea placeholder="Observações adicionais, detalhes técnicos, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                     )}/>
                                 </div>
                             </ScrollArea>
-                            <DialogFooter className="pt-6">
+                            <DialogFooter className="pt-6 border-t">
                                 <Button type="submit" disabled={form.formState.isSubmitting}>
                                     {form.formState.isSubmitting ? "Salvando..." : "Salvar Orçamento"}
                                 </Button>
@@ -568,41 +663,41 @@ export default function QuotationsPage() {
             </Dialog>
 
             <Sheet open={isViewSheetOpen} onOpenChange={setIsViewSheetOpen}>
-                <SheetContent className="w-full sm:max-w-2xl">
+                <SheetContent className="w-full sm:max-w-3xl">
                     {selectedQuotation && (
                         <>
                         <SheetHeader>
-                            <SheetTitle className="font-headline">Orçamento Nº {selectedQuotation.number}</SheetTitle>
+                            <SheetTitle className="font-headline text-2xl">Orçamento Nº {selectedQuotation.number}</SheetTitle>
                             <SheetDescription>
-                                Cliente: {selectedQuotation.customer.name}
+                                Cliente: <span className="font-medium text-foreground">{selectedQuotation.customer.name}</span>
+                                {selectedQuotation.buyerName && ` | Comprador: `}
+                                {selectedQuotation.buyerName && <span className="font-medium text-foreground">{selectedQuotation.buyerName}</span>}
                             </SheetDescription>
                         </SheetHeader>
                         <ScrollArea className="h-[calc(100vh-12rem)]">
                             <div className="space-y-6 py-6 pr-6">
                                 <Card>
-                                    <CardHeader>
-                                        <CardTitle>Detalhes do Orçamento</CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-3">
+                                    <CardHeader><CardTitle>Detalhes do Orçamento</CardTitle></CardHeader>
+                                    <CardContent className="space-y-3 text-sm">
                                         <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium text-muted-foreground">Status</span>
+                                            <span className="font-medium text-muted-foreground">Status</span>
                                             <Badge variant={getStatusVariant(selectedQuotation.status)}>{selectedQuotation.status}</Badge>
                                         </div>
                                         <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium text-muted-foreground">Data de Criação</span>
-                                            <span className="text-sm">{format(selectedQuotation.createdAt.toDate(), "dd/MM/yyyy")}</span>
+                                            <span className="font-medium text-muted-foreground">Data de Criação</span>
+                                            <span>{format(selectedQuotation.createdAt.toDate(), "dd/MM/yyyy")}</span>
                                         </div>
                                         <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium text-muted-foreground">Validade</span>
-                                            <span className="text-sm">{format(selectedQuotation.validity, "dd/MM/yyyy")}</span>
+                                            <span className="font-medium text-muted-foreground">Validade</span>
+                                            <span>{format(selectedQuotation.validity, "dd/MM/yyyy")}</span>
                                         </div>
                                         <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium text-muted-foreground">Cond. Pagamento</span>
-                                            <span className="text-sm">{selectedQuotation.paymentTerms}</span>
+                                            <span className="font-medium text-muted-foreground">Cond. Pagamento</span>
+                                            <span>{selectedQuotation.paymentTerms}</span>
                                         </div>
                                         <div className="flex justify-between items-center">
-                                            <span className="text-sm font-medium text-muted-foreground">Prazo de Entrega</span>
-                                            <span className="text-sm">{selectedQuotation.deliveryTime}</span>
+                                            <span className="font-medium text-muted-foreground">Prazo de Entrega</span>
+                                            <span>{selectedQuotation.deliveryTime}</span>
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -616,25 +711,31 @@ export default function QuotationsPage() {
                                                     <TableHead>Descrição</TableHead>
                                                     <TableHead className="text-center w-[60px]">Qtd.</TableHead>
                                                     <TableHead className="text-right w-[120px]">Valor Unit.</TableHead>
-                                                    <TableHead className="text-right w-[120px]">Subtotal</TableHead>
+                                                    <TableHead className="text-right w-[150px]">Subtotal c/ Imposto</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
-                                                {selectedQuotation.items.map((item, index) => (
-                                                    <TableRow key={index}>
-                                                        <TableCell className="font-medium">{item.description}</TableCell>
-                                                        <TableCell className="text-center">{item.quantity}</TableCell>
-                                                        <TableCell className="text-right">{item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
-                                                        <TableCell className="text-right">{(item.quantity * item.unitPrice).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
-                                                    </TableRow>
-                                                ))}
+                                                {selectedQuotation.items.map((item, index) => {
+                                                    const { totalWithTax } = calculateItemTotals(item);
+                                                    return (
+                                                        <TableRow key={index}>
+                                                            <TableCell className="font-medium">
+                                                                {item.description}
+                                                                {item.code && <span className="block text-xs text-muted-foreground">Cód: {item.code}</span>}
+                                                            </TableCell>
+                                                            <TableCell className="text-center">{item.quantity}</TableCell>
+                                                            <TableCell className="text-right">{item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                                                            <TableCell className="text-right font-semibold">{totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                                                        </TableRow>
+                                                    )
+                                                })}
                                             </TableBody>
                                         </Table>
                                         <Separator className="my-4" />
-                                        <div className="flex justify-end items-center gap-4 text-lg font-bold pr-4">
-                                            <span>Total:</span>
-                                            <span>
-                                                {calculateTotal(selectedQuotation.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        <div className="flex justify-end items-center gap-4 text-xl font-bold pr-4">
+                                            <span>Total Geral:</span>
+                                            <span className="text-primary">
+                                                {calculateGrandTotal(selectedQuotation.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                             </span>
                                         </div>
                                     </CardContent>
@@ -642,7 +743,7 @@ export default function QuotationsPage() {
 
                                 {selectedQuotation.notes && (
                                     <Card>
-                                        <CardHeader><CardTitle>Observações</CardTitle></CardHeader>
+                                        <CardHeader><CardTitle>Observações Gerais</CardTitle></CardHeader>
                                         <CardContent>
                                             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedQuotation.notes}</p>
                                         </CardContent>
