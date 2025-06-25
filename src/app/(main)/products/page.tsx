@@ -5,9 +5,9 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, setDoc, doc, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2 } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { useAuth } from "../layout";
 
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 const productSchema = z.object({
   code: z.string().min(1, { message: "O código do produto é obrigatório." }),
@@ -40,6 +39,7 @@ export default function ProductsPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
 
@@ -81,6 +81,63 @@ export default function ProductsPage() {
       fetchProducts();
     }
   }, [user, authLoading]);
+  
+  const syncProductsFromQuotations = async () => {
+    setIsSyncing(true);
+    toast({ title: "Sincronizando...", description: "Buscando produtos em orçamentos existentes." });
+    
+    try {
+        const quotationsSnapshot = await getDocs(collection(db, "companies", "mecald", "quotations"));
+        const productsToSync = new Map<string, any>();
+
+        quotationsSnapshot.forEach((quotationDoc) => {
+            const quotationData = quotationDoc.data();
+            if (Array.isArray(quotationData.items)) {
+                quotationData.items.forEach((item: any) => {
+                    if (item.code && typeof item.code === 'string' && item.code.trim() !== "") {
+                        const productData = {
+                            code: item.code.trim(),
+                            description: item.description || "Sem descrição",
+                            unitPrice: Number(item.unitPrice) || 0,
+                            unitWeight: Number(item.unitWeight) || 0,
+                            taxRate: Number(item.taxRate) || 0,
+                        };
+                        productsToSync.set(productData.code, productData);
+                    }
+                });
+            }
+        });
+        
+        if (productsToSync.size === 0) {
+            toast({ title: "Nenhum produto novo encontrado", description: "Seu catálogo já parece estar atualizado." });
+            setIsSyncing(false);
+            return;
+        }
+
+        const batch = writeBatch(db);
+        const productsCollectionRef = collection(db, "companies", "mecald", "products");
+
+        productsToSync.forEach((productData, productCode) => {
+            const productRef = doc(productsCollectionRef, productCode);
+            batch.set(productRef, { ...productData, updatedAt: Timestamp.now() }, { merge: true });
+        });
+
+        await batch.commit();
+
+        toast({ title: "Sincronização Concluída!", description: `${productsToSync.size} produtos foram adicionados ou atualizados.` });
+        await fetchProducts();
+
+    } catch (error) {
+        console.error("Error syncing products from quotations: ", error);
+        toast({
+            variant: "destructive",
+            title: "Erro na Sincronização",
+            description: "Não foi possível sincronizar os produtos. Verifique o console.",
+        });
+    } finally {
+        setIsSyncing(false);
+    }
+  };
 
   const onSubmit = async (values: z.infer<typeof productSchema>) => {
     try {
@@ -169,6 +226,10 @@ export default function ProductsPage() {
                         className="pl-9 w-64"
                     />
                  </div>
+                 <Button onClick={syncProductsFromQuotations} variant="outline" disabled={isSyncing}>
+                    <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    {isSyncing ? "Sincronizando..." : "Sincronizar Catálogo"}
+                 </Button>
                  <Button onClick={handleAddClick}>
                     <PlusCircle className="mr-2 h-4 w-4" />
                     Adicionar Produto
