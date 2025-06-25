@@ -63,6 +63,10 @@ const quotationSchema = z.object({
   includedServices: z.array(z.string()).optional(),
 });
 
+const generateOrderSchema = z.object({
+  poNumber: z.string().min(1, "O número do pedido de compra é obrigatório."),
+});
+
 type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp, number: number };
 type Customer = { id: string, nomeFantasia: string };
 type Item = z.infer<typeof itemSchema>;
@@ -184,6 +188,10 @@ export default function QuotationsPage() {
     const { user, loading: authLoading } = useAuth();
     const router = useRouter();
 
+    // Generate Order Dialog State
+    const [isGenerateOrderDialogOpen, setIsGenerateOrderDialogOpen] = useState(false);
+    const [quotationToConvert, setQuotationToConvert] = useState<Quotation | null>(null);
+
     const form = useForm<z.infer<typeof quotationSchema>>({
         resolver: zodResolver(quotationSchema),
         defaultValues: {
@@ -191,6 +199,13 @@ export default function QuotationsPage() {
             items: [],
             includedServices: [],
         }
+    });
+
+    const generateOrderForm = useForm<z.infer<typeof generateOrderSchema>>({
+        resolver: zodResolver(generateOrderSchema),
+        defaultValues: {
+          poNumber: "",
+        },
     });
 
     const { fields, append, remove } = useFieldArray({
@@ -429,13 +444,20 @@ export default function QuotationsPage() {
         setIsViewSheetOpen(true);
     };
 
-    const handleGenerateOrder = async (quotation: Quotation) => {
+    const handleGenerateOrder = (quotation: Quotation) => {
         if (!quotation) return;
+        setQuotationToConvert(quotation);
+        generateOrderForm.reset({ poNumber: '' });
+        setIsGenerateOrderDialogOpen(true);
+    };
+
+    const onConfirmGenerateOrder = async (values: z.infer<typeof generateOrderSchema>) => {
+        if (!quotationToConvert) return;
     
         try {
             const productsRef = collection(db, "companies", "mecald", "products");
             const itemsWithProductionPlan = await Promise.all(
-                quotation.items.map(async (item) => {
+                quotationToConvert.items.map(async (item) => {
                     let productionPlan: any[] = [];
                     if (item.code) {
                         const productDoc = await getDoc(doc(productsRef, item.code));
@@ -448,7 +470,7 @@ export default function QuotationsPage() {
 
                             if (planTemplate && planTemplate.length > 0) {
                                 productionPlan = planTemplate.map((stage: any) => ({
-                                    stageName: stage.stageName,
+                                    ...stage,
                                     status: "Pendente",
                                     startDate: null,
                                     completedDate: null,
@@ -456,29 +478,36 @@ export default function QuotationsPage() {
                             }
                         }
                     }
-                    return {
-                        ...item,
-                        productionPlan,
-                    };
+                    return { ...item, productionPlan };
                 })
             );
     
             const orderData = {
-                quotationId: quotation.id,
-                quotationNumber: quotation.number,
-                customer: quotation.customer,
+                quotationId: quotationToConvert.id,
+                quotationNumber: values.poNumber,
+                internalOS: quotationToConvert.number.toString(),
+                customer: quotationToConvert.customer,
+                projectName: `Ref. Orçamento ${quotationToConvert.number}`,
                 items: itemsWithProductionPlan,
-                totalValue: calculateGrandTotal(quotation.items),
+                totalValue: calculateGrandTotal(quotationToConvert.items),
                 status: "Aguardando Produção",
                 createdAt: Timestamp.now(),
+                deliveryDate: quotationToConvert.validity
             };
     
             await addDoc(collection(db, "companies", "mecald", "orders"), orderData);
+            
+            const quotationRef = doc(db, "companies", "mecald", "quotations", quotationToConvert.id);
+            await updateDoc(quotationRef, { status: "Aprovado" });
+
             toast({
                 title: "Pedido gerado com sucesso!",
-                description: `O pedido para o orçamento Nº ${quotation.number} foi criado.`,
+                description: `O pedido para o orçamento Nº ${quotationToConvert.number} foi criado.`,
             });
+            
+            setIsGenerateOrderDialogOpen(false);
             setIsViewSheetOpen(false);
+            await fetchQuotations();
             router.push('/orders');
         } catch (error) {
             console.error("Error generating order:", error);
@@ -511,10 +540,8 @@ export default function QuotationsPage() {
                 const pageWidth = docPdf.internal.pageSize.width;
                 let y = 15;
     
-                // Header - Logo on left, Company Info on right
                 if (companyData.logo?.preview) {
                     try { 
-                        // A more rectangular logo space, and FAST compression
                         docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 40, 20, undefined, 'FAST'); 
                     }
                     catch (e) { console.error("Error adding logo to PDF:", e); }
@@ -540,13 +567,11 @@ export default function QuotationsPage() {
                     docPdf.text(`Email: ${companyData.email}`, rightColX, companyInfoY, { align: 'right' });
                 }
 
-                y = 60; // Start position for main content after header
+                y = 60;
 
-                // Title centered
                 docPdf.setFontSize(14).setFont(undefined, 'bold').text(`Orçamento Nº ${number}`, pageWidth / 2, y, { align: 'center' });
                 y += 15;
 
-                // Customer and Date info
                 docPdf.setFontSize(11).setFont(undefined, 'normal');
                 docPdf.text(`Cliente: ${customer.name}`, 15, y);
                 docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
@@ -557,7 +582,6 @@ export default function QuotationsPage() {
                 docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
                 y += 10;
     
-                // Items Table
                 const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Preço Unit.', 'Imposto (%)', 'Total c/ Imp.']];
                 const body = items.map(item => [
                     item.code || '-',
@@ -586,11 +610,9 @@ export default function QuotationsPage() {
                 });
                 y = (docPdf as any).lastAutoTable.finalY + 10;
                 
-                // Total
                 docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, pageWidth - 15, y, { align: 'right' });
                 y += 10;
     
-                // Services
                 if (includedServices && includedServices.length > 0) {
                     if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
                     docPdf.setFontSize(11).setFont(undefined, 'bold').text('Serviços Inclusos:', 15, y);
@@ -604,7 +626,6 @@ export default function QuotationsPage() {
                     });
                 }
                 
-                // Payment and Delivery
                 y += 5;
                 if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
                 docPdf.setFontSize(11).setFont(undefined, 'bold').text('Condições Comerciais:', 15, y);
@@ -615,7 +636,6 @@ export default function QuotationsPage() {
                 docPdf.text(`Prazo de Entrega: ${deliveryTime}`, 18, y);
                 y += 10;
     
-                // Notes
                 if (notes) {
                     if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
                     docPdf.setFontSize(11).setFont(undefined, 'bold').text('Observações:', 15, y);
@@ -624,7 +644,6 @@ export default function QuotationsPage() {
                     docPdf.setFontSize(10).setFont(undefined, 'normal').text(splitNotes, 15, y);
                 }
     
-                // Footer
                 if (companyData.website) {
                     docPdf.setTextColor(0, 0, 255);
                     docPdf.textWithLink(companyData.website, 15, pageHeight - 10, { url: companyData.website });
@@ -1121,6 +1140,42 @@ export default function QuotationsPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            <Dialog open={isGenerateOrderDialogOpen} onOpenChange={setIsGenerateOrderDialogOpen}>
+                <DialogContent>
+                    <Form {...generateOrderForm}>
+                        <form onSubmit={generateOrderForm.handleSubmit(onConfirmGenerateOrder)}>
+                            <DialogHeader>
+                                <DialogTitle>Gerar Pedido de Produção</DialogTitle>
+                                <DialogDescription>
+                                    O orçamento Nº <span className="font-bold">{quotationToConvert?.number}</span> será convertido em um pedido. O número do orçamento se tornará a OS Interna. Por favor, insira o número do Pedido de Compra (PC) do cliente.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="py-4">
+                                <FormField
+                                    control={generateOrderForm.control}
+                                    name="poNumber"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Nº do Pedido de Compra do Cliente</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="Ex: PC-12345" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+                            <DialogFooter>
+                                <Button type="button" variant="outline" onClick={() => setIsGenerateOrderDialogOpen(false)}>Cancelar</Button>
+                                <Button type="submit" disabled={generateOrderForm.formState.isSubmitting}>
+                                    {generateOrderForm.formState.isSubmitting ? 'Gerando...' : 'Confirmar e Gerar Pedido'}
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

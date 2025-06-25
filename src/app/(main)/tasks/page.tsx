@@ -30,7 +30,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type Task = {
   orderId: string;
   itemId: string;
-  quotationNumber: number;
+  quotationNumber: string;
   internalOS: string;
   customerName: string;
   itemName: string;
@@ -116,7 +116,7 @@ export default function TasksPage() {
         } else if (typeof orderData.customer === 'string') {
             customerName = orderData.customer;
         }
-        const quotationNumber = orderData.quotationNumber || orderData.orderNumber || 0;
+        const quotationNumber = (orderData.quotationNumber || orderData.orderNumber || 'N/A').toString();
 
         (orderData.items || []).forEach((item: any, itemIndex: number) => {
           (item.productionPlan || []).forEach((stage: any) => {

@@ -109,7 +109,7 @@ type CompanyData = {
 type Order = {
     id: string;
     quotationId: string;
-    quotationNumber: number;
+    quotationNumber: string;
     internalOS?: string;
     projectName?: string;
     customer: CustomerInfo;
@@ -448,7 +448,7 @@ export default function OrdersPage() {
                     customerInfo = { id: '', name: data.customer };
                 }
 
-                const orderNum = data.orderNumber || data.quotationNumber || 0;
+                const orderNum = (data.orderNumber || data.quotationNumber || 'N/A').toString();
 
                 return {
                     id: doc.id,
@@ -608,7 +608,7 @@ export default function OrdersPage() {
                 if (dateComparison !== 0) return dateComparison;
             }
 
-            return (b.quotationNumber || 0) - (a.quotationNumber || 0);
+            return b.createdAt.getTime() - a.createdAt.getTime();
         });
     }, [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
     
