@@ -855,18 +855,41 @@ export default function OrdersPage() {
     
             const docPdf = new jsPDF();
             const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
             let yPos = 15;
     
-            // Header similar to packing slip
+            // Professional Header - Logo left, Company Info right
             if (companyData.logo?.preview) {
                 try {
                     docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
                 } catch (e) { console.error("Error adding logo to PDF:", e); }
             }
-            docPdf.setFontSize(14).setFont(undefined, 'bold');
-            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos + 10, { align: 'center' });
-            yPos += 25;
             
+            const rightColX = pageWidth - 15;
+            let companyInfoY = yPos + 5;
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', rightColX, companyInfoY, { align: 'right' });
+            
+            companyInfoY += 6;
+            docPdf.setFontSize(9).setFont(undefined, 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, 80);
+                docPdf.text(addressLines, rightColX, companyInfoY, { align: 'right' });
+                companyInfoY += (addressLines.length * 4);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, rightColX, companyInfoY, { align: 'right' });
+                companyInfoY += 4;
+            }
+            if (companyData.email) {
+                docPdf.text(`Email: ${companyData.email}`, rightColX, companyInfoY, { align: 'right' });
+            }
+
+            yPos = 55;
+            docPdf.setFontSize(14).setFont(undefined, 'bold');
+            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+    
             docPdf.setFontSize(11).setFont(undefined, 'normal');
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
             docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, pageWidth - 15, yPos, { align: 'right' });
@@ -877,39 +900,72 @@ export default function OrdersPage() {
     
             const tableBody: any[] = [];
             selectedOrder.items.forEach(item => {
+                tableBody.push([
+                    { 
+                        content: item.description, 
+                        colSpan: 5, 
+                        styles: { 
+                            halign: 'left', 
+                            fontStyle: 'bold', 
+                            fillColor: [240, 248, 255], // AliceBlue
+                            textColor: [51, 51, 51],
+                            cellPadding: 3,
+                        }
+                    }
+                ]);
+
                 if (item.productionPlan && item.productionPlan.length > 0) {
-                    item.productionPlan.forEach((stage, stageIndex) => {
+                    item.productionPlan.forEach((stage) => {
                         tableBody.push([
-                            stageIndex === 0 ? item.description : '',
-                            stage.stageName,
+                            `    • ${stage.stageName}`,
                             stage.status,
                             stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : 'Pendente',
                             stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : 'Pendente',
+                            stage.durationDays ? `${stage.durationDays} dia(s)` : '-'
                         ]);
                     });
                 } else {
-                     tableBody.push([item.description, 'Nenhuma etapa definida', '-', '-', '-']);
+                     tableBody.push([
+                        { 
+                            content: '   Nenhuma etapa de fabricação definida para este item.', 
+                            colSpan: 5,
+                            styles: {
+                                halign: 'left',
+                                fontStyle: 'italic',
+                                textColor: [150, 150, 150]
+                            }
+                        }
+                     ]);
                 }
             });
     
             autoTable(docPdf, {
                 startY: yPos,
-                head: [['Item', 'Etapa de Fabricação', 'Status', 'Início Previsto', 'Conclusão Prevista']],
+                head: [['Etapa de Fabricação', 'Status', 'Início Previsto', 'Término Previsto', 'Duração']],
                 body: tableBody,
-                didDrawCell: (data) => {
-                    if (data.section === 'body' && data.column.index === 0 && data.cell.raw !== '') {
-                       if(data.row.index > 0){
-                         docPdf.setDrawColor(200); // set line color to gray
-                         docPdf.line(data.cell.x, data.cell.y, data.cell.x + data.cell.width, data.cell.y );
-                       }
-                    }
+                theme: 'grid',
+                styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
+                headStyles: { 
+                    fillColor: [51, 122, 183], // Primary color HSL(210, 60%, 50%)
+                    fontSize: 9, 
+                    textColor: 255, 
+                    fontStyle: 'bold' 
                 },
-                styles: { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
                 columnStyles: {
                     0: { cellWidth: 'auto' },
+                    1: { cellWidth: 35, halign: 'center' },
+                    2: { cellWidth: 30, halign: 'center' },
+                    3: { cellWidth: 35, halign: 'center' },
+                    4: { cellWidth: 30, halign: 'center' },
                 }
             });
+            
+            const pageCount = (docPdf as any).internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                docPdf.setPage(i);
+                docPdf.setFontSize(8).setTextColor(150);
+                docPdf.text(`Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+            }
     
             docPdf.save(`Cronograma_${selectedOrder.quotationNumber}.pdf`);
     
@@ -922,6 +978,7 @@ export default function OrdersPage() {
             });
         }
     };
+
 
     return (
         <>
