@@ -662,7 +662,12 @@ export default function OrdersPage() {
 
     const handleOpenProgressModal = (item: OrderItem) => {
         setItemToTrack(item);
-        setEditedPlan(JSON.parse(JSON.stringify(item.productionPlan || []))); // Deep copy
+        const planToEdit = (item.productionPlan || []).map(stage => ({
+            ...stage,
+            startDate: stage.startDate ? new Date(stage.startDate) : null,
+            completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
+        }));
+        setEditedPlan(planToEdit);
         setIsProgressModalOpen(true);
     };
 
@@ -1195,11 +1200,11 @@ export default function OrdersPage() {
                                                 <PopoverTrigger asChild>
                                                     <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.startDate && "text-muted-foreground")}>
                                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {stage.startDate ? format(new Date(stage.startDate), "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
                                                     </Button>
                                                 </PopoverTrigger>
                                                 <PopoverContent className="w-auto p-0">
-                                                    <Calendar mode="single" selected={stage.startDate ? new Date(stage.startDate) : undefined} onSelect={(date) => handleProgressChange(index, 'startDate', date)} initialFocus />
+                                                    <Calendar mode="single" selected={stage.startDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'startDate', date)} initialFocus />
                                                 </PopoverContent>
                                             </Popover>
                                         </div>
@@ -1209,11 +1214,11 @@ export default function OrdersPage() {
                                                 <PopoverTrigger asChild>
                                                     <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.completedDate && "text-muted-foreground")}>
                                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {stage.completedDate ? format(new Date(stage.completedDate), "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
                                                     </Button>
                                                 </PopoverTrigger>
                                                 <PopoverContent className="w-auto p-0">
-                                                    <Calendar mode="single" selected={stage.completedDate ? new Date(stage.completedDate) : undefined} onSelect={(date) => handleProgressChange(index, 'completedDate', date)} initialFocus />
+                                                    <Calendar mode="single" selected={stage.completedDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'completedDate', date)} initialFocus />
                                                 </PopoverContent>
                                             </Popover>
                                         </div>
