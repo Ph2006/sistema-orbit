@@ -458,8 +458,9 @@ export default function QuotationsPage() {
                 const { default: jsPDF } = await import('jspdf');
                 const { default: autoTable } = await import('jspdf-autotable');
 
-                const docPdf = new jsPDF();
+                const docPdf = new jsPDF({ orientation: "landscape" });
                 const pageHeight = docPdf.internal.pageSize.height;
+                const pageWidth = docPdf.internal.pageSize.width;
                 let y = 20;
     
                 // Header
@@ -478,29 +479,47 @@ export default function QuotationsPage() {
                 y += 10;
                 docPdf.setFontSize(11).setFont(undefined, 'normal');
                 docPdf.text(`Cliente: ${customer.name}`, 15, y);
-                docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, 140, y);
+                docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 60, y);
                 y += 5;
-                docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, 140, y);
+                docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, pageWidth - 60, y);
                 y += 10;
     
                 // Items Table
-                const head = [['Item', 'Qtd', 'Preço Unit.', 'Imposto (%)', 'Total c/ Imp.']];
+                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Preço Unit.', 'Imposto (%)', 'Total c/ Imp.']];
                 const body = items.map(item => [
+                    item.code || '-',
                     item.description,
                     item.quantity,
+                    item.unitWeight ? `${item.unitWeight.toLocaleString('pt-BR')} kg` : '-',
                     item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                    item.taxRate || 0,
+                    (item.taxRate || 0).toLocaleString('pt-BR'),
                     calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                 ]);
-                autoTable(docPdf, { startY: y, head, body });
+                autoTable(docPdf, {
+                    startY: y,
+                    head,
+                    body,
+                    styles: { fontSize: 8 },
+                    headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+                    columnStyles: {
+                        0: { cellWidth: 35 },
+                        1: { cellWidth: 'auto' },
+                        2: { cellWidth: 15, halign: 'right' },
+                        3: { cellWidth: 25, halign: 'right' },
+                        4: { cellWidth: 35, halign: 'right' },
+                        5: { cellWidth: 25, halign: 'right' },
+                        6: { cellWidth: 40, halign: 'right' },
+                    }
+                });
                 y = (docPdf as any).lastAutoTable.finalY + 10;
                 
                 // Total
-                docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 140, y);
+                docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, pageWidth - 90, y);
                 y += 10;
     
                 // Services
                 if (includedServices && includedServices.length > 0) {
+                    if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
                     docPdf.setFontSize(11).setFont(undefined, 'bold').text('Serviços Inclusos:', 15, y);
                     y += 6;
                     docPdf.setFontSize(10).setFont(undefined, 'normal');
@@ -508,11 +527,13 @@ export default function QuotationsPage() {
                         const service = serviceOptions.find(s => s.id === serviceId);
                         docPdf.text(`- ${service ? service.label : serviceId}`, 18, y);
                         y += 5;
+                        if (y > pageHeight - 20) { y = 20; docPdf.addPage(); }
                     });
                 }
                 
                 // Payment and Delivery
                 y += 5;
+                if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
                 docPdf.setFontSize(11).setFont(undefined, 'bold').text('Condições Comerciais:', 15, y);
                 y += 6;
                 docPdf.setFontSize(10).setFont(undefined, 'normal');
@@ -523,9 +544,10 @@ export default function QuotationsPage() {
     
                 // Notes
                 if (notes) {
+                    if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
                     docPdf.setFontSize(11).setFont(undefined, 'bold').text('Observações:', 15, y);
                     y += 6;
-                    const splitNotes = docPdf.splitTextToSize(notes, 180);
+                    const splitNotes = docPdf.splitTextToSize(notes, pageWidth - 30);
                     docPdf.setFontSize(10).setFont(undefined, 'normal').text(splitNotes, 15, y);
                 }
     
