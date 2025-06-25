@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -45,7 +45,6 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 const productionStageSchema = z.object({
     stageName: z.string(),
@@ -63,6 +62,10 @@ const orderItemSchema = z.object({
     quantity: z.coerce.number().min(0, "A quantidade não pode ser negativa."),
     unitWeight: z.coerce.number().min(0, "O peso não pode ser negativo.").optional(),
     productionPlan: z.array(productionStageSchema).optional(),
+    itemDeliveryDate: z.date().nullable().optional(),
+    shippingList: z.string().optional(),
+    invoiceNumber: z.string().optional(),
+    shippingDate: z.date().nullable().optional(),
 });
 
 const orderStatusEnum = z.enum([
@@ -393,7 +396,13 @@ export default function OrdersPage() {
                         completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
                     }));
 
-                    return enrichedItem;
+                    return {
+                        ...enrichedItem,
+                        itemDeliveryDate: item.itemDeliveryDate?.toDate() || deliveryDate,
+                        shippingList: item.shippingList || '',
+                        invoiceNumber: item.invoiceNumber || '',
+                        shippingDate: item.shippingDate?.toDate() || null,
+                    };
                 });
 
                 let finalStatus = mapOrderStatus(data.status);
@@ -472,30 +481,32 @@ export default function OrdersPage() {
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
             
-            const updatedItems = values.items.map((item, index) => {
-                const itemCode = item.code || item.product_code || '';
-                const cleanItem = { ...item, code: itemCode };
-                delete (cleanItem as any).product_code;
-    
+            const itemsToSave = values.items.map(formItem => {
+                const originalItem = selectedOrder.items.find(i => i.id === formItem.id);
+                const planToSave = originalItem?.productionPlan?.map(p => ({
+                    ...p,
+                    startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
+                    completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                })) || [];
+
                 return {
-                    ...cleanItem,
-                    unitWeight: Number(item.unitWeight) || 0,
-                    quantity: Number(item.quantity) || 0,
-                    // Preserve existing production plan
-                    productionPlan: selectedOrder.items[index]?.productionPlan || []
+                    ...formItem,
+                    itemDeliveryDate: formItem.itemDeliveryDate ? Timestamp.fromDate(formItem.itemDeliveryDate) : null,
+                    shippingDate: formItem.shippingDate ? Timestamp.fromDate(formItem.shippingDate) : null,
+                    productionPlan: planToSave,
                 };
             });
     
-            const totalWeight = calculateTotalWeight(updatedItems);
+            const totalWeight = calculateTotalWeight(itemsToSave);
             
             const dataToSave = {
-                items: updatedItems,
-                totalWeight: totalWeight,
                 internalOS: values.internalOS,
                 projectName: values.projectName,
+                status: values.status,
                 driveLink: values.driveLink,
                 documents: values.documents,
-                status: values.status,
+                items: itemsToSave,
+                totalWeight: totalWeight,
             };
     
             await updateDoc(orderRef, dataToSave);
@@ -505,18 +516,18 @@ export default function OrdersPage() {
                 description: "Os dados do pedido foram salvos com sucesso.",
             });
     
-            const updatedOrderInState = {
-                ...selectedOrder,
-                ...dataToSave,
-            };
-            setSelectedOrder(updatedOrderInState);
-            form.reset({
-                ...updatedOrderInState,
-                status: updatedOrderInState.status as any,
-            });
+            const updatedOrderList = await fetchOrders();
+            const updatedOrderInState = updatedOrderList.find(o => o.id === selectedOrder.id);
+
+            if (updatedOrderInState) {
+                setSelectedOrder(updatedOrderInState);
+                 form.reset({
+                    ...updatedOrderInState,
+                    status: updatedOrderInState.status as any,
+                });
+            }
     
             setIsEditing(false);
-            await fetchOrders();
         } catch (error) {
             console.error("Error updating order:", error);
             toast({
@@ -907,7 +918,8 @@ export default function OrdersPage() {
                         completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
                     }));
                 }
-                return {...item, productionPlan: planForFirestore };
+                const { id, product_code, ...restOfItem } = item as any;
+                return {...restOfItem, id: item.id, productionPlan: planForFirestore };
             });
     
             await updateDoc(orderRef, { items: itemsForFirestore });
@@ -919,6 +931,10 @@ export default function OrdersPage() {
             const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
             if (updatedOrder) {
                 setSelectedOrder(updatedOrder);
+                 form.reset({
+                    ...updatedOrder,
+                    status: updatedOrder.status as any,
+                });
             }
         } catch (error) {
             console.error("Error saving progress:", error);
@@ -1101,10 +1117,8 @@ export default function OrdersPage() {
                     startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
                     completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
                 }));
-                const cleanItem = { ...item };
-                // @ts-ignore
-                delete cleanItem.product_code; 
-                return { ...cleanItem, productionPlan: planForFirestore };
+                const { id, product_code, ...cleanItem } = item as any;
+                return { ...cleanItem, id: item.id, productionPlan: planForFirestore };
             });
 
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
@@ -1342,7 +1356,9 @@ export default function OrdersPage() {
                                                 <Card>
                                                     <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
                                                     <CardContent className="space-y-4">
-                                                        {fields.map((field, index) => (
+                                                        {fields.map((field, index) => {
+                                                            const itemProgress = calculateItemProgress(watchedItems[index] || {});
+                                                            return (
                                                             <Card key={field.id} className="p-4 bg-secondary">
                                                                 <div className="space-y-4">
                                                                     <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
@@ -1352,7 +1368,7 @@ export default function OrdersPage() {
                                                                             <FormMessage />
                                                                         </FormItem>
                                                                     )}/>
-                                                                    <div className="grid grid-cols-3 gap-4">
+                                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                                                          <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
                                                                             <FormItem>
                                                                                 <FormLabel>Código</FormLabel>
@@ -1374,10 +1390,70 @@ export default function OrdersPage() {
                                                                                 <FormMessage />
                                                                             </FormItem>
                                                                         )}/>
+                                                                        <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Entrega do Item</FormLabel>
+                                                                                <Popover>
+                                                                                    <PopoverTrigger asChild>
+                                                                                        <FormControl>
+                                                                                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                                {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                                            </Button>
+                                                                                        </FormControl>
+                                                                                    </PopoverTrigger>
+                                                                                    <PopoverContent className="w-auto p-0">
+                                                                                        <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                                    </PopoverContent>
+                                                                                </Popover>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
                                                                     </div>
+                                                                    {itemProgress === 100 && (
+                                                                        <>
+                                                                            <Separator className="my-2" />
+                                                                            <h5 className="text-sm font-semibold">Informações de Envio (Item Concluído)</h5>
+                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                                <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
+                                                                                    <FormItem>
+                                                                                        <FormLabel>Lista de Embarque (LE)</FormLabel>
+                                                                                        <FormControl><Input placeholder="Nº da LE" {...field} value={field.value ?? ''} /></FormControl>
+                                                                                        <FormMessage />
+                                                                                    </FormItem>
+                                                                                )}/>
+                                                                                 <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
+                                                                                    <FormItem>
+                                                                                        <FormLabel>Nota Fiscal (NF-e)</FormLabel>
+                                                                                        <FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl>
+                                                                                        <FormMessage />
+                                                                                    </FormItem>
+                                                                                )}/>
+                                                                                 <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
+                                                                                    <FormItem>
+                                                                                        <FormLabel>Data de Envio</FormLabel>
+                                                                                        <Popover>
+                                                                                            <PopoverTrigger asChild>
+                                                                                                <FormControl>
+                                                                                                    <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                                                                                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                                        {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                                                    </Button>
+                                                                                                </FormControl>
+                                                                                            </PopoverTrigger>
+                                                                                            <PopoverContent className="w-auto p-0">
+                                                                                                <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                                            </PopoverContent>
+                                                                                        </Popover>
+                                                                                        <FormMessage />
+                                                                                    </FormItem>
+                                                                                )}/>
+                                                                            </div>
+                                                                        </>
+                                                                    )}
                                                                 </div>
                                                             </Card>
-                                                        ))}
+                                                        )})}
                                                     </CardContent>
                                                 </Card>
                                             </div>
@@ -1505,6 +1581,18 @@ export default function OrdersPage() {
                                                                     <TableCell className="font-medium">
                                                                         {item.description}
                                                                         {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
+                                                                        {item.itemDeliveryDate && (
+                                                                            <span className="block text-xs text-muted-foreground">
+                                                                                Entrega: {format(item.itemDeliveryDate, 'dd/MM/yy')}
+                                                                            </span>
+                                                                        )}
+                                                                        {itemProgress === 100 && (item.shippingList || item.invoiceNumber || item.shippingDate) && (
+                                                                            <div className="mt-1 pt-1 border-t border-dashed border-muted-foreground/20 text-xs text-muted-foreground space-y-0.5">
+                                                                                {item.shippingList && <p>LE: <span className="font-semibold">{item.shippingList}</span></p>}
+                                                                                {item.invoiceNumber && <p>NF-e: <span className="font-semibold">{item.invoiceNumber}</span></p>}
+                                                                                {item.shippingDate && <p>Envio: <span className="font-semibold">{format(item.shippingDate, 'dd/MM/yy')}</span></p>}
+                                                                            </div>
+                                                                        )}
                                                                     </TableCell>
                                                                     <TableCell className="text-center">{item.quantity}</TableCell>
                                                                     <TableCell>
@@ -1645,7 +1733,7 @@ export default function OrdersPage() {
                                                 <Label>Duração (dias)</Label>
                                                 <Input
                                                     type="number"
-                                                    step="0.1"
+                                                    step="any"
                                                     placeholder="Ex: 1.5"
                                                     value={stage.durationDays ?? ''}
                                                     onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
