@@ -172,13 +172,20 @@ export default function OrdersPage() {
                 const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
                 
                 const enrichedItems = (data.items || []).map((item: any, index: number) => {
-                    const enrichedItem = { ...item, id: item.id || `${doc.id}-${index}`};
+                    const itemCode = item.code || item.product_code || '';
+                    const enrichedItem = { 
+                        ...item, 
+                        id: item.id || `${doc.id}-${index}`,
+                        code: itemCode,
+                    };
+                    delete enrichedItem.product_code;
+
                     enrichedItem.unitWeight = Number(enrichedItem.unitWeight) || 0;
 
                     if (enrichedItem.unitWeight === 0) {
-                        const itemCode = (item.code || item.product_code || '').trim().toUpperCase();
-                        if (itemCode) {
-                            const productData = productsMap.get(itemCode);
+                        const productCodeToSearch = (itemCode).trim().toUpperCase();
+                        if (productCodeToSearch) {
+                            const productData = productsMap.get(productCodeToSearch);
                             if (productData && productData.unitWeight) {
                                 enrichedItem.unitWeight = Number(productData.unitWeight) || 0;
                             }
@@ -349,7 +356,14 @@ export default function OrdersPage() {
                                                                         <FormMessage />
                                                                     </FormItem>
                                                                 )}/>
-                                                                <div className="grid grid-cols-2 gap-4">
+                                                                <div className="grid grid-cols-3 gap-4">
+                                                                     <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                                                                        <FormItem>
+                                                                            <FormLabel>Código</FormLabel>
+                                                                            <FormControl><Input placeholder="Cód. Produto" {...field} value={field.value || ''} /></FormControl>
+                                                                            <FormMessage />
+                                                                        </FormItem>
+                                                                    )}/>
                                                                      <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
                                                                         <FormItem>
                                                                             <FormLabel>Quantidade</FormLabel>
