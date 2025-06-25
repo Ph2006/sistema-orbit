@@ -241,15 +241,18 @@ export default function TasksPage() {
         docPdf.text(`Relatório de Tarefas - ${format(new Date(), 'dd/MM/yyyy')}`, pageWidth / 2, y, { align: 'center' });
         y += 15;
 
-        const tableHead = [['Pedido / OS', 'Cliente', 'Item / Etapa', 'Data Prevista', 'Responsável']];
+        const tableHead = [['Pedido', 'OS', 'Cliente', 'Item / Etapa', 'Qtd', 'Peso (kg)', 'Data Prevista', 'Responsável']];
         const addSection = (title: string, tasks: Task[], color: [number, number, number] | undefined = undefined) => {
             if (tasks.length > 0) {
                 docPdf.setFontSize(12).setFont(undefined, 'bold').text(title, 15, y);
                 y += 7;
                 const body = tasks.map(task => [
-                    `Nº ${task.quotationNumber}\nOS: ${task.internalOS}`,
+                    `Nº ${task.quotationNumber}`,
+                    task.internalOS,
                     task.customerName,
-                    `${task.itemName}\n • ${task.stageName}\nQtd: ${task.itemQuantity} | Peso: ${task.itemWeight.toLocaleString('pt-BR')} kg`,
+                    `${task.itemName}\n • ${task.stageName}`,
+                    task.itemQuantity.toString(),
+                    task.itemWeight.toLocaleString('pt-BR'),
                     task.dueDate ? format(task.dueDate, 'dd/MM/yy') : (task.startDate ? `Início ${format(task.startDate, 'dd/MM/yy')}` : 'N/A'),
                     task.responsible
                 ]);
@@ -281,9 +284,12 @@ export default function TasksPage() {
             <TableHeader>
                 <TableRow>
                     <TableHead className="w-[100px]">Pedido</TableHead>
+                    <TableHead className="w-[100px]">OS Interna</TableHead>
                     <TableHead>Cliente</TableHead>
-                    <TableHead>Item / Etapa de Fabricação</TableHead>
-                    <TableHead className="w-[150px]">Data Prevista</TableHead>
+                    <TableHead>Item / Etapa</TableHead>
+                    <TableHead className="w-[80px] text-right">Qtd.</TableHead>
+                    <TableHead className="w-[120px] text-right">Peso (kg)</TableHead>
+                    <TableHead className="w-[120px]">Data Prevista</TableHead>
                     <TableHead className="w-[150px]">Responsável</TableHead>
                     <TableHead className="w-[120px]">Status</TableHead>
                 </TableRow>
@@ -292,16 +298,14 @@ export default function TasksPage() {
                 {tasks.map((task, index) => (
                     <TableRow key={`${task.orderId}-${task.itemName}-${task.stageName}-${index}`} className={task.isOverdue ? "bg-destructive/10" : ""}>
                         <TableCell className="font-medium">Nº {task.quotationNumber}</TableCell>
+                        <TableCell>{task.internalOS}</TableCell>
                         <TableCell>{task.customerName}</TableCell>
                         <TableCell>
                             <div className="font-medium">{task.itemName}</div>
                             <div className="text-muted-foreground text-sm">&bull; {task.stageName}</div>
-                            <div className="text-muted-foreground text-xs mt-1 flex gap-x-4 gap-y-1 flex-wrap">
-                                <span>OS: <span className="font-semibold text-foreground/90">{task.internalOS}</span></span>
-                                <span>Qtd: <span className="font-semibold text-foreground/90">{task.itemQuantity}</span></span>
-                                <span>Peso: <span className="font-semibold text-foreground/90">{task.itemWeight.toLocaleString('pt-BR')} kg</span></span>
-                            </div>
                         </TableCell>
+                        <TableCell className="text-right">{task.itemQuantity}</TableCell>
+                        <TableCell className="text-right">{task.itemWeight.toLocaleString('pt-BR')}</TableCell>
                         <TableCell>
                           {task.dueDate ? format(task.dueDate, 'dd/MM/yyyy') : 
                            (task.startDate ? `Início ${format(task.startDate, 'dd/MM/yyyy')}`: 'A definir')}
