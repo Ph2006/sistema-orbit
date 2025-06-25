@@ -481,18 +481,29 @@ export default function OrdersPage() {
     
             if (companyData.logo?.preview) {
                 try {
-                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 30, 30);
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
                 } catch (e) {
                     console.error("Error adding logo to PDF:", e);
                 }
             }
+
+            let textX = 65;
+            let textY = yPos;
             docPdf.setFontSize(18).setFont(undefined, 'bold');
-            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', 50, yPos + 7);
-            docPdf.setFontSize(10).setFont(undefined, 'normal');
-            docPdf.text(companyData.endereco || '', 50, yPos + 14);
-            docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 50, yPos + 19);
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+            textY += 6;
             
-            yPos = 60;
+            docPdf.setFontSize(9).setFont(undefined, 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+                docPdf.text(addressLines, textX, textY);
+                textY += (addressLines.length * 4);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+            }
+            
+            yPos = 55;
             docPdf.setFontSize(14).setFont(undefined, 'bold');
             docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
@@ -501,8 +512,13 @@ export default function OrdersPage() {
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
             docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
             yPos += 7;
+            
             docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, 15, yPos);
+            if (selectedOrder.deliveryDate) {
+                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            }
             yPos += 7;
+
             docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
             yPos += 12;
     
@@ -526,27 +542,31 @@ export default function OrdersPage() {
                 columnStyles: {
                     0: { cellWidth: 20 },
                     1: { cellWidth: 'auto' },
-                    2: { halign: 'right', cellWidth: 20 },
-                    3: { halign: 'right', cellWidth: 30 },
-                    4: { halign: 'right', cellWidth: 30 },
+                    2: { halign: 'center', cellWidth: 20 },
+                    3: { halign: 'center', cellWidth: 30 },
+                    4: { halign: 'center', cellWidth: 30 },
                 }
             });
     
-            yPos = (docPdf as any).lastAutoTable.finalY + 15;
+            let finalY = (docPdf as any).lastAutoTable.finalY;
+            const footerStartY = pageHeight - 35;
+
+            if (finalY + 20 > footerStartY) {
+                docPdf.addPage();
+                finalY = 15;
+            }
     
             docPdf.setFontSize(12).setFont(undefined, 'bold');
             docPdf.text(
                 `Peso Total dos Itens: ${totalWeightOfSelection.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, 
-                pageWidth - 15, yPos, { align: 'right' }
+                pageWidth - 15, finalY + 15, { align: 'right' }
             );
-            yPos += 20;
-    
-            if (yPos > pageHeight - 40) { docPdf.addPage(); yPos = 20; }
+
             docPdf.setFontSize(10).setFont(undefined, 'normal');
-            docPdf.text('Recebido por:', 15, yPos);
-            docPdf.line(40, yPos, 120, yPos);
-            docPdf.text('Data:', 15, yPos + 10);
-            docPdf.line(28, yPos + 10, 85, yPos + 10);
+            docPdf.text('Recebido por:', 15, footerStartY);
+            docPdf.line(40, footerStartY, 120, footerStartY);
+            docPdf.text('Data:', 15, footerStartY + 10);
+            docPdf.line(28, footerStartY + 10, 85, footerStartY + 10);
     
             docPdf.save(`Romaneio_${selectedOrder.quotationNumber}.pdf`);
             
