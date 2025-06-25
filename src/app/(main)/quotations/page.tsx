@@ -441,9 +441,14 @@ export default function QuotationsPage() {
                         const productDoc = await getDoc(doc(productsRef, item.code));
                         if (productDoc.exists()) {
                             const productData = productDoc.data();
-                            if (Array.isArray(productData.manufacturingStages)) {
-                                productionPlan = productData.manufacturingStages.map((stageName: string) => ({
-                                    stageName,
+                            
+                            const planTemplate = productData.productionPlanTemplate || (productData.manufacturingStages && Array.isArray(productData.manufacturingStages)
+                                ? productData.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+                                : []);
+
+                            if (planTemplate && planTemplate.length > 0) {
+                                productionPlan = planTemplate.map((stage: any) => ({
+                                    stageName: stage.stageName,
                                     status: "Pendente",
                                     startDate: null,
                                     completedDate: null,
@@ -1094,4 +1099,3 @@ export default function QuotationsPage() {
         </>
     );
 }
-

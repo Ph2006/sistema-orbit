@@ -23,16 +23,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
+
+const planStageSchema = z.object({
+  stageName: z.string(),
+  durationDays: z.coerce.number().min(0).optional(),
+});
 
 const productSchema = z.object({
   code: z.string().min(1, { message: "O código do produto é obrigatório." }),
   description: z.string().min(3, { message: "A descrição é obrigatória." }),
   unitPrice: z.coerce.number().min(0, { message: "O preço unitário deve ser um número positivo." }),
   unitWeight: z.coerce.number().min(0).optional(),
-  manufacturingStages: z.array(z.string()).optional(),
+  productionPlanTemplate: z.array(planStageSchema).optional(),
 });
 
-type Product = z.infer<typeof productSchema> & { id: string };
+type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -59,7 +65,7 @@ export default function ProductsPage() {
       description: "",
       unitPrice: 0,
       unitWeight: 0,
-      manufacturingStages: [],
+      productionPlanTemplate: [],
     },
   });
 
@@ -124,10 +130,18 @@ export default function ProductsPage() {
     setIsLoading(true);
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
-      const productsList = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...(doc.data() as Omit<Product, 'id'>),
-      }));
+      const productsList = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        const planTemplate = data.productionPlanTemplate || (data.manufacturingStages && Array.isArray(data.manufacturingStages)
+            ? data.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+            : []);
+
+        return {
+          id: doc.id,
+          ...(data as Omit<Product, 'id'>),
+          productionPlanTemplate: planTemplate,
+        };
+      });
       setProducts(productsList);
     } catch (error) {
       console.error("Error fetching products: ", error);
@@ -271,15 +285,18 @@ export default function ProductsPage() {
   
   const handleAddClick = () => {
     setSelectedProduct(null);
-    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0, manufacturingStages: [] });
+    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0, productionPlanTemplate: [] });
     setIsFormOpen(true);
   };
   
   const handleEditClick = (product: Product) => {
     setSelectedProduct(product);
+    const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        : []);
     form.reset({
       ...product,
-      manufacturingStages: product.manufacturingStages || []
+      productionPlanTemplate: planTemplate
     });
     setIsFormOpen(true);
   };
@@ -499,55 +516,63 @@ export default function ProductsPage() {
                 <Separator />
 
                 <FormField
-                    control={form.control}
-                    name="manufacturingStages"
-                    render={() => (
-                        <FormItem>
-                            <div className="mb-4">
-                                <FormLabel className="text-base">Etapas de Fabricação</FormLabel>
-                                <FormDescription>
-                                    Selecione as etapas que este produto normalmente percorre.
-                                </FormDescription>
-                            </div>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                {manufacturingStages.map((stage) => (
-                                    <FormField
-                                        key={stage}
-                                        control={form.control}
-                                        name="manufacturingStages"
-                                        render={({ field }) => {
-                                            return (
-                                                <FormItem
-                                                    key={stage}
-                                                    className="flex flex-row items-start space-x-3 space-y-0"
-                                                >
-                                                    <FormControl>
-                                                        <Checkbox
-                                                            checked={field.value?.includes(stage)}
-                                                            onCheckedChange={(checked) => {
-                                                                return checked
-                                                                    ? field.onChange([...(field.value || []), stage])
-                                                                    : field.onChange(
-                                                                        field.value?.filter(
-                                                                            (value) => value !== stage
-                                                                        )
-                                                                    )
-                                                            }}
-                                                        />
-                                                    </FormControl>
-                                                    <FormLabel className="font-normal">
-                                                        {stage}
-                                                    </FormLabel>
-                                                </FormItem>
-                                            )
-                                        }}
-                                    />
-                                ))}
-                            </div>
-                            <FormMessage />
-                        </FormItem>
-                    )}
-                />
+                  control={form.control}
+                  name="productionPlanTemplate"
+                  render={({ field }) => (
+                      <FormItem>
+                          <div className="mb-4">
+                              <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
+                              <FormDescription>
+                                  Selecione as etapas e defina a duração em dias para cada uma.
+                              </FormDescription>
+                          </div>
+                          <div className="space-y-3">
+                              {manufacturingStages.map((stageName) => {
+                                  const currentStage = field.value?.find(p => p.stageName === stageName);
+                                  const isChecked = !!currentStage;
+
+                                  return (
+                                      <div key={stageName} className="flex items-center gap-4 rounded-md border p-3">
+                                          <Checkbox
+                                              id={`stage-checkbox-${stageName}`}
+                                              checked={isChecked}
+                                              onCheckedChange={(checked) => {
+                                                  const newValue = checked
+                                                      ? [...(field.value || []), { stageName: stageName, durationDays: 0 }]
+                                                      : (field.value || []).filter(p => p.stageName !== stageName);
+                                                  field.onChange(newValue.sort((a,b) => manufacturingStages.indexOf(a.stageName) - manufacturingStages.indexOf(b.stageName)));
+                                              }}
+                                          />
+                                          <Label htmlFor={`stage-checkbox-${stageName}`} className="flex-1 font-normal cursor-pointer">
+                                              {stageName}
+                                          </Label>
+                                          {isChecked && (
+                                              <div className="flex items-center gap-2">
+                                                  <Input
+                                                      type="number"
+                                                      className="h-8 w-20"
+                                                      placeholder="Dias"
+                                                      value={currentStage?.durationDays || ''}
+                                                      onChange={(e) => {
+                                                          const newPlan = (field.value || []).map(p => 
+                                                              p.stageName === stageName 
+                                                              ? { ...p, durationDays: e.target.value === '' ? undefined : Number(e.target.value) } 
+                                                              : p
+                                                          );
+                                                          field.onChange(newPlan);
+                                                      }}
+                                                  />
+                                                  <span className="text-sm text-muted-foreground">dias</span>
+                                              </div>
+                                          )}
+                                      </div>
+                                  );
+                              })}
+                          </div>
+                          <FormMessage />
+                      </FormItem>
+                  )}
+              />
 
               <DialogFooter className="pt-6">
                  <Button type="submit" disabled={form.formState.isSubmitting}>
