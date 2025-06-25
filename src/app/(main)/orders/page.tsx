@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -77,6 +77,7 @@ const mapOrderStatus = (status?: string): string => {
     const statusMap: { [key: string]: string } = {
         'in production': 'Em Produção',
         'em produção': 'Em Produção',
+        'in progress': 'Em Produção',
         'awaiting production': 'Aguardando Produção',
         'aguardando produção': 'Aguardando Produção',
         'pending': 'Aguardando Produção',
@@ -85,6 +86,8 @@ const mapOrderStatus = (status?: string): string => {
         'finished': 'Concluído',
         'cancelled': 'Cancelado',
         'cancelado': 'Cancelado',
+        'ready': 'Pronto para Entrega',
+        'pronto para entrega': 'Pronto para Entrega'
     };
 
     return statusMap[lowerStatus] || status;
@@ -98,6 +101,8 @@ const getStatusProps = (status: string): { variant: "default" | "secondary" | "d
             return { variant: "secondary", icon: Hourglass, label: "Aguardando Produção", colorClass: "" };
         case "Concluído":
             return { variant: "default", icon: CheckCircle, label: "Concluído", colorClass: "bg-green-600 hover:bg-green-600/90" };
+        case "Pronto para Entrega":
+            return { variant: "default", icon: Truck, label: "Pronto para Entrega", colorClass: "bg-blue-500 hover:bg-blue-500/90" };
         case "Cancelado":
             return { variant: "destructive", icon: XCircle, label: "Cancelado", colorClass: "" };
         default:
