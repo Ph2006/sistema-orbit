@@ -465,14 +465,14 @@ export default function QuotationsPage() {
     
                 // Header
                 if (companyData.logo?.preview) {
-                    try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, 10, 30, 30); }
+                    try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, 15, 25, 25); }
                     catch (e) { console.error("Error adding logo to PDF:", e); }
                 }
                 docPdf.setFontSize(18);
-                docPdf.text(companyData.nomeFantasia || 'Orçamento', 60, 20);
+                docPdf.text(companyData.nomeFantasia || 'Orçamento', 45, 22);
                 docPdf.setFontSize(10);
-                docPdf.text(companyData.endereco || '', 60, 28);
-                docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 60, 33);
+                docPdf.text(companyData.endereco || '', 45, 30);
+                docPdf.text(`CNPJ: ${companyData.cnpj || ''}`, 45, 35);
                 
                 y = 50;
                 docPdf.setFontSize(14).setFont(undefined, 'bold').text(`Orçamento Nº ${number}`, 15, y);
