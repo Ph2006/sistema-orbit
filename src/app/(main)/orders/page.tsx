@@ -78,6 +78,7 @@ const mapOrderStatus = (status?: string): string => {
         'in production': 'Em Produção',
         'em produção': 'Em Produção',
         'in progress': 'Em Produção',
+        'in-progress': 'Em Produção',
         'em progresso': 'Em Produção',
         'awaiting production': 'Aguardando Produção',
         'aguardando produção': 'Aguardando Produção',
