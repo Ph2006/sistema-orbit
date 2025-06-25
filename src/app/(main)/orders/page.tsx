@@ -8,7 +8,7 @@ import * as z from "zod";
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, isSameDay } from "date-fns";
+import { format, isSameDay, addDays } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -40,6 +40,7 @@ const productionStageSchema = z.object({
     status: z.string(),
     startDate: z.date().nullable().optional(),
     completedDate: z.date().nullable().optional(),
+    durationDays: z.coerce.number().min(0).optional(),
 });
 
 const orderItemSchema = z.object({
@@ -665,52 +666,113 @@ export default function OrdersPage() {
         setItemToTrack(item);
         setIsProgressModalOpen(true);
         setEditedPlan([]);
-    
-        if (item.productionPlan && item.productionPlan.length > 0) {
-            const planToEdit = (item.productionPlan || []).map(stage => ({
-                ...stage,
-                startDate: stage.startDate ? new Date(stage.startDate) : null,
-                completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
-            }));
-            setEditedPlan(planToEdit);
-            return;
-        }
-    
-        if (item.code) {
-            setIsFetchingPlan(true);
-            try {
+        setIsFetchingPlan(true);
+
+        try {
+            let productTemplateMap = new Map<string, number>();
+            if (item.code) {
                 const productRef = doc(db, "companies", "mecald", "products", item.code);
                 const productSnap = await getDoc(productRef);
-                let newPlan: ProductionStage[] = [];
                 if (productSnap.exists()) {
-                    const productData = productSnap.data();
-                    const template = productData.productionPlanTemplate || [];
-                    if (template.length > 0) {
-                        newPlan = template.map((stage: any) => ({
-                            stageName: stage.stageName,
-                            status: "Pendente",
-                            startDate: null,
-                            completedDate: null,
-                        }));
-                    }
+                    const template = productSnap.data().productionPlanTemplate || [];
+                    template.forEach((stage: any) => {
+                        productTemplateMap.set(stage.stageName, stage.durationDays || 0);
+                    });
                 }
-                setEditedPlan(newPlan);
-            } catch (error) {
-                console.error("Error fetching production plan template:", error);
-                toast({ variant: "destructive", title: "Erro ao buscar plano", description: "Não foi possível carregar o plano de fabricação do produto." });
-                setEditedPlan([]);
-            } finally {
-                setIsFetchingPlan(false);
             }
+
+            let finalPlan: ProductionStage[];
+
+            if (item.productionPlan && item.productionPlan.length > 0) {
+                finalPlan = item.productionPlan.map(stage => ({
+                    ...stage,
+                    startDate: stage.startDate ? new Date(stage.startDate) : null,
+                    completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
+                    durationDays: stage.durationDays ?? productTemplateMap.get(stage.stageName) ?? 0,
+                }));
+            } else {
+                finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, durationDays]) => ({
+                    stageName,
+                    durationDays,
+                    status: "Pendente",
+                    startDate: null,
+                    completedDate: null,
+                }));
+            }
+            setEditedPlan(finalPlan);
+
+        } catch(error) {
+            console.error("Error preparing production plan:", error);
+            toast({ variant: "destructive", title: "Erro ao carregar plano", description: "Não foi possível carregar os dados do plano." });
+            setEditedPlan([]);
+        } finally {
+            setIsFetchingPlan(false);
         }
     };
 
-    const handleProgressChange = (stageIndex: number, field: keyof ProductionStage, value: any) => {
-        setEditedPlan(currentPlan => {
-            const newPlan = [...currentPlan];
-            newPlan[stageIndex] = { ...newPlan[stageIndex], [field]: value };
-            return newPlan;
-        });
+    const handlePlanChange = (stageIndex: number, field: 'startDate' | 'completedDate' | 'durationDays', value: any) => {
+        let newPlan = JSON.parse(JSON.stringify(editedPlan));
+
+        const currentStage = newPlan[stageIndex];
+        
+        if (field === 'startDate' || field === 'completedDate') {
+            currentStage[field] = value ? new Date(value) : null;
+        } else if (field === 'durationDays') {
+            currentStage[field] = value === '' ? undefined : Number(value);
+        }
+        
+        if ((field === 'startDate' && currentStage.startDate) || field === 'durationDays') {
+            let lastCompletionDate: Date | null = currentStage.startDate ? addDays(new Date(currentStage.startDate), -1) : null;
+            
+            for (let i = stageIndex; i < newPlan.length; i++) {
+                const stage = newPlan[i];
+                
+                if (i > stageIndex) {
+                    stage.startDate = lastCompletionDate ? addDays(new Date(lastCompletionDate), 1) : null;
+                }
+                
+                if (stage.startDate) {
+                    const duration = Math.max(0, Number(stage.durationDays) || 0);
+                    const daysToAdd = Math.ceil(duration) > 0 ? Math.ceil(duration) - 1 : 0;
+                    stage.completedDate = addDays(new Date(stage.startDate), daysToAdd);
+                } else {
+                    stage.completedDate = null;
+                }
+                
+                lastCompletionDate = stage.completedDate;
+            }
+        }
+        
+        if (field === 'completedDate') {
+            let lastCompletionDate = currentStage.completedDate;
+            for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                const stage = newPlan[i];
+                stage.startDate = lastCompletionDate ? addDays(new Date(lastCompletionDate), 1) : null;
+                if (stage.startDate) {
+                    const duration = Math.max(0, Number(stage.durationDays) || 0);
+                    const daysToAdd = Math.ceil(duration) > 0 ? Math.ceil(duration) - 1 : 0;
+                    stage.completedDate = addDays(new Date(stage.startDate), daysToAdd);
+                } else {
+                    stage.completedDate = null;
+                }
+                lastCompletionDate = stage.completedDate;
+            }
+        }
+        
+        if (field === 'startDate' && !value) {
+            for (let i = stageIndex; i < newPlan.length; i++) {
+                newPlan[i].startDate = null;
+                newPlan[i].completedDate = null;
+            }
+        }
+
+        const finalPlan = newPlan.map((p: any) => ({
+            ...p,
+            startDate: p.startDate ? new Date(p.startDate) : null,
+            completedDate: p.completedDate ? new Date(p.completedDate) : null,
+        }));
+        
+        setEditedPlan(finalPlan);
     };
 
     const handleSaveProgress = async () => {
@@ -723,7 +785,9 @@ export default function OrdersPage() {
                     return { 
                         ...item, 
                         productionPlan: editedPlan.map(p => ({
-                            ...p,
+                            stageName: p.stageName,
+                            status: p.status,
+                            durationDays: p.durationDays,
                             startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
                             completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
                         }))
@@ -1201,7 +1265,7 @@ export default function OrdersPage() {
                     <DialogHeader>
                         <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
                         <DialogDescription>
-                            Atualize o status e as datas para cada etapa de fabricação.
+                            Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente.
                         </DialogDescription>
                     </DialogHeader>
                     <ScrollArea className="max-h-[60vh]">
@@ -1215,11 +1279,15 @@ export default function OrdersPage() {
                                     <Card key={index} className="p-4">
                                         <CardTitle className="text-lg mb-4">{stage.stageName}</CardTitle>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div className="space-y-2">
+                                             <div className="space-y-2">
                                                 <Label>Status</Label>
                                                 <Select 
                                                     value={stage.status} 
-                                                    onValueChange={(value) => handleProgressChange(index, 'status', value)}
+                                                    onValueChange={(value) => {
+                                                        const newPlan = [...editedPlan];
+                                                        newPlan[index] = { ...newPlan[index], status: value };
+                                                        setEditedPlan(newPlan);
+                                                    }}
                                                 >
                                                     <SelectTrigger>
                                                         <SelectValue placeholder="Selecione o status" />
@@ -1230,6 +1298,16 @@ export default function OrdersPage() {
                                                         <SelectItem value="Concluído">Concluído</SelectItem>
                                                     </SelectContent>
                                                 </Select>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Duração (dias)</Label>
+                                                <Input
+                                                    type="number"
+                                                    step="0.1"
+                                                    placeholder="Ex: 1.5"
+                                                    value={stage.durationDays ?? ''}
+                                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
+                                                />
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
@@ -1243,7 +1321,7 @@ export default function OrdersPage() {
                                                         </Button>
                                                     </PopoverTrigger>
                                                     <PopoverContent className="w-auto p-0">
-                                                        <Calendar mode="single" selected={stage.startDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'startDate', date)} initialFocus />
+                                                        <Calendar mode="single" selected={stage.startDate ?? undefined} onSelect={(date) => handlePlanChange(index, 'startDate', date)} initialFocus />
                                                     </PopoverContent>
                                                 </Popover>
                                             </div>
@@ -1257,7 +1335,7 @@ export default function OrdersPage() {
                                                         </Button>
                                                     </PopoverTrigger>
                                                     <PopoverContent className="w-auto p-0">
-                                                        <Calendar mode="single" selected={stage.completedDate ?? undefined} onSelect={(date) => handleProgressChange(index, 'completedDate', date)} initialFocus />
+                                                        <Calendar mode="single" selected={stage.completedDate ?? undefined} onSelect={(date) => handlePlanChange(index, 'completedDate', date)} initialFocus />
                                                     </PopoverContent>
                                                 </Popover>
                                             </div>
