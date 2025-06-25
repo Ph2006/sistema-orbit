@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
@@ -138,6 +138,7 @@ export default function OrdersPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
@@ -158,7 +159,10 @@ export default function OrdersPage() {
             const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
             const productsMap = new Map<string, { unitWeight: number }>();
             productsSnapshot.forEach(doc => {
-                productsMap.set(doc.id.trim().toUpperCase(), { unitWeight: doc.data().unitWeight || 0 });
+                const productCode = (doc.id || '').trim().toUpperCase();
+                if (productCode) {
+                    productsMap.set(productCode, { unitWeight: doc.data().unitWeight || 0 });
+                }
             });
 
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
@@ -230,6 +234,7 @@ export default function OrdersPage() {
     const handleViewOrder = (order: Order) => {
         setSelectedOrder(order);
         form.reset(order);
+        setIsEditing(false);
         setIsSheetOpen(true);
     };
 
@@ -254,8 +259,8 @@ export default function OrdersPage() {
                 title: "Pedido atualizado!",
                 description: "Os dados do pedido foram salvos com sucesso.",
             });
-            setIsSheetOpen(false);
-            await fetchOrders(); // Refresh data
+            setIsEditing(false);
+            await fetchOrders();
         } catch (error) {
             console.error("Error updating order:", error);
             toast({
@@ -315,7 +320,7 @@ export default function OrdersPage() {
                 </Card>
             </div>
 
-            <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+            <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) setIsEditing(false); }}>
                 <SheetContent className="w-full sm:max-w-3xl">
                     {selectedOrder && (
                         <>
@@ -325,35 +330,12 @@ export default function OrdersPage() {
                                     Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
                                 </SheetDescription>
                             </SheetHeader>
-                            <Form {...form}>
-                                <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-full">
-                                    <ScrollArea className="flex-1 pr-6 -mr-6">
-                                        <div className="space-y-6 py-6">
-                                            <Card>
-                                                <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
-                                                <CardContent className="space-y-3 text-sm">
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="font-medium text-muted-foreground">Status</span>
-                                                        {(() => {
-                                                            const statusProps = getStatusProps(selectedOrder.status);
-                                                            return <Badge variant={statusProps.variant} className={statusProps.colorClass}><statusProps.icon className="mr-2 h-4 w-4" />{statusProps.label}</Badge>;
-                                                        })()}
-                                                    </div>
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
-                                                        <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
-                                                        <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center font-bold text-lg">
-                                                        <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
-                                                        <span className="text-primary">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
-                                                    </div>
-                                                </CardContent>
-                                            </Card>
-
+                            
+                            {isEditing ? (
+                                // EDIT VIEW
+                                <Form {...form}>
+                                    <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-[calc(100%-4rem)]">
+                                        <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
                                             <Card>
                                                 <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
                                                 <CardContent className="space-y-4">
@@ -388,15 +370,83 @@ export default function OrdersPage() {
                                                     ))}
                                                 </CardContent>
                                             </Card>
+                                        </ScrollArea>
+                                        <SheetFooter className="py-4 border-t">
+                                            <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
+                                            <Button type="submit" disabled={form.formState.isSubmitting}>
+                                                {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                                            </Button>
+                                        </SheetFooter>
+                                    </form>
+                                </Form>
+                            ) : (
+                                // READ-ONLY VIEW
+                                <>
+                                    <ScrollArea className="h-[calc(100vh-12rem)]">
+                                        <div className="space-y-6 py-6 pr-6">
+                                            <Card>
+                                                <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
+                                                <CardContent className="space-y-3 text-sm">
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground">Status</span>
+                                                        {(() => {
+                                                            const statusProps = getStatusProps(selectedOrder.status);
+                                                            return <Badge variant={statusProps.variant} className={statusProps.colorClass}><statusProps.icon className="mr-2 h-4 w-4" />{statusProps.label}</Badge>;
+                                                        })()}
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
+                                                        <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
+                                                        <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center font-bold text-lg">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
+                                                        <span className="text-primary">{selectedOrder.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card>
+                                                <CardHeader><CardTitle>Itens do Pedido</CardTitle></CardHeader>
+                                                <CardContent>
+                                                    <Table>
+                                                        <TableHeader>
+                                                            <TableRow>
+                                                                <TableHead>Descrição</TableHead>
+                                                                <TableHead className="text-center w-[80px]">Qtd.</TableHead>
+                                                                <TableHead className="text-right w-[120px]">Peso Unit.</TableHead>
+                                                                <TableHead className="text-right w-[150px]">Peso Total</TableHead>
+                                                            </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                            {selectedOrder.items.map((item, index) => (
+                                                                <TableRow key={index}>
+                                                                    <TableCell className="font-medium">
+                                                                        {item.description}
+                                                                        {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
+                                                                    </TableCell>
+                                                                    <TableCell className="text-center">{item.quantity}</TableCell>
+                                                                    <TableCell className="text-right">{(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                                                                    <TableCell className="text-right font-semibold">{( (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0) ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                                                                </TableRow>
+                                                            ))}
+                                                        </TableBody>
+                                                    </Table>
+                                                </CardContent>
+                                            </Card>
                                         </div>
                                     </ScrollArea>
-                                    <SheetFooter className="py-4 border-t">
-                                        <Button type="submit" disabled={form.formState.isSubmitting}>
-                                            {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                                    <SheetFooter className="pt-4 pr-6 border-t">
+                                        <Button onClick={() => setIsEditing(true)}>
+                                            <Edit className="mr-2 h-4 w-4" />
+                                            Editar Pedido
                                         </Button>
                                     </SheetFooter>
-                                </form>
-                            </Form>
+                                </>
+                            )}
                         </>
                     )}
                 </SheetContent>
