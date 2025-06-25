@@ -7,17 +7,18 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -43,7 +44,7 @@ const quotationSchema = z.object({
     id: z.string({ required_error: "Selecione um cliente." }),
     name: z.string(),
   }),
-  status: z.enum(["Pendente", "Aprovado", "Recusado", "Cancelado"], { required_error: "Selecione um status." }),
+  status: z.enum(["Aguardando Aprovação", "Aprovado", "Reprovado", "Informativo"], { required_error: "Selecione um status." }),
   validity: z.date({ required_error: "A data de validade é obrigatória." }),
   paymentTerms: z.string().min(3, "As condições de pagamento são obrigatórias."),
   deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
@@ -66,11 +67,12 @@ export default function QuotationsPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
+    const router = useRouter();
 
     const form = useForm<z.infer<typeof quotationSchema>>({
         resolver: zodResolver(quotationSchema),
         defaultValues: {
-            status: "Pendente",
+            status: "Aguardando Aprovação",
             items: [{ description: "", quantity: 1, unitPrice: 0 }],
         }
     });
@@ -97,12 +99,33 @@ export default function QuotationsPage() {
     const fetchQuotations = async () => {
         if (!user) return;
         setIsLoading(true);
+
+        const mapStatus = (status?: string, approvedAt?: any): string => {
+            const newStatus = status?.trim();
+            if (!newStatus) {
+                return approvedAt ? "Aprovado" : "Aguardando Aprovação";
+            }
+            switch(newStatus) {
+                case "Pendente":
+                    return "Aguardando Aprovação";
+                case "Recusado":
+                case "Cancelado":
+                    return "Reprovado";
+                case "Aprovado":
+                case "Aguardando Aprovação":
+                case "Reprovado":
+                case "Informativo":
+                    return newStatus;
+                default:
+                    return "Aguardando Aprovação";
+            }
+        }
+
         try {
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "quotations"));
             const quotationsList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
 
-                // Handle backward compatibility for items/includedServices
                 let finalItems = data.items || [];
                 if ((!finalItems || finalItems.length === 0) && Array.isArray(data.includedServices) && data.includedServices.length > 0) {
                     finalItems = data.includedServices.map((service: string) => ({
@@ -116,10 +139,9 @@ export default function QuotationsPage() {
                     finalItems.push({ description: "Nenhum item/serviço especificado", quantity: 1, unitPrice: 0 });
                 }
 
-                // Handle different date formats
                 const getCreatedAt = () => {
                     if (!data.createdAt) return Timestamp.now();
-                    if (data.createdAt.toDate) return data.createdAt; // It's a Timestamp
+                    if (data.createdAt.toDate) return data.createdAt;
                     if (typeof data.createdAt === 'string') return Timestamp.fromDate(new Date(data.createdAt));
                     return Timestamp.now();
                 }
@@ -137,7 +159,7 @@ export default function QuotationsPage() {
                         id: data.customerId || (data.customer?.id || ''), 
                         name: data.customerName || (data.customer?.name || 'N/A') 
                     },
-                    status: data.status || (data.approvedAt ? 'Aprovado' : 'Pendente'),
+                    status: mapStatus(data.status, data.approvedAt),
                     validity: getValidity(),
                     paymentTerms: data.paymentTerms || 'A combinar',
                     deliveryTime: data.deliveryTerms || data.deliveryTime || 'A combinar',
@@ -206,7 +228,7 @@ export default function QuotationsPage() {
         setSelectedQuotation(null);
         form.reset({
             customer: undefined,
-            status: "Pendente",
+            status: "Aguardando Aprovação",
             validity: new Date(new Date().setDate(new Date().getDate() + 15)),
             paymentTerms: "A combinar",
             deliveryTime: "A combinar",
@@ -247,6 +269,37 @@ export default function QuotationsPage() {
         setSelectedQuotation(quotation);
         setIsViewSheetOpen(true);
     };
+
+    const handleGenerateOrder = async (quotation: Quotation) => {
+        if (!quotation) return;
+
+        const orderData = {
+            quotationId: quotation.id,
+            quotationNumber: quotation.number,
+            customer: quotation.customer,
+            items: quotation.items,
+            totalValue: calculateTotal(quotation.items),
+            status: "Aguardando Produção", // Initial status for a production order
+            createdAt: Timestamp.now(),
+        };
+
+        try {
+            await addDoc(collection(db, "companies", "mecald", "orders"), orderData);
+            toast({
+                title: "Pedido gerado com sucesso!",
+                description: `O pedido para o orçamento Nº ${quotation.number} foi criado.`,
+            });
+            setIsViewSheetOpen(false);
+            router.push('/orders');
+        } catch (error) {
+            console.error("Error generating order:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar pedido",
+                description: "Ocorreu um erro ao criar o pedido. Tente novamente.",
+            });
+        }
+    };
     
     const filteredQuotations = quotations.filter((q) => {
         const query = searchQuery.toLowerCase();
@@ -260,9 +313,9 @@ export default function QuotationsPage() {
     const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
         switch (status) {
             case "Aprovado": return "default";
-            case "Pendente": return "secondary";
-            case "Recusado": return "destructive";
-            case "Cancelado": return "destructive";
+            case "Aguardando Aprovação": return "secondary";
+            case "Reprovado": return "destructive";
+            case "Informativo": return "outline";
             default: return "outline";
         }
     };
@@ -307,7 +360,7 @@ export default function QuotationsPage() {
                                         <TableHead>Cliente</TableHead>
                                         <TableHead className="w-[120px]">Criação</TableHead>
                                         <TableHead className="w-[150px]">Valor Total</TableHead>
-                                        <TableHead className="w-[120px]">Status</TableHead>
+                                        <TableHead className="w-[180px]">Status</TableHead>
                                         <TableHead className="w-[100px] text-right">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -375,10 +428,10 @@ export default function QuotationsPage() {
                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                                                     <FormControl><SelectTrigger><SelectValue placeholder="Selecione um status" /></SelectTrigger></FormControl>
                                                     <SelectContent>
-                                                        <SelectItem value="Pendente">Pendente</SelectItem>
+                                                        <SelectItem value="Aguardando Aprovação">Aguardando Aprovação</SelectItem>
                                                         <SelectItem value="Aprovado">Aprovado</SelectItem>
-                                                        <SelectItem value="Recusado">Recusado</SelectItem>
-                                                        <SelectItem value="Cancelado">Cancelado</SelectItem>
+                                                        <SelectItem value="Reprovado">Reprovado</SelectItem>
+                                                        <SelectItem value="Informativo">Informativo</SelectItem>
                                                     </SelectContent>
                                                 </Select><FormMessage />
                                             </FormItem>
@@ -460,7 +513,7 @@ export default function QuotationsPage() {
                                 Cliente: {selectedQuotation.customer.name}
                             </SheetDescription>
                         </SheetHeader>
-                        <ScrollArea className="h-[calc(100vh-8rem)]">
+                        <ScrollArea className="h-[calc(100vh-12rem)]">
                             <div className="space-y-6 py-6 pr-6">
                                 <Card>
                                     <CardHeader>
@@ -533,6 +586,14 @@ export default function QuotationsPage() {
                                 )}
                             </div>
                         </ScrollArea>
+                        <SheetFooter className="pt-4 pr-6 border-t">
+                            {selectedQuotation.status === 'Aprovado' && (
+                                <Button onClick={() => handleGenerateOrder(selectedQuotation)} className="w-full sm:w-auto">
+                                    <PackagePlus className="mr-2 h-4 w-4" />
+                                    Gerar Pedido de Produção
+                                </Button>
+                            )}
+                        </SheetFooter>
                         </>
                     )}
                 </SheetContent>
