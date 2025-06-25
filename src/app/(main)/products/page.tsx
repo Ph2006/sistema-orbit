@@ -338,8 +338,9 @@ export default function ProductsPage() {
   });
 
   const filteredProductsForCopy = useMemo(() => {
+    const query = copyFromSearch.toLowerCase();
     return products.filter(p => 
-        p.description.toLowerCase().includes(copyFromSearch.toLowerCase()) &&
+        (p.description.toLowerCase().includes(query) || p.code.toLowerCase().includes(query)) &&
         p.id !== selectedProduct?.id
     );
   }, [products, copyFromSearch, selectedProduct]);
@@ -566,7 +567,7 @@ export default function ProductsPage() {
                                         <PopoverContent className="w-[350px] p-0" align="end">
                                             <div className="p-2">
                                                 <Input
-                                                    placeholder="Buscar produto para copiar..."
+                                                    placeholder="Buscar por nome ou código..."
                                                     value={copyFromSearch}
                                                     onChange={(e) => setCopyFromSearch(e.target.value)}
                                                     className="h-9"
