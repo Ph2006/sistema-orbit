@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isSameDay } from "date-fns";
@@ -15,6 +15,7 @@ import autoTable from "jspdf-autotable";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -23,7 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -32,7 +33,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 
+const productionStageSchema = z.object({
+    stageName: z.string(),
+    status: z.string(),
+    startDate: z.date().nullable().optional(),
+    completedDate: z.date().nullable().optional(),
+});
 
 const orderItemSchema = z.object({
     id: z.string().optional(),
@@ -41,6 +49,7 @@ const orderItemSchema = z.object({
     description: z.string().min(1, "A descrição é obrigatória."),
     quantity: z.coerce.number().min(0, "A quantidade não pode ser negativa."),
     unitWeight: z.coerce.number().min(0, "O peso não pode ser negativo.").optional(),
+    productionPlan: z.array(productionStageSchema).optional(),
 });
 
 const orderSchema = z.object({
@@ -55,6 +64,7 @@ const orderSchema = z.object({
   }).optional(),
 });
 
+type ProductionStage = z.infer<typeof productionStageSchema>;
 type OrderItem = z.infer<typeof orderItemSchema>;
 
 type CustomerInfo = { id: string; name: string };
@@ -244,6 +254,11 @@ export default function OrdersPage() {
     const [isEditing, setIsEditing] = useState(false);
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
+
+    // Progress tracking state
+    const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
+    const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
+    const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -314,6 +329,13 @@ export default function OrdersPage() {
                             }
                         }
                     }
+
+                    enrichedItem.productionPlan = (item.productionPlan || []).map((p: any) => ({
+                        ...p,
+                        startDate: p.startDate?.toDate ? p.startDate.toDate() : null,
+                        completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
+                    }));
+
                     return enrichedItem;
                 });
 
@@ -390,7 +412,7 @@ export default function OrdersPage() {
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
             
-            const updatedItems = values.items.map(item => {
+            const updatedItems = values.items.map((item, index) => {
                 const itemCode = item.code || item.product_code || '';
                 const cleanItem = { ...item, code: itemCode };
                 delete (cleanItem as any).product_code;
@@ -399,6 +421,8 @@ export default function OrdersPage() {
                     ...cleanItem,
                     unitWeight: Number(item.unitWeight) || 0,
                     quantity: Number(item.quantity) || 0,
+                    // Preserve existing production plan
+                    productionPlan: selectedOrder.items[index]?.productionPlan || []
                 };
             });
     
@@ -594,7 +618,7 @@ export default function OrdersPage() {
                 head: [['Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
                 body: tableBody,
                 styles: { fontSize: 8 },
-                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255, halign: 'center' },
                 columnStyles: {
                     0: { cellWidth: 20 },
                     1: { cellWidth: 'auto' },
@@ -636,6 +660,129 @@ export default function OrdersPage() {
         }
     };
 
+    const handleOpenProgressModal = (item: OrderItem) => {
+        setItemToTrack(item);
+        setEditedPlan(JSON.parse(JSON.stringify(item.productionPlan || []))); // Deep copy
+        setIsProgressModalOpen(true);
+    };
+
+    const handleProgressChange = (stageIndex: number, field: keyof ProductionStage, value: any) => {
+        setEditedPlan(currentPlan => {
+            const newPlan = [...currentPlan];
+            newPlan[stageIndex] = { ...newPlan[stageIndex], [field]: value };
+            return newPlan;
+        });
+    };
+
+    const handleSaveProgress = async () => {
+        if (!selectedOrder || !itemToTrack) return;
+    
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            const updatedItems = selectedOrder.items.map(item => {
+                if (item.id === itemToTrack.id) {
+                    return { 
+                        ...item, 
+                        productionPlan: editedPlan.map(p => ({
+                            ...p,
+                            startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
+                            completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
+                        }))
+                    };
+                }
+                return item;
+            });
+    
+            await updateDoc(orderRef, { items: updatedItems });
+            toast({ title: "Progresso salvo!", description: "As etapas de produção foram atualizadas." });
+            setIsProgressModalOpen(false);
+            setItemToTrack(null);
+            await fetchOrders(); 
+        } catch (error) {
+            console.error("Error saving progress:", error);
+            toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar o progresso do item." });
+        }
+    };
+
+    const handleExportSchedule = async () => {
+        if (!selectedOrder) return;
+    
+        toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
+    
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+    
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            let yPos = 15;
+    
+            // Header similar to packing slip
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) { console.error("Error adding logo to PDF:", e); }
+            }
+            docPdf.setFontSize(14).setFont(undefined, 'bold');
+            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos + 10, { align: 'center' });
+            yPos += 25;
+            
+            docPdf.setFontSize(11).setFont(undefined, 'normal');
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 12;
+    
+            const tableBody: any[] = [];
+            selectedOrder.items.forEach(item => {
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    item.productionPlan.forEach((stage, stageIndex) => {
+                        tableBody.push([
+                            stageIndex === 0 ? item.description : '',
+                            stage.stageName,
+                            stage.status,
+                            stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : 'Pendente',
+                            stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : 'Pendente',
+                        ]);
+                    });
+                } else {
+                     tableBody.push([item.description, 'Nenhuma etapa definida', '-', '-', '-']);
+                }
+            });
+    
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Item', 'Etapa de Fabricação', 'Status', 'Início Previsto', 'Conclusão Prevista']],
+                body: tableBody,
+                didDrawCell: (data) => {
+                    if (data.section === 'body' && data.column.index === 0 && data.cell.raw !== '') {
+                       if(data.row.index > 0){
+                         docPdf.setDrawColor(200); // set line color to gray
+                         docPdf.line(data.cell.x, data.cell.y, data.cell.x + data.cell.width, data.cell.y );
+                       }
+                    }
+                },
+                styles: { fontSize: 8, cellPadding: 2 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+                columnStyles: {
+                    0: { cellWidth: 'auto' },
+                }
+            });
+    
+            docPdf.save(`Cronograma_${selectedOrder.quotationNumber}.pdf`);
+    
+        } catch (error) {
+            console.error("Error exporting schedule:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar cronograma",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
 
     return (
         <>
@@ -948,7 +1095,7 @@ export default function OrdersPage() {
                                                                 </TableHead>
                                                                 <TableHead>Descrição</TableHead>
                                                                 <TableHead className="text-center w-[80px]">Qtd.</TableHead>
-                                                                <TableHead className="text-right w-[120px]">Peso Unit.</TableHead>
+                                                                <TableHead className="text-center w-[120px]">Progresso</TableHead>
                                                                 <TableHead className="text-right w-[150px]">Peso Total</TableHead>
                                                             </TableRow>
                                                         </TableHeader>
@@ -967,7 +1114,11 @@ export default function OrdersPage() {
                                                                         {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
                                                                     </TableCell>
                                                                     <TableCell className="text-center">{item.quantity}</TableCell>
-                                                                    <TableCell className="text-right">{(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                                                                    <TableCell className="text-center">
+                                                                        <Button variant="outline" size="icon" onClick={() => handleOpenProgressModal(item)}>
+                                                                            <ListChecks className="h-4 w-4" />
+                                                                        </Button>
+                                                                    </TableCell>
                                                                     <TableCell className="text-right font-semibold">{( (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0) ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
                                                                 </TableRow>
                                                             ))}
@@ -977,14 +1128,23 @@ export default function OrdersPage() {
                                             </Card>
                                         </div>
                                     </ScrollArea>
-                                    <SheetFooter className="pt-4 pr-6 border-t flex sm:justify-between items-center">
-                                        <Button 
-                                            onClick={handleGeneratePackingSlip} 
-                                            disabled={selectedItems.size === 0}
-                                        >
-                                            <FileText className="mr-2 h-4 w-4" />
-                                            Emitir Romaneio ({selectedItems.size})
-                                        </Button>
+                                    <SheetFooter className="pt-4 pr-6 border-t flex flex-wrap gap-2 sm:justify-between items-center">
+                                        <div className="flex gap-2">
+                                            <Button 
+                                                onClick={handleGeneratePackingSlip} 
+                                                disabled={selectedItems.size === 0}
+                                            >
+                                                <FileText className="mr-2 h-4 w-4" />
+                                                Emitir Romaneio ({selectedItems.size})
+                                            </Button>
+                                             <Button 
+                                                onClick={handleExportSchedule}
+                                                variant="outline"
+                                            >
+                                                <GanttChart className="mr-2 h-4 w-4" />
+                                                Exportar Cronograma
+                                            </Button>
+                                        </div>
                                         <Button onClick={() => setIsEditing(true)}>
                                             <Edit className="mr-2 h-4 w-4" />
                                             Editar Pedido
@@ -996,6 +1156,87 @@ export default function OrdersPage() {
                     )}
                 </SheetContent>
             </Sheet>
+
+            <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
+                <DialogContent className="sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
+                        <DialogDescription>
+                            Atualize o status e as datas para cada etapa de fabricação.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <ScrollArea className="max-h-[60vh]">
+                        <div className="space-y-4 p-1 pr-4">
+                            {(editedPlan || []).map((stage, index) => (
+                                <Card key={index} className="p-4">
+                                    <CardTitle className="text-lg mb-4">{stage.stageName}</CardTitle>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label>Status</Label>
+                                            <Select 
+                                                value={stage.status} 
+                                                onValueChange={(value) => handleProgressChange(index, 'status', value)}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Selecione o status" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Pendente">Pendente</SelectItem>
+                                                    <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                                                    <SelectItem value="Concluído">Concluído</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                        <div className="space-y-2">
+                                            <Label>Data de Início</Label>
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.startDate && "text-muted-foreground")}>
+                                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                                        {stage.startDate ? format(new Date(stage.startDate), "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0">
+                                                    <Calendar mode="single" selected={stage.startDate ? new Date(stage.startDate) : undefined} onSelect={(date) => handleProgressChange(index, 'startDate', date)} initialFocus />
+                                                </PopoverContent>
+                                            </Popover>
+                                        </div>
+                                         <div className="space-y-2">
+                                            <Label>Data de Conclusão</Label>
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.completedDate && "text-muted-foreground")}>
+                                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                                        {stage.completedDate ? format(new Date(stage.completedDate), "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0">
+                                                    <Calendar mode="single" selected={stage.completedDate ? new Date(stage.completedDate) : undefined} onSelect={(date) => handleProgressChange(index, 'completedDate', date)} initialFocus />
+                                                </PopoverContent>
+                                            </Popover>
+                                        </div>
+                                    </div>
+                                </Card>
+                            ))}
+                            {(editedPlan?.length === 0) && (
+                                <div className="text-center text-muted-foreground py-8">
+                                    <p>Nenhuma etapa de fabricação definida para este item.</p>
+                                    <p className="text-sm">Você pode definir as etapas na tela de Produtos.</p>
+                                </div>
+                            )}
+                        </div>
+                    </ScrollArea>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleSaveProgress}>Salvar Progresso</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }
+
+
+    
