@@ -334,9 +334,10 @@ export default function OrdersPage() {
         }
     };
     
-    const fetchOrders = async () => {
-        if (!user) return;
+    const fetchOrders = async (): Promise<Order[]> => {
+        if (!user) return [];
         setIsLoading(true);
+        let ordersList: Order[] = [];
         try {
             const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
             const productsMap = new Map<string, { unitWeight: number }>();
@@ -348,7 +349,7 @@ export default function OrdersPage() {
             });
 
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
-            const ordersList = querySnapshot.docs.map(doc => {
+            ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
                 const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
                 const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
@@ -431,6 +432,7 @@ export default function OrdersPage() {
         } finally {
             setIsLoading(false);
         }
+        return ordersList;
     };
 
     useEffect(() => {
@@ -850,27 +852,35 @@ export default function OrdersPage() {
     
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
-            const updatedItems = selectedOrder.items.map(item => {
+            const itemsForFirestore = selectedOrder.items.map(item => {
+                let planForFirestore: any[];
+    
                 if (item.id === itemToTrack.id) {
-                    return { 
-                        ...item, 
-                        productionPlan: editedPlan.map(p => ({
-                            stageName: p.stageName,
-                            status: p.status,
-                            durationDays: p.durationDays,
-                            startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
-                            completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
-                        }))
-                    };
+                    planForFirestore = editedPlan.map(p => ({
+                        ...p,
+                        startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
+                        completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
+                    }));
+                } else {
+                    planForFirestore = (item.productionPlan || []).map(p => ({
+                        ...p,
+                        startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
+                        completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                    }));
                 }
-                return item;
+                return {...item, productionPlan: planForFirestore };
             });
     
-            await updateDoc(orderRef, { items: updatedItems });
+            await updateDoc(orderRef, { items: itemsForFirestore });
             toast({ title: "Progresso salvo!", description: "As etapas de produção foram atualizadas." });
             setIsProgressModalOpen(false);
             setItemToTrack(null);
-            await fetchOrders(); 
+
+            const allOrders = await fetchOrders();
+            const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
+            if (updatedOrder) {
+                setSelectedOrder(updatedOrder);
+            }
         } catch (error) {
             console.error("Error saving progress:", error);
             toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar o progresso do item." });
@@ -892,7 +902,6 @@ export default function OrdersPage() {
             const pageHeight = docPdf.internal.pageSize.height;
             let yPos = 15;
     
-            // Professional Header - Logo left, Company Info right
             if (companyData.logo?.preview) {
                 try {
                     docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
@@ -939,7 +948,7 @@ export default function OrdersPage() {
             const tableBody: any[] = [];
             selectedOrder.items.forEach(item => {
                 const itemProgress = calculateItemProgress(item);
-                const itemHeaderText = `${item.description} (Qtd: ${item.quantity}${item.code ? `, Cód: ${item.code}` : ''}) - Progresso: ${Math.round(itemProgress)}%`;
+                const itemHeaderText = `${item.description} (Qtd: ${item.quantity}, Cód: ${item.code || 'N/A'}) - Progresso: ${Math.round(itemProgress)}%`;
                 tableBody.push([
                     { 
                         content: itemHeaderText, 
@@ -947,7 +956,7 @@ export default function OrdersPage() {
                         styles: { 
                             halign: 'left', 
                             fontStyle: 'bold', 
-                            fillColor: [240, 248, 255], // AliceBlue
+                            fillColor: [240, 248, 255], 
                             textColor: [51, 51, 51],
                             cellPadding: 3,
                         }
@@ -986,7 +995,7 @@ export default function OrdersPage() {
                 theme: 'grid',
                 styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
                 headStyles: { 
-                    fillColor: [51, 122, 183], // Primary color HSL(210, 60%, 50%)
+                    fillColor: [51, 122, 183], 
                     fontSize: 9, 
                     textColor: 255, 
                     fontStyle: 'bold' 
@@ -994,9 +1003,9 @@ export default function OrdersPage() {
                 columnStyles: {
                     0: { cellWidth: 125 },
                     1: { cellWidth: 35, halign: 'center' },
-                    2: { cellWidth: 35, halign: 'center' },
-                    3: { cellWidth: 35, halign: 'center' },
-                    4: { cellWidth: 30, halign: 'center' },
+                    2: { cellWidth: 25, halign: 'center' },
+                    3: { cellWidth: 25, halign: 'center' },
+                    4: { cellWidth: 20, halign: 'center' },
                 }
             });
             
