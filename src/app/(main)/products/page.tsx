@@ -513,8 +513,8 @@ export default function ProductsPage() {
                   <FormField control={form.control} name="code" render={({ field }) => (
                       <FormItem>
                           <FormLabel>Código do Produto</FormLabel>
-                          <FormControl><Input placeholder="Ex: PROD-001" {...field} disabled={!!selectedProduct} /></FormControl>
-                          <FormDescription>O código não pode conter '/' e não pode ser alterado após a criação.</FormDescription>
+                          <FormControl><Input placeholder="Ex: PROD-001" {...field} /></FormControl>
+                          <FormDescription>O código do produto não pode conter '/'. Alterar o código criará um novo registro para o produto.</FormDescription>
                           <FormMessage />
                       </FormItem>
                   )} />
@@ -536,7 +536,7 @@ export default function ProductsPage() {
                       <FormField control={form.control} name="unitWeight" render={({ field }) => (
                           <FormItem>
                               <FormLabel>Peso Unit. (kg)</FormLabel>
-                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? 0} /></FormControl>
                               <FormMessage />
                           </FormItem>
                       )} />
@@ -625,7 +625,7 @@ export default function ProductsPage() {
                                                         step="any"
                                                         className="h-8 w-20"
                                                         placeholder="Dias"
-                                                        value={currentStage?.durationDays ?? ''}
+                                                        value={currentStage?.durationDays ?? 0}
                                                         onChange={(e) => {
                                                             const value = e.target.value;
                                                             const sanitizedValue = value.replace(',', '.');
