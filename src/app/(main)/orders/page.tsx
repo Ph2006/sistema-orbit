@@ -70,21 +70,39 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
     }, 0);
 };
 
+const mapOrderStatus = (status?: string): string => {
+    if (!status) return "Não definido";
+    const lowerStatus = status.toLowerCase().trim();
+    
+    const statusMap: { [key: string]: string } = {
+        'in production': 'Em Produção',
+        'em produção': 'Em Produção',
+        'awaiting production': 'Aguardando Produção',
+        'aguardando produção': 'Aguardando Produção',
+        'pending': 'Aguardando Produção',
+        'completed': 'Concluído',
+        'concluído': 'Concluído',
+        'finished': 'Concluído',
+        'cancelled': 'Cancelado',
+        'cancelado': 'Cancelado',
+    };
+
+    return statusMap[lowerStatus] || status;
+};
+
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
-    const lowerStatus = status ? status.toLowerCase() : '';
-    if (lowerStatus.includes("produção") && !lowerStatus.includes("aguardando")) {
-        return { variant: "default", icon: PlayCircle, label: "Em Produção", colorClass: "" };
+    switch (status) {
+        case "Em Produção":
+            return { variant: "default", icon: PlayCircle, label: "Em Produção", colorClass: "" };
+        case "Aguardando Produção":
+            return { variant: "secondary", icon: Hourglass, label: "Aguardando Produção", colorClass: "" };
+        case "Concluído":
+            return { variant: "default", icon: CheckCircle, label: "Concluído", colorClass: "bg-green-600 hover:bg-green-600/90" };
+        case "Cancelado":
+            return { variant: "destructive", icon: XCircle, label: "Cancelado", colorClass: "" };
+        default:
+            return { variant: "outline", icon: Package, label: status || "Não definido", colorClass: "" };
     }
-    if (lowerStatus.includes("aguardando")) {
-        return { variant: "secondary", icon: Hourglass, label: "Aguardando Produção", colorClass: "" };
-    }
-    if (lowerStatus.includes("concluído")) {
-        return { variant: "default", icon: CheckCircle, label: "Concluído", colorClass: "bg-green-600 hover:bg-green-600/90" };
-    }
-    if (lowerStatus.includes("cancelado")) {
-        return { variant: "destructive", icon: XCircle, label: "Cancelado", colorClass: "" };
-    }
-    return { variant: "outline", icon: Package, label: status || "Não definido", colorClass: "" };
 };
 
 function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: (order: Order) => void; }) {
@@ -240,7 +258,7 @@ export default function OrdersPage() {
                     customer: customerInfo,
                     items: enrichedItems,
                     totalValue: data.totalValue || 0,
-                    status: data.status || 'Status não definido',
+                    status: mapOrderStatus(data.status),
                     createdAt: createdAtDate,
                     deliveryDate: deliveryDate,
                     totalWeight: calculateTotalWeight(enrichedItems),
