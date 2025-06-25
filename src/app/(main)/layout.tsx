@@ -7,6 +7,7 @@ import {
   Sidebar,
   SidebarHeader,
   SidebarContent,
+  SidebarFooter,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -134,7 +135,7 @@ function AuthWrapper({ children, pathname }: { children: React.ReactNode; pathna
           <div className="flex items-center gap-2">
             <OrbitLogo className="w-8 h-8" />
             <h1 className="text-xl font-headline font-semibold text-primary">
-              Orbit System
+              Sistema OrbIT
             </h1>
           </div>
         </SidebarHeader>
@@ -156,6 +157,10 @@ function AuthWrapper({ children, pathname }: { children: React.ReactNode; pathna
             ))}
           </SidebarMenu>
         </SidebarContent>
+        <SidebarFooter className="mt-auto p-4 text-center text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+            <p>© 2025 Sistema OrbIT — Versão 1.0 — Todos os direitos reservados.</p>
+            <p className="mt-2">Desenvolvido por Paulo Henrique Nascimento Ribeiro.</p>
+        </SidebarFooter>
       </Sidebar>
       <SidebarInset>
         <header className="flex items-center justify-start p-2 border-b">

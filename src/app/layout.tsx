@@ -3,7 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'Orbit System',
+  title: 'Sistema OrbIT',
   description: 'Sistema de monitoramento da produção',
 };
 
@@ -26,5 +26,3 @@ export default function RootLayout({
     </html>
   );
 }
-
-    

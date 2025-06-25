@@ -14,7 +14,7 @@ export default function LoginPage() {
           <div className="flex justify-center mb-4">
             <OrbitLogo className="h-16 w-16" />
           </div>
-          <CardTitle className="text-3xl font-headline text-primary">Orbit System</CardTitle>
+          <CardTitle className="text-3xl font-headline text-primary">Sistema OrbIT</CardTitle>
           <CardDescription className="text-lg">
             Monitoramento de produção inteligente
           </CardDescription>
@@ -38,5 +38,3 @@ export default function LoginPage() {
     </main>
   );
 }
-
-    
