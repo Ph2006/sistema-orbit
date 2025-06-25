@@ -65,10 +65,20 @@ const orderItemSchema = z.object({
     productionPlan: z.array(productionStageSchema).optional(),
 });
 
+const orderStatusEnum = z.enum([
+    "Aguardando Produção",
+    "Em Produção",
+    "Pronto para Entrega",
+    "Concluído",
+    "Cancelado",
+    "Atrasado",
+]);
+
 const orderSchema = z.object({
   id: z.string(),
   internalOS: z.string().optional(),
   projectName: z.string().optional(),
+  status: orderStatusEnum,
   items: z.array(orderItemSchema),
   driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
   documents: z.object({
@@ -421,7 +431,7 @@ export default function OrdersPage() {
                     driveLink: data.driveLink || '',
                     documents: data.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
                 } as Order;
-            }).sort((a, b) => (b.quotationNumber || 0) - (a.quotationNumber || 0));
+            });
             
             setOrders(ordersList);
         } catch (error) {
@@ -448,6 +458,7 @@ export default function OrdersPage() {
         setSelectedOrder(order);
         form.reset({
             ...order,
+            status: order.status as any,
             documents: order.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
         });
         setIsEditing(false);
@@ -484,6 +495,7 @@ export default function OrdersPage() {
                 projectName: values.projectName,
                 driveLink: values.driveLink,
                 documents: values.documents,
+                status: values.status,
             };
     
             await updateDoc(orderRef, dataToSave);
@@ -498,7 +510,10 @@ export default function OrdersPage() {
                 ...dataToSave,
             };
             setSelectedOrder(updatedOrderInState);
-            form.reset(updatedOrderInState);
+            form.reset({
+                ...updatedOrderInState,
+                status: updatedOrderInState.status as any,
+            });
     
             setIsEditing(false);
             await fetchOrders();
@@ -517,26 +532,48 @@ export default function OrdersPage() {
         return Array.from(statuses);
     }, [orders]);
 
-    const filteredOrders = useMemo(() => orders.filter(order => {
-        const query = searchQuery.toLowerCase();
-        const customerName = order.customer?.name?.toLowerCase() || '';
-        const status = order.status?.toLowerCase() || '';
-        const quotationNumber = order.quotationNumber?.toString() || '';
-        const internalOS = order.internalOS?.toLowerCase() || '';
-        const projectName = order.projectName?.toLowerCase() || '';
+    const filteredOrders = useMemo(() => {
+        const filtered = orders.filter(order => {
+            const query = searchQuery.toLowerCase();
+            const customerName = order.customer?.name?.toLowerCase() || '';
+            const status = order.status?.toLowerCase() || '';
+            const quotationNumber = order.quotationNumber?.toString() || '';
+            const internalOS = order.internalOS?.toLowerCase() || '';
+            const projectName = order.projectName?.toLowerCase() || '';
 
-        const textMatch = quotationNumber.includes(query) ||
-            customerName.includes(query) ||
-            status.includes(query) ||
-            internalOS.includes(query) ||
-            projectName.includes(query);
+            const textMatch = quotationNumber.includes(query) ||
+                customerName.includes(query) ||
+                status.includes(query) ||
+                internalOS.includes(query) ||
+                projectName.includes(query);
 
-        const statusMatch = statusFilter === 'all' || order.status === statusFilter;
-        const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
-        const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
+            const statusMatch = statusFilter === 'all' || order.status === statusFilter;
+            const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
+            const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
 
-        return textMatch && statusMatch && customerMatch && dateMatch;
-    }), [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
+            return textMatch && statusMatch && customerMatch && dateMatch;
+        });
+
+        return filtered.sort((a, b) => {
+            const aIsCompleted = a.status === 'Concluído';
+            const bIsCompleted = b.status === 'Concluído';
+
+            if (aIsCompleted && !bIsCompleted) return 1;
+            if (!aIsCompleted && bIsCompleted) return -1;
+            
+            const aDate = a.deliveryDate;
+            const bDate = b.deliveryDate;
+
+            if (aDate && !bDate) return -1;
+            if (!aDate && bDate) return 1;
+            if (aDate && bDate) {
+                const dateComparison = aDate.getTime() - bDate.getTime();
+                if (dateComparison !== 0) return dateComparison;
+            }
+
+            return (b.quotationNumber || 0) - (a.quotationNumber || 0);
+        });
+    }, [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
     
     const watchedItems = form.watch("items");
     const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
@@ -1079,7 +1116,10 @@ export default function OrdersPage() {
             const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
             if (updatedOrder) {
                 setSelectedOrder(updatedOrder);
-                form.reset(updatedOrder);
+                form.reset({
+                    ...updatedOrder,
+                    status: updatedOrder.status as any,
+                });
             }
 
         } catch (error) {
@@ -1215,7 +1255,7 @@ export default function OrdersPage() {
                                         <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
                                             <div className="space-y-6">
                                                 <Card className="p-4 bg-secondary/50">
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                         <FormField control={form.control} name="internalOS" render={({ field }) => (
                                                             <FormItem>
                                                                 <FormLabel>OS Interna</FormLabel>
@@ -1230,6 +1270,30 @@ export default function OrdersPage() {
                                                                 <FormMessage />
                                                             </FormItem>
                                                         )}/>
+                                                        <FormField
+                                                            control={form.control}
+                                                            name="status"
+                                                            render={({ field }) => (
+                                                                <FormItem>
+                                                                    <FormLabel>Status do Pedido</FormLabel>
+                                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                        <FormControl>
+                                                                            <SelectTrigger>
+                                                                                <SelectValue placeholder="Selecione um status" />
+                                                                            </SelectTrigger>
+                                                                        </FormControl>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
+                                                                            <SelectItem value="Em Produção">Em Produção</SelectItem>
+                                                                            <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
+                                                                            <SelectItem value="Concluído">Concluído</SelectItem>
+                                                                            <SelectItem value="Cancelado">Cancelado</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                    <FormMessage />
+                                                                </FormItem>
+                                                            )}
+                                                        />
                                                     </div>
                                                     <div className="space-y-4 mt-4">
                                                         <FormField control={form.control} name="driveLink" render={({ field }) => (
