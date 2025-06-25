@@ -51,7 +51,7 @@ const quotationSchema = z.object({
   items: z.array(itemSchema).min(1, "Adicione pelo menos um item ao orçamento."),
 });
 
-type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp };
+type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp, number: number };
 type Customer = { id: string, nomeFantasia: string };
 
 export default function QuotationsPage() {
@@ -132,6 +132,7 @@ export default function QuotationsPage() {
 
                 return {
                     id: doc.id,
+                    number: data.number || 0,
                     customer: { 
                         id: data.customerId || (data.customer?.id || ''), 
                         name: data.customerName || (data.customer?.name || 'N/A') 
@@ -145,7 +146,7 @@ export default function QuotationsPage() {
                     createdAt: getCreatedAt(),
                 } as Quotation;
             });
-            setQuotations(quotationsList.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis()));
+            setQuotations(quotationsList.sort((a, b) => (b.number || 0) - (a.number || 0)));
         } catch (error) {
             console.error("Error fetching quotations:", error);
             toast({
@@ -167,21 +168,27 @@ export default function QuotationsPage() {
     
     const onSubmit = async (values: z.infer<typeof quotationSchema>) => {
         try {
-            const dataToSave = {
+            let dataToSave: any = {
                 ...values,
-                customerName: values.customer.name, // Save flat for compatibility
+                customerName: values.customer.name,
                 customerId: values.customer.id,
-                createdAt: selectedQuotation?.createdAt || Timestamp.now(),
                 updatedAt: Timestamp.now(),
-            }
+            };
             // @ts-ignore
-            delete dataToSave.customer; // Remove nested object before saving
+            delete dataToSave.customer;
 
             if (selectedQuotation) {
+                dataToSave.createdAt = selectedQuotation.createdAt;
+                dataToSave.number = selectedQuotation.number;
                 const quotationRef = doc(db, "companies", "mecald", "quotations", selectedQuotation.id);
                 await updateDoc(quotationRef, dataToSave);
                 toast({ title: "Orçamento atualizado!" });
             } else {
+                const highestNumber = quotations.length > 0
+                    ? Math.max(...quotations.map(q => q.number || 0))
+                    : 0;
+                dataToSave.number = highestNumber + 1;
+                dataToSave.createdAt = Timestamp.now();
                 await addDoc(collection(db, "companies", "mecald", "quotations"), dataToSave);
                 toast({ title: "Orçamento criado!" });
             }
@@ -244,7 +251,7 @@ export default function QuotationsPage() {
     const filteredQuotations = quotations.filter((q) => {
         const query = searchQuery.toLowerCase();
         return (
-            q.id.toLowerCase().includes(query) ||
+            (q.number?.toString() || '').toLowerCase().includes(query) ||
             q.customer.name.toLowerCase().includes(query) ||
             q.status.toLowerCase().includes(query)
         );
@@ -308,7 +315,7 @@ export default function QuotationsPage() {
                                     {filteredQuotations.length > 0 ? (
                                         filteredQuotations.map((q) => (
                                             <TableRow key={q.id} onClick={() => handleViewQuotation(q)} className="cursor-pointer">
-                                                <TableCell className="font-medium truncate max-w-[120px]">{q.id.substring(0,8).toUpperCase()}</TableCell>
+                                                <TableCell className="font-medium">{q.number}</TableCell>
                                                 <TableCell>{q.customer.name}</TableCell>
                                                 <TableCell>{format(q.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
                                                 <TableCell>
@@ -448,7 +455,7 @@ export default function QuotationsPage() {
                     {selectedQuotation && (
                         <>
                         <SheetHeader>
-                            <SheetTitle className="font-headline">Orçamento Nº {selectedQuotation.id.substring(0, 8).toUpperCase()}</SheetTitle>
+                            <SheetTitle className="font-headline">Orçamento Nº {selectedQuotation.number}</SheetTitle>
                             <SheetDescription>
                                 Cliente: {selectedQuotation.customer.name}
                             </SheetDescription>
