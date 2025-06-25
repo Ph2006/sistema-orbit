@@ -31,8 +31,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type Task = {
   orderId: string;
   quotationNumber: number;
+  internalOS: string;
   customerName: string;
   itemName: string;
+  itemQuantity: number;
+  itemWeight: number;
   stageName: string;
   startDate: Date | null;
   dueDate: Date | null;
@@ -86,14 +89,16 @@ export default function TasksPage() {
           (item.productionPlan || []).forEach((stage: any) => {
             const completedDate = stage.completedDate?.toDate ? stage.completedDate.toDate() : null;
             const startDate = stage.startDate?.toDate ? stage.startDate.toDate() : null;
-            const now = endOfDay(new Date());
-
+            
             if (stage.status !== 'Concluído') {
                 allTasks.push({
                     orderId: orderDoc.id,
                     quotationNumber: orderData.quotationNumber || 0,
+                    internalOS: orderData.internalOS || 'N/A',
                     customerName: orderData.customer?.name || 'N/A',
                     itemName: item.description,
+                    itemQuantity: item.quantity || 0,
+                    itemWeight: (item.quantity || 0) * (item.unitWeight || 0),
                     stageName: stage.stageName,
                     startDate: startDate,
                     dueDate: completedDate,
@@ -236,15 +241,15 @@ export default function TasksPage() {
         docPdf.text(`Relatório de Tarefas - ${format(new Date(), 'dd/MM/yyyy')}`, pageWidth / 2, y, { align: 'center' });
         y += 15;
 
-        const tableHead = [['Pedido', 'Cliente', 'Item / Etapa', 'Data Prevista', 'Responsável']];
+        const tableHead = [['Pedido / OS', 'Cliente', 'Item / Etapa', 'Data Prevista', 'Responsável']];
         const addSection = (title: string, tasks: Task[], color: [number, number, number] | undefined = undefined) => {
             if (tasks.length > 0) {
                 docPdf.setFontSize(12).setFont(undefined, 'bold').text(title, 15, y);
                 y += 7;
                 const body = tasks.map(task => [
-                    `Nº ${task.quotationNumber}`,
+                    `Nº ${task.quotationNumber}\nOS: ${task.internalOS}`,
                     task.customerName,
-                    `${task.itemName}\n • ${task.stageName}`,
+                    `${task.itemName}\n • ${task.stageName}\nQtd: ${task.itemQuantity} | Peso: ${task.itemWeight.toLocaleString('pt-BR')} kg`,
                     task.dueDate ? format(task.dueDate, 'dd/MM/yy') : (task.startDate ? `Início ${format(task.startDate, 'dd/MM/yy')}` : 'N/A'),
                     task.responsible
                 ]);
@@ -289,8 +294,13 @@ export default function TasksPage() {
                         <TableCell className="font-medium">Nº {task.quotationNumber}</TableCell>
                         <TableCell>{task.customerName}</TableCell>
                         <TableCell>
-                            <span className="font-medium">{task.itemName}</span>
-                            <span className="block text-muted-foreground text-sm">&bull; {task.stageName}</span>
+                            <div className="font-medium">{task.itemName}</div>
+                            <div className="text-muted-foreground text-sm">&bull; {task.stageName}</div>
+                            <div className="text-muted-foreground text-xs mt-1 flex gap-x-4 gap-y-1 flex-wrap">
+                                <span>OS: <span className="font-semibold text-foreground/90">{task.internalOS}</span></span>
+                                <span>Qtd: <span className="font-semibold text-foreground/90">{task.itemQuantity}</span></span>
+                                <span>Peso: <span className="font-semibold text-foreground/90">{task.itemWeight.toLocaleString('pt-BR')} kg</span></span>
+                            </div>
                         </TableCell>
                         <TableCell>
                           {task.dueDate ? format(task.dueDate, 'dd/MM/yyyy') : 
