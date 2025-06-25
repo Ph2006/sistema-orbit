@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -41,6 +41,7 @@ const orderSchema = z.object({
   id: z.string(),
   internalOS: z.string().optional(),
   items: z.array(orderItemSchema),
+  driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
 });
 
 type OrderItem = z.infer<typeof orderItemSchema>;
@@ -59,6 +60,7 @@ type Order = {
     status: string;
     createdAt: Date;
     deliveryDate?: Date;
+    driveLink?: string;
 };
 
 
@@ -280,6 +282,7 @@ export default function OrdersPage() {
                     createdAt: createdAtDate,
                     deliveryDate: deliveryDate,
                     totalWeight: calculateTotalWeight(enrichedItems),
+                    driveLink: data.driveLink || '',
                 } as Order;
             }).sort((a, b) => (b.quotationNumber || 0) - (a.quotationNumber || 0));
             
@@ -334,6 +337,7 @@ export default function OrdersPage() {
                 items: updatedItems,
                 totalWeight: totalWeight,
                 internalOS: values.internalOS,
+                driveLink: values.driveLink,
             };
     
             await updateDoc(orderRef, dataToSave);
@@ -546,13 +550,22 @@ export default function OrdersPage() {
                                         <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
                                             <div className="space-y-6">
                                                 <Card className="p-4 bg-secondary/50">
-                                                    <FormField control={form.control} name="internalOS" render={({ field }) => (
-                                                        <FormItem>
-                                                            <FormLabel>OS Interna</FormLabel>
-                                                            <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
-                                                            <FormMessage />
-                                                        </FormItem>
-                                                    )}/>
+                                                    <div className="space-y-4">
+                                                        <FormField control={form.control} name="internalOS" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>OS Interna</FormLabel>
+                                                                <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField control={form.control} name="driveLink" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Link da Pasta (Google Drive)</FormLabel>
+                                                                <FormControl><Input type="url" placeholder="https://drive.google.com/..." {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                    </div>
                                                 </Card>
                                                 <Card>
                                                     <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
@@ -669,7 +682,17 @@ export default function OrdersPage() {
                                             </Card>
                                         </div>
                                     </ScrollArea>
-                                    <SheetFooter className="pt-4 pr-6 border-t">
+                                    <SheetFooter className="pt-4 pr-6 border-t flex flex-col sm:flex-row sm:justify-between sm:items-center">
+                                        <div>
+                                            {selectedOrder.driveLink && (
+                                                <Button variant="outline" asChild>
+                                                    <a href={selectedOrder.driveLink} target="_blank" rel="noopener noreferrer">
+                                                        <FolderGit2 className="mr-2 h-4 w-4" />
+                                                        Abrir pasta no Drive
+                                                    </a>
+                                                </Button>
+                                            )}
+                                        </div>
                                         <Button onClick={() => setIsEditing(true)}>
                                             <Edit className="mr-2 h-4 w-4" />
                                             Editar Pedido
