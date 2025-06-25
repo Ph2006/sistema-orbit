@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2 } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -45,6 +45,7 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 const productionStageSchema = z.object({
     stageName: z.string(),
@@ -303,6 +304,8 @@ export default function OrdersPage() {
     const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
     const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
     const [isFetchingPlan, setIsFetchingPlan] = useState(false);
+    const [isCopyProgressModalOpen, setIsCopyProgressModalOpen] = useState(false);
+    const [sourceItemId, setSourceItemId] = useState<string | null>(null);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -1028,6 +1031,71 @@ export default function OrdersPage() {
         }
     };
 
+    const handleOpenCopyProgressModal = () => {
+      if (!selectedOrder || selectedItems.size < 2) {
+        toast({
+          variant: "destructive",
+          title: "Seleção inválida",
+          description: "Selecione pelo menos dois itens (um para copiar e um para colar).",
+        });
+        return;
+      }
+      setSourceItemId(null); // Reset source selection
+      setIsCopyProgressModalOpen(true);
+    };
+    
+    const handleConfirmCopyProgress = async () => {
+        if (!selectedOrder || !sourceItemId || selectedItems.size < 2) {
+            return;
+        }
+    
+        try {
+            const sourceItem = selectedOrder.items.find(item => item.id === sourceItemId);
+            if (!sourceItem) {
+                throw new Error("Item de origem não encontrado.");
+            }
+    
+            const sourceProductionPlan = sourceItem.productionPlan || [];
+    
+            const updatedItems = selectedOrder.items.map(item => {
+                if (selectedItems.has(item.id!) && item.id !== sourceItemId) {
+                    // Deep copy the plan to avoid reference issues
+                    return { ...item, productionPlan: JSON.parse(JSON.stringify(sourceProductionPlan)) };
+                }
+                return item;
+            });
+    
+            const itemsForFirestore = updatedItems.map(item => {
+                const planForFirestore = (item.productionPlan || []).map(p => ({
+                    ...p,
+                    startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
+                    completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                }));
+                const cleanItem = { ...item };
+                // @ts-ignore
+                delete cleanItem.product_code; 
+                return { ...cleanItem, productionPlan: planForFirestore };
+            });
+    
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            await updateDoc(orderRef, { items: itemsForFirestore });
+    
+            toast({ title: "Progresso copiado!", description: `As etapas foram copiadas para ${selectedItems.size - 1} item(ns).` });
+            setIsCopyProgressModalOpen(false);
+            
+            const allOrders = await fetchOrders();
+            const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
+            if (updatedOrder) {
+                setSelectedOrder(updatedOrder);
+                form.reset(updatedOrder);
+            }
+    
+        } catch (error) {
+            console.error("Error copying progress:", error);
+            toast({ variant: "destructive", title: "Erro ao copiar", description: "Não foi possível copiar o progresso dos itens." });
+        }
+    };
+
 
     return (
         <>
@@ -1409,7 +1477,7 @@ export default function OrdersPage() {
                                         </div>
                                     </ScrollArea>
                                     <SheetFooter className="pt-4 pr-6 border-t flex flex-wrap gap-2 sm:justify-between items-center">
-                                        <div className="flex gap-2">
+                                        <div className="flex gap-2 flex-wrap">
                                             <Button 
                                                 onClick={handleGeneratePackingSlip} 
                                                 disabled={selectedItems.size === 0}
@@ -1423,6 +1491,14 @@ export default function OrdersPage() {
                                             >
                                                 <GanttChart className="mr-2 h-4 w-4" />
                                                 Exportar Cronograma
+                                            </Button>
+                                            <Button
+                                              onClick={handleOpenCopyProgressModal}
+                                              disabled={selectedItems.size < 2}
+                                              variant="outline"
+                                            >
+                                              <Copy className="mr-2 h-4 w-4" />
+                                              Copiar Progresso
                                             </Button>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -1536,6 +1612,42 @@ export default function OrdersPage() {
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>Cancelar</Button>
                         <Button onClick={handleSaveProgress}>Salvar Progresso</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isCopyProgressModalOpen} onOpenChange={setIsCopyProgressModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Copiar Progresso de Fabricação</DialogTitle>
+                        <DialogDescription>
+                            Selecione o item de ORIGEM. O progresso dele será copiado para todos os outros itens selecionados.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <ScrollArea className="max-h-[60vh]">
+                        <div className="py-4 pr-4">
+                            <RadioGroup value={sourceItemId ?? undefined} onValueChange={setSourceItemId} className="space-y-2">
+                                {selectedOrder && Array.from(selectedItems).map(itemId => {
+                                    const item = selectedOrder.items.find(i => i.id === itemId);
+                                    if (!item) return null;
+                                    return (
+                                        <Label key={item.id} htmlFor={`r-${item.id}`} className="flex items-center space-x-3 border p-3 rounded-md has-[:checked]:bg-secondary cursor-pointer">
+                                            <RadioGroupItem value={item.id!} id={`r-${item.id}`} />
+                                            <div className="flex-1">
+                                                <p className="font-medium">{item.description}</p>
+                                                <p className="text-xs text-muted-foreground">Cód: {item.code || 'N/A'}</p>
+                                            </div>
+                                        </Label>
+                                    );
+                                })}
+                            </RadioGroup>
+                        </div>
+                    </ScrollArea>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsCopyProgressModalOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleConfirmCopyProgress} disabled={!sourceItemId}>
+                            Confirmar Cópia
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
