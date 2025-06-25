@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 
 const productionStageSchema = z.object({
     stageName: z.string(),
@@ -121,6 +122,23 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
         return acc + (quantity * unitWeight);
     }, 0);
 };
+
+const calculateItemProgress = (item: OrderItem): number => {
+    if (!item.productionPlan || item.productionPlan.length === 0) {
+        return 0;
+    }
+    const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
+    return (completedStages / item.productionPlan.length) * 100;
+};
+
+const calculateOrderProgress = (order: Order): number => {
+    if (!order.items || order.items.length === 0) {
+        return 0;
+    }
+    const totalProgress = order.items.reduce((acc, item) => acc + calculateItemProgress(item), 0);
+    return totalProgress / order.items.length;
+};
+
 
 const mapOrderStatus = (status?: string): string => {
     if (!status) return "Não definido";
@@ -209,7 +227,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
              <Table>
                 <TableBody>
                     <TableRow>
-                        <TableCell colSpan={8} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
+                        <TableCell colSpan={9} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
                     </TableRow>
                 </TableBody>
             </Table>
@@ -220,19 +238,21 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
         <Table>
             <TableHeader>
                 <TableRow>
-                    <TableHead className="w-[120px]">Nº Pedido</TableHead>
-                    <TableHead className="w-[150px]">OS Interna</TableHead>
-                    <TableHead className="w-[200px]">Projeto Cliente</TableHead>
+                    <TableHead className="w-[100px]">Nº Pedido</TableHead>
+                    <TableHead className="w-[120px]">OS Interna</TableHead>
+                    <TableHead>Projeto Cliente</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead className="w-[100px] text-center">Docs</TableHead>
                     <TableHead className="w-[120px]">Data Entrega</TableHead>
-                    <TableHead className="w-[150px] text-right">Peso Total</TableHead>
-                    <TableHead className="w-[200px]">Status</TableHead>
+                    <TableHead className="w-[120px] text-right">Peso Total</TableHead>
+                    <TableHead className="w-[150px]">Progresso</TableHead>
+                    <TableHead className="w-[180px]">Status</TableHead>
                 </TableRow>
             </TableHeader>
             <TableBody>
                 {orders.map((order) => {
                     const statusProps = getStatusProps(order.status);
+                    const orderProgress = calculateOrderProgress(order);
                     return (
                         <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
@@ -245,6 +265,12 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                             <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
                             <TableCell className="text-right font-medium">
                                 {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                    <Progress value={orderProgress} className="h-2" />
+                                    <span className="text-xs font-medium text-muted-foreground">{Math.round(orderProgress)}%</span>
+                                </div>
                             </TableCell>
                             <TableCell>
                                 <Badge variant={statusProps.variant} className={statusProps.colorClass}>
@@ -906,11 +932,14 @@ export default function OrdersPage() {
             docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
             yPos += 7;
             docPdf.text(`Projeto do Cliente: ${selectedOrder.projectName || 'N/A'}`, 15, yPos);
+            const overallProgress = calculateOrderProgress(selectedOrder);
+            docPdf.text(`Progresso Geral: ${Math.round(overallProgress)}%`, pageWidth - 15, yPos, { align: 'right' });
             yPos += 12;
     
             const tableBody: any[] = [];
             selectedOrder.items.forEach(item => {
-                const itemHeaderText = `${item.description} (Qtd: ${item.quantity}${item.code ? `, Cód: ${item.code}` : ''})`;
+                const itemProgress = calculateItemProgress(item);
+                const itemHeaderText = `${item.description} (Qtd: ${item.quantity}${item.code ? `, Cód: ${item.code}` : ''}) - Progresso: ${Math.round(itemProgress)}%`;
                 tableBody.push([
                     { 
                         content: itemHeaderText, 
@@ -1271,7 +1300,15 @@ export default function OrdersPage() {
                                                             <span className="text-muted-foreground">Não definido</span>
                                                         )}
                                                     </div>
-                                                    <div className="flex justify-between items-center font-bold text-lg">
+                                                    <Separator className="my-3" />
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><ListChecks className="mr-2 h-4 w-4" />Progresso Geral</span>
+                                                        <div className="flex items-center gap-2 w-1/2">
+                                                            <Progress value={calculateOrderProgress(selectedOrder)} className="h-2" />
+                                                            <span className="font-semibold">{Math.round(calculateOrderProgress(selectedOrder))}%</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between items-center font-bold text-lg pt-2">
                                                         <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
                                                         <span className="text-primary">{selectedOrder.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
                                                     </div>
@@ -1315,12 +1352,14 @@ export default function OrdersPage() {
                                                                 </TableHead>
                                                                 <TableHead>Descrição</TableHead>
                                                                 <TableHead className="text-center w-[80px]">Qtd.</TableHead>
-                                                                <TableHead className="text-center w-[120px]">Progresso</TableHead>
+                                                                <TableHead className="text-center w-[150px]">Progresso</TableHead>
                                                                 <TableHead className="text-right w-[150px]">Peso Total</TableHead>
                                                             </TableRow>
                                                         </TableHeader>
                                                         <TableBody>
-                                                            {selectedOrder.items.map((item) => (
+                                                            {selectedOrder.items.map((item) => {
+                                                                const itemProgress = calculateItemProgress(item);
+                                                                return (
                                                                 <TableRow key={item.id!}>
                                                                     <TableCell>
                                                                         <Checkbox
@@ -1335,13 +1374,25 @@ export default function OrdersPage() {
                                                                     </TableCell>
                                                                     <TableCell className="text-center">{item.quantity}</TableCell>
                                                                     <TableCell className="text-center">
-                                                                        <Button variant="outline" size="icon" onClick={() => handleOpenProgressModal(item)}>
-                                                                            <ListChecks className="h-4 w-4" />
-                                                                        </Button>
+                                                                        <div className="flex items-center justify-center gap-2">
+                                                                            <span className="text-sm font-medium w-8">{Math.round(itemProgress)}%</span>
+                                                                            <TooltipProvider>
+                                                                                <Tooltip>
+                                                                                    <TooltipTrigger asChild>
+                                                                                        <Button variant="outline" size="icon" onClick={() => handleOpenProgressModal(item)}>
+                                                                                            <ListChecks className="h-4 w-4" />
+                                                                                        </Button>
+                                                                                    </TooltipTrigger>
+                                                                                    <TooltipContent>
+                                                                                        <p>Editar Progresso</p>
+                                                                                    </TooltipContent>
+                                                                                </Tooltip>
+                                                                            </TooltipProvider>
+                                                                        </div>
                                                                     </TableCell>
                                                                     <TableCell className="text-right font-semibold">{( (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0) ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
                                                                 </TableRow>
-                                                            ))}
+                                                            )})}
                                                         </TableBody>
                                                     </Table>
                                                 </CardContent>
