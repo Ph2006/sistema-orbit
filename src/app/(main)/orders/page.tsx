@@ -8,7 +8,7 @@ import * as z from "zod";
 import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format } from "date-fns";
+import { format, isSameDay } from "date-fns";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,9 +20,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 const orderItemSchema = z.object({
     id: z.string().optional(),
@@ -41,15 +44,14 @@ const orderSchema = z.object({
 
 type OrderItem = z.infer<typeof orderItemSchema>;
 
+type CustomerInfo = { id: string; name: string };
+
 type Order = {
     id: string;
     quotationId: string;
     quotationNumber: number;
     internalOS?: string;
-    customer: {
-        id: string;
-        name: string;
-    };
+    customer: CustomerInfo;
     items: OrderItem[];
     totalValue: number;
     totalWeight: number;
@@ -57,6 +59,7 @@ type Order = {
     createdAt: Date;
     deliveryDate?: Date;
 };
+
 
 const calculateTotalWeight = (items: OrderItem[]): number => {
     if (!items || !Array.isArray(items)) return 0;
@@ -90,7 +93,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
              <Table>
                 <TableBody>
                     <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">Nenhum pedido encontrado.</TableCell>
+                        <TableCell colSpan={7} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
                     </TableRow>
                 </TableBody>
             </Table>
@@ -143,9 +146,15 @@ export default function OrdersPage() {
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [isEditing, setIsEditing] = useState(false);
-    const [searchQuery, setSearchQuery] = useState("");
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
+    
+    // Filter states
+    const [searchQuery, setSearchQuery] = useState("");
+    const [customers, setCustomers] = useState<CustomerInfo[]>([]);
+    const [statusFilter, setStatusFilter] = useState<string>("");
+    const [customerFilter, setCustomerFilter] = useState<string>("");
+    const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
 
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
@@ -156,6 +165,20 @@ export default function OrdersPage() {
         name: "items"
     });
 
+    const fetchCustomers = async () => {
+        if (!user) return;
+        try {
+            const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
+            const customersList = querySnapshot.docs.map((doc) => ({
+                id: doc.id,
+                name: doc.data().nomeFantasia || doc.data().name || "Cliente sem nome",
+            }));
+            setCustomers(customersList);
+        } catch (error) {
+            console.error("Error fetching customers for filter:", error);
+        }
+    };
+    
     const fetchOrders = async () => {
         if (!user) return;
         setIsLoading(true);
@@ -198,7 +221,7 @@ export default function OrdersPage() {
                     return enrichedItem;
                 });
                 
-                let customerInfo = { id: '', name: 'Cliente não informado' };
+                let customerInfo: CustomerInfo = { id: '', name: 'Cliente não informado' };
                 if (data.customer && typeof data.customer === 'object' && data.customer.name) {
                     customerInfo = { id: data.customer.id || '', name: data.customer.name };
                 } else if (typeof data.customerName === 'string') {
@@ -240,6 +263,7 @@ export default function OrdersPage() {
     useEffect(() => {
         if (!authLoading && user) {
             fetchOrders();
+            fetchCustomers();
         }
     }, [user, authLoading]);
 
@@ -301,6 +325,11 @@ export default function OrdersPage() {
             });
         }
     };
+    
+    const uniqueStatuses = useMemo(() => {
+        const statuses = new Set(orders.map(order => order.status).filter(Boolean));
+        return Array.from(statuses);
+    }, [orders]);
 
     const filteredOrders = useMemo(() => orders.filter(order => {
         const query = searchQuery.toLowerCase();
@@ -309,23 +338,36 @@ export default function OrdersPage() {
         const quotationNumber = order.quotationNumber?.toString() || '';
         const internalOS = order.internalOS?.toLowerCase() || '';
 
-        return (
-            quotationNumber.includes(query) ||
+        const textMatch = quotationNumber.includes(query) ||
             customerName.includes(query) ||
             status.includes(query) ||
-            internalOS.includes(query)
-        );
-    }), [orders, searchQuery]);
+            internalOS.includes(query);
+
+        const statusMatch = !statusFilter || order.status === statusFilter;
+        const customerMatch = !customerFilter || order.customer.id === customerFilter;
+        const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
+
+        return textMatch && statusMatch && customerMatch && dateMatch;
+    }), [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
     
     const watchedItems = form.watch("items");
     const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
+
+    const clearFilters = () => {
+        setSearchQuery("");
+        setStatusFilter("");
+        setCustomerFilter("");
+        setDateFilter(undefined);
+    };
+
+    const hasActiveFilters = searchQuery || statusFilter || customerFilter || dateFilter;
 
     return (
         <>
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de Produção</h1>
-                    <div className="relative">
+                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
                             placeholder="Buscar por nº, OS, cliente ou status..."
@@ -335,6 +377,54 @@ export default function OrdersPage() {
                         />
                     </div>
                 </div>
+
+                 <Card className="p-4">
+                    <div className="flex flex-wrap items-center gap-4">
+                        <span className="text-sm font-medium">Filtrar por:</span>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="">Todos os Status</SelectItem>
+                                {uniqueStatuses.map(status => (
+                                    <SelectItem key={status} value={status}>{status}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={customerFilter} onValueChange={setCustomerFilter}>
+                            <SelectTrigger className="w-[240px]">
+                                <SelectValue placeholder="Cliente" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="">Todos os Clientes</SelectItem>
+                                {customers.map(customer => (
+                                    <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant={"outline"} className={cn("w-[240px] justify-start text-left font-normal", !dateFilter && "text-muted-foreground")}>
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {dateFilter ? format(dateFilter, "dd/MM/yyyy") : <span>Data de Entrega</span>}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0">
+                                <Calendar mode="single" selected={dateFilter} onSelect={setDateFilter} initialFocus />
+                            </PopoverContent>
+                        </Popover>
+                        
+                        {hasActiveFilters && (
+                            <Button variant="ghost" onClick={clearFilters}>
+                                <X className="mr-2 h-4 w-4" />
+                                Limpar Filtros
+                            </Button>
+                        )}
+                    </div>
+                </Card>
 
                 <Card>
                     <CardHeader>
