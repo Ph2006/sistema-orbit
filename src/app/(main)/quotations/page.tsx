@@ -12,9 +12,6 @@ import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useRouter } from "next/navigation";
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -445,23 +442,26 @@ export default function QuotationsPage() {
         }
     };
 
-    const handleExport = async (format: 'pdf' | 'excel') => {
+    const handleExport = async (formatType: 'pdf' | 'excel') => {
         if (!selectedQuotation) return;
-
-        toast({ title: "Exportando...", description: `Gerando ${format.toUpperCase()} do orçamento Nº ${selectedQuotation.number}.` });
-
+    
+        toast({ title: "Exportando...", description: `Gerando ${formatType.toUpperCase()} do orçamento Nº ${selectedQuotation.number}.` });
+    
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const docSnap = await getDoc(companyRef);
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
             const { items, customer, number, validity, paymentTerms, deliveryTime, notes, includedServices } = selectedQuotation;
             const grandTotal = calculateGrandTotal(items);
+    
+            if (formatType === 'pdf') {
+                const { default: jsPDF } = await import('jspdf');
+                const { default: autoTable } = await import('jspdf-autotable');
 
-            if (format === 'pdf') {
                 const docPdf = new jsPDF();
                 const pageHeight = docPdf.internal.pageSize.height;
                 let y = 20;
-
+    
                 // Header
                 if (companyData.logo?.preview) {
                     try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, 10, 30, 30); }
@@ -482,7 +482,7 @@ export default function QuotationsPage() {
                 y += 5;
                 docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, 140, y);
                 y += 10;
-
+    
                 // Items Table
                 const head = [['Item', 'Qtd', 'Preço Unit.', 'Imposto (%)', 'Total c/ Imp.']];
                 const body = items.map(item => [
@@ -498,7 +498,7 @@ export default function QuotationsPage() {
                 // Total
                 docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 140, y);
                 y += 10;
-
+    
                 // Services
                 if (includedServices && includedServices.length > 0) {
                     docPdf.setFontSize(11).setFont(undefined, 'bold').text('Serviços Inclusos:', 15, y);
@@ -520,7 +520,7 @@ export default function QuotationsPage() {
                 y+= 5;
                 docPdf.text(`Prazo de Entrega: ${deliveryTime}`, 18, y);
                 y += 10;
-
+    
                 // Notes
                 if (notes) {
                     docPdf.setFontSize(11).setFont(undefined, 'bold').text('Observações:', 15, y);
@@ -528,16 +528,17 @@ export default function QuotationsPage() {
                     const splitNotes = docPdf.splitTextToSize(notes, 180);
                     docPdf.setFontSize(10).setFont(undefined, 'normal').text(splitNotes, 15, y);
                 }
-
+    
                 // Footer
                 if (companyData.website) {
                     docPdf.setTextColor(0, 0, 255);
                     docPdf.textWithLink(companyData.website, 15, pageHeight - 10, { url: companyData.website });
                 }
-
+    
                 docPdf.save(`Orcamento_${number}.pdf`);
-
-            } else if (format === 'excel') {
+    
+            } else if (formatType === 'excel') {
+                const XLSX = await import('xlsx');
                 const ws_data = [
                     [companyData.nomeFantasia || ''],
                     [companyData.endereco || ''],
@@ -577,7 +578,7 @@ export default function QuotationsPage() {
                 XLSX.writeFile(wb, `Orcamento_${number}.xlsx`);
             }
             toast({ title: "Exportação concluída!", description: "Seu arquivo foi baixado." });
-
+    
         } catch (error) {
             console.error("Export error:", error);
             toast({ variant: "destructive", title: "Erro na exportação", description: "Não foi possível gerar o arquivo." });
