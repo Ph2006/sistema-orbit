@@ -470,29 +470,45 @@ export default function QuotationsPage() {
     
         try {
             const productsRef = collection(db, "companies", "mecald", "products");
-            const itemsWithProductionPlan = await Promise.all(
-                quotationToConvert.items.map(async (item) => {
+            const itemsForOrder = await Promise.all(
+                quotationToConvert.items.map(async (item, index) => {
                     let productionPlan: any[] = [];
                     if (item.code) {
-                        const productDoc = await getDoc(doc(productsRef, item.code));
-                        if (productDoc.exists()) {
-                            const productData = productDoc.data();
-                            
-                            const planTemplate = productData.productionPlanTemplate || (productData.manufacturingStages && Array.isArray(productData.manufacturingStages)
-                                ? productData.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
-                                : []);
-
-                            if (planTemplate && planTemplate.length > 0) {
-                                productionPlan = planTemplate.map((stage: any) => ({
-                                    ...stage,
-                                    status: "Pendente",
-                                    startDate: null,
-                                    completedDate: null,
-                                }));
+                        try {
+                            const productDoc = await getDoc(doc(productsRef, item.code));
+                            if (productDoc.exists()) {
+                                const productData = productDoc.data();
+                                const planTemplate = productData.productionPlanTemplate || [];
+                                if (planTemplate.length > 0) {
+                                    productionPlan = planTemplate.map((stage: any) => ({
+                                        ...stage,
+                                        status: "Pendente",
+                                        startDate: null,
+                                        completedDate: null,
+                                    }));
+                                }
                             }
+                        } catch (e) {
+                             console.error(`Could not fetch product with code ${item.code}`, e);
                         }
                     }
-                    return { ...item, productionPlan };
+                    
+                    const itemDeliveryDate = item.leadTimeDays
+                        ? new Date(new Date().setDate(new Date().getDate() + item.leadTimeDays))
+                        : quotationToConvert.validity;
+    
+                    return {
+                        id: `${quotationToConvert.id}-${index}`,
+                        code: item.code || '',
+                        description: item.description,
+                        quantity: Number(item.quantity) || 0,
+                        unitWeight: Number(item.unitWeight) || 0,
+                        productionPlan: productionPlan,
+                        itemDeliveryDate: itemDeliveryDate, // Keep as JS Date for now
+                        shippingList: '',
+                        invoiceNumber: '',
+                        shippingDate: null,
+                    };
                 })
             );
     
@@ -502,18 +518,21 @@ export default function QuotationsPage() {
                 internalOS: quotationToConvert.number.toString(),
                 customer: quotationToConvert.customer,
                 projectName: `Ref. Orçamento ${quotationToConvert.number}`,
-                items: itemsWithProductionPlan,
+                items: itemsForOrder.map(item => ({
+                    ...item,
+                    itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
+                })),
                 totalValue: calculateGrandTotal(quotationToConvert.items),
                 status: "Aguardando Produção",
                 createdAt: Timestamp.now(),
-                deliveryDate: quotationToConvert.validity
+                deliveryDate: Timestamp.fromDate(quotationToConvert.validity),
             };
     
             await addDoc(collection(db, "companies", "mecald", "orders"), orderData);
             
             const quotationRef = doc(db, "companies", "mecald", "quotations", quotationToConvert.id);
             await updateDoc(quotationRef, { status: "Aprovado" });
-
+    
             toast({
                 title: "Pedido gerado com sucesso!",
                 description: `O pedido para o orçamento Nº ${quotationToConvert.number} foi criado.`,
@@ -657,7 +676,7 @@ export default function QuotationsPage() {
     
                 if (companyData.website) {
                     docPdf.setTextColor(0, 0, 255);
-                    docPdf.textWithLink(companyData.website, 15, pageHeight - 10, { url: companyData.website });
+                    docPdf.textWithLink(companyData.website, 15, pageHeight - 10, { url: companyData.website || '#' });
                 }
     
                 docPdf.save(`Orcamento_${number}.pdf`);
@@ -1180,7 +1199,7 @@ export default function QuotationsPage() {
                             </div>
                         </ScrollArea>
                         <SheetFooter className="pt-4 pr-6 border-t flex sm:justify-end gap-2">
-                            {selectedQuotation.status === 'Aprovado' && (
+                            {selectedQuotation.status !== 'Aprovado' && (
                                 <Button onClick={() => handleGenerateOrder(selectedQuotation)} className="w-full sm:w-auto">
                                     <PackagePlus className="mr-2 h-4 w-4" />
                                     Gerar Pedido
