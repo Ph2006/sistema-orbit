@@ -340,7 +340,22 @@ export default function QuotationsPage() {
         try {
             const itemsWithTotals = values.items.map(item => {
                 const { totalPrice, taxAmount, totalWithTax } = calculateItemTotals(item);
-                return { ...item, totalPrice, taxAmount, totalWithTax, totalWeight: (item.quantity || 0) * (item.unitWeight || 0) };
+                // Explicitly create the object to save, excluding the react-hook-form 'id'
+                return {
+                    code: item.code || '',
+                    description: item.description,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice,
+                    unitWeight: item.unitWeight || 0,
+                    taxRate: item.taxRate || 0,
+                    leadTimeDays: item.leadTimeDays || 0,
+                    notes: item.notes || '',
+                    // Calculated fields
+                    totalPrice,
+                    taxAmount,
+                    totalWithTax,
+                    totalWeight: (item.quantity || 0) * (item.unitWeight || 0)
+                };
             });
 
             let dataToSave: any = {
@@ -349,6 +364,7 @@ export default function QuotationsPage() {
                 customerName: values.customer.name,
                 customerId: values.customer.id,
                 updatedAt: Timestamp.now(),
+                validity: Timestamp.fromDate(values.validity),
             };
             // @ts-ignore
             delete dataToSave.customer;
