@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -104,7 +104,7 @@ export default function MaterialsPage() {
         name: "items"
     });
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         if (!user) return;
         setIsLoading(true);
         try {
@@ -128,28 +128,41 @@ export default function MaterialsPage() {
                     history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()}))
                 } as Requisition
             });
-            setRequisitions(reqsList);
             
-            const ordersList: OrderInfo[] = ordersSnapshot.docs
-              .filter(d => {
-                  const status = d.data().status;
-                  return status !== 'Concluído' && status !== 'Cancelado';
-              })
-              .map(d => {
-                  const data = d.data();
-                  const customerName = data.customer?.name || data.customerName || 'Cliente desconhecido';
+            const ordersDataList = ordersSnapshot.docs
+              .map(doc => {
+                  const data = doc.data();
+                  const status = data.status;
+                  if (status === 'Concluído' || status === 'Cancelado') {
+                      return null;
+                  }
+                  
+                  let customerName = 'Cliente desconhecido';
+                   if (data.customer && typeof data.customer === 'object' && data.customer.name) {
+                      customerName = data.customer.name;
+                  } else if (typeof data.customerName === 'string') {
+                      customerName = data.customerName;
+                  }
+
                   return {
-                      id: d.id,
-                      number: data.quotationNumber || data.orderNumber || 'N/A',
+                      id: doc.id,
+                      number: (data.quotationNumber || data.orderNumber || 'N/A').toString(),
                       customerName: customerName,
                   };
-              });
-            setOrders(ordersList);
+              })
+              .filter((order): order is OrderInfo => order !== null);
+            
+            setOrders(ordersDataList);
 
-            if (teamSnapshot.exists() && Array.isArray(teamSnapshot.data().members)) {
-                setTeam(teamSnapshot.data().members.map((m: any) => ({ id: m.id, name: m.name })));
-            } else {
-                setTeam([]);
+            if (teamSnapshot.exists()) {
+                const teamData = teamSnapshot.data();
+                if (teamData && Array.isArray(teamData.members)) {
+                     const membersList = teamData.members.map((m: any) => ({
+                        id: m.id?.toString() || Math.random().toString(), 
+                        name: m.name,
+                    }));
+                    setTeam(membersList);
+                }
             }
         } catch (error) {
             console.error("Error fetching data:", error);
@@ -157,13 +170,13 @@ export default function MaterialsPage() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [user, toast]);
     
     useEffect(() => {
         if (user && !authLoading) {
             fetchData();
         }
-    }, [user, authLoading]);
+    }, [user, authLoading, fetchData]);
 
     const handleOpenForm = (requisition: Requisition | null = null) => {
         setSelectedRequisition(requisition);
