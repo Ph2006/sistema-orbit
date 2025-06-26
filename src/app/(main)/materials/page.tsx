@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, setDoc, addDoc, Timestamp, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, addDoc, Timestamp, getDoc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -37,13 +37,15 @@ import { cn } from "@/lib/utils";
 const requisitionItemSchema = z.object({
   id: z.string().optional(),
   code: z.string().optional(),
+  material: z.string().optional(),
+  dimensao: z.string().optional(),
+  pesoUnitario: z.coerce.number().min(0).optional(),
   description: z.string().min(3, "Descrição obrigatória."),
   quantityRequested: z.coerce.number().min(0.1, "Qtd. deve ser maior que 0."),
   quantityFulfilled: z.coerce.number().min(0).optional().default(0),
   unit: z.string().min(1, "Unidade obrigatória (ex: m, kg, pç)."),
   neededDate: z.date().optional().nullable(),
   notes: z.string().optional(),
-  estimatedCost: z.coerce.number().min(0).optional(),
 });
 
 const requisitionSchema = z.object({
@@ -81,6 +83,7 @@ export default function MaterialsPage() {
     const [orders, setOrders] = useState<OrderInfo[]>([]);
     const [team, setTeam] = useState<TeamMember[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isLoadingData, setIsLoadingData] = useState(true);
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [selectedRequisition, setSelectedRequisition] = useState<Requisition | null>(null);
@@ -107,6 +110,7 @@ export default function MaterialsPage() {
     const fetchData = useCallback(async () => {
         if (!user) return;
         setIsLoading(true);
+        setIsLoadingData(true);
         try {
             const [reqsSnapshot, ordersSnapshot, teamSnapshot] = await Promise.all([
                 getDocs(collection(db, "companies", "mecald", "materialRequisitions")),
@@ -170,6 +174,7 @@ export default function MaterialsPage() {
             toast({ variant: "destructive", title: "Erro ao Carregar Dados", description: description, duration: 8000 });
         } finally {
             setIsLoading(false);
+            setIsLoadingData(false);
         }
     }, [user, toast]);
     
@@ -289,7 +294,7 @@ export default function MaterialsPage() {
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input placeholder="Buscar por nº, solicitante, status..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 w-64"/>
                         </div>
-                        <Button onClick={() => handleOpenForm()} disabled={isLoading}>
+                        <Button onClick={() => handleOpenForm()} disabled={isLoadingData}>
                             <PlusCircle className="mr-2 h-4 w-4" />
                             Nova Requisição
                         </Button>
@@ -444,7 +449,7 @@ export default function MaterialsPage() {
                                         <CardHeader className="flex flex-row justify-between items-center">
                                             <CardTitle>2. Detalhamento dos Itens Solicitados</CardTitle>
                                             <Button type="button" size="sm" variant="outline"
-                                                onClick={() => append({ description: "", quantityRequested: 1, unit: "" })}>
+                                                onClick={() => append({ description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0 })}>
                                                 <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
                                             </Button>
                                         </CardHeader>
@@ -454,21 +459,34 @@ export default function MaterialsPage() {
                                                     <Button type="button" variant="ghost" size="icon" className="absolute top-2 right-2 text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
                                                     <div className="space-y-4">
                                                         <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
-                                                            <FormItem><FormLabel>Descrição do Material</FormLabel><FormControl><Input placeholder="Ex: Chapa de Aço 1/4" {...field} /></FormControl><FormMessage /></FormItem>
+                                                            <FormItem><FormLabel>Descrição do Item</FormLabel><FormControl><Input placeholder="Ex: Chapa de Aço 1/4" {...field} /></FormControl><FormMessage /></FormItem>
                                                         )} />
-                                                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                             <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
                                                                 <FormItem><FormLabel>Código</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                             )} />
+                                                            <FormField control={form.control} name={`items.${index}.material`} render={({ field }) => (
+                                                                <FormItem><FormLabel>Material</FormLabel><FormControl><Input placeholder="Ex: Aço 1020" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                                            )} />
+                                                            <FormField control={form.control} name={`items.${index}.dimensao`} render={({ field }) => (
+                                                                <FormItem><FormLabel>Dimensão</FormLabel><FormControl><Input placeholder="Ex: 1/2'' x 1.200 x 3.000mm" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                                            )} />
+                                                        </div>
+                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                                             <FormField control={form.control} name={`items.${index}.quantityRequested`} render={({ field }) => (
                                                                 <FormItem><FormLabel>Qtd. Solicitada</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
                                                             )} />
-                                                            <FormField control={form.control} name={`items.${index}.quantityFulfilled`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Qtd. Atendida</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-                                                            )} />
-                                                            <FormField control={form.control} name={`items.${index}.unit`} render={({ field }) => (
+                                                             <FormField control={form.control} name={`items.${index}.unit`} render={({ field }) => (
                                                                 <FormItem><FormLabel>Unidade</FormLabel><FormControl><Input placeholder="kg, m, pç" {...field} /></FormControl><FormMessage /></FormItem>
                                                             )} />
+                                                             <FormField control={form.control} name={`items.${index}.pesoUnitario`} render={({ field }) => (
+                                                                <FormItem><FormLabel>Peso Unit. (kg)</FormLabel><FormControl><Input type="number" step="0.01" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                                            )} />
+                                                            {selectedRequisition && (
+                                                                <FormField control={form.control} name={`items.${index}.quantityFulfilled`} render={({ field }) => (
+                                                                    <FormItem><FormLabel>Qtd. Atendida</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+                                                                )} />
+                                                            )}
                                                         </div>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                             <FormField control={form.control} name={`items.${index}.neededDate`} render={({ field }) => (
@@ -483,9 +501,6 @@ export default function MaterialsPage() {
                                                                         <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent>
                                                                     </Popover><FormMessage />
                                                                 </FormItem>
-                                                            )} />
-                                                            <FormField control={form.control} name={`items.${index}.estimatedCost`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Custo Estimado (Unit.)</FormLabel><FormControl><Input type="number" step="0.01" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                             )} />
                                                         </div>
                                                         <FormField control={form.control} name={`items.${index}.notes`} render={({ field }) => (
@@ -594,3 +609,5 @@ export default function MaterialsPage() {
         </>
     );
 }
+
+    
