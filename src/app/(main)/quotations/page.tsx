@@ -57,7 +57,7 @@ const quotationSchema = z.object({
     name: z.string(),
   }),
   buyerName: z.string().optional(),
-  status: z.enum(["Aguardando Aprovação", "Enviado", "Aprovado", "Reprovado", "Informativo", "Expirado"], { required_error: "Selecione um status." }),
+  status: z.enum(["Aguardando Aprovação", "Enviado", "Aprovado", "Reprovado", "Informativo", "Expirado", "Pedido Gerado"], { required_error: "Selecione um status." }),
   validity: z.date({ required_error: "A data de validade é obrigatória." }),
   paymentTerms: z.string().min(3, "As condições de pagamento são obrigatórias."),
   deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
@@ -531,7 +531,7 @@ export default function QuotationsPage() {
             await addDoc(collection(db, "companies", "mecald", "orders"), orderData);
             
             const quotationRef = doc(db, "companies", "mecald", "quotations", quotationToConvert.id);
-            await updateDoc(quotationRef, { status: "Aprovado" });
+            await updateDoc(quotationRef, { status: "Pedido Gerado" });
     
             toast({
                 title: "Pedido gerado com sucesso!",
@@ -741,6 +741,7 @@ export default function QuotationsPage() {
     const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
         switch (status) {
             case "Aprovado": return "default";
+            case "Pedido Gerado": return "default";
             case "Aguardando Aprovação": return "secondary";
             case "Enviado": return "secondary";
             case "Reprovado": return "destructive";
@@ -756,7 +757,7 @@ export default function QuotationsPage() {
         }
 
         const relevantQuotations = quotations.filter(q => q.status !== "Informativo");
-        const approvedQuotations = relevantQuotations.filter(q => q.status === "Aprovado");
+        const approvedQuotations = relevantQuotations.filter(q => q.status === "Aprovado" || q.status === "Pedido Gerado");
 
         const totalCount = relevantQuotations.length;
         const approvedCount = approvedQuotations.length;
@@ -841,7 +842,7 @@ export default function QuotationsPage() {
                                                     {calculateGrandTotal(q.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Badge variant={getStatusVariant(q.status)}>{q.status}</Badge>
+                                                    <Badge variant={getStatusVariant(q.status)} className={cn((q.status === 'Aprovado' || q.status === 'Pedido Gerado') && 'bg-green-600 hover:bg-green-700 text-primary-foreground')}>{q.status}</Badge>
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex items-center justify-end gap-2">
@@ -903,6 +904,7 @@ export default function QuotationsPage() {
                                                         <SelectItem value="Reprovado">Reprovado</SelectItem>
                                                         <SelectItem value="Expirado">Expirado</SelectItem>
                                                         <SelectItem value="Informativo">Informativo</SelectItem>
+                                                        <SelectItem value="Pedido Gerado">Pedido Gerado</SelectItem>
                                                     </SelectContent>
                                                 </Select><FormMessage />
                                             </FormItem>
@@ -1114,7 +1116,7 @@ export default function QuotationsPage() {
                                     <CardContent className="space-y-3 text-sm">
                                         <div className="flex justify-between items-center">
                                             <span className="font-medium text-muted-foreground">Status</span>
-                                            <Badge variant={getStatusVariant(selectedQuotation.status)}>{selectedQuotation.status}</Badge>
+                                            <Badge variant={getStatusVariant(selectedQuotation.status)} className={cn((selectedQuotation.status === 'Aprovado' || selectedQuotation.status === 'Pedido Gerado') && 'bg-green-600 text-primary-foreground')}>{selectedQuotation.status}</Badge>
                                         </div>
                                         <div className="flex justify-between items-center">
                                             <span className="font-medium text-muted-foreground">Data de Criação</span>
@@ -1199,7 +1201,7 @@ export default function QuotationsPage() {
                             </div>
                         </ScrollArea>
                         <SheetFooter className="pt-4 pr-6 border-t flex sm:justify-end gap-2">
-                            {selectedQuotation.status !== 'Aprovado' && (
+                            {selectedQuotation.status === 'Aprovado' && (
                                 <Button onClick={() => handleGenerateOrder(selectedQuotation)} className="w-full sm:w-auto">
                                     <PackagePlus className="mr-2 h-4 w-4" />
                                     Gerar Pedido
