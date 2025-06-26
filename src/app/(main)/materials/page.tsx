@@ -70,7 +70,7 @@ const requisitionSchema = z.object({
 });
 
 type Requisition = z.infer<typeof requisitionSchema>;
-type OrderInfo = { id: string; number: string; customerName: string; };
+type OrderInfo = { id: string; internalOS: string; };
 type TeamMember = { id: string; name: string };
 
 const RequisitionStatus: Requisition['status'][] = ["Pendente", "Aprovada", "Reprovada", "Atendida Parcialmente", "Atendida Totalmente", "Cancelada"];
@@ -118,21 +118,13 @@ export default function MaterialsPage() {
             const ordersDataList = ordersSnapshot.docs
               .map(doc => {
                   const data = doc.data();
-                  if (['Concluído', 'Cancelado'].includes(data.status)) {
+                  if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) {
                       return null;
                   }
                   
-                  let customerName = 'Cliente desconhecido';
-                   if (data.customer && typeof data.customer === 'object' && data.customer.name) {
-                      customerName = data.customer.name;
-                  } else if (typeof data.customerName === 'string') {
-                      customerName = data.customerName;
-                  }
-
                   return {
                       id: doc.id,
-                      number: (data.quotationNumber || data.orderNumber || 'N/A').toString(),
-                      customerName: customerName,
+                      internalOS: data.internalOS.toString(),
                   };
               })
               .filter((order): order is OrderInfo => order !== null);
@@ -327,7 +319,7 @@ export default function MaterialsPage() {
                                         <TableHead>Nº</TableHead>
                                         <TableHead>Data</TableHead>
                                         <TableHead>Solicitante</TableHead>
-                                        <TableHead>Pedido Vinculado</TableHead>
+                                        <TableHead>OS Vinculada</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
@@ -339,7 +331,7 @@ export default function MaterialsPage() {
                                                 <TableCell className="font-medium">{req.requisitionNumber || req.id}</TableCell>
                                                 <TableCell>{format(req.date, 'dd/MM/yyyy')}</TableCell>
                                                 <TableCell>{req.requestedBy}</TableCell>
-                                                <TableCell>{orders.find(o => o.id === req.orderId)?.number || 'N/A'}</TableCell>
+                                                <TableCell>{orders.find(o => o.id === req.orderId)?.internalOS || 'N/A'}</TableCell>
                                                 <TableCell>
                                                     <Badge variant={getStatusVariant(req.status)} className={cn(req.status === 'Aprovada' && 'bg-green-600')}>{req.status}</Badge>
                                                 </TableCell>
@@ -419,10 +411,10 @@ export default function MaterialsPage() {
                                             <FormItem><FormLabel>Departamento</FormLabel><FormControl><Input placeholder="Ex: Produção, Manutenção" {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem>
                                         )} />
                                         <FormField control={form.control} name="orderId" render={({ field }) => (
-                                            <FormItem><FormLabel>Pedido de Produção Vinculado</FormLabel>
+                                            <FormItem><FormLabel>OS de Produção Vinculada</FormLabel>
                                             <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido (Opcional)"/></SelectTrigger></FormControl>
-                                                <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent>
+                                                <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS (Opcional)"/></SelectTrigger></FormControl>
+                                                <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent>
                                             </Select><FormMessage />
                                             </FormItem>
                                         )} />
