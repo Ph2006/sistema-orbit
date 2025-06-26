@@ -34,7 +34,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // Schemas & Constants
@@ -462,17 +462,30 @@ export default function MaterialsPage() {
     }, [requisitions]);
 
     const generateCuttingPlan = () => {
-        const { stockLength, kerf, items } = form.getValues('cuttingPlan') || {};
+        const cuttingPlanValues = form.getValues('cuttingPlan');
+        if (!cuttingPlanValues) {
+            toast({ variant: 'destructive', title: 'Erro', description: 'Plano de corte não inicializado.' });
+            return;
+        }
+
+        const { stockLength, kerf, items } = cuttingPlanValues;
 
         if (!stockLength || !items || items.length === 0) {
             toast({ variant: 'destructive', title: 'Entrada Inválida', description: 'Forneça o comprimento da barra e pelo menos um item para cortar.' });
             return;
         }
 
+        const stockLengthNum = Number(stockLength);
+        const kerfNum = Number(kerf || 0);
+
         const allPieces: { code?: string, description: string; length: number }[] = [];
         items.forEach(item => {
-            for (let i = 0; i < item.quantity; i++) {
-                allPieces.push({ code: item.code, description: item.description, length: item.length });
+            const quantityNum = Number(item.quantity);
+            const lengthNum = Number(item.length);
+            if (quantityNum > 0 && lengthNum > 0) {
+                for (let i = 0; i < quantityNum; i++) {
+                    allPieces.push({ code: item.code, description: item.description, length: lengthNum });
+                }
             }
         });
 
@@ -480,11 +493,11 @@ export default function MaterialsPage() {
 
         const bins: { pieces: number[]; remaining: number }[] = [];
         for (const piece of allPieces) {
-            if (piece.length > stockLength) continue;
+            if (piece.length > stockLengthNum) continue;
 
             let placed = false;
             for (const bin of bins) {
-                const spaceNeeded = bin.pieces.length > 0 ? piece.length + (kerf || 0) : piece.length;
+                const spaceNeeded = bin.pieces.length > 0 ? piece.length + kerfNum : piece.length;
                 if (bin.remaining >= spaceNeeded) {
                     bin.pieces.push(piece.length);
                     bin.remaining -= spaceNeeded;
@@ -496,7 +509,7 @@ export default function MaterialsPage() {
             if (!placed) {
                 bins.push({
                     pieces: [piece.length],
-                    remaining: stockLength - piece.length,
+                    remaining: stockLengthNum - piece.length,
                 });
             }
         }
@@ -516,9 +529,9 @@ export default function MaterialsPage() {
         let totalScrap = 0;
         const finalPatterns = Array.from(patternMap.entries()).map(([patternString, data]) => {
             const piecesUsedSum = data.pieces.reduce((sum, p) => sum + p, 0);
-            const kerfTotal = Math.max(0, data.pieces.length -1) * (kerf || 0);
+            const kerfTotal = Math.max(0, data.pieces.length -1) * kerfNum;
             const barUsage = piecesUsedSum + kerfTotal;
-            const leftover = stockLength - barUsage;
+            const leftover = stockLengthNum - barUsage;
             totalScrap += leftover * data.count;
 
             return {
@@ -527,14 +540,14 @@ export default function MaterialsPage() {
                 pieces: data.pieces,
                 barUsage,
                 leftover,
-                yieldPercentage: (piecesUsedSum / stockLength) * 100,
+                yieldPercentage: (piecesUsedSum / stockLengthNum) * 100,
                 barsNeeded: data.count,
             };
         });
 
         const totalBars = bins.length;
-        const totalMaterialLength = totalBars * stockLength;
-        const totalYield = ((totalMaterialLength - totalScrap) / totalMaterialLength) * 100;
+        const totalMaterialLength = totalBars * stockLengthNum;
+        const totalYield = totalMaterialLength > 0 ? ((totalMaterialLength - totalScrap) / totalMaterialLength) * 100 : 0;
 
         const results: PlanResult = {
             patterns: finalPatterns,
