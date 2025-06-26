@@ -220,9 +220,17 @@ export default function MaterialsPage() {
 
     const onSubmit = async (values: Requisition) => {
         try {
-            // Explicitly build the object to be saved to avoid passing Date objects or undefined values.
+            const newHistoryEntry = {
+                timestamp: new Date(),
+                user: user?.email || "Sistema",
+                action: selectedRequisition ? "Edição" : "Criação",
+                details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
+            };
+    
+            const finalHistory = [...(values.history || []), newHistoryEntry];
+    
             const dataToSave = {
-                date: Timestamp.fromDate(new Date(values.date)),
+                date: Timestamp.fromDate(values.date),
                 status: values.status,
                 requestedBy: values.requestedBy,
                 department: values.department || null,
@@ -239,26 +247,16 @@ export default function MaterialsPage() {
                     quantityFulfilled: item.quantityFulfilled || 0,
                     unit: item.unit,
                     notes: item.notes || null,
-                    neededDate: item.neededDate ? Timestamp.fromDate(new Date(item.neededDate)) : null,
+                    neededDate: item.neededDate ? Timestamp.fromDate(item.neededDate) : null,
                 })),
                 approval: values.approval ? {
                     approvedBy: values.approval.approvedBy || null,
-                    approvalDate: values.approval.approvalDate ? Timestamp.fromDate(new Date(values.approval.approvalDate)) : null,
+                    approvalDate: values.approval.approvalDate ? Timestamp.fromDate(values.approval.approvalDate) : null,
                     justification: values.approval.justification || null,
                 } : null,
-                history: [
-                    ...(values.history || []).map(h => ({ ...h, timestamp: new Date(h.timestamp) })), // Ensure history dates are Date objects
-                    {
-                        timestamp: new Date(),
-                        user: user?.email || "Sistema",
-                        action: selectedRequisition ? "Edição" : "Criação",
-                        details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
-                    }
-                ].map(h => ({
+                history: finalHistory.map(h => ({
+                    ...h,
                     timestamp: Timestamp.fromDate(h.timestamp),
-                    user: h.user,
-                    action: h.action,
-                    details: h.details || null,
                 })),
                 requisitionNumber: values.requisitionNumber || null,
             };
