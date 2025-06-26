@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -61,6 +62,9 @@ const cuttingPlanItemSchema = z.object({
     length: z.coerce.number().min(1, "Comprimento deve ser > 0"),
     quantity: z.coerce.number().min(1, "Quantidade deve ser > 0"),
 });
+
+type CuttingPlanItem = z.infer<typeof cuttingPlanItemSchema>;
+
 
 const cuttingPlanSchema = z.object({
   stockLength: z.coerce.number().min(1, "Comprimento da barra é obrigatório."),
@@ -146,6 +150,12 @@ export default function MaterialsPage() {
     const { user, loading: authLoading } = useAuth();
     const { toast } = useToast();
 
+    // State for the temporary cut item form
+    const emptyCutItem: CuttingPlanItem = { description: "", length: 0, quantity: 1, code: '' };
+    const [currentCutItem, setCurrentCutItem] = useState<CuttingPlanItem>(emptyCutItem);
+    const [editCutIndex, setEditCutIndex] = useState<number | null>(null);
+
+
     const form = useForm<Requisition>({
         resolver: zodResolver(requisitionSchema),
         defaultValues: {
@@ -162,7 +172,7 @@ export default function MaterialsPage() {
     });
 
     const { fields, append, remove } = useFieldArray({ control: form.control, name: "items" });
-    const { fields: cutItems, append: appendCutItem, remove: removeCutItem } = useFieldArray({ control: form.control, name: "cuttingPlan.items" });
+    const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: form.control, name: "cuttingPlan.items" });
 
 
     const fetchData = useCallback(async () => {
@@ -237,6 +247,9 @@ export default function MaterialsPage() {
     const handleOpenForm = (requisition: Requisition | null = null) => {
         setPlanResults(null);
         setSelectedRequisition(requisition);
+        setCurrentCutItem(emptyCutItem);
+        setEditCutIndex(null);
+
         if (requisition) {
             form.reset({
                 ...requisition,
@@ -428,6 +441,101 @@ export default function MaterialsPage() {
             toast({ variant: "destructive", title: "Erro ao exportar", description: "Não foi possível gerar o PDF." });
         }
     }
+    
+    const handleExportCutPlanPDF = async (requisition: Requisition) => {
+        toast({ title: "Gerando PDF do Plano de Corte..." });
+    
+        const plan = form.getValues('cuttingPlan');
+        const results = planResults || (plan && plan.summary) ? { patterns: plan.patterns, summary: plan.summary } : null;
+    
+        if (!results || !plan) {
+            toast({ variant: 'destructive', title: 'Nenhum plano gerado', description: 'Gere um plano de corte antes de exportar.' });
+            return;
+        }
+    
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const companySnap = await getDoc(companyRef);
+            const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
+    
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            let y = 15;
+    
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15);
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+    
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text('Plano de Corte', pageWidth / 2, y + 5, { align: 'center' });
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            docPdf.text(`Requisição Nº: ${requisition.requisitionNumber}`, pageWidth / 2, y + 12, { align: 'center' });
+            y += 25;
+    
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Parâmetros de Entrada', 15, y);
+            y += 6;
+            autoTable(docPdf, {
+                startY: y,
+                theme: 'plain',
+                styles: { fontSize: 9 },
+                body: [
+                    ['Comprimento da Barra:', `${plan.stockLength} mm`],
+                    ['Espessura do Corte (Kerf):', `${plan.kerf} mm`],
+                ],
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 10;
+    
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Itens a Cortar', 15, y);
+            y += 6;
+            autoTable(docPdf, {
+                startY: y,
+                head: [['Código', 'Descrição', 'Comprimento (mm)', 'Quantidade']],
+                body: plan.items.map(item => [item.code || '-', item.description, item.length, item.quantity]),
+                headStyles: { fillColor: [40, 40, 40] }
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 10;
+    
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Padrões de Corte Otimizados', 15, y);
+            y += 6;
+            autoTable(docPdf, {
+                startY: y,
+                head: [['#', 'Padrão de Corte (Peças x Comp.)', 'Sobra (mm)', 'Nº de Barras', 'Rendimento']],
+                body: results.patterns.map((p: any) => [
+                    p.patternId,
+                    p.patternString,
+                    p.leftover.toFixed(2),
+                    p.barsNeeded,
+                    `${p.yieldPercentage.toFixed(1)}%`
+                ]),
+                headStyles: { fillColor: [40, 40, 40] }
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 10;
+    
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Resumo do Plano', 15, y);
+            y += 6;
+            autoTable(docPdf, {
+                startY: y,
+                theme: 'plain',
+                styles: { fontSize: 9 },
+                body: [
+                    ['Total de Barras Necessárias:', results.summary.totalBars.toString()],
+                    ['Rendimento Total:', `${results.summary.totalYieldPercentage.toFixed(2)}%`],
+                    ['Sucata Total:', `${results.summary.totalScrapPercentage.toFixed(2)}%`],
+                ],
+            });
+    
+            docPdf.save(`PlanoCorte_Req_${requisition.requisitionNumber}.pdf`);
+    
+        } catch (error) {
+            console.error("Error exporting cut plan PDF:", error);
+            toast({ variant: "destructive", title: "Erro ao exportar", description: "Não foi possível gerar o PDF do plano de corte." });
+        }
+    };
+    
 
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter(r => {
@@ -493,7 +601,7 @@ export default function MaterialsPage() {
 
         const bins: { pieces: number[]; remaining: number }[] = [];
         for (const piece of allPieces) {
-            if (piece.length > stockLengthNum) continue;
+             if (piece.length > stockLengthNum) continue;
 
             let placed = false;
             for (const bin of bins) {
@@ -538,9 +646,9 @@ export default function MaterialsPage() {
                 patternId: patternId++,
                 patternString,
                 pieces: data.pieces,
-                barUsage,
-                leftover,
-                yieldPercentage: (piecesUsedSum / stockLengthNum) * 100,
+                barUsage: Number(barUsage) || 0,
+                leftover: Number(leftover) || 0,
+                yieldPercentage: Number((piecesUsedSum / stockLengthNum) * 100) || 0,
                 barsNeeded: data.count,
             };
         });
@@ -563,6 +671,52 @@ export default function MaterialsPage() {
         form.setValue('cuttingPlan.summary', results.summary);
         toast({ title: "Plano de Corte Gerado!", description: "Os resultados foram calculados e exibidos." });
     };
+
+    const handleCurrentCutItemChange = (field: keyof CuttingPlanItem, value: any) => {
+        setCurrentCutItem(prev => ({...prev, [field]: value}));
+    };
+
+    const handleAddCutItem = () => {
+        const result = cuttingPlanItemSchema.safeParse(currentCutItem);
+        if (!result.success) {
+            const firstError = result.error.errors[0];
+            toast({
+                variant: 'destructive',
+                title: `Erro de validação: ${firstError.path[0]}`,
+                description: firstError.message
+            });
+            return;
+        }
+        appendCutItem(currentCutItem);
+        setCurrentCutItem(emptyCutItem);
+    };
+
+    const handleUpdateCutItem = () => {
+        if (editCutIndex === null) return;
+        const result = cuttingPlanItemSchema.safeParse(currentCutItem);
+        if (!result.success) {
+            const firstError = result.error.errors[0];
+            toast({
+                variant: 'destructive',
+                title: `Erro de validação: ${firstError.path[0]}`,
+                description: firstError.message
+            });
+            return;
+        }
+        updateCutItem(editCutIndex, currentCutItem);
+        setCurrentCutItem(emptyCutItem);
+        setEditCutIndex(null);
+    };
+
+    const handleEditCutItem = (index: number) => {
+        setEditCutIndex(index);
+        setCurrentCutItem(form.getValues(`cuttingPlan.items.${index}`));
+    };
+    
+    const handleCancelEditCutItem = () => {
+        setCurrentCutItem(emptyCutItem);
+        setEditCutIndex(null);
+    }
 
     return (
         <>
@@ -832,7 +986,6 @@ export default function MaterialsPage() {
                                 </TabsContent>
                                 <TabsContent value="cuttingPlan">
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                        {/* Input side */}
                                         <div className="space-y-6">
                                             <Card>
                                                 <CardHeader><CardTitle>Parâmetros de Entrada</CardTitle></CardHeader>
@@ -844,48 +997,85 @@ export default function MaterialsPage() {
                                                         <FormItem><FormLabel>Espessura do Corte / Kerf (mm)</FormLabel><FormControl><Input type="number" placeholder="3" {...field} /></FormControl><FormMessage /></FormItem>
                                                     )} />
                                                      <FormField control={form.control} name="cuttingPlan.leftoverThreshold" render={({ field }) => (
-                                                        <FormItem><FormLabel>Aceitar sobras menores que (mm)</FormLabel><FormControl><Input type="number" placeholder="Opcional" {...field} /></FormControl><FormMessage /></FormItem>
+                                                        <FormItem><FormLabel>Aceitar sobras menores que (mm)</FormLabel><FormControl><Input type="number" placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                     )} />
                                                 </CardContent>
                                             </Card>
                                             <Card>
-                                                 <CardHeader className="flex flex-row items-center justify-between">
+                                                <CardHeader>
+                                                    <CardTitle>Item do Plano de Corte</CardTitle>
+                                                    <CardDescription>
+                                                        {editCutIndex !== null ? 'Edite os dados do item selecionado.' : 'Preencha os dados e adicione um novo item.'}
+                                                    </CardDescription>
+                                                </CardHeader>
+                                                <CardContent className="space-y-4">
                                                     <div>
-                                                        <CardTitle>Itens a Cortar</CardTitle>
-                                                        <CardDescription>Lista de peças e quantidades.</CardDescription>
+                                                        <Label>Descrição</Label>
+                                                        <Input placeholder={`Peça ${cutItems.length + 1}`} value={currentCutItem.description} onChange={e => handleCurrentCutItemChange('description', e.target.value)} />
                                                     </div>
-                                                    <Button type="button" variant="outline" size="sm" onClick={() => appendCutItem({ code: '', description: '', length: 0, quantity: 1 })}>
-                                                        <PlusCircle className="h-4 w-4 mr-2" /> Item
-                                                    </Button>
-                                                 </CardHeader>
-                                                 <CardContent className="space-y-4">
-                                                    {cutItems.map((item, index) => (
-                                                        <div key={item.id} className="border p-4 rounded-md space-y-4 relative">
-                                                            <Button type="button" variant="ghost" size="icon" className="absolute top-2 right-2 text-destructive hover:text-destructive" onClick={() => removeCutItem(index)}><X className="h-4 w-4" /></Button>
-                                                            <FormField control={form.control} name={`cuttingPlan.items.${index}.description`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Descrição</FormLabel><FormControl><Input placeholder={`Peça ${index + 1}`} {...field} /></FormControl></FormItem>
-                                                            )} />
-                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                                <FormField control={form.control} name={`cuttingPlan.items.${index}.code`} render={({ field }) => (
-                                                                    <FormItem><FormLabel>Código</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl></FormItem>
-                                                                )} />
-                                                                <FormField control={form.control} name={`cuttingPlan.items.${index}.length`} render={({ field }) => (
-                                                                    <FormItem><FormLabel>Comp. (mm)</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
-                                                                )} />
-                                                                <FormField control={form.control} name={`cuttingPlan.items.${index}.quantity`} render={({ field }) => (
-                                                                    <FormItem><FormLabel>Qtd.</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
-                                                                )} />
-                                                            </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                        <div>
+                                                            <Label>Código</Label>
+                                                            <Input placeholder="Opcional" value={currentCutItem.code || ''} onChange={e => handleCurrentCutItemChange('code', e.target.value)} />
                                                         </div>
-                                                    ))}
-                                                    {cutItems.length === 0 && <p className="text-sm text-center text-muted-foreground py-4">Nenhum item adicionado.</p>}
-                                                 </CardContent>
+                                                        <div>
+                                                            <Label>Comprimento (mm)</Label>
+                                                            <Input type="number" value={currentCutItem.length} onChange={e => handleCurrentCutItemChange('length', e.target.value)} />
+                                                        </div>
+                                                        <div>
+                                                            <Label>Quantidade</Label>
+                                                            <Input type="number" value={currentCutItem.quantity} onChange={e => handleCurrentCutItemChange('quantity', e.target.value)} />
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-end gap-2">
+                                                        {editCutIndex !== null && (
+                                                            <Button type="button" variant="outline" onClick={handleCancelEditCutItem}>Cancelar Edição</Button>
+                                                        )}
+                                                        <Button type="button" onClick={editCutIndex !== null ? handleUpdateCutItem : handleAddCutItem}>
+                                                            <PlusCircle className="mr-2 h-4 w-4" />
+                                                            {editCutIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}
+                                                        </Button>
+                                                    </div>
+                                                </CardContent>
                                             </Card>
+                                             {cutItems.length > 0 && (
+                                                <Card>
+                                                    <CardHeader>
+                                                        <CardTitle>Itens a Cortar</CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent>
+                                                        <Table>
+                                                            <TableHeader>
+                                                                <TableRow>
+                                                                    <TableHead>Código</TableHead>
+                                                                    <TableHead>Descrição</TableHead>
+                                                                    <TableHead>Comp. (mm)</TableHead>
+                                                                    <TableHead>Qtd.</TableHead>
+                                                                    <TableHead className="text-right">Ações</TableHead>
+                                                                </TableRow>
+                                                            </TableHeader>
+                                                            <TableBody>
+                                                                {cutItems.map((item, index) => (
+                                                                    <TableRow key={item.id}>
+                                                                        <TableCell>{item.code}</TableCell>
+                                                                        <TableCell>{item.description}</TableCell>
+                                                                        <TableCell>{item.length}</TableCell>
+                                                                        <TableCell>{item.quantity}</TableCell>
+                                                                        <TableCell className="text-right">
+                                                                            <Button type="button" variant="ghost" size="icon" onClick={() => handleEditCutItem(index)}><Pencil className="h-4 w-4" /></Button>
+                                                                            <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => removeCutItem(index)}><Trash2 className="h-4 w-4" /></Button>
+                                                                        </TableCell>
+                                                                    </TableRow>
+                                                                ))}
+                                                            </TableBody>
+                                                        </Table>
+                                                    </CardContent>
+                                                </Card>
+                                            )}
                                             <Button type="button" className="w-full" onClick={generateCuttingPlan}>
                                                 <BrainCircuit className="mr-2 h-4 w-4" /> Gerar Plano de Corte
                                             </Button>
                                         </div>
-                                        {/* Output side */}
                                         <div className="space-y-6">
                                             <Card>
                                                 <CardHeader><CardTitle>Resultados do Plano</CardTitle><CardDescription>Padrões de corte para otimizar o uso do material.</CardDescription></CardHeader>
@@ -991,11 +1181,17 @@ export default function MaterialsPage() {
                                 </ScrollArea>
                                 </div>
                             </Tabs>
-                            <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0 flex sm:justify-between">
-                                <div>
+                            <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0 flex-wrap sm:justify-between gap-2">
+                                <div className="flex gap-2">
                                     {selectedRequisition && (
                                         <Button type="button" variant="outline" onClick={() => handleExportPDF(selectedRequisition)}>
-                                            <FileDown className="mr-2 h-4 w-4" /> Exportar PDF
+                                            <FileDown className="mr-2 h-4 w-4" /> Exportar Requisição
+                                        </Button>
+                                    )}
+                                    {selectedRequisition && (
+                                        <Button type="button" variant="outline" onClick={() => handleExportCutPlanPDF(selectedRequisition)} 
+                                            disabled={!planResults && !selectedRequisition?.cuttingPlan?.summary}>
+                                            <GanttChart className="mr-2 h-4 w-4" /> Exportar Plano de Corte
                                         </Button>
                                     )}
                                 </div>
