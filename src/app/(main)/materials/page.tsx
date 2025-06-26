@@ -56,6 +56,7 @@ const requisitionItemSchema = z.object({
 });
 
 const cuttingPlanItemSchema = z.object({
+    code: z.string().optional(),
     description: z.string().min(1, "Descrição é obrigatória"),
     length: z.coerce.number().min(1, "Comprimento deve ser > 0"),
     quantity: z.coerce.number().min(1, "Quantidade deve ser > 0"),
@@ -468,10 +469,10 @@ export default function MaterialsPage() {
             return;
         }
 
-        const allPieces: { description: string; length: number }[] = [];
+        const allPieces: { code?: string, description: string; length: number }[] = [];
         items.forEach(item => {
             for (let i = 0; i < item.quantity; i++) {
-                allPieces.push({ description: item.description, length: item.length });
+                allPieces.push({ code: item.code, description: item.description, length: item.length });
             }
         });
 
@@ -840,23 +841,28 @@ export default function MaterialsPage() {
                                                         <CardTitle>Itens a Cortar</CardTitle>
                                                         <CardDescription>Lista de peças e quantidades.</CardDescription>
                                                     </div>
-                                                    <Button type="button" variant="outline" size="sm" onClick={() => appendCutItem({ description: '', length: 0, quantity: 1 })}>
+                                                    <Button type="button" variant="outline" size="sm" onClick={() => appendCutItem({ code: '', description: '', length: 0, quantity: 1 })}>
                                                         <PlusCircle className="h-4 w-4 mr-2" /> Item
                                                     </Button>
                                                  </CardHeader>
                                                  <CardContent className="space-y-4">
                                                     {cutItems.map((item, index) => (
-                                                        <div key={item.id} className="grid grid-cols-[1fr_100px_80px_auto] gap-2 items-end">
+                                                        <div key={item.id} className="border p-4 rounded-md space-y-4 relative">
+                                                            <Button type="button" variant="ghost" size="icon" className="absolute top-2 right-2 text-destructive hover:text-destructive" onClick={() => removeCutItem(index)}><X className="h-4 w-4" /></Button>
                                                             <FormField control={form.control} name={`cuttingPlan.items.${index}.description`} render={({ field }) => (
                                                                 <FormItem><FormLabel>Descrição</FormLabel><FormControl><Input placeholder={`Peça ${index + 1}`} {...field} /></FormControl></FormItem>
                                                             )} />
-                                                            <FormField control={form.control} name={`cuttingPlan.items.${index}.length`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Comp. (mm)</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
-                                                            )} />
-                                                            <FormField control={form.control} name={`cuttingPlan.items.${index}.quantity`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Qtd.</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
-                                                            )} />
-                                                            <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => removeCutItem(index)}><X className="h-4 w-4" /></Button>
+                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                <FormField control={form.control} name={`cuttingPlan.items.${index}.code`} render={({ field }) => (
+                                                                    <FormItem><FormLabel>Código</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl></FormItem>
+                                                                )} />
+                                                                <FormField control={form.control} name={`cuttingPlan.items.${index}.length`} render={({ field }) => (
+                                                                    <FormItem><FormLabel>Comp. (mm)</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
+                                                                )} />
+                                                                <FormField control={form.control} name={`cuttingPlan.items.${index}.quantity`} render={({ field }) => (
+                                                                    <FormItem><FormLabel>Qtd.</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
+                                                                )} />
+                                                            </div>
                                                         </div>
                                                     ))}
                                                     {cutItems.length === 0 && <p className="text-sm text-center text-muted-foreground py-4">Nenhum item adicionado.</p>}
