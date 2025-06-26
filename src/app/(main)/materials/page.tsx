@@ -286,44 +286,80 @@ export default function MaterialsPage() {
 
     const handleExportPDF = async (requisition: Requisition) => {
         toast({ title: "Gerando PDF...", description: "Aguarde enquanto o arquivo é preparado." });
-    
+
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const companySnap = await getDoc(companyRef);
             const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
-    
-            const docPdf = new jsPDF();
-    
-            docPdf.setFontSize(18);
-            docPdf.text(`Requisição de Material Nº: ${requisition.requisitionNumber}`, 14, 22);
+
+            const docPdf = new jsPDF({ orientation: "landscape" });
+            const pageWidth = docPdf.internal.pageSize.width;
+
+            // Header
             if (companyData.logo?.preview) {
-                 try {
-                    docPdf.addImage(companyData.logo.preview, 'PNG', 150, 15, 40, 20);
-                 } catch (e) { console.error("Error adding logo to PDF:", e); }
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, 12, 40, 15);
+                } catch (e) { console.error("Error adding logo to PDF:", e); }
             }
-    
-            docPdf.setFontSize(11);
-            docPdf.text(`Data: ${format(requisition.date, 'dd/MM/yyyy')}`, 14, 32);
-            docPdf.text(`Solicitante: ${requisition.requestedBy}`, 14, 38);
-            docPdf.text(`Status: ${requisition.status}`, 14, 44);
-            const os = orders.find(o => o.id === requisition.orderId)?.internalOS || 'N/A';
-            docPdf.text(`OS Vinculada: ${os}`, 14, 50);
-    
-            const tableBody = requisition.items.map(item => [
-                item.description,
-                item.quantityRequested,
-                item.unit,
-                item.status,
-                item.deliveryDate ? format(item.deliveryDate, 'dd/MM/yyyy') : 'N/A',
-            ]);
-            autoTable(docPdf, {
-                startY: 60,
-                head: [['Descrição', 'Qtd. Solicitada', 'Unid.', 'Status', 'Data Entrega Prev.']],
-                body: tableBody,
-            });
+            docPdf.setFontSize(18);
+            docPdf.text(`Requisição de Material Nº: ${requisition.requisitionNumber}`, pageWidth / 2, 20, { align: 'center' });
+
+            // Sub-header
+            docPdf.setFontSize(10);
+            const subheaderY = 35;
+            docPdf.text(`Data: ${format(requisition.date, 'dd/MM/yyyy')}`, 15, subheaderY);
+            docPdf.text(`Solicitante: ${requisition.requestedBy}`, 15, subheaderY + 5);
             
+            const os = orders.find(o => o.id === requisition.orderId)?.internalOS || 'N/A';
+            docPdf.text(`OS Vinculada: ${os}`, pageWidth - 15, subheaderY, { align: 'right' });
+            docPdf.text(`Status: ${requisition.status}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
+
+            // Table
+            const head = [['Cód.', 'Material', 'Dimensão', 'Descrição', 'Qtd. Sol.', 'Unid.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
+            const body = requisition.items.map(item => [
+                item.code || '-',
+                item.material || '-',
+                item.dimensao || '-',
+                item.description,
+                item.quantityRequested.toString(),
+                item.unit,
+                (item.pesoUnitario || 0).toFixed(2),
+                item.deliveryDate ? format(item.deliveryDate, 'dd/MM/yyyy') : 'N/A',
+                item.status || 'Pendente',
+            ]);
+
+            autoTable(docPdf, {
+                startY: 50,
+                head,
+                body,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [40, 40, 40] },
+                columnStyles: {
+                    0: { cellWidth: 20 }, // Cód.
+                    1: { cellWidth: 30 }, // Material
+                    2: { cellWidth: 40 }, // Dimensão
+                    3: { cellWidth: 'auto' }, // Descrição
+                    4: { cellWidth: 15, halign: 'right' }, // Qtd. Sol.
+                    5: { cellWidth: 15, halign: 'center' }, // Unid.
+                    6: { cellWidth: 20, halign: 'right' }, // Peso Unit.
+                    7: { cellWidth: 22, halign: 'center' }, // Entrega
+                    8: { cellWidth: 40 }, // Status
+                }
+            });
+
+            // Footer notes
+            let finalY = (docPdf as any).lastAutoTable.finalY + 10;
+            if (requisition.generalNotes) {
+                docPdf.setFontSize(10).setFont(undefined, 'bold');
+                docPdf.text('Observações Gerais:', 15, finalY);
+                finalY += 5;
+                docPdf.setFontSize(9).setFont(undefined, 'normal');
+                const splitNotes = docPdf.splitTextToSize(requisition.generalNotes, pageWidth - 30);
+                docPdf.text(splitNotes, 15, finalY);
+            }
+
             docPdf.save(`Requisicao_${requisition.requisitionNumber}.pdf`);
-    
+
         } catch (error) {
             console.error("Error exporting PDF:", error);
             toast({ variant: "destructive", title: "Erro ao exportar", description: "Não foi possível gerar o PDF." });
@@ -729,3 +765,5 @@ export default function MaterialsPage() {
     );
 }
 
+
+    
