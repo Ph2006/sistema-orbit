@@ -220,35 +220,62 @@ export default function MaterialsPage() {
 
     const onSubmit = async (values: Requisition) => {
         try {
-            const dataToSave: any = {
-                ...values,
-                date: Timestamp.fromDate(values.date),
+            // Explicitly build the object to be saved to avoid passing Date objects or undefined values.
+            const dataToSave = {
+                date: Timestamp.fromDate(new Date(values.date)),
+                status: values.status,
+                requestedBy: values.requestedBy,
+                department: values.department || null,
+                orderId: values.orderId || null,
+                generalNotes: values.generalNotes || null,
+                items: values.items.map(item => ({
+                    id: item.id || null,
+                    code: item.code || null,
+                    material: item.material || null,
+                    dimensao: item.dimensao || null,
+                    pesoUnitario: item.pesoUnitario || 0,
+                    description: item.description,
+                    quantityRequested: item.quantityRequested,
+                    quantityFulfilled: item.quantityFulfilled || 0,
+                    unit: item.unit,
+                    notes: item.notes || null,
+                    neededDate: item.neededDate ? Timestamp.fromDate(new Date(item.neededDate)) : null,
+                })),
+                approval: values.approval ? {
+                    approvedBy: values.approval.approvedBy || null,
+                    approvalDate: values.approval.approvalDate ? Timestamp.fromDate(new Date(values.approval.approvalDate)) : null,
+                    justification: values.approval.justification || null,
+                } : null,
                 history: [
-                    ...(values.history || []),
+                    ...(values.history || []).map(h => ({ ...h, timestamp: new Date(h.timestamp) })), // Ensure history dates are Date objects
                     {
                         timestamp: new Date(),
                         user: user?.email || "Sistema",
                         action: selectedRequisition ? "Edição" : "Criação",
                         details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
                     }
-                ].map(h => ({...h, timestamp: Timestamp.fromDate(h.timestamp)})),
-                items: values.items.map(item => ({
-                    ...item,
-                    neededDate: item.neededDate ? Timestamp.fromDate(item.neededDate) : null,
+                ].map(h => ({
+                    timestamp: Timestamp.fromDate(h.timestamp),
+                    user: h.user,
+                    action: h.action,
+                    details: h.details || null,
                 })),
-                approval: values.approval ? {
-                    ...values.approval,
-                    approvalDate: values.approval.approvalDate ? Timestamp.fromDate(values.approval.approvalDate) : null
-                } : null
+                requisitionNumber: values.requisitionNumber || null,
             };
 
             if (selectedRequisition?.id) {
                 await setDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave);
                 toast({ title: "Requisição atualizada!", description: "As alterações foram salvas com sucesso." });
             } else {
-                const highestNumber = requisitions.length > 0 ? Math.max(...requisitions.map(r => parseInt(r.requisitionNumber || "0"))) : 0;
-                dataToSave.requisitionNumber = (highestNumber + 1).toString().padStart(5, '0');
-                await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), dataToSave);
+                const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
+                const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
+                
+                const newData = {
+                    ...dataToSave,
+                    requisitionNumber: (highestNumber + 1).toString().padStart(5, '0')
+                };
+                
+                await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), newData);
                 toast({ title: "Requisição criada!", description: "A nova requisição foi salva." });
             }
 
@@ -256,9 +283,10 @@ export default function MaterialsPage() {
             await fetchData();
         } catch (error) {
             console.error("Error saving requisition:", error);
-            toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar os dados da requisição." });
+            toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar a requisição. Verifique o console para mais detalhes." });
         }
     };
+
 
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter(r => {
