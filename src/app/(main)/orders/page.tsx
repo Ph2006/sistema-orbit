@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, XCircle as XCircleIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -1170,19 +1170,29 @@ export default function OrdersPage() {
             
             const updatedItems = selectedOrder.items.map(item => {
                 if (item.id === targetItem.id) {
-                    return { ...item, productionPlan: JSON.parse(JSON.stringify(sourceProductionPlan)) };
+                    // Deep copy the plan to avoid reference issues. Dates become strings.
+                    const newPlan = JSON.parse(JSON.stringify(sourceProductionPlan));
+                    return { ...item, productionPlan: newPlan };
                 }
                 return item;
             });
 
+            // Prepare the items array for Firestore, ensuring dates are Timestamps
             const itemsForFirestore = updatedItems.map(item => {
                 const planForFirestore = (item.productionPlan || []).map(p => ({
                     ...p,
-                    startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
-                    completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                    // new Date() correctly handles Date objects and ISO strings
+                    startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
+                    completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
                 }));
-                const { id, product_code, ...cleanItem } = item as any;
-                return { ...cleanItem, id: item.id, productionPlan: planForFirestore };
+                
+                // Return the full item with the corrected production plan and other dates
+                return {
+                    ...item,
+                    productionPlan: planForFirestore,
+                    itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
+                    shippingDate: item.shippingDate ? Timestamp.fromDate(new Date(item.shippingDate)) : null,
+                };
             });
 
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
@@ -1190,6 +1200,7 @@ export default function OrdersPage() {
 
             toast({ title: "Progresso colado!", description: `Etapas aplicadas ao item "${targetItem.description}".` });
             
+            // Refetch and update UI
             const allOrders = await fetchOrders();
             const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
             if (updatedOrder) {
@@ -1683,7 +1694,7 @@ export default function OrdersPage() {
                                                                                         <Tooltip>
                                                                                             <TooltipTrigger asChild>
                                                                                                 <Button variant="ghost" size="icon" onClick={handleCancelCopy} className="text-destructive hover:text-destructive">
-                                                                                                    <XCircle className="h-4 w-4" />
+                                                                                                    <XCircleIcon className="h-4 w-4" />
                                                                                                 </Button>
                                                                                             </TooltipTrigger>
                                                                                             <TooltipContent><p>Cancelar Cópia</p></TooltipContent>
