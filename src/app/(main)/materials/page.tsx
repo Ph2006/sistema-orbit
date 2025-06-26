@@ -220,7 +220,7 @@ export default function MaterialsPage() {
 
     const onSubmit = async (values: Requisition) => {
         try {
-            const dataToSave = {
+            const dataToSave: any = {
                 ...values,
                 date: Timestamp.fromDate(values.date),
                 history: [
@@ -231,7 +231,15 @@ export default function MaterialsPage() {
                         action: selectedRequisition ? "Edição" : "Criação",
                         details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
                     }
-                ].map(h => ({...h, timestamp: Timestamp.fromDate(h.timestamp)}))
+                ].map(h => ({...h, timestamp: Timestamp.fromDate(h.timestamp)})),
+                items: values.items.map(item => ({
+                    ...item,
+                    neededDate: item.neededDate ? Timestamp.fromDate(item.neededDate) : null,
+                })),
+                approval: values.approval ? {
+                    ...values.approval,
+                    approvalDate: values.approval.approvalDate ? Timestamp.fromDate(values.approval.approvalDate) : null
+                } : null
             };
 
             if (selectedRequisition?.id) {
@@ -609,5 +617,3 @@ export default function MaterialsPage() {
         </>
     );
 }
-
-    
