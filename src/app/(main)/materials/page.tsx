@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History } from "lucide-react";
+import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -130,10 +130,15 @@ export default function MaterialsPage() {
             });
             setRequisitions(reqsList);
             
-            const ordersList: OrderInfo[] = ordersSnapshot.docs.map(d => ({
-                id: d.id,
-                number: d.data().quotationNumber || d.data().orderNumber || 'N/A',
-            }));
+            const ordersList: OrderInfo[] = ordersSnapshot.docs
+              .filter(d => {
+                  const status = d.data().status;
+                  return status !== 'Concluído' && status !== 'Cancelado';
+              })
+              .map(d => ({
+                  id: d.id,
+                  number: d.data().quotationNumber || d.data().orderNumber || 'N/A',
+              }));
             setOrders(ordersList);
 
             if (teamSnapshot.exists() && teamSnapshot.data().members) {
