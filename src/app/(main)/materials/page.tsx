@@ -114,26 +114,11 @@ export default function MaterialsPage() {
                 getDoc(doc(db, "companies", "mecald", "settings", "team")),
             ]);
 
-            const reqsList: Requisition[] = reqsSnapshot.docs.map(d => {
-                const data = d.data();
-                return {
-                    ...data,
-                    id: d.id,
-                    date: data.date.toDate(),
-                    approval: data.approval ? {
-                        ...data.approval,
-                        approvalDate: data.approval.approvalDate?.toDate() || null,
-                    } : {},
-                    items: data.items.map((item: any) => ({...item, neededDate: item.neededDate?.toDate() || null})),
-                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()}))
-                } as Requisition
-            });
-            
+            // ORDERS
             const ordersDataList = ordersSnapshot.docs
               .map(doc => {
                   const data = doc.data();
-                  const status = data.status;
-                  if (status === 'Concluído' || status === 'Cancelado') {
+                  if (['Concluído', 'Cancelado'].includes(data.status)) {
                       return null;
                   }
                   
@@ -151,22 +136,46 @@ export default function MaterialsPage() {
                   };
               })
               .filter((order): order is OrderInfo => order !== null);
-            
             setOrders(ordersDataList);
 
+            // TEAM
             if (teamSnapshot.exists()) {
                 const teamData = teamSnapshot.data();
                 if (teamData && Array.isArray(teamData.members)) {
-                     const membersList = teamData.members.map((m: any) => ({
-                        id: m.id?.toString() || Math.random().toString(), 
-                        name: m.name,
-                    }));
+                     const membersList = teamData.members
+                        .filter((m: any) => m && m.name)
+                        .map((m: any) => ({
+                          id: m.id?.toString() || m.name,
+                          name: m.name,
+                        }));
                     setTeam(membersList);
                 }
             }
-        } catch (error) {
+            
+            // REQUISITIONS
+            const reqsList: Requisition[] = reqsSnapshot.docs.map(d => {
+                const data = d.data();
+                return {
+                    ...data,
+                    id: d.id,
+                    date: data.date.toDate(),
+                    approval: data.approval ? {
+                        ...data.approval,
+                        approvalDate: data.approval.approvalDate?.toDate() || null,
+                    } : {},
+                    items: data.items.map((item: any) => ({...item, neededDate: item.neededDate?.toDate() || null})),
+                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()}))
+                } as Requisition
+            });
+            setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
+            
+        } catch (error: any) {
             console.error("Error fetching data:", error);
-            toast({ variant: "destructive", title: "Erro ao carregar dados", description: "Não foi possível buscar os dados do sistema." });
+            let description = "Não foi possível buscar os dados do sistema. Tente recarregar a página.";
+            if (error.code === 'permission-denied') {
+                description = "Permissão negada. Verifique as regras de segurança do seu Firestore e se você está autenticado corretamente.";
+            }
+            toast({ variant: "destructive", title: "Erro ao Carregar Dados", description: description, duration: 8000 });
         } finally {
             setIsLoading(false);
         }
