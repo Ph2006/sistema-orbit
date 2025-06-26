@@ -112,67 +112,6 @@ const calculateGrandTotal = (items: Item[] | any[]) => {
     }, 0);
 };
 
-const ItemFormCard = ({ index, control, remove, watchedItems }: { index: number, control: any, remove: (index: number) => void, watchedItems: any[] }) => {
-    const currentItem = watchedItems[index] || {};
-    const { totalPrice, taxAmount, totalWithTax } = calculateItemTotals(currentItem);
-
-    return (
-        <Card className="p-4 relative">
-            <div className="flex justify-between items-start mb-4">
-                <h4 className="font-semibold text-md pt-2">Item {index + 1}</h4>
-                <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive -mt-2 -mr-2" onClick={() => remove(index)}>
-                    <X className="h-4 w-4" />
-                </Button>
-            </div>
-            <div className="space-y-4">
-                <FormField control={control} name={`items.${index}.description`} render={({ field }) => (
-                    <FormItem><FormLabel>Descrição</FormLabel><FormControl><Textarea placeholder="Descrição completa do item, serviço ou produto" {...field} /></FormControl><FormMessage /></FormItem>
-                )}/>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <FormField control={control} name={`items.${index}.code`} render={({ field }) => (
-                        <FormItem><FormLabel>Código</FormLabel><FormControl><Input placeholder="Cód. do produto" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                    <FormField control={control} name={`items.${index}.quantity`} render={({ field }) => (
-                        <FormItem><FormLabel>Quantidade</FormLabel><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                    <FormField control={control} name={`items.${index}.unitPrice`} render={({ field }) => (
-                        <FormItem><FormLabel>Preço Unit. (R$)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                     <FormField control={control} name={`items.${index}.taxRate`} render={({ field }) => (
-                        <FormItem><FormLabel>Imposto (%)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                </div>
-                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <FormField control={control} name={`items.${index}.unitWeight`} render={({ field }) => (
-                        <FormItem><FormLabel>Peso Unit. (kg)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                    <FormField control={control} name={`items.${index}.leadTimeDays`} render={({ field }) => (
-                        <FormItem><FormLabel>Prazo (dias)</FormLabel><FormControl><Input type="number" placeholder="Ex: 15" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                    )}/>
-                 </div>
-                 <FormField control={control} name={`items.${index}.notes`} render={({ field }) => (
-                    <FormItem><FormLabel>Notas do Item</FormLabel><FormControl><Input placeholder="Observações específicas para este item" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                )}/>
-                <Separator />
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-sm">
-                    <div>
-                        <span className="text-muted-foreground">Subtotal: </span>
-                        <span className="font-medium">{totalPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    </div>
-                     <div>
-                        <span className="text-muted-foreground">Valor Imposto: </span>
-                        <span className="font-medium">{taxAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    </div>
-                     <div>
-                        <span className="text-muted-foreground">Total do Item: </span>
-                        <span className="font-bold text-primary">{totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    </div>
-                </div>
-            </div>
-        </Card>
-    );
-};
-
 
 export default function QuotationsPage() {
     const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -854,7 +793,7 @@ export default function QuotationsPage() {
             </div>
 
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-                <DialogContent className="max-w-4xl">
+                <DialogContent className="max-w-5xl">
                     <DialogHeader>
                         <DialogTitle>{selectedQuotation ? "Editar Orçamento" : "Novo Orçamento"}</DialogTitle>
                         <DialogDescription>Preencha os detalhes do orçamento.</DialogDescription>
@@ -897,15 +836,68 @@ export default function QuotationsPage() {
                                     
                                     <Card>
                                         <CardHeader className="flex flex-row items-center justify-between">
-                                            <CardTitle>Itens do Orçamento</CardTitle>
-                                            <Button type="button" variant="outline" size="sm" onClick={() => append({ description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' })}>
-                                                <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
+                                            <div>
+                                                <CardTitle>Itens do Orçamento</CardTitle>
+                                                <CardDescription>Adicione ou edite os itens abaixo. O total é calculado automaticamente.</CardDescription>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => append({ description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' })}
+                                            >
+                                                <PlusCircle className="mr-2 h-4 w-4" />
+                                                Adicionar Item
                                             </Button>
                                         </CardHeader>
-                                        <CardContent className="space-y-4">
-                                            {fields.map((field, index) => (
-                                                <ItemFormCard key={field.id} index={index} control={form.control} remove={remove} watchedItems={watchedItems} />
-                                            ))}
+                                        <CardContent>
+                                            <div className="w-full overflow-x-auto">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead className="min-w-[250px]">Descrição</TableHead>
+                                                        <TableHead className="w-[100px]">Qtd.</TableHead>
+                                                        <TableHead className="w-[150px]">Preço Unit.</TableHead>
+                                                        <TableHead className="w-[150px]">Total Item</TableHead>
+                                                        <TableHead className="w-[50px] text-right">Ação</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {fields.map((field, index) => {
+                                                        const currentItem = watchedItems[index] || {};
+                                                        const { totalWithTax } = calculateItemTotals(currentItem);
+                                                        return (
+                                                            <TableRow key={field.id}>
+                                                                <TableCell>
+                                                                    <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
+                                                                        <FormItem><FormControl><Textarea placeholder="Descrição do item" {...field} className="min-h-0 h-10 p-2" /></FormControl><FormMessage /></FormItem>
+                                                                    )}/>
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
+                                                                        <FormItem><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
+                                                                    )}/>
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <FormField control={form.control} name={`items.${index}.unitPrice`} render={({ field }) => (
+                                                                        <FormItem><FormControl><Input type="number" step="0.01" placeholder="R$ 0,00" {...field} /></FormControl><FormMessage /></FormItem>
+                                                                    )}/>
+                                                                </TableCell>
+                                                                <TableCell className="text-right font-medium">
+                                                                    {totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} className="text-destructive hover:text-destructive">
+                                                                        <Trash2 className="h-4 w-4" />
+                                                                    </Button>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        )
+                                                    })}
+                                                </TableBody>
+                                            </Table>
+                                            </div>
+
                                             {fields.length > 0 && (
                                                 <>
                                                     <Separator className="my-4" />
