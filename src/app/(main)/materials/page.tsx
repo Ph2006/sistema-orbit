@@ -8,8 +8,11 @@ import * as z from "zod";
 import { collection, getDocs, doc, setDoc, addDoc, Timestamp, getDoc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format } from "date-fns";
+import { format, isPast, endOfDay } from "date-fns";
 import { ptBR } from 'date-fns/locale';
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
 
 // Imports from shadcn/ui and lucide-react
 import { Button } from "@/components/ui/button";
@@ -22,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil } from "lucide-react";
+import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil, FileDown, AlertTriangle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -31,9 +34,12 @@ import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-// Schemas
+// Schemas & Constants
+const itemStatuses = ["Pendente", "Estoque", "Recebido (Aguardando Inspeção)", "Inspecionado e Aprovado", "Inspecionado e Rejeitado"] as const;
+
 const requisitionItemSchema = z.object({
   id: z.string().optional(),
   code: z.string().optional(),
@@ -44,8 +50,9 @@ const requisitionItemSchema = z.object({
   quantityRequested: z.coerce.number().min(0.1, "Qtd. deve ser maior que 0."),
   quantityFulfilled: z.coerce.number().min(0).optional().default(0),
   unit: z.string().min(1, "Unidade obrigatória (ex: m, kg, pç)."),
-  neededDate: z.date().optional().nullable(),
+  deliveryDate: z.date().optional().nullable(),
   notes: z.string().optional(),
+  status: z.string().optional().default("Pendente"),
 });
 
 const requisitionSchema = z.object({
@@ -72,8 +79,13 @@ const requisitionSchema = z.object({
 });
 
 type Requisition = z.infer<typeof requisitionSchema>;
+type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 type OrderInfo = { id: string; internalOS: string; };
 type TeamMember = { id: string; name: string };
+type CompanyData = {
+    nomeFantasia?: string;
+    logo?: { preview?: string };
+};
 
 const RequisitionStatus: Requisition['status'][] = ["Pendente", "Aprovada", "Reprovada", "Atendida Parcialmente", "Atendida Totalmente", "Cancelada"];
 
@@ -118,37 +130,25 @@ export default function MaterialsPage() {
                 getDoc(doc(db, "companies", "mecald", "settings", "team")),
             ]);
 
-            // ORDERS
             const ordersDataList = ordersSnapshot.docs
               .map(doc => {
                   const data = doc.data();
-                  if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) {
-                      return null;
-                  }
-                  
-                  return {
-                      id: doc.id,
-                      internalOS: data.internalOS.toString(),
-                  };
+                  if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) return null;
+                  return { id: doc.id, internalOS: data.internalOS.toString() };
               })
               .filter((order): order is OrderInfo => order !== null);
             setOrders(ordersDataList);
 
-            // TEAM
             if (teamSnapshot.exists()) {
                 const teamData = teamSnapshot.data();
                 if (teamData && Array.isArray(teamData.members)) {
                      const membersList = teamData.members
                         .filter((m: any) => m && m.name)
-                        .map((m: any) => ({
-                          id: m.id?.toString() || m.name,
-                          name: m.name,
-                        }));
+                        .map((m: any) => ({ id: m.id?.toString() || m.name, name: m.name, }));
                     setTeam(membersList);
                 }
             }
             
-            // REQUISITIONS
             const reqsList: Requisition[] = reqsSnapshot.docs.map(d => {
                 const data = d.data();
                 return {
@@ -159,7 +159,11 @@ export default function MaterialsPage() {
                         ...data.approval,
                         approvalDate: data.approval.approvalDate?.toDate() || null,
                     } : {},
-                    items: data.items.map((item: any) => ({...item, neededDate: item.neededDate?.toDate() || null})),
+                    items: (data.items || []).map((item: any) => ({
+                        ...item, 
+                        deliveryDate: item.deliveryDate?.toDate() || null,
+                        status: item.status || "Pendente",
+                    })),
                     history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()}))
                 } as Requisition
             });
@@ -167,11 +171,11 @@ export default function MaterialsPage() {
             
         } catch (error: any) {
             console.error("Error fetching data:", error);
-            let description = "Não foi possível buscar os dados do sistema. Tente recarregar a página.";
+            let description = "Não foi possível buscar os dados do sistema.";
             if (error.code === 'permission-denied') {
-                description = "Permissão negada. Verifique as regras de segurança do seu Firestore e se você está autenticado corretamente.";
+                description = "Permissão negada. Verifique as regras de segurança do seu Firestore.";
             }
-            toast({ variant: "destructive", title: "Erro ao Carregar Dados", description: description, duration: 8000 });
+            toast({ variant: "destructive", title: "Erro ao Carregar Dados", description, duration: 8000 });
         } finally {
             setIsLoading(false);
             setIsLoadingData(false);
@@ -247,31 +251,26 @@ export default function MaterialsPage() {
                     quantityFulfilled: item.quantityFulfilled || 0,
                     unit: item.unit,
                     notes: item.notes || null,
-                    neededDate: item.neededDate ? Timestamp.fromDate(item.neededDate) : null,
+                    deliveryDate: item.deliveryDate ? Timestamp.fromDate(item.deliveryDate) : null,
+                    status: item.status || 'Pendente',
                 })),
                 approval: values.approval ? {
                     approvedBy: values.approval.approvedBy || null,
                     approvalDate: values.approval.approvalDate ? Timestamp.fromDate(values.approval.approvalDate) : null,
                     justification: values.approval.justification || null,
                 } : null,
-                history: finalHistory.map(h => ({
-                    ...h,
-                    timestamp: Timestamp.fromDate(h.timestamp),
-                })),
+                history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
                 requisitionNumber: values.requisitionNumber || null,
             };
 
             if (selectedRequisition?.id) {
-                await setDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave);
+                await setDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave, { merge: true });
                 toast({ title: "Requisição atualizada!", description: "As alterações foram salvas com sucesso." });
             } else {
                 const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
                 const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
                 
-                const newData = {
-                    ...dataToSave,
-                    requisitionNumber: (highestNumber + 1).toString().padStart(5, '0')
-                };
+                const newData = { ...dataToSave, requisitionNumber: (highestNumber + 1).toString().padStart(5, '0') };
                 
                 await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), newData);
                 toast({ title: "Requisição criada!", description: "A nova requisição foi salva." });
@@ -285,6 +284,51 @@ export default function MaterialsPage() {
         }
     };
 
+    const handleExportPDF = async (requisition: Requisition) => {
+        toast({ title: "Gerando PDF...", description: "Aguarde enquanto o arquivo é preparado." });
+    
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const companySnap = await getDoc(companyRef);
+            const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
+    
+            const docPdf = new jsPDF();
+    
+            docPdf.setFontSize(18);
+            docPdf.text(`Requisição de Material Nº: ${requisition.requisitionNumber}`, 14, 22);
+            if (companyData.logo?.preview) {
+                 try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 150, 15, 40, 20);
+                 } catch (e) { console.error("Error adding logo to PDF:", e); }
+            }
+    
+            docPdf.setFontSize(11);
+            docPdf.text(`Data: ${format(requisition.date, 'dd/MM/yyyy')}`, 14, 32);
+            docPdf.text(`Solicitante: ${requisition.requestedBy}`, 14, 38);
+            docPdf.text(`Status: ${requisition.status}`, 14, 44);
+            const os = orders.find(o => o.id === requisition.orderId)?.internalOS || 'N/A';
+            docPdf.text(`OS Vinculada: ${os}`, 14, 50);
+    
+            const tableBody = requisition.items.map(item => [
+                item.description,
+                item.quantityRequested,
+                item.unit,
+                item.status,
+                item.deliveryDate ? format(item.deliveryDate, 'dd/MM/yyyy') : 'N/A',
+            ]);
+            autoTable(docPdf, {
+                startY: 60,
+                head: [['Descrição', 'Qtd. Solicitada', 'Unid.', 'Status', 'Data Entrega Prev.']],
+                body: tableBody,
+            });
+            
+            docPdf.save(`Requisicao_${requisition.requisitionNumber}.pdf`);
+    
+        } catch (error) {
+            console.error("Error exporting PDF:", error);
+            toast({ variant: "destructive", title: "Erro ao exportar", description: "Não foi possível gerar o PDF." });
+        }
+    }
 
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter(r => {
@@ -355,6 +399,7 @@ export default function MaterialsPage() {
                              <Table>
                                 <TableHeader>
                                     <TableRow>
+                                        <TableHead className="w-[50px]">Alerta</TableHead>
                                         <TableHead>Nº</TableHead>
                                         <TableHead>Data</TableHead>
                                         <TableHead>Solicitante</TableHead>
@@ -367,6 +412,33 @@ export default function MaterialsPage() {
                                     {filteredRequisitions.length > 0 ? (
                                         filteredRequisitions.map(req => (
                                             <TableRow key={req.id}>
+                                                <TableCell>
+                                                    {(() => {
+                                                        const overdueItems = req.items.filter(item => 
+                                                            item.deliveryDate && isPast(endOfDay(item.deliveryDate)) && item.status !== 'Inspecionado e Aprovado'
+                                                        );
+                                                        if (overdueItems.length > 0) {
+                                                            return (
+                                                                <TooltipProvider>
+                                                                    <Tooltip>
+                                                                        <TooltipTrigger asChild>
+                                                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                                                                                <AlertTriangle className="h-5 w-5" />
+                                                                            </Button>
+                                                                        </TooltipTrigger>
+                                                                        <TooltipContent>
+                                                                            <p className="font-bold">{overdueItems.length} item(s) com entrega atrasada:</p>
+                                                                            <ul className="list-disc pl-5 mt-1">
+                                                                                {overdueItems.map((it, idx) => <li key={idx}>{it.description}</li>)}
+                                                                            </ul>
+                                                                        </TooltipContent>
+                                                                    </Tooltip>
+                                                                </TooltipProvider>
+                                                            )
+                                                        }
+                                                        return null;
+                                                    })()}
+                                                </TableCell>
                                                 <TableCell className="font-medium">{req.requisitionNumber || req.id}</TableCell>
                                                 <TableCell>{format(req.date, 'dd/MM/yyyy')}</TableCell>
                                                 <TableCell>{req.requestedBy}</TableCell>
@@ -382,7 +454,7 @@ export default function MaterialsPage() {
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={6} className="h-24 text-center">Nenhuma requisição encontrada.</TableCell>
+                                            <TableCell colSpan={7} className="h-24 text-center">Nenhuma requisição encontrada.</TableCell>
                                         </TableRow>
                                     )}
                                 </TableBody>
@@ -483,14 +555,14 @@ export default function MaterialsPage() {
                                         <CardHeader className="flex flex-row justify-between items-center">
                                             <CardTitle>2. Detalhamento dos Itens Solicitados</CardTitle>
                                             <Button type="button" size="sm" variant="outline"
-                                                onClick={() => append({ description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0 })}>
+                                                onClick={() => append({ description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente" })}>
                                                 <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
                                             </Button>
                                         </CardHeader>
                                         <CardContent className="space-y-4">
                                             {fields.map((field, index) => (
-                                                <Card key={field.id} className="p-4 bg-muted/30 relative">
-                                                    <Button type="button" variant="ghost" size="icon" className="absolute top-2 right-2 text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
+                                                <div key={field.id} className="p-4 border rounded-md relative">
+                                                    <Button type="button" variant="ghost" size="icon" className="absolute top-2 right-2 text-destructive hover:text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
                                                     <div className="space-y-4">
                                                         <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
                                                             <FormItem><FormLabel>Descrição do Item</FormLabel><FormControl><Input placeholder="Ex: Chapa de Aço 1/4" {...field} /></FormControl><FormMessage /></FormItem>
@@ -516,18 +588,11 @@ export default function MaterialsPage() {
                                                              <FormField control={form.control} name={`items.${index}.pesoUnitario`} render={({ field }) => (
                                                                 <FormItem><FormLabel>Peso Unit. (kg)</FormLabel><FormControl><Input type="number" step="0.01" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                             )} />
-                                                            {selectedRequisition && (
-                                                                <FormField control={form.control} name={`items.${index}.quantityFulfilled`} render={({ field }) => (
-                                                                    <FormItem><FormLabel>Qtd. Atendida</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-                                                                )} />
-                                                            )}
-                                                        </div>
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                            <FormField control={form.control} name={`items.${index}.neededDate`} render={({ field }) => (
-                                                                <FormItem className="flex flex-col"><FormLabel>Data de Necessidade</FormLabel>
+                                                            <FormField control={form.control} name={`items.${index}.deliveryDate`} render={({ field }) => (
+                                                                <FormItem className="flex flex-col"><FormLabel>Data de Entrega Prevista</FormLabel>
                                                                     <Popover>
                                                                         <PopoverTrigger asChild><FormControl>
-                                                                            <Button variant={"outline"} className={cn("pl-3 text-left", !field.value && "text-muted-foreground")}>
+                                                                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
                                                                                 {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
                                                                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                                                                             </Button>
@@ -537,15 +602,26 @@ export default function MaterialsPage() {
                                                                 </FormItem>
                                                             )} />
                                                         </div>
+                                                        {selectedRequisition && (
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                <FormField control={form.control} name={`items.${index}.quantityFulfilled`} render={({ field }) => (
+                                                                    <FormItem><FormLabel>Qtd. Atendida</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? 0} /></FormControl><FormMessage /></FormItem>
+                                                                )} />
+                                                                <FormField control={form.control} name={`items.${index}.status`} render={({ field }) => (
+                                                                    <FormItem><FormLabel>Status do Item</FormLabel>
+                                                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                            <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                                                                            <SelectContent>{itemStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                                                                        </Select><FormMessage />
+                                                                    </FormItem>
+                                                                )} />
+                                                            </div>
+                                                        )}
                                                         <FormField control={form.control} name={`items.${index}.notes`} render={({ field }) => (
                                                             <FormItem><FormLabel>Observações do Item</FormLabel><FormControl><Input placeholder="Ex: Certificado de qualidade, norma específica" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                         )} />
-                                                        <div className="flex justify-end gap-4 text-sm mt-2">
-                                                            <Button type="button" variant="link" size="sm" className="h-auto p-0">Verificar Estoque</Button>
-                                                            <Button type="button" variant="link" size="sm" className="h-auto p-0">Gerar Pedido de Compra</Button>
-                                                        </div>
                                                     </div>
-                                                </Card>
+                                                </div>
                                             ))}
                                             {fields.length === 0 && <p className="text-center text-muted-foreground p-4">Nenhum material adicionado.</p>}
                                         </CardContent>
@@ -613,11 +689,20 @@ export default function MaterialsPage() {
                                 </ScrollArea>
                                 </div>
                             </Tabs>
-                            <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0">
-                                <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-                                <Button type="submit" disabled={form.formState.isSubmitting}>
-                                    {form.formState.isSubmitting ? "Salvando..." : (selectedRequisition ? "Salvar Alterações" : "Criar Requisição")}
-                                </Button>
+                            <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0 flex sm:justify-between">
+                                <div>
+                                    {selectedRequisition && (
+                                        <Button type="button" variant="outline" onClick={() => handleExportPDF(selectedRequisition)}>
+                                            <FileDown className="mr-2 h-4 w-4" /> Exportar PDF
+                                        </Button>
+                                    )}
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
+                                    <Button type="submit" disabled={form.formState.isSubmitting}>
+                                        {form.formState.isSubmitting ? "Salvando..." : (selectedRequisition ? "Salvar Alterações" : "Criar Requisição")}
+                                    </Button>
+                                </div>
                             </DialogFooter>
                         </form>
                     </Form>
@@ -643,3 +728,4 @@ export default function MaterialsPage() {
         </>
     );
 }
+
