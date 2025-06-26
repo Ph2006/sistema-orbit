@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil, FileDown, AlertTriangle } from "lucide-react";
+import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil, FileDown, AlertTriangle, GanttChart, BrainCircuit, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -34,7 +34,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // Schemas & Constants
@@ -55,6 +55,25 @@ const requisitionItemSchema = z.object({
   status: z.string().optional().default("Pendente"),
 });
 
+const cuttingPlanItemSchema = z.object({
+    description: z.string().min(1, "Descrição é obrigatória"),
+    length: z.coerce.number().min(1, "Comprimento deve ser > 0"),
+    quantity: z.coerce.number().min(1, "Quantidade deve ser > 0"),
+});
+
+const cuttingPlanSchema = z.object({
+  stockLength: z.coerce.number().min(1, "Comprimento da barra é obrigatório."),
+  kerf: z.coerce.number().min(0, "Espessura do corte não pode ser negativa.").default(0),
+  leftoverThreshold: z.coerce.number().min(0).optional(),
+  items: z.array(cuttingPlanItemSchema).min(1, "Adicione pelo menos um item para cortar."),
+  patterns: z.array(z.any()).optional(),
+  summary: z.object({
+    totalBars: z.number(),
+    totalScrapPercentage: z.number(),
+    totalYieldPercentage: z.number(),
+  }).optional(),
+}).optional();
+
 const requisitionSchema = z.object({
   id: z.string().optional(),
   requisitionNumber: z.string().optional(),
@@ -64,6 +83,7 @@ const requisitionSchema = z.object({
   department: z.string().optional(),
   orderId: z.string().optional(),
   items: z.array(requisitionItemSchema).min(1, "A requisição deve ter pelo menos um item."),
+  cuttingPlan: cuttingPlanSchema,
   approval: z.object({
     approvedBy: z.string().optional(),
     approvalDate: z.date().optional().nullable(),
@@ -80,6 +100,7 @@ const requisitionSchema = z.object({
 
 type Requisition = z.infer<typeof requisitionSchema>;
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
+type CuttingPlan = z.infer<typeof cuttingPlanSchema>;
 type OrderInfo = { id: string; internalOS: string; };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
@@ -88,6 +109,25 @@ type CompanyData = {
 };
 
 const RequisitionStatus: Requisition['status'][] = ["Pendente", "Aprovada", "Reprovada", "Atendida Parcialmente", "Atendida Totalmente", "Cancelada"];
+
+interface PlanResult {
+  patterns: {
+      patternId: number;
+      patternString: string;
+      pieces: number[];
+      barUsage: number;
+      leftover: number;
+      yieldPercentage: number;
+      barsNeeded: number;
+  }[];
+  summary: {
+      totalBars: number;
+      totalYieldPercentage: number;
+      totalScrapPercentage: number;
+      totalScrapLength: number;
+  };
+}
+
 
 // Main Component
 export default function MaterialsPage() {
@@ -101,6 +141,7 @@ export default function MaterialsPage() {
     const [selectedRequisition, setSelectedRequisition] = useState<Requisition | null>(null);
     const [requisitionToDelete, setRequisitionToDelete] = useState<Requisition | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+    const [planResults, setPlanResults] = useState<PlanResult | null>(null);
     const { user, loading: authLoading } = useAuth();
     const { toast } = useToast();
 
@@ -111,13 +152,17 @@ export default function MaterialsPage() {
             status: "Pendente",
             items: [],
             history: [],
+            cuttingPlan: {
+                stockLength: 6000,
+                kerf: 3,
+                items: [],
+            }
         },
     });
 
-    const { fields, append, remove } = useFieldArray({
-        control: form.control,
-        name: "items"
-    });
+    const { fields, append, remove } = useFieldArray({ control: form.control, name: "items" });
+    const { fields: cutItems, append: appendCutItem, remove: removeCutItem } = useFieldArray({ control: form.control, name: "cuttingPlan.items" });
+
 
     const fetchData = useCallback(async () => {
         if (!user) return;
@@ -189,16 +234,21 @@ export default function MaterialsPage() {
     }, [user, authLoading, fetchData]);
 
     const handleOpenForm = (requisition: Requisition | null = null) => {
+        setPlanResults(null);
         setSelectedRequisition(requisition);
         if (requisition) {
-            form.reset(requisition);
+            form.reset({
+                ...requisition,
+                cuttingPlan: requisition.cuttingPlan || { stockLength: 6000, kerf: 3, items: [] }
+            });
         } else {
             form.reset({
                 date: new Date(),
                 status: "Pendente",
                 items: [],
                 history: [],
-                requestedBy: user?.displayName || user?.email || undefined
+                requestedBy: user?.displayName || user?.email || undefined,
+                cuttingPlan: { stockLength: 6000, kerf: 3, items: [] }
             });
         }
         setIsFormOpen(true);
@@ -233,35 +283,51 @@ export default function MaterialsPage() {
     
             const finalHistory = [...(values.history || []), newHistoryEntry];
     
-            const dataToSave = {
+            const dataToSave: any = {
                 date: Timestamp.fromDate(values.date),
                 status: values.status,
                 requestedBy: values.requestedBy,
                 department: values.department || null,
                 orderId: values.orderId || null,
                 generalNotes: values.generalNotes || null,
-                items: values.items.map(item => ({
-                    id: item.id || null,
-                    code: item.code || null,
-                    material: item.material || null,
-                    dimensao: item.dimensao || null,
-                    pesoUnitario: item.pesoUnitario || 0,
-                    description: item.description,
-                    quantityRequested: item.quantityRequested,
-                    quantityFulfilled: item.quantityFulfilled || 0,
-                    unit: item.unit,
-                    notes: item.notes || null,
-                    deliveryDate: item.deliveryDate ? Timestamp.fromDate(item.deliveryDate) : null,
-                    status: item.status || 'Pendente',
-                })),
-                approval: values.approval ? {
-                    approvedBy: values.approval.approvedBy || null,
-                    approvalDate: values.approval.approvalDate ? Timestamp.fromDate(values.approval.approvalDate) : null,
-                    justification: values.approval.justification || null,
-                } : null,
                 history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
                 requisitionNumber: values.requisitionNumber || null,
             };
+            
+            dataToSave.items = values.items.map(item => ({
+                id: item.id || null,
+                code: item.code || null,
+                material: item.material || null,
+                dimensao: item.dimensao || null,
+                pesoUnitario: item.pesoUnitario || 0,
+                description: item.description,
+                quantityRequested: item.quantityRequested,
+                quantityFulfilled: item.quantityFulfilled || 0,
+                unit: item.unit,
+                notes: item.notes || null,
+                deliveryDate: item.deliveryDate ? Timestamp.fromDate(item.deliveryDate) : null,
+                status: item.status || 'Pendente',
+            }));
+
+            if (values.approval) {
+              dataToSave.approval = {
+                  approvedBy: values.approval.approvedBy || null,
+                  approvalDate: values.approval.approvalDate ? Timestamp.fromDate(values.approval.approvalDate) : null,
+                  justification: values.approval.justification || null,
+              }
+            } else {
+              dataToSave.approval = null;
+            }
+
+            if (values.cuttingPlan && values.cuttingPlan.items.length > 0) {
+              dataToSave.cuttingPlan = {
+                ...values.cuttingPlan,
+                patterns: planResults?.patterns || values.cuttingPlan.patterns || [],
+                summary: planResults?.summary || values.cuttingPlan.summary || null,
+              }
+            } else {
+              dataToSave.cuttingPlan = null;
+            }
 
             if (selectedRequisition?.id) {
                 await setDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave, { merge: true });
@@ -295,7 +361,6 @@ export default function MaterialsPage() {
             const docPdf = new jsPDF({ orientation: "landscape" });
             const pageWidth = docPdf.internal.pageSize.width;
 
-            // Header
             if (companyData.logo?.preview) {
                 try {
                     docPdf.addImage(companyData.logo.preview, 'PNG', 15, 12, 40, 15);
@@ -304,7 +369,6 @@ export default function MaterialsPage() {
             docPdf.setFontSize(18);
             docPdf.text(`Requisição de Material Nº: ${requisition.requisitionNumber}`, pageWidth / 2, 20, { align: 'center' });
 
-            // Sub-header
             docPdf.setFontSize(10);
             const subheaderY = 35;
             docPdf.text(`Data: ${format(requisition.date, 'dd/MM/yyyy')}`, 15, subheaderY);
@@ -314,7 +378,6 @@ export default function MaterialsPage() {
             docPdf.text(`OS Vinculada: ${os}`, pageWidth - 15, subheaderY, { align: 'right' });
             docPdf.text(`Status: ${requisition.status}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
 
-            // Table
             const head = [['Cód.', 'Material', 'Dimensão', 'Descrição', 'Qtd. Sol.', 'Unid.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
             const body = requisition.items.map(item => [
                 item.code || '-',
@@ -335,19 +398,18 @@ export default function MaterialsPage() {
                 styles: { fontSize: 8 },
                 headStyles: { fillColor: [40, 40, 40] },
                 columnStyles: {
-                    0: { cellWidth: 20 }, // Cód.
-                    1: { cellWidth: 30 }, // Material
-                    2: { cellWidth: 40 }, // Dimensão
-                    3: { cellWidth: 'auto' }, // Descrição
-                    4: { cellWidth: 15, halign: 'right' }, // Qtd. Sol.
-                    5: { cellWidth: 15, halign: 'center' }, // Unid.
-                    6: { cellWidth: 20, halign: 'right' }, // Peso Unit.
-                    7: { cellWidth: 22, halign: 'center' }, // Entrega
-                    8: { cellWidth: 40 }, // Status
+                    0: { cellWidth: 20 },
+                    1: { cellWidth: 30 },
+                    2: { cellWidth: 40 },
+                    3: { cellWidth: 'auto' },
+                    4: { cellWidth: 15, halign: 'right' },
+                    5: { cellWidth: 15, halign: 'center' },
+                    6: { cellWidth: 20, halign: 'right' },
+                    7: { cellWidth: 22, halign: 'center' },
+                    8: { cellWidth: 40 },
                 }
             });
 
-            // Footer notes
             let finalY = (docPdf as any).lastAutoTable.finalY + 10;
             if (requisition.generalNotes) {
                 docPdf.setFontSize(10).setFont(undefined, 'bold');
@@ -397,6 +459,96 @@ export default function MaterialsPage() {
             total: requisitions.length,
         }
     }, [requisitions]);
+
+    const generateCuttingPlan = () => {
+        const { stockLength, kerf, items } = form.getValues('cuttingPlan') || {};
+
+        if (!stockLength || !items || items.length === 0) {
+            toast({ variant: 'destructive', title: 'Entrada Inválida', description: 'Forneça o comprimento da barra e pelo menos um item para cortar.' });
+            return;
+        }
+
+        const allPieces: { description: string; length: number }[] = [];
+        items.forEach(item => {
+            for (let i = 0; i < item.quantity; i++) {
+                allPieces.push({ description: item.description, length: item.length });
+            }
+        });
+
+        allPieces.sort((a, b) => b.length - a.length);
+
+        const bins: { pieces: number[]; remaining: number }[] = [];
+        for (const piece of allPieces) {
+            if (piece.length > stockLength) continue;
+
+            let placed = false;
+            for (const bin of bins) {
+                const spaceNeeded = bin.pieces.length > 0 ? piece.length + (kerf || 0) : piece.length;
+                if (bin.remaining >= spaceNeeded) {
+                    bin.pieces.push(piece.length);
+                    bin.remaining -= spaceNeeded;
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed) {
+                bins.push({
+                    pieces: [piece.length],
+                    remaining: stockLength - piece.length,
+                });
+            }
+        }
+        
+        const patternMap = new Map<string, { pieces: number[], count: number }>();
+        bins.forEach(bin => {
+            const patternKey = [...bin.pieces].sort((a, b) => b - a).join(' + ');
+            const entry = patternMap.get(patternKey);
+            if (entry) {
+                entry.count++;
+            } else {
+                patternMap.set(patternKey, { pieces: bin.pieces, count: 1 });
+            }
+        });
+
+        let patternId = 1;
+        let totalScrap = 0;
+        const finalPatterns = Array.from(patternMap.entries()).map(([patternString, data]) => {
+            const piecesUsedSum = data.pieces.reduce((sum, p) => sum + p, 0);
+            const kerfTotal = Math.max(0, data.pieces.length -1) * (kerf || 0);
+            const barUsage = piecesUsedSum + kerfTotal;
+            const leftover = stockLength - barUsage;
+            totalScrap += leftover * data.count;
+
+            return {
+                patternId: patternId++,
+                patternString,
+                pieces: data.pieces,
+                barUsage,
+                leftover,
+                yieldPercentage: (piecesUsedSum / stockLength) * 100,
+                barsNeeded: data.count,
+            };
+        });
+
+        const totalBars = bins.length;
+        const totalMaterialLength = totalBars * stockLength;
+        const totalYield = ((totalMaterialLength - totalScrap) / totalMaterialLength) * 100;
+
+        const results: PlanResult = {
+            patterns: finalPatterns,
+            summary: {
+                totalBars: totalBars,
+                totalYieldPercentage: totalYield,
+                totalScrapPercentage: 100 - totalYield,
+                totalScrapLength: totalScrap,
+            },
+        };
+        setPlanResults(results);
+        form.setValue('cuttingPlan.patterns', results.patterns);
+        form.setValue('cuttingPlan.summary', results.summary);
+        toast({ title: "Plano de Corte Gerado!", description: "Os resultados foram calculados e exibidos." });
+    };
 
     return (
         <>
@@ -515,7 +667,8 @@ export default function MaterialsPage() {
                             <Tabs defaultValue="details" className="flex-grow flex flex-col min-h-0">
                                 <TabsList>
                                     <TabsTrigger value="details">Detalhes da Requisição</TabsTrigger>
-                                    <TabsTrigger value="items">Itens Solicitados</TabsTrigger>
+                                    <TabsTrigger value="items">Lista de Materiais</TabsTrigger>
+                                    <TabsTrigger value="cuttingPlan">Plano de Corte</TabsTrigger>
                                     <TabsTrigger value="approval">Aprovação</TabsTrigger>
                                     <TabsTrigger value="history">Histórico</TabsTrigger>
                                 </TabsList>
@@ -523,7 +676,7 @@ export default function MaterialsPage() {
                                 <ScrollArea className="h-full pr-6">
                                 <TabsContent value="details" className="space-y-6">
                                   <Card>
-                                    <CardHeader><CardTitle>1. Identificação da Requisição</CardTitle></CardHeader>
+                                    <CardHeader><CardTitle>Identificação da Requisição</CardTitle></CardHeader>
                                     <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                         <FormField control={form.control} name="date" render={({ field }) => (
                                             <FormItem className="flex flex-col"><FormLabel>Data da Requisição</FormLabel>
@@ -568,7 +721,7 @@ export default function MaterialsPage() {
                                     </CardContent>
                                   </Card>
                                   <Card>
-                                    <CardHeader><CardTitle>7. Comentários e Anexos</CardTitle></CardHeader>
+                                    <CardHeader><CardTitle>Comentários e Anexos</CardTitle></CardHeader>
                                     <CardContent className="space-y-4">
                                         <FormField control={form.control} name="generalNotes" render={({ field }) => (
                                             <FormItem><FormLabel>Observações Gerais</FormLabel><FormControl><Textarea placeholder="Qualquer informação adicional sobre a requisição..." {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem>
@@ -589,7 +742,7 @@ export default function MaterialsPage() {
                                 <TabsContent value="items" className="space-y-4">
                                     <Card>
                                         <CardHeader className="flex flex-row justify-between items-center">
-                                            <CardTitle>2. Detalhamento dos Itens Solicitados</CardTitle>
+                                            <CardTitle>Detalhamento dos Itens Solicitados</CardTitle>
                                             <Button type="button" size="sm" variant="outline"
                                                 onClick={() => append({ description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente" })}>
                                                 <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
@@ -633,7 +786,7 @@ export default function MaterialsPage() {
                                                                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                                                                             </Button>
                                                                         </FormControl></PopoverTrigger>
-                                                                        <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent>
+                                                                        <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent>
                                                                     </Popover><FormMessage />
                                                                 </FormItem>
                                                             )} />
@@ -663,9 +816,103 @@ export default function MaterialsPage() {
                                         </CardContent>
                                     </Card>
                                 </TabsContent>
+                                <TabsContent value="cuttingPlan">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                        {/* Input side */}
+                                        <div className="space-y-6">
+                                            <Card>
+                                                <CardHeader><CardTitle>Parâmetros de Entrada</CardTitle></CardHeader>
+                                                <CardContent className="space-y-4">
+                                                    <FormField control={form.control} name="cuttingPlan.stockLength" render={({ field }) => (
+                                                        <FormItem><FormLabel>Comprimento da Barra (mm)</FormLabel><FormControl><Input type="number" placeholder="6000" {...field} /></FormControl><FormMessage /></FormItem>
+                                                    )} />
+                                                    <FormField control={form.control} name="cuttingPlan.kerf" render={({ field }) => (
+                                                        <FormItem><FormLabel>Espessura do Corte / Kerf (mm)</FormLabel><FormControl><Input type="number" placeholder="3" {...field} /></FormControl><FormMessage /></FormItem>
+                                                    )} />
+                                                     <FormField control={form.control} name="cuttingPlan.leftoverThreshold" render={({ field }) => (
+                                                        <FormItem><FormLabel>Aceitar sobras menores que (mm)</FormLabel><FormControl><Input type="number" placeholder="Opcional" {...field} /></FormControl><FormMessage /></FormItem>
+                                                    )} />
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                 <CardHeader className="flex flex-row items-center justify-between">
+                                                    <div>
+                                                        <CardTitle>Itens a Cortar</CardTitle>
+                                                        <CardDescription>Lista de peças e quantidades.</CardDescription>
+                                                    </div>
+                                                    <Button type="button" variant="outline" size="sm" onClick={() => appendCutItem({ description: '', length: 0, quantity: 1 })}>
+                                                        <PlusCircle className="h-4 w-4 mr-2" /> Item
+                                                    </Button>
+                                                 </CardHeader>
+                                                 <CardContent className="space-y-4">
+                                                    {cutItems.map((item, index) => (
+                                                        <div key={item.id} className="grid grid-cols-[1fr_100px_80px_auto] gap-2 items-end">
+                                                            <FormField control={form.control} name={`cuttingPlan.items.${index}.description`} render={({ field }) => (
+                                                                <FormItem><FormLabel>Descrição</FormLabel><FormControl><Input placeholder={`Peça ${index + 1}`} {...field} /></FormControl></FormItem>
+                                                            )} />
+                                                            <FormField control={form.control} name={`cuttingPlan.items.${index}.length`} render={({ field }) => (
+                                                                <FormItem><FormLabel>Comp. (mm)</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
+                                                            )} />
+                                                            <FormField control={form.control} name={`cuttingPlan.items.${index}.quantity`} render={({ field }) => (
+                                                                <FormItem><FormLabel>Qtd.</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
+                                                            )} />
+                                                            <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => removeCutItem(index)}><X className="h-4 w-4" /></Button>
+                                                        </div>
+                                                    ))}
+                                                    {cutItems.length === 0 && <p className="text-sm text-center text-muted-foreground py-4">Nenhum item adicionado.</p>}
+                                                 </CardContent>
+                                            </Card>
+                                            <Button type="button" className="w-full" onClick={generateCuttingPlan}>
+                                                <BrainCircuit className="mr-2 h-4 w-4" /> Gerar Plano de Corte
+                                            </Button>
+                                        </div>
+                                        {/* Output side */}
+                                        <div className="space-y-6">
+                                            <Card>
+                                                <CardHeader><CardTitle>Resultados do Plano</CardTitle><CardDescription>Padrões de corte para otimizar o uso do material.</CardDescription></CardHeader>
+                                                <CardContent>
+                                                    {planResults ? (
+                                                        <>
+                                                            <Table>
+                                                                <TableHeader>
+                                                                    <TableRow>
+                                                                        <TableHead>Padrão</TableHead>
+                                                                        <TableHead>Uso / Sobra</TableHead>
+                                                                        <TableHead>Nº Barras</TableHead>
+                                                                        <TableHead>Rend.</TableHead>
+                                                                    </TableRow>
+                                                                </TableHeader>
+                                                                <TableBody>
+                                                                    {planResults.patterns.map(p => (
+                                                                        <TableRow key={p.patternId}>
+                                                                            <TableCell className="text-xs">{p.patternString}</TableCell>
+                                                                            <TableCell>{p.barUsage.toFixed(0)}mm / <span className="text-destructive">{p.leftover.toFixed(0)}mm</span></TableCell>
+                                                                            <TableCell>{p.barsNeeded}</TableCell>
+                                                                            <TableCell>{p.yieldPercentage.toFixed(1)}%</TableCell>
+                                                                        </TableRow>
+                                                                    ))}
+                                                                </TableBody>
+                                                            </Table>
+                                                            <Separator className="my-4" />
+                                                            <div className="text-sm space-y-2">
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Total de Barras:</span> <span>{planResults.summary.totalBars}</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Rendimento Total:</span> <span>{planResults.summary.totalYieldPercentage.toFixed(2)}%</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Sucata Total (%):</span> <span className="text-destructive">{planResults.summary.totalScrapPercentage.toFixed(2)}%</span></div>
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <div className="text-center text-muted-foreground py-10">
+                                                            <p>Gere um plano para ver os resultados.</p>
+                                                        </div>
+                                                    )}
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+                                    </div>
+                                </TabsContent>
                                 <TabsContent value="approval" className="space-y-6">
                                     <Card>
-                                        <CardHeader><CardTitle>4. Autorização e Aprovação</CardTitle></CardHeader>
+                                        <CardHeader><CardTitle>Autorização e Aprovação</CardTitle></CardHeader>
                                         <CardContent className="space-y-4">
                                              <FormField control={form.control} name="approval.approvedBy" render={({ field }) => (
                                                 <FormItem><FormLabel>Aprovador Responsável</FormLabel>
@@ -684,7 +931,7 @@ export default function MaterialsPage() {
                                                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                                                             </Button>
                                                         </FormControl></PopoverTrigger>
-                                                        <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent>
+                                                        <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent>
                                                     </Popover><FormMessage />
                                                 </FormItem>
                                             )} />
@@ -714,7 +961,7 @@ export default function MaterialsPage() {
                                                                 {log.details && <p className="text-xs mt-1">{log.details}</p>}
                                                             </div>
                                                         </li>
-                                                    ))}
+                                                    )).sort((a,b) => b.key! > a.key! ? 1 : -1)}
                                                 </ul>
                                             ) : (
                                                 <p className="text-center text-muted-foreground py-4">Nenhum histórico de alterações para esta requisição.</p>
@@ -764,6 +1011,3 @@ export default function MaterialsPage() {
         </>
     );
 }
-
-
-    
