@@ -77,8 +77,14 @@ const orderStatusEnum = z.enum([
     "Atrasado",
 ]);
 
+const customerInfoSchema = z.object({
+  id: z.string({ required_error: "Selecione um cliente." }),
+  name: z.string(),
+});
+
 const orderSchema = z.object({
   id: z.string(),
+  customer: customerInfoSchema,
   internalOS: z.string().optional(),
   projectName: z.string().optional(),
   status: orderStatusEnum,
@@ -517,8 +523,8 @@ export default function OrdersPage() {
 
                 return {
                     ...formItem,
-                    itemDeliveryDate: formItem.itemDeliveryDate ? Timestamp.fromDate(formItem.itemDeliveryDate) : null,
-                    shippingDate: formItem.shippingDate ? Timestamp.fromDate(formItem.shippingDate) : null,
+                    itemDeliveryDate: formItem.itemDeliveryDate ? Timestamp.fromDate(new Date(formItem.itemDeliveryDate)) : null,
+                    shippingDate: formItem.shippingDate ? Timestamp.fromDate(new Date(formItem.shippingDate)) : null,
                     productionPlan: planToSave,
                 };
             });
@@ -526,6 +532,9 @@ export default function OrdersPage() {
             const totalWeight = calculateTotalWeight(itemsToSave);
             
             const dataToSave = {
+                customer: values.customer,
+                customerId: values.customer.id,
+                customerName: values.customer.name,
                 internalOS: values.internalOS,
                 projectName: values.projectName,
                 status: values.status,
@@ -1344,18 +1353,42 @@ export default function OrdersPage() {
                                         <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
                                             <div className="space-y-6">
                                                 <Card className="p-4 bg-secondary/50">
-                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                                        <FormField control={form.control} name="customer" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Cliente</FormLabel>
+                                                                <Select
+                                                                    onValueChange={(value) => {
+                                                                        const selectedCustomer = customers.find(c => c.id === value);
+                                                                        if (selectedCustomer) field.onChange(selectedCustomer);
+                                                                    }}
+                                                                    value={field.value?.id}
+                                                                >
+                                                                    <FormControl>
+                                                                        <SelectTrigger>
+                                                                            <SelectValue placeholder="Selecione um cliente" />
+                                                                        </SelectTrigger>
+                                                                    </FormControl>
+                                                                    <SelectContent>
+                                                                        {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                         <FormField control={form.control} name="projectName" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Projeto do Cliente</FormLabel>
+                                                                <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                         <FormField control={form.control} name="internalOS" render={({ field }) => (
                                                             <FormItem>
                                                                 <FormLabel>OS Interna</FormLabel>
                                                                 <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
-                                                                <FormMessage />
-                                                            </FormItem>
-                                                        )}/>
-                                                        <FormField control={form.control} name="projectName" render={({ field }) => (
-                                                            <FormItem>
-                                                                <FormLabel>Projeto do Cliente</FormLabel>
-                                                                <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
                                                                 <FormMessage />
                                                             </FormItem>
                                                         )}/>
@@ -1384,7 +1417,7 @@ export default function OrdersPage() {
                                                             )}
                                                         />
                                                     </div>
-                                                    <div className="space-y-4 mt-4">
+                                                    <div className="space-y-4 mt-6">
                                                         <FormField control={form.control} name="driveLink" render={({ field }) => (
                                                             <FormItem>
                                                                 <FormLabel>Link da Pasta (Google Drive)</FormLabel>
