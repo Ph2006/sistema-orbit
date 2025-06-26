@@ -69,9 +69,8 @@ const requisitionSchema = z.object({
   })).optional(),
 });
 
-type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 type Requisition = z.infer<typeof requisitionSchema>;
-type OrderInfo = { id: string; number: string };
+type OrderInfo = { id: string; number: string; customerName: string; };
 type TeamMember = { id: string; name: string };
 
 const RequisitionStatus: Requisition['status'][] = ["Pendente", "Aprovada", "Reprovada", "Atendida Parcialmente", "Atendida Totalmente", "Cancelada"];
@@ -125,7 +124,8 @@ export default function MaterialsPage() {
                         ...data.approval,
                         approvalDate: data.approval.approvalDate?.toDate() || null,
                     } : {},
-                    items: data.items.map((item: any) => ({...item, neededDate: item.neededDate?.toDate() || null}))
+                    items: data.items.map((item: any) => ({...item, neededDate: item.neededDate?.toDate() || null})),
+                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()}))
                 } as Requisition
             });
             setRequisitions(reqsList);
@@ -135,14 +135,21 @@ export default function MaterialsPage() {
                   const status = d.data().status;
                   return status !== 'Concluído' && status !== 'Cancelado';
               })
-              .map(d => ({
-                  id: d.id,
-                  number: d.data().quotationNumber || d.data().orderNumber || 'N/A',
-              }));
+              .map(d => {
+                  const data = d.data();
+                  const customerName = data.customer?.name || data.customerName || 'Cliente desconhecido';
+                  return {
+                      id: d.id,
+                      number: data.quotationNumber || data.orderNumber || 'N/A',
+                      customerName: customerName,
+                  };
+              });
             setOrders(ordersList);
 
-            if (teamSnapshot.exists() && teamSnapshot.data().members) {
+            if (teamSnapshot.exists() && Array.isArray(teamSnapshot.data().members)) {
                 setTeam(teamSnapshot.data().members.map((m: any) => ({ id: m.id, name: m.name })));
+            } else {
+                setTeam([]);
             }
         } catch (error) {
             console.error("Error fetching data:", error);
@@ -268,7 +275,7 @@ export default function MaterialsPage() {
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input placeholder="Buscar por nº, solicitante, status..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 w-64"/>
                         </div>
-                        <Button onClick={() => handleOpenForm()}>
+                        <Button onClick={() => handleOpenForm()} disabled={isLoading}>
                             <PlusCircle className="mr-2 h-4 w-4" />
                             Nova Requisição
                         </Button>
@@ -392,8 +399,8 @@ export default function MaterialsPage() {
                                         <FormField control={form.control} name="orderId" render={({ field }) => (
                                             <FormItem><FormLabel>Pedido de Produção Vinculado</FormLabel>
                                             <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl><SelectTrigger><SelectValue placeholder="Opcional"/></SelectTrigger></FormControl>
-                                                <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Pedido Nº {o.number}</SelectItem>)}</SelectContent>
+                                                <FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido (Opcional)"/></SelectTrigger></FormControl>
+                                                <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent>
                                             </Select><FormMessage />
                                             </FormItem>
                                         )} />
@@ -573,5 +580,3 @@ export default function MaterialsPage() {
         </>
     );
 }
-
-    
