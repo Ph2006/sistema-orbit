@@ -906,7 +906,7 @@ export default function QuotationsPage() {
                                                     onChange={e => handleCurrentItemChange('description', e.target.value)}
                                                 />
                                             </div>
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
                                                 <div>
                                                     <FormLabel>Código</FormLabel>
                                                     <Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} />
@@ -918,6 +918,10 @@ export default function QuotationsPage() {
                                                 <div>
                                                     <FormLabel>Preço Unitário (R$)</FormLabel>
                                                     <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitPrice} onChange={e => handleCurrentItemChange('unitPrice', e.target.value)} />
+                                                </div>
+                                                <div>
+                                                    <FormLabel>Imposto (%)</FormLabel>
+                                                    <Input type="number" step="0.01" placeholder="0" value={currentItem.taxRate || ''} onChange={e => handleCurrentItemChange('taxRate', e.target.value)} />
                                                 </div>
                                                 <div>
                                                     <FormLabel>Peso Unit. (kg)</FormLabel>
@@ -1255,5 +1259,3 @@ export default function QuotationsPage() {
         </>
     );
 }
-
-    
