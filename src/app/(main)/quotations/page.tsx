@@ -127,6 +127,12 @@ export default function QuotationsPage() {
     const { user, loading: authLoading } = useAuth();
     const router = useRouter();
 
+    // State for the temporary item form
+    const emptyItem: Item = { description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' };
+    const [currentItem, setCurrentItem] = useState<Item>(emptyItem);
+    const [editIndex, setEditIndex] = useState<number | null>(null);
+
+
     // Generate Order Dialog State
     const [isGenerateOrderDialogOpen, setIsGenerateOrderDialogOpen] = useState(false);
     const [quotationToConvert, setQuotationToConvert] = useState<Quotation | null>(null);
@@ -147,7 +153,7 @@ export default function QuotationsPage() {
         },
     });
 
-    const { fields, append, remove } = useFieldArray({
+    const { fields, append, remove, update } = useFieldArray({
         control: form.control,
         name: "items"
     });
@@ -350,6 +356,52 @@ export default function QuotationsPage() {
             toast({ variant: "destructive", title: "Erro ao salvar" });
         }
     };
+
+    const handleCurrentItemChange = (field: keyof Item, value: any) => {
+        setCurrentItem(prev => ({...prev, [field]: value}));
+    };
+
+    const handleAddItem = () => {
+        const result = itemSchema.safeParse(currentItem);
+        if (!result.success) {
+            const firstError = result.error.errors[0];
+            toast({
+                variant: 'destructive',
+                title: `Erro de validação: ${firstError.path[0]}`,
+                description: firstError.message
+            });
+            return;
+        }
+        append(currentItem);
+        setCurrentItem(emptyItem);
+    };
+
+    const handleUpdateItem = () => {
+        if (editIndex === null) return;
+         const result = itemSchema.safeParse(currentItem);
+        if (!result.success) {
+            const firstError = result.error.errors[0];
+            toast({
+                variant: 'destructive',
+                title: `Erro de validação: ${firstError.path[0]}`,
+                description: firstError.message
+            });
+            return;
+        }
+        update(editIndex, currentItem);
+        setCurrentItem(emptyItem);
+        setEditIndex(null);
+    };
+
+    const handleEditItem = (index: number) => {
+        setCurrentItem(watchedItems[index]);
+        setEditIndex(index);
+    };
+
+    const handleCancelEdit = () => {
+        setCurrentItem(emptyItem);
+        setEditIndex(null);
+    }
     
     const handleAddClick = () => {
         setSelectedQuotation(null);
@@ -361,9 +413,11 @@ export default function QuotationsPage() {
             paymentTerms: "A combinar",
             deliveryTime: "A combinar",
             notes: "",
-            items: [{ description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' }],
+            items: [],
             includedServices: [],
         });
+        setCurrentItem(emptyItem);
+        setEditIndex(null);
         setIsFormOpen(true);
     };
 
@@ -373,6 +427,8 @@ export default function QuotationsPage() {
             ...quotation,
             validity: quotation.validity instanceof Date ? quotation.validity : (quotation.validity as any).toDate(),
         });
+        setCurrentItem(emptyItem);
+        setEditIndex(null);
         setIsFormOpen(true);
     };
     
@@ -835,82 +891,94 @@ export default function QuotationsPage() {
                                     </div>
                                     
                                     <Card>
-                                        <CardHeader className="flex flex-row items-center justify-between">
-                                            <div>
-                                                <CardTitle>Itens do Orçamento</CardTitle>
-                                                <CardDescription>Adicione ou edite os itens abaixo. O total é calculado automaticamente.</CardDescription>
-                                            </div>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => append({ description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' })}
-                                            >
-                                                <PlusCircle className="mr-2 h-4 w-4" />
-                                                Adicionar Item
-                                            </Button>
+                                        <CardHeader>
+                                            <CardTitle>Item do Orçamento</CardTitle>
+                                            <CardDescription>
+                                                {editIndex !== null ? 'Edite os dados do item selecionado.' : 'Preencha os dados e adicione um novo item.'}
+                                            </CardDescription>
                                         </CardHeader>
-                                        <CardContent>
-                                            <div className="w-full overflow-x-auto">
-                                            <Table>
-                                                <TableHeader>
-                                                    <TableRow>
-                                                        <TableHead className="min-w-[250px]">Descrição</TableHead>
-                                                        <TableHead className="w-[100px]">Qtd.</TableHead>
-                                                        <TableHead className="w-[150px]">Preço Unit.</TableHead>
-                                                        <TableHead className="w-[150px]">Total Item</TableHead>
-                                                        <TableHead className="w-[50px] text-right">Ação</TableHead>
-                                                    </TableRow>
-                                                </TableHeader>
-                                                <TableBody>
-                                                    {fields.map((field, index) => {
-                                                        const currentItem = watchedItems[index] || {};
-                                                        const { totalWithTax } = calculateItemTotals(currentItem);
-                                                        return (
-                                                            <TableRow key={field.id}>
-                                                                <TableCell>
-                                                                    <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
-                                                                        <FormItem><FormControl><Textarea placeholder="Descrição do item" {...field} className="min-h-0 h-10 p-2" /></FormControl><FormMessage /></FormItem>
-                                                                    )}/>
-                                                                </TableCell>
-                                                                <TableCell>
-                                                                    <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
-                                                                        <FormItem><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
-                                                                    )}/>
-                                                                </TableCell>
-                                                                <TableCell>
-                                                                    <FormField control={form.control} name={`items.${index}.unitPrice`} render={({ field }) => (
-                                                                        <FormItem><FormControl><Input type="number" step="0.01" placeholder="R$ 0,00" {...field} /></FormControl><FormMessage /></FormItem>
-                                                                    )}/>
-                                                                </TableCell>
-                                                                <TableCell className="text-right font-medium">
-                                                                    {totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                                </TableCell>
-                                                                <TableCell className="text-right">
-                                                                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} className="text-destructive hover:text-destructive">
-                                                                        <Trash2 className="h-4 w-4" />
-                                                                    </Button>
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        )
-                                                    })}
-                                                </TableBody>
-                                            </Table>
+                                        <CardContent className="space-y-4">
+                                            <div>
+                                                <FormLabel>Descrição do Item</FormLabel>
+                                                <Textarea 
+                                                    placeholder="Descrição detalhada do produto ou serviço" 
+                                                    value={currentItem.description}
+                                                    onChange={e => handleCurrentItemChange('description', e.target.value)}
+                                                />
                                             </div>
-
-                                            {fields.length > 0 && (
-                                                <>
-                                                    <Separator className="my-4" />
-                                                    <div className="flex justify-end items-center gap-4 text-lg font-bold pr-4">
-                                                        <span>Total Geral:</span>
-                                                        <span className="text-primary">
-                                                            {grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                        </span>
-                                                    </div>
-                                                </>
-                                            )}
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                <div>
+                                                    <FormLabel>Código</FormLabel>
+                                                    <Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} />
+                                                </div>
+                                                <div>
+                                                    <FormLabel>Quantidade</FormLabel>
+                                                    <Input type="number" placeholder="1" value={currentItem.quantity} onChange={e => handleCurrentItemChange('quantity', e.target.value)} />
+                                                </div>
+                                                <div>
+                                                    <FormLabel>Preço Unitário (R$)</FormLabel>
+                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitPrice} onChange={e => handleCurrentItemChange('unitPrice', e.target.value)} />
+                                                </div>
+                                                <div>
+                                                    <FormLabel>Peso Unit. (kg)</FormLabel>
+                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitWeight || ''} onChange={e => handleCurrentItemChange('unitWeight', e.target.value)} />
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-end gap-2">
+                                                {editIndex !== null && (
+                                                    <Button type="button" variant="outline" onClick={handleCancelEdit}>Cancelar Edição</Button>
+                                                )}
+                                                <Button type="button" onClick={editIndex !== null ? handleUpdateItem : handleAddItem}>
+                                                    {editIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}
+                                                </Button>
+                                            </div>
                                         </CardContent>
                                     </Card>
+
+                                    {watchedItems.length > 0 && (
+                                        <Card>
+                                            <CardHeader>
+                                                <CardTitle>Itens Adicionados</CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                                <Table>
+                                                    <TableHeader>
+                                                        <TableRow>
+                                                            <TableHead>Descrição</TableHead>
+                                                            <TableHead className="w-[80px]">Qtd.</TableHead>
+                                                            <TableHead className="w-[120px]">Preço Unit.</TableHead>
+                                                            <TableHead className="w-[150px]">Total</TableHead>
+                                                            <TableHead className="w-[100px] text-right">Ações</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {watchedItems.map((item, index) => {
+                                                            const { totalWithTax } = calculateItemTotals(item);
+                                                            return (
+                                                                <TableRow key={index} className={cn(editIndex === index && "bg-secondary")}>
+                                                                    <TableCell className="font-medium">{item.description}</TableCell>
+                                                                    <TableCell>{item.quantity}</TableCell>
+                                                                    <TableCell>{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
+                                                                    <TableCell>{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
+                                                                    <TableCell className="text-right">
+                                                                        <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button>
+                                                                        <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            )
+                                                        })}
+                                                    </TableBody>
+                                                </Table>
+                                                <Separator className="my-4" />
+                                                <div className="flex justify-end items-center gap-4 text-lg font-bold pr-4">
+                                                    <span>Total Geral:</span>
+                                                    <span className="text-primary">
+                                                        {grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    </span>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    )}
 
                                     <Card>
                                         <CardHeader><CardTitle>Serviços Inclusos</CardTitle></CardHeader>
