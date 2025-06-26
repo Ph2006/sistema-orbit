@@ -12,6 +12,9 @@ import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useRouter } from "next/navigation";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -543,9 +546,6 @@ export default function QuotationsPage() {
             const grandTotal = calculateGrandTotal(items);
     
             if (formatType === 'pdf') {
-                const { default: jsPDF } = await import('jspdf');
-                const { default: autoTable } = await import('jspdf-autotable');
-
                 const docPdf = new jsPDF({ orientation: "landscape" });
                 const pageHeight = docPdf.internal.pageSize.height;
                 const pageWidth = docPdf.internal.pageSize.width;
@@ -1255,3 +1255,5 @@ export default function QuotationsPage() {
         </>
     );
 }
+
+    
