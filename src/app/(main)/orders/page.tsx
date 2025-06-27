@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, XCircle as XCircleIcon } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -335,6 +335,7 @@ export default function OrdersPage() {
     const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
     const [isFetchingPlan, setIsFetchingPlan] = useState(false);
     const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
+    const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -1014,147 +1015,6 @@ export default function OrdersPage() {
             toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar o progresso do item." });
         }
     };
-
-    const handleExportSchedule = async () => {
-        if (!selectedOrder) return;
-    
-        toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
-    
-        try {
-            const companyRef = doc(db, "companies", "mecald", "settings", "company");
-            const docSnap = await getDoc(companyRef);
-            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
-    
-            const docPdf = new jsPDF({ orientation: 'landscape' });
-            const pageWidth = docPdf.internal.pageSize.width;
-            const pageHeight = docPdf.internal.pageSize.height;
-            let yPos = 15;
-    
-            if (companyData.logo?.preview) {
-                try {
-                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
-                } catch (e) { console.error("Error adding logo to PDF:", e); }
-            }
-            
-            const rightColX = pageWidth - 15;
-            let companyInfoY = yPos + 5;
-            docPdf.setFontSize(16).setFont(undefined, 'bold');
-            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', rightColX, companyInfoY, { align: 'right' });
-            
-            companyInfoY += 6;
-            docPdf.setFontSize(9).setFont(undefined, 'normal');
-            if (companyData.endereco) {
-                const addressLines = docPdf.splitTextToSize(companyData.endereco, 80);
-                docPdf.text(addressLines, rightColX, companyInfoY, { align: 'right' });
-                companyInfoY += (addressLines.length * 4);
-            }
-            if (companyData.cnpj) {
-                docPdf.text(`CNPJ: ${companyData.cnpj}`, rightColX, companyInfoY, { align: 'right' });
-                companyInfoY += 4;
-            }
-            if (companyData.email) {
-                docPdf.text(`Email: ${companyData.email}`, rightColX, companyInfoY, { align: 'right' });
-            }
-
-            yPos = 55;
-            docPdf.setFontSize(14).setFont(undefined, 'bold');
-            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
-            yPos += 15;
-    
-            docPdf.setFontSize(11).setFont(undefined, 'normal');
-            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
-            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 7;
-            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
-            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 7;
-            docPdf.text(`Projeto do Cliente: ${selectedOrder.projectName || 'N/A'}`, 15, yPos);
-            const overallProgress = calculateOrderProgress(selectedOrder);
-            docPdf.text(`Progresso Geral: ${Math.round(overallProgress)}%`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 12;
-    
-            const tableBody: any[] = [];
-            selectedOrder.items.forEach(item => {
-                const itemProgress = calculateItemProgress(item);
-                const itemHeaderText = `${item.description} (Qtd: ${item.quantity}, Cód: ${item.code || 'N/A'}) - Progresso: ${Math.round(itemProgress)}%`;
-                tableBody.push([
-                    { 
-                        content: itemHeaderText, 
-                        colSpan: 5, 
-                        styles: { 
-                            halign: 'left', 
-                            fontStyle: 'bold', 
-                            fillColor: [240, 248, 255], 
-                            textColor: [51, 51, 51],
-                            cellPadding: 3,
-                        }
-                    }
-                ]);
-
-                if (item.productionPlan && item.productionPlan.length > 0) {
-                    item.productionPlan.forEach((stage) => {
-                        tableBody.push([
-                            `    • ${stage.stageName}`,
-                            stage.status,
-                            stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : 'Pendente',
-                            stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : 'Pendente',
-                            stage.durationDays ? `${stage.durationDays} dia(s)` : '-'
-                        ]);
-                    });
-                } else {
-                     tableBody.push([
-                        { 
-                            content: '   Nenhuma etapa de fabricação definida para este item.', 
-                            colSpan: 5,
-                            styles: {
-                                halign: 'left',
-                                fontStyle: 'italic',
-                                textColor: [150, 150, 150]
-                            }
-                        }
-                     ]);
-                }
-            });
-    
-            autoTable(docPdf, {
-                startY: yPos,
-                head: [['Etapa de Fabricação', 'Status', 'Início Previsto', 'Término Previsto', 'Duração']],
-                body: tableBody,
-                theme: 'grid',
-                styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
-                headStyles: { 
-                    fillColor: [51, 122, 183], 
-                    fontSize: 9, 
-                    textColor: 255, 
-                    fontStyle: 'bold' 
-                },
-                columnStyles: {
-                    0: { cellWidth: 'auto' },
-                    1: { cellWidth: 30, halign: 'center' },
-                    2: { cellWidth: 30, halign: 'center' },
-                    3: { cellWidth: 30, halign: 'center' },
-                    4: { cellWidth: 25, halign: 'center' },
-                }
-            });
-            
-            const pageCount = (docPdf as any).internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                docPdf.setPage(i);
-                docPdf.setFontSize(8).setTextColor(150);
-                docPdf.text(`Página ${i} de ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
-            }
-    
-            docPdf.save(`Cronograma_${selectedOrder.quotationNumber}.pdf`);
-    
-        } catch (error) {
-            console.error("Error exporting schedule:", error);
-            toast({
-                variant: "destructive",
-                title: "Erro ao gerar cronograma",
-                description: "Não foi possível gerar o arquivo PDF.",
-            });
-        }
-    };
     
     const handleCopyProgress = (itemToCopy: OrderItem) => {
         setProgressClipboard(itemToCopy);
@@ -1224,6 +1084,31 @@ export default function OrdersPage() {
             console.error("Error pasting progress:", error);
             toast({ variant: "destructive", title: "Erro ao colar", description: "Não foi possível colar o progresso." });
         }
+    };
+
+    const handleRemoveStageFromPlan = (indexToRemove: number) => {
+        setEditedPlan(editedPlan.filter((_, index) => index !== indexToRemove));
+    };
+
+    const handleAddStageToPlan = () => {
+        const trimmedName = newStageNameForPlan.trim();
+        if (!trimmedName) {
+        toast({
+            variant: "destructive",
+            title: "Nome da etapa inválido",
+            description: "O nome da etapa não pode estar em branco.",
+        });
+        return;
+        }
+        const newStage: ProductionStage = {
+            stageName: trimmedName,
+            status: "Pendente",
+            startDate: null,
+            completedDate: null,
+            durationDays: 0,
+        };
+        setEditedPlan([...editedPlan, newStage]);
+        setNewStageNameForPlan("");
     };
 
 
@@ -1814,8 +1699,18 @@ export default function OrdersPage() {
                                 </div>
                             ) : (editedPlan && editedPlan.length > 0) ? (
                                 editedPlan.map((stage, index) => (
-                                    <Card key={index} className="p-4">
-                                        <CardTitle className="text-lg mb-4">{stage.stageName}</CardTitle>
+                                    <Card key={index} className="p-4 relative">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-destructive"
+                                            onClick={() => handleRemoveStageFromPlan(index)}
+                                        >
+                                            <XCircleIcon className="h-4 w-4" />
+                                            <span className="sr-only">Remover etapa</span>
+                                        </Button>
+                                        <CardTitle className="text-lg mb-4 pr-8">{stage.stageName}</CardTitle>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                              <div className="space-y-2">
                                                 <Label>Status</Label>
@@ -1888,6 +1783,20 @@ export default function OrdersPage() {
                             )}
                         </div>
                     </ScrollArea>
+                    <div className="pt-4 border-t">
+                        <Label className="text-sm font-medium">Adicionar Nova Etapa</Label>
+                        <div className="flex items-center gap-2 mt-2">
+                            <Input
+                                placeholder="Nome da nova etapa"
+                                value={newStageNameForPlan}
+                                onChange={(e) => setNewStageNameForPlan(e.target.value)}
+                            />
+                            <Button type="button" variant="secondary" onClick={handleAddStageToPlan}>
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Adicionar
+                            </Button>
+                        </div>
+                    </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>Cancelar</Button>
                         <Button onClick={handleSaveProgress}>Salvar Progresso</Button>
