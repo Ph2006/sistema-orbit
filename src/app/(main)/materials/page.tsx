@@ -617,16 +617,21 @@ export default function MaterialsPage() {
 
         const allPieces: { code?: string; description: string; length: number }[] = [];
         if (items) {
-            for (const item of items) {
-                const quantityNum = parseInt(String(item.quantity), 10);
-                const lengthNum = parseFloat(String(item.length));
+            items.forEach(item => {
+                const quantityNum = Math.floor(Number(item.quantity) || 0);
+                const lengthNum = Number(item.length) || 0;
         
-                if (!isNaN(quantityNum) && quantityNum > 0 && !isNaN(lengthNum) && lengthNum > 0) {
+                if (quantityNum > 0 && lengthNum > 0) {
                     for (let i = 0; i < quantityNum; i++) {
                         allPieces.push({ code: item.code || '', description: item.description, length: lengthNum });
                     }
                 }
-            }
+            });
+        }
+        
+        if (allPieces.length === 0) {
+            toast({ variant: 'destructive', title: 'Nenhum item válido', description: 'Verifique as quantidades e comprimentos dos itens.' });
+            return;
         }
 
         allPieces.sort((a, b) => b.length - a.length);
@@ -656,7 +661,14 @@ export default function MaterialsPage() {
         
         const patternMap = new Map<string, { pieces: number[], count: number }>();
         bins.forEach(bin => {
-            const patternKey = [...bin.pieces].sort((a, b) => b - a).join(' + ');
+            const pieceCounts = new Map<number, number>();
+            bin.pieces.forEach(p => {
+                pieceCounts.set(p, (pieceCounts.get(p) || 0) + 1);
+            });
+            
+            const sortedPieces = Array.from(pieceCounts.entries()).sort(([a], [b]) => b - a);
+            const patternKey = sortedPieces.map(([length, count]) => `${count}x${length}`).join(',');
+
             const entry = patternMap.get(patternKey);
             if (entry) {
                 entry.count++;
@@ -667,7 +679,12 @@ export default function MaterialsPage() {
 
         let patternId = 1;
         let totalScrap = 0;
-        const finalPatterns = Array.from(patternMap.entries()).map(([patternString, data]) => {
+        const finalPatterns = Array.from(patternMap.entries()).map(([patternKey, data]) => {
+            const patternString = patternKey
+                .split(',')
+                .map(part => part.replace('x', ' x '))
+                .join(' + ');
+
             const piecesUsedSum = data.pieces.reduce((sum, p) => sum + p, 0);
             const kerfTotal = Math.max(0, data.pieces.length -1) * kerfNum;
             const barUsage = piecesUsedSum + kerfTotal;
