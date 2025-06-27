@@ -422,8 +422,8 @@ export default function MaterialsPage() {
                     1: { cellWidth: 'auto' },
                     2: { cellWidth: 40 },
                     3: { cellWidth: 30 },
-                    4: { cellWidth: 20, halign: 'right' },
-                    5: { cellWidth: 25, halign: 'right' },
+                    4: { cellWidth: 20, halign: 'center' },
+                    5: { cellWidth: 25, halign: 'center' },
                     6: { cellWidth: 25, halign: 'center' },
                     7: { cellWidth: 40 },
                 }
@@ -758,7 +758,7 @@ export default function MaterialsPage() {
             });
             return;
         }
-        update(editItemIndex, currentItem);
+        update(editItemIndex, result.data);
         setCurrentItem(emptyRequisitionItem);
         setEditItemIndex(null);
     };
