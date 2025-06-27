@@ -42,7 +42,7 @@ import { cn } from "@/lib/utils";
 const itemStatuses = ["Pendente", "Estoque", "Recebido (Aguardando Inspeção)", "Inspecionado e Aprovado", "Inspecionado e Rejeitado"] as const;
 
 const requisitionItemSchema = z.object({
-  id: z.string().optional(),
+  id: z.string(),
   code: z.string().optional(),
   material: z.string().optional(),
   dimensao: z.string().optional(),
@@ -67,6 +67,7 @@ type CuttingPlanItem = z.infer<typeof cuttingPlanItemSchema>;
 
 
 const cuttingPlanSchema = z.object({
+  materialDescription: z.string().optional(),
   stockLength: z.coerce.number().min(1, "Comprimento da barra é obrigatório."),
   kerf: z.coerce.number().min(0, "Espessura do corte não pode ser negativa.").default(0),
   leftoverThreshold: z.coerce.number().min(0).optional(),
@@ -172,6 +173,7 @@ export default function MaterialsPage() {
                 stockLength: 6000,
                 kerf: 3,
                 items: [],
+                materialDescription: "",
             }
         },
     });
@@ -265,7 +267,7 @@ export default function MaterialsPage() {
         if (requisition) {
             form.reset({
                 ...requisition,
-                cuttingPlan: requisition.cuttingPlan || { stockLength: 6000, kerf: 3, items: [] }
+                cuttingPlan: requisition.cuttingPlan || { stockLength: 6000, kerf: 3, items: [], materialDescription: "" }
             });
         } else {
             form.reset({
@@ -274,7 +276,7 @@ export default function MaterialsPage() {
                 items: [],
                 history: [],
                 requestedBy: user?.displayName || user?.email || undefined,
-                cuttingPlan: { stockLength: 6000, kerf: 3, items: [] }
+                cuttingPlan: { stockLength: 6000, kerf: 3, items: [], materialDescription: "" }
             });
         }
         setIsFormOpen(true);
@@ -376,14 +378,12 @@ export default function MaterialsPage() {
         }
     };
 
-    const handleExportPDF = async (requisition: Requisition) => {
+    const handleExportPDF = async () => {
+        if (!selectedRequisition) return;
+
         toast({ title: "Gerando PDF...", description: "Aguarde enquanto o arquivo é preparado." });
 
-        const currentFormValues = form.getValues();
-        const requisitionToExport: Requisition = {
-            ...requisition,
-            ...currentFormValues,
-        };
+        const requisitionToExport = form.getValues();
 
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
@@ -458,7 +458,8 @@ export default function MaterialsPage() {
         }
     }
     
-    const handleExportCutPlanPDF = async (requisition: Requisition) => {
+    const handleExportCutPlanPDF = async () => {
+        if (!selectedRequisition) return;
         toast({ title: "Gerando PDF do Plano de Corte..." });
     
         const plan = form.getValues('cuttingPlan');
@@ -489,7 +490,7 @@ export default function MaterialsPage() {
             docPdf.setFontSize(16).setFont(undefined, 'bold');
             docPdf.text('Plano de Corte', pageWidth / 2, y + 5, { align: 'center' });
             docPdf.setFontSize(10).setFont(undefined, 'normal');
-            docPdf.text(`Requisição Nº: ${requisition.requisitionNumber}`, pageWidth / 2, y + 12, { align: 'center' });
+            docPdf.text(`Requisição Nº: ${selectedRequisition.requisitionNumber}`, pageWidth / 2, y + 12, { align: 'center' });
             y += 25;
     
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('Parâmetros de Entrada', 15, y);
@@ -499,6 +500,7 @@ export default function MaterialsPage() {
                 theme: 'plain',
                 styles: { fontSize: 9 },
                 body: [
+                    ['Material da Barra:', plan.materialDescription || 'Não especificado'],
                     ['Comprimento da Barra:', `${plan.stockLength} mm`],
                     ['Espessura do Corte (Kerf):', `${plan.kerf} mm`],
                 ],
@@ -544,7 +546,7 @@ export default function MaterialsPage() {
                 ],
             });
     
-            docPdf.save(`PlanoCorte_Req_${requisition.requisitionNumber}.pdf`);
+            docPdf.save(`PlanoCorte_Req_${selectedRequisition.requisitionNumber}.pdf`);
     
         } catch (error) {
             console.error("Error exporting cut plan PDF:", error);
@@ -1086,6 +1088,9 @@ export default function MaterialsPage() {
                                             <Card>
                                                 <CardHeader><CardTitle>Parâmetros de Entrada</CardTitle></CardHeader>
                                                 <CardContent className="space-y-4">
+                                                    <FormField control={form.control} name="cuttingPlan.materialDescription" render={({ field }) => (
+                                                        <FormItem><FormLabel>Descrição do Material da Barra</FormLabel><FormControl><Input placeholder="Ex: Cantoneira 2 x 3/16" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                                    )} />
                                                     <FormField control={form.control} name="cuttingPlan.stockLength" render={({ field }) => (
                                                         <FormItem><FormLabel>Comprimento da Barra (mm)</FormLabel><FormControl><Input type="number" placeholder="6000" {...field} /></FormControl><FormMessage /></FormItem>
                                                     )} />
@@ -1280,12 +1285,12 @@ export default function MaterialsPage() {
                             <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0 flex-wrap sm:justify-between gap-2">
                                 <div className="flex gap-2">
                                     {selectedRequisition && (
-                                        <Button type="button" variant="outline" onClick={() => handleExportPDF(selectedRequisition)}>
+                                        <Button type="button" variant="outline" onClick={() => handleExportPDF()}>
                                             <FileDown className="mr-2 h-4 w-4" /> Exportar Requisição
                                         </Button>
                                     )}
                                     {selectedRequisition && (
-                                        <Button type="button" variant="outline" onClick={() => handleExportCutPlanPDF(selectedRequisition)} 
+                                        <Button type="button" variant="outline" onClick={() => handleExportCutPlanPDF()} 
                                             disabled={!planResults && !selectedRequisition?.cuttingPlan?.summary}>
                                             <GanttChart className="mr-2 h-4 w-4" /> Exportar Plano de Corte
                                         </Button>
