@@ -399,14 +399,13 @@ export default function MaterialsPage() {
             docPdf.text(`OS Vinculada: ${os}`, pageWidth - 15, subheaderY, { align: 'right' });
             docPdf.text(`Status: ${requisition.status}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
 
-            const head = [['Cód.', 'Material', 'Dimensão', 'Descrição', 'Qtd. Sol.', 'Unid.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
+            const head = [['Cód.', 'Descrição', 'Dimensão', 'Material', 'Qtd.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
             const body = requisition.items.map(item => [
                 item.code || '-',
-                item.material || '-',
-                item.dimensao || '-',
                 item.description,
+                item.dimensao || '-',
+                item.material || '-',
                 item.quantityRequested.toString(),
-                item.unit,
                 (item.pesoUnitario || 0).toFixed(2),
                 item.deliveryDate ? format(item.deliveryDate, 'dd/MM/yyyy') : 'N/A',
                 item.status || 'Pendente',
@@ -420,14 +419,13 @@ export default function MaterialsPage() {
                 headStyles: { fillColor: [40, 40, 40] },
                 columnStyles: {
                     0: { cellWidth: 20 },
-                    1: { cellWidth: 30 },
+                    1: { cellWidth: 'auto' },
                     2: { cellWidth: 40 },
-                    3: { cellWidth: 'auto' },
-                    4: { cellWidth: 15, halign: 'right' },
-                    5: { cellWidth: 15, halign: 'center' },
-                    6: { cellWidth: 20, halign: 'right' },
-                    7: { cellWidth: 22, halign: 'center' },
-                    8: { cellWidth: 40 },
+                    3: { cellWidth: 30 },
+                    4: { cellWidth: 20, halign: 'right' },
+                    5: { cellWidth: 25, halign: 'right' },
+                    6: { cellWidth: 25, halign: 'center' },
+                    7: { cellWidth: 40 },
                 }
             });
 
