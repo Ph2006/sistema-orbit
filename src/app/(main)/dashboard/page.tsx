@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { collection, getDocs, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { BarChart, Package, Percent, Truck, Wrench, AlertTriangle, CheckCircle, Scale } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { MonthlyProductionChart } from "@/components/dashboard/kpi-charts";
@@ -71,11 +73,11 @@ export default function DashboardPage() {
                 const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
                 totalToProduceWeight += itemWeight;
                 
-                const itemProgress = item.productionPlan?.length > 0
-                    ? (item.productionPlan.filter((p: any) => p.status === 'Concluído').length / item.productionPlan.length) * 100
-                    : (item.code ? 0 : 100);
+                const isItemCompleted = item.productionPlan?.length > 0
+                    ? item.productionPlan.every((p: any) => p.status === 'Concluído')
+                    : !!item.shippingDate;
 
-                if (itemProgress === 100) {
+                if (isItemCompleted) {
                     totalProducedWeight += itemWeight;
                 }
 
@@ -83,12 +85,13 @@ export default function DashboardPage() {
                   totalShippedItems++;
                   customerEntry.totalItems++;
                   
-                  const shippingDate = item.shippingDate.toDate();
+                  const shippingDate = item.shippingDate instanceof Timestamp ? item.shippingDate.toDate() : new Date(item.shippingDate);
+                  
                   const monthKey = format(shippingDate, "yyyy-MM");
                   monthlyProductionMap.set(monthKey, (monthlyProductionMap.get(monthKey) || 0) + itemWeight);
                   customerEntry.deliveredWeight += itemWeight;
 
-                  const itemDeliveryDate = item.itemDeliveryDate?.toDate();
+                  const itemDeliveryDate = item.itemDeliveryDate instanceof Timestamp ? item.itemDeliveryDate.toDate() : (item.itemDeliveryDate ? new Date(item.itemDeliveryDate) : null);
                   if (itemDeliveryDate) {
                     const sDate = new Date(shippingDate);
                     sDate.setHours(0, 0, 0, 0);
@@ -106,9 +109,11 @@ export default function DashboardPage() {
           
           const qualityReports = qualitySnapshot.docs.map(doc => doc.data());
           qualityReports.forEach(report => {
-              const customerEntry = customerDataMap.get(report.customerName);
-              if(customerEntry) {
-                  customerEntry.ncCount++;
+              if (report.customerName) {
+                const customerEntry = customerDataMap.get(report.customerName);
+                if(customerEntry) {
+                    customerEntry.ncCount++;
+                }
               }
           });
 
@@ -116,10 +121,16 @@ export default function DashboardPage() {
           const geralNcRate = totalShippedItems > 0 ? (qualityReports.length / totalShippedItems) * 100 : 0;
           const internalNcRate = totalShippedItems > 0 ? (qualityReports.filter(r => r.type === "Interna").length / totalShippedItems) * 100 : 0;
 
-          const monthlyProduction = Array.from(monthlyProductionMap.entries())
-            .map(([month, weight]) => ({ month: new Date(month + '-02').toLocaleString('default', { month: 'short' }), weight }))
-            .sort((a,b) => new Date(a.month).getMonth() - new Date(b.month).getMonth())
-            .slice(-6);
+          const sortedMonthlyEntries = Array.from(monthlyProductionMap.entries())
+            .sort(([a], [b]) => a.localeCompare(b));
+          
+          const monthlyProduction = sortedMonthlyEntries.map(([monthKey, weight]) => {
+              const date = new Date(monthKey + '-02');
+              return {
+                  month: format(date, 'MMM', { locale: ptBR }),
+                  weight,
+              };
+          }).slice(-6);
           
           const customerAnalysis = Array.from(customerDataMap.entries()).map(([name, data]) => ({ name, ...data }));
 
