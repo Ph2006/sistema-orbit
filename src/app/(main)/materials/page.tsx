@@ -150,6 +150,11 @@ export default function MaterialsPage() {
     const { user, loading: authLoading } = useAuth();
     const { toast } = useToast();
 
+    // State for the temporary item form
+    const emptyRequisitionItem: RequisitionItem = { description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null };
+    const [currentItem, setCurrentItem] = useState<RequisitionItem>(emptyRequisitionItem);
+    const [editItemIndex, setEditItemIndex] = useState<number | null>(null);
+
     // State for the temporary cut item form
     const emptyCutItem: CuttingPlanItem = { description: "", length: 0, quantity: 1, code: '' };
     const [currentCutItem, setCurrentCutItem] = useState<CuttingPlanItem>(emptyCutItem);
@@ -171,7 +176,7 @@ export default function MaterialsPage() {
         },
     });
 
-    const { fields, append, remove } = useFieldArray({ control: form.control, name: "items" });
+    const { fields, append, remove, update } = useFieldArray({ control: form.control, name: "items" });
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: form.control, name: "cuttingPlan.items" });
 
 
@@ -247,6 +252,8 @@ export default function MaterialsPage() {
     const handleOpenForm = (requisition: Requisition | null = null) => {
         setPlanResults(null);
         setSelectedRequisition(requisition);
+        setCurrentItem(emptyRequisitionItem);
+        setEditItemIndex(null);
         setCurrentCutItem(emptyCutItem);
         setEditCutIndex(null);
 
@@ -717,6 +724,56 @@ export default function MaterialsPage() {
         setCurrentCutItem(emptyCutItem);
         setEditCutIndex(null);
     }
+    
+    const handleCurrentItemChange = (field: keyof RequisitionItem, value: any) => {
+        if (field === 'deliveryDate') {
+            setCurrentItem(prev => ({...prev, [field]: value ? new Date(value) : null}));
+        } else {
+            setCurrentItem(prev => ({...prev, [field]: value}));
+        }
+    };
+
+    const handleAddItem = () => {
+        const result = requisitionItemSchema.safeParse(currentItem);
+        if (!result.success) {
+            const firstError = result.error.errors[0];
+            toast({
+                variant: 'destructive',
+                title: `Erro de validação: ${firstError.path[0]}`,
+                description: firstError.message
+            });
+            return;
+        }
+        append(currentItem);
+        setCurrentItem(emptyRequisitionItem);
+    };
+
+    const handleUpdateItem = () => {
+        if (editItemIndex === null) return;
+        const result = requisitionItemSchema.safeParse(currentItem);
+        if (!result.success) {
+            const firstError = result.error.errors[0];
+            toast({
+                variant: 'destructive',
+                title: `Erro de validação: ${firstError.path[0]}`,
+                description: firstError.message
+            });
+            return;
+        }
+        update(editItemIndex, currentItem);
+        setCurrentItem(emptyRequisitionItem);
+        setEditItemIndex(null);
+    };
+
+    const handleEditItem = (index: number) => {
+        setEditItemIndex(index);
+        setCurrentItem(form.getValues(`items.${index}`));
+    };
+    
+    const handleCancelEditItem = () => {
+        setCurrentItem(emptyRequisitionItem);
+        setEditItemIndex(null);
+    };
 
     return (
         <>
@@ -909,80 +966,96 @@ export default function MaterialsPage() {
                                 </TabsContent>
                                 <TabsContent value="items" className="space-y-4">
                                     <Card>
-                                        <CardHeader className="flex flex-row justify-between items-center">
-                                            <CardTitle>Detalhamento dos Itens Solicitados</CardTitle>
-                                            <Button type="button" size="sm" variant="outline"
-                                                onClick={() => append({ description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente" })}>
-                                                <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
-                                            </Button>
+                                        <CardHeader>
+                                            <CardTitle>Item da Requisição</CardTitle>
+                                            <CardDescription>
+                                                 {editItemIndex !== null ? 'Edite os dados do item selecionado.' : 'Preencha os dados e adicione um novo item.'}
+                                            </CardDescription>
                                         </CardHeader>
                                         <CardContent className="space-y-4">
-                                            {fields.map((field, index) => (
-                                                <div key={field.id} className="p-4 border rounded-md relative">
-                                                    <Button type="button" variant="ghost" size="icon" className="absolute top-2 right-2 text-destructive hover:text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
-                                                    <div className="space-y-4">
-                                                        <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
-                                                            <FormItem><FormLabel>Descrição do Item</FormLabel><FormControl><Input placeholder="Ex: Chapa de Aço 1/4" {...field} /></FormControl><FormMessage /></FormItem>
-                                                        )} />
-                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                            <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Código</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                                            )} />
-                                                            <FormField control={form.control} name={`items.${index}.material`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Material</FormLabel><FormControl><Input placeholder="Ex: Aço 1020" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                                            )} />
-                                                            <FormField control={form.control} name={`items.${index}.dimensao`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Dimensão</FormLabel><FormControl><Input placeholder="Ex: 1/2'' x 1.200 x 3.000mm" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                                            )} />
-                                                        </div>
-                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                            <FormField control={form.control} name={`items.${index}.quantityRequested`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Qtd. Solicitada</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-                                                            )} />
-                                                             <FormField control={form.control} name={`items.${index}.unit`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Unidade</FormLabel><FormControl><Input placeholder="kg, m, pç" {...field} /></FormControl><FormMessage /></FormItem>
-                                                            )} />
-                                                             <FormField control={form.control} name={`items.${index}.pesoUnitario`} render={({ field }) => (
-                                                                <FormItem><FormLabel>Peso Unit. (kg)</FormLabel><FormControl><Input type="number" step="0.01" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                                            )} />
-                                                            <FormField control={form.control} name={`items.${index}.deliveryDate`} render={({ field }) => (
-                                                                <FormItem className="flex flex-col"><FormLabel>Data de Entrega Prevista</FormLabel>
-                                                                    <Popover>
-                                                                        <PopoverTrigger asChild><FormControl>
-                                                                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
-                                                                                {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                                                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                                            </Button>
-                                                                        </FormControl></PopoverTrigger>
-                                                                        <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent>
-                                                                    </Popover><FormMessage />
-                                                                </FormItem>
-                                                            )} />
-                                                        </div>
-                                                        {selectedRequisition && (
-                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                                <FormField control={form.control} name={`items.${index}.quantityFulfilled`} render={({ field }) => (
-                                                                    <FormItem><FormLabel>Qtd. Atendida</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? 0} /></FormControl><FormMessage /></FormItem>
-                                                                )} />
-                                                                <FormField control={form.control} name={`items.${index}.status`} render={({ field }) => (
-                                                                    <FormItem><FormLabel>Status do Item</FormLabel>
-                                                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                                            <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                                                                            <SelectContent>{itemStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                                                                        </Select><FormMessage />
-                                                                    </FormItem>
-                                                                )} />
-                                                            </div>
-                                                        )}
-                                                        <FormField control={form.control} name={`items.${index}.notes`} render={({ field }) => (
-                                                            <FormItem><FormLabel>Observações do Item</FormLabel><FormControl><Input placeholder="Ex: Certificado de qualidade, norma específica" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                                        )} />
+                                            <div className="space-y-4">
+                                                <div>
+                                                    <Label>Descrição do Item</Label>
+                                                    <Input placeholder="Ex: Chapa de Aço 1/4" value={currentItem.description} onChange={e => handleCurrentItemChange('description', e.target.value)} />
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                    <div><Label>Código</Label><Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} /></div>
+                                                    <div><Label>Material</Label><Input placeholder="Ex: Aço 1020" value={currentItem.material || ''} onChange={e => handleCurrentItemChange('material', e.target.value)} /></div>
+                                                    <div><Label>Dimensão</Label><Input placeholder="Ex: 1/2'' x 1.200 x 3.000mm" value={currentItem.dimensao || ''} onChange={e => handleCurrentItemChange('dimensao', e.target.value)} /></div>
+                                                </div>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                    <div><Label>Qtd. Solicitada</Label><Input type="number" value={currentItem.quantityRequested} onChange={e => handleCurrentItemChange('quantityRequested', e.target.value)} /></div>
+                                                    <div><Label>Unidade</Label><Input placeholder="kg, m, pç" value={currentItem.unit} onChange={e => handleCurrentItemChange('unit', e.target.value)} /></div>
+                                                    <div><Label>Peso Unit. (kg)</Label><Input type="number" step="0.01" value={currentItem.pesoUnitario || ''} onChange={e => handleCurrentItemChange('pesoUnitario', e.target.value)} /></div>
+                                                    <div className="flex flex-col space-y-2"><Label>Data de Entrega Prevista</Label>
+                                                        <Popover>
+                                                            <PopoverTrigger asChild>
+                                                                <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !currentItem.deliveryDate && "text-muted-foreground")}>
+                                                                    {currentItem.deliveryDate ? format(currentItem.deliveryDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                                                </Button>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={currentItem.deliveryDate || undefined} onSelect={date => handleCurrentItemChange('deliveryDate', date)} /></PopoverContent>
+                                                        </Popover>
                                                     </div>
                                                 </div>
-                                            ))}
-                                            {fields.length === 0 && <p className="text-center text-muted-foreground p-4">Nenhum material adicionado.</p>}
+                                                {selectedRequisition && (
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        <div><Label>Qtd. Atendida</Label><Input type="number" value={currentItem.quantityFulfilled || 0} onChange={e => handleCurrentItemChange('quantityFulfilled', e.target.value)} /></div>
+                                                        <div><Label>Status do Item</Label>
+                                                            <Select value={currentItem.status} onValueChange={value => handleCurrentItemChange('status', value)}>
+                                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                                <SelectContent>{itemStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div><Label>Observações do Item</Label><Input placeholder="Ex: Certificado de qualidade, norma específica" value={currentItem.notes || ''} onChange={e => handleCurrentItemChange('notes', e.target.value)} /></div>
+                                            </div>
+                                             <div className="flex justify-end gap-2">
+                                                {editItemIndex !== null && (
+                                                    <Button type="button" variant="outline" onClick={handleCancelEditItem}>Cancelar Edição</Button>
+                                                )}
+                                                <Button type="button" onClick={editItemIndex !== null ? handleUpdateItem : handleAddItem}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" />
+                                                    {editItemIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}
+                                                </Button>
+                                            </div>
                                         </CardContent>
                                     </Card>
+
+                                    {fields.length > 0 && (
+                                        <Card>
+                                            <CardHeader><CardTitle>Itens Adicionados</CardTitle></CardHeader>
+                                            <CardContent>
+                                                <Table>
+                                                    <TableHeader>
+                                                        <TableRow>
+                                                            <TableHead>Descrição</TableHead>
+                                                            <TableHead>Qtd.</TableHead>
+                                                            <TableHead>Unid.</TableHead>
+                                                            <TableHead>Status</TableHead>
+                                                            <TableHead className="text-right">Ações</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {fields.map((item, index) => (
+                                                            <TableRow key={item.id} className={cn(editItemIndex === index && "bg-secondary")}>
+                                                                <TableCell className="font-medium">{item.description}</TableCell>
+                                                                <TableCell>{item.quantityRequested}</TableCell>
+                                                                <TableCell>{item.unit}</TableCell>
+                                                                <TableCell>{item.status}</TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button>
+                                                                    <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </TableBody>
+                                                </Table>
+                                            </CardContent>
+                                        </Card>
+                                    )}
                                 </TabsContent>
                                 <TabsContent value="cuttingPlan">
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
