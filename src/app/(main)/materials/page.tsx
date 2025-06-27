@@ -742,7 +742,7 @@ export default function MaterialsPage() {
             });
             return;
         }
-        append(currentItem);
+        append(result.data);
         setCurrentItem(emptyRequisitionItem);
     };
 
