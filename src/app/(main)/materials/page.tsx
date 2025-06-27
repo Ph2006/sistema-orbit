@@ -221,8 +221,12 @@ export default function MaterialsPage() {
                         approvalDate: data.approval.approvalDate?.toDate() || null,
                     } : {},
                     items: (data.items || []).map((item: any, index: number) => ({
-                        ...item, 
-                        id: item.id || `${d.id}-${index}`, // FIX: Ensure all items have a stable ID
+                        ...item,
+                        id: item.id || `${d.id}-${index}`,
+                        code: item.code || '',
+                        material: item.material || '',
+                        dimensao: item.dimensao || '',
+                        notes: item.notes || '',
                         deliveryDate: item.deliveryDate?.toDate() || null,
                         status: item.status || "Pendente",
                     })),
@@ -317,16 +321,16 @@ export default function MaterialsPage() {
             };
             
             dataToSave.items = values.items.map(item => ({
-                id: item.id || null,
-                code: item.code || null,
-                material: item.material || null,
-                dimensao: item.dimensao || null,
+                id: item.id,
+                code: item.code || '',
+                material: item.material || '',
+                dimensao: item.dimensao || '',
                 pesoUnitario: item.pesoUnitario || 0,
                 description: item.description,
                 quantityRequested: item.quantityRequested,
                 quantityFulfilled: item.quantityFulfilled || 0,
                 unit: item.unit,
-                notes: item.notes || null,
+                notes: item.notes || '',
                 deliveryDate: item.deliveryDate ? Timestamp.fromDate(item.deliveryDate) : null,
                 status: item.status || 'Pendente',
             }));
@@ -513,9 +517,9 @@ export default function MaterialsPage() {
                 body: results.patterns.map((p: any) => [
                     p.patternId,
                     p.patternString,
-                    p.leftover.toFixed(2),
+                    (Number(p.leftover) || 0).toFixed(2),
                     p.barsNeeded,
-                    `${p.yieldPercentage.toFixed(1)}%`
+                    `${(Number(p.yieldPercentage) || 0).toFixed(1)}%`
                 ]),
                 headStyles: { fillColor: [40, 40, 40] }
             });
@@ -693,7 +697,7 @@ export default function MaterialsPage() {
             });
             return;
         }
-        appendCutItem(currentCutItem);
+        appendCutItem(result.data);
         setCurrentCutItem(emptyCutItem);
     };
 
@@ -709,7 +713,7 @@ export default function MaterialsPage() {
             });
             return;
         }
-        updateCutItem(editCutIndex, currentCutItem);
+        updateCutItem(editCutIndex, result.data);
         setCurrentCutItem(emptyCutItem);
         setEditCutIndex(null);
     };
@@ -733,7 +737,13 @@ export default function MaterialsPage() {
     };
 
     const handleAddItem = () => {
-        const result = requisitionItemSchema.safeParse(currentItem);
+        const dataToValidate = {
+            ...currentItem,
+            quantityRequested: Number(currentItem.quantityRequested) || 0,
+            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+        };
+
+        const result = requisitionItemSchema.safeParse(dataToValidate);
         if (!result.success) {
             const firstError = result.error.errors[0];
             toast({
@@ -749,7 +759,14 @@ export default function MaterialsPage() {
 
     const handleUpdateItem = () => {
         if (editItemIndex === null) return;
-        const result = requisitionItemSchema.safeParse(currentItem);
+
+        const dataToValidate = {
+            ...currentItem,
+            quantityRequested: Number(currentItem.quantityRequested) || 0,
+            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+        };
+
+        const result = requisitionItemSchema.safeParse(dataToValidate);
         if (!result.success) {
             const firstError = result.error.errors[0];
             toast({
