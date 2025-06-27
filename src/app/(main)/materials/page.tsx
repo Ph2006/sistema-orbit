@@ -220,8 +220,9 @@ export default function MaterialsPage() {
                         ...data.approval,
                         approvalDate: data.approval.approvalDate?.toDate() || null,
                     } : {},
-                    items: (data.items || []).map((item: any) => ({
+                    items: (data.items || []).map((item: any, index: number) => ({
                         ...item, 
+                        id: item.id || `${d.id}-${index}`, // FIX: Ensure all items have a stable ID
                         deliveryDate: item.deliveryDate?.toDate() || null,
                         status: item.status || "Pendente",
                     })),
@@ -742,7 +743,7 @@ export default function MaterialsPage() {
             });
             return;
         }
-        append(result.data);
+        append({ ...result.data, id: Date.now().toString() });
         setCurrentItem(emptyRequisitionItem);
     };
 
@@ -1166,9 +1167,9 @@ export default function MaterialsPage() {
                                                                     {planResults.patterns.map(p => (
                                                                         <TableRow key={p.patternId}>
                                                                             <TableCell className="text-xs">{p.patternString}</TableCell>
-                                                                            <TableCell>{p.barUsage.toFixed(0)}mm / <span className="text-destructive">{p.leftover.toFixed(0)}mm</span></TableCell>
+                                                                            <TableCell>{(p.barUsage || 0).toFixed(0)}mm / <span className="text-destructive">{(p.leftover || 0).toFixed(0)}mm</span></TableCell>
                                                                             <TableCell>{p.barsNeeded}</TableCell>
-                                                                            <TableCell>{p.yieldPercentage.toFixed(1)}%</TableCell>
+                                                                            <TableCell>{(p.yieldPercentage || 0).toFixed(1)}%</TableCell>
                                                                         </TableRow>
                                                                     ))}
                                                                 </TableBody>
