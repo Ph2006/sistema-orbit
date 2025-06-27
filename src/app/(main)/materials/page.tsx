@@ -77,6 +77,7 @@ const cuttingPlanSchema = z.object({
     totalBars: z.number(),
     totalScrapPercentage: z.number(),
     totalYieldPercentage: z.number(),
+    totalScrapLength: z.number(),
   }).optional(),
 }).optional();
 
@@ -180,6 +181,7 @@ export default function MaterialsPage() {
 
     const { fields, append, remove, update } = useFieldArray({ control: form.control, name: "items" });
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: form.control, name: "cuttingPlan.items" });
+    const watchedCutPlan = form.watch("cuttingPlan");
 
 
     const fetchData = useCallback(async () => {
@@ -347,14 +349,23 @@ export default function MaterialsPage() {
               dataToSave.approval = null;
             }
 
-            if (values.cuttingPlan && values.cuttingPlan.items.length > 0) {
-              dataToSave.cuttingPlan = {
-                ...values.cuttingPlan,
-                patterns: planResults?.patterns || values.cuttingPlan.patterns || [],
-                summary: planResults?.summary || values.cuttingPlan.summary || null,
-              }
+            if (values.cuttingPlan && values.cuttingPlan.items?.length > 0) {
+                dataToSave.cuttingPlan = {
+                  materialDescription: values.cuttingPlan.materialDescription || '',
+                  stockLength: Number(values.cuttingPlan.stockLength) || 0,
+                  kerf: Number(values.cuttingPlan.kerf) || 0,
+                  leftoverThreshold: Number(values.cuttingPlan.leftoverThreshold) || 0,
+                  items: values.cuttingPlan.items.map(item => ({
+                      code: item.code || '',
+                      description: item.description,
+                      length: Number(item.length) || 0,
+                      quantity: Number(item.quantity) || 0,
+                  })),
+                  patterns: planResults?.patterns || values.cuttingPlan.patterns || [],
+                  summary: planResults?.summary || values.cuttingPlan.summary || null,
+                }
             } else {
-              dataToSave.cuttingPlan = null;
+                dataToSave.cuttingPlan = null;
             }
 
             if (selectedRequisition?.id) {
@@ -379,11 +390,10 @@ export default function MaterialsPage() {
     };
 
     const handleExportPDF = async () => {
-        if (!selectedRequisition) return;
+        const requisitionToExport = form.getValues();
+        if (!requisitionToExport) return;
 
         toast({ title: "Gerando PDF...", description: "Aguarde enquanto o arquivo é preparado." });
-
-        const requisitionToExport = form.getValues();
 
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
@@ -459,16 +469,16 @@ export default function MaterialsPage() {
     }
     
     const handleExportCutPlanPDF = async () => {
-        if (!selectedRequisition) return;
-        toast({ title: "Gerando PDF do Plano de Corte..." });
-    
-        const plan = form.getValues('cuttingPlan');
+        const formValues = form.getValues();
+        const plan = formValues.cuttingPlan;
         const results = planResults || (plan && plan.summary) ? { patterns: plan.patterns, summary: plan.summary } : null;
     
-        if (!results || !plan) {
-            toast({ variant: 'destructive', title: 'Nenhum plano gerado', description: 'Gere um plano de corte antes de exportar.' });
+        if (!results || !plan || !plan.items || plan.items.length === 0) {
+            toast({ variant: 'destructive', title: 'Nenhum plano gerado', description: 'Adicione itens e gere um plano de corte antes de exportar.' });
             return;
         }
+    
+        toast({ title: "Gerando PDF do Plano de Corte..." });
     
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
@@ -490,7 +500,8 @@ export default function MaterialsPage() {
             docPdf.setFontSize(16).setFont(undefined, 'bold');
             docPdf.text('Plano de Corte', pageWidth / 2, y + 5, { align: 'center' });
             docPdf.setFontSize(10).setFont(undefined, 'normal');
-            docPdf.text(`Requisição Nº: ${selectedRequisition.requisitionNumber}`, pageWidth / 2, y + 12, { align: 'center' });
+            const reqNumber = formValues.requisitionNumber || 'NOVO';
+            docPdf.text(`Requisição Nº: ${reqNumber}`, pageWidth / 2, y + 12, { align: 'center' });
             y += 25;
     
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('Parâmetros de Entrada', 15, y);
@@ -546,7 +557,7 @@ export default function MaterialsPage() {
                 ],
             });
     
-            docPdf.save(`PlanoCorte_Req_${selectedRequisition.requisitionNumber}.pdf`);
+            docPdf.save(`PlanoCorte_Req_${reqNumber}.pdf`);
     
         } catch (error) {
             console.error("Error exporting cut plan PDF:", error);
@@ -604,16 +615,19 @@ export default function MaterialsPage() {
         const stockLengthNum = Number(stockLength);
         const kerfNum = Number(kerf || 0);
 
-        const allPieces: { code?: string, description: string; length: number }[] = [];
-        items.forEach(item => {
-            const quantityNum = Number(item.quantity);
-            const lengthNum = Number(item.length);
-            if (quantityNum > 0 && lengthNum > 0) {
-                for (let i = 0; i < quantityNum; i++) {
-                    allPieces.push({ code: item.code, description: item.description, length: lengthNum });
+        const allPieces: { code?: string; description: string; length: number }[] = [];
+        if (items) {
+            for (const item of items) {
+                const quantityNum = parseInt(String(item.quantity), 10);
+                const lengthNum = parseFloat(String(item.length));
+        
+                if (!isNaN(quantityNum) && quantityNum > 0 && !isNaN(lengthNum) && lengthNum > 0) {
+                    for (let i = 0; i < quantityNum; i++) {
+                        allPieces.push({ code: item.code || '', description: item.description, length: lengthNum });
+                    }
                 }
             }
-        });
+        }
 
         allPieces.sort((a, b) => b.length - a.length);
 
@@ -750,6 +764,10 @@ export default function MaterialsPage() {
             id: Date.now().toString(),
             quantityRequested: Number(currentItem.quantityRequested) || 0,
             pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+            code: currentItem.code || '',
+            material: currentItem.material || '',
+            dimensao: currentItem.dimensao || '',
+            notes: currentItem.notes || '',
         };
 
         const result = requisitionItemSchema.safeParse(dataToValidate);
@@ -771,8 +789,13 @@ export default function MaterialsPage() {
 
         const dataToValidate = {
             ...currentItem,
+            id: currentItem.id || Date.now().toString(),
             quantityRequested: Number(currentItem.quantityRequested) || 0,
             pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+            code: currentItem.code || '',
+            material: currentItem.material || '',
+            dimensao: currentItem.dimensao || '',
+            notes: currentItem.notes || '',
         };
 
         const result = requisitionItemSchema.safeParse(dataToValidate);
@@ -1289,12 +1312,14 @@ export default function MaterialsPage() {
                                             <FileDown className="mr-2 h-4 w-4" /> Exportar Requisição
                                         </Button>
                                     )}
-                                    {selectedRequisition && (
-                                        <Button type="button" variant="outline" onClick={() => handleExportCutPlanPDF()} 
-                                            disabled={!planResults && !selectedRequisition?.cuttingPlan?.summary}>
-                                            <GanttChart className="mr-2 h-4 w-4" /> Exportar Plano de Corte
-                                        </Button>
-                                    )}
+                                    <Button 
+                                        type="button" 
+                                        variant="outline" 
+                                        onClick={handleExportCutPlanPDF} 
+                                        disabled={!watchedCutPlan?.items?.length || (!planResults && !watchedCutPlan?.summary)}
+                                    >
+                                        <GanttChart className="mr-2 h-4 w-4" /> Exportar Plano de Corte
+                                    </Button>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
