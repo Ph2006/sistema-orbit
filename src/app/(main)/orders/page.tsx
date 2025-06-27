@@ -820,6 +820,78 @@ export default function OrdersPage() {
         }
     };
 
+    const handleExportSchedule = async () => {
+        if (!selectedOrder) return;
+
+        toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            let yPos = 15;
+
+            // Header
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+            docPdf.setFontSize(18).setFont(undefined, 'bold');
+            docPdf.text(`Cronograma de Produção - Pedido Nº ${selectedOrder.quotationNumber}`, pageWidth / 2, yPos + 10, { align: 'center' });
+            yPos += 30;
+
+            docPdf.setFontSize(11).setFont(undefined, 'normal');
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 10;
+            
+            const tableBody: any[][] = [];
+            selectedOrder.items.forEach(item => {
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    tableBody.push([{ content: `Item: ${item.description} (Qtd: ${item.quantity})`, colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#f0f0f0' } }]);
+                    item.productionPlan.forEach(stage => {
+                        tableBody.push([
+                            `  • ${stage.stageName}`,
+                            stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : 'N/A',
+                            stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : 'N/A',
+                            `${stage.durationDays || 0} dia(s)`,
+                            stage.status,
+                        ]);
+                    });
+                }
+            });
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Etapa', 'Início Previsto', 'Fim Previsto', 'Duração', 'Status']],
+                body: tableBody,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+                didParseCell: (data) => {
+                    if (data.cell.raw && (data.cell.raw as any).colSpan) {
+                         data.cell.styles.halign = 'left';
+                    }
+                }
+            });
+
+            docPdf.save(`Cronograma_Pedido_${selectedOrder.quotationNumber}.pdf`);
+
+        } catch (error) {
+            console.error("Error generating schedule PDF:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar cronograma",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
+
     const handleOpenProgressModal = async (item: OrderItem) => {
         setItemToTrack(item);
         setIsProgressModalOpen(true);
