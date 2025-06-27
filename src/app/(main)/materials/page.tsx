@@ -151,7 +151,7 @@ export default function MaterialsPage() {
     const { toast } = useToast();
 
     // State for the temporary item form
-    const emptyRequisitionItem: RequisitionItem = { description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null };
+    const emptyRequisitionItem: RequisitionItem = { id: '', description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null };
     const [currentItem, setCurrentItem] = useState<RequisitionItem>(emptyRequisitionItem);
     const [editItemIndex, setEditItemIndex] = useState<number | null>(null);
 
@@ -321,7 +321,7 @@ export default function MaterialsPage() {
             };
             
             dataToSave.items = values.items.map(item => ({
-                id: item.id,
+                id: item.id || '',
                 code: item.code || '',
                 material: item.material || '',
                 dimensao: item.dimensao || '',
@@ -379,6 +379,12 @@ export default function MaterialsPage() {
     const handleExportPDF = async (requisition: Requisition) => {
         toast({ title: "Gerando PDF...", description: "Aguarde enquanto o arquivo é preparado." });
 
+        const currentFormValues = form.getValues();
+        const requisitionToExport: Requisition = {
+            ...requisition,
+            ...currentFormValues,
+        };
+
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const companySnap = await getDoc(companyRef);
@@ -393,26 +399,26 @@ export default function MaterialsPage() {
                 } catch (e) { console.error("Error adding logo to PDF:", e); }
             }
             docPdf.setFontSize(18);
-            docPdf.text(`Requisição de Material Nº: ${requisition.requisitionNumber}`, pageWidth / 2, 20, { align: 'center' });
+            docPdf.text(`Requisição de Material Nº: ${requisitionToExport.requisitionNumber}`, pageWidth / 2, 20, { align: 'center' });
 
             docPdf.setFontSize(10);
             const subheaderY = 35;
-            docPdf.text(`Data: ${format(requisition.date, 'dd/MM/yyyy')}`, 15, subheaderY);
-            docPdf.text(`Solicitante: ${requisition.requestedBy}`, 15, subheaderY + 5);
+            docPdf.text(`Data: ${format(new Date(requisitionToExport.date), 'dd/MM/yyyy')}`, 15, subheaderY);
+            docPdf.text(`Solicitante: ${requisitionToExport.requestedBy}`, 15, subheaderY + 5);
             
-            const os = orders.find(o => o.id === requisition.orderId)?.internalOS || 'N/A';
+            const os = orders.find(o => o.id === requisitionToExport.orderId)?.internalOS || 'N/A';
             docPdf.text(`OS Vinculada: ${os}`, pageWidth - 15, subheaderY, { align: 'right' });
-            docPdf.text(`Status: ${requisition.status}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
+            docPdf.text(`Status: ${requisitionToExport.status}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
 
             const head = [['Cód.', 'Descrição', 'Dimensão', 'Material', 'Qtd.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
-            const body = requisition.items.map(item => [
+            const body = requisitionToExport.items.map(item => [
                 item.code || '-',
                 item.description,
                 item.dimensao || '-',
                 item.material || '-',
                 item.quantityRequested.toString(),
                 (item.pesoUnitario || 0).toFixed(2),
-                item.deliveryDate ? format(item.deliveryDate, 'dd/MM/yyyy') : 'N/A',
+                item.deliveryDate ? format(new Date(item.deliveryDate), 'dd/MM/yyyy') : 'N/A',
                 item.status || 'Pendente',
             ]);
 
@@ -435,16 +441,16 @@ export default function MaterialsPage() {
             });
 
             let finalY = (docPdf as any).lastAutoTable.finalY + 10;
-            if (requisition.generalNotes) {
+            if (requisitionToExport.generalNotes) {
                 docPdf.setFontSize(10).setFont(undefined, 'bold');
                 docPdf.text('Observações Gerais:', 15, finalY);
                 finalY += 5;
                 docPdf.setFontSize(9).setFont(undefined, 'normal');
-                const splitNotes = docPdf.splitTextToSize(requisition.generalNotes, pageWidth - 30);
+                const splitNotes = docPdf.splitTextToSize(requisitionToExport.generalNotes, pageWidth - 30);
                 docPdf.text(splitNotes, 15, finalY);
             }
 
-            docPdf.save(`Requisicao_${requisition.requisitionNumber}.pdf`);
+            docPdf.save(`Requisicao_${requisitionToExport.requisitionNumber}.pdf`);
 
         } catch (error) {
             console.error("Error exporting PDF:", error);
@@ -739,6 +745,7 @@ export default function MaterialsPage() {
     const handleAddItem = () => {
         const dataToValidate = {
             ...currentItem,
+            id: Date.now().toString(),
             quantityRequested: Number(currentItem.quantityRequested) || 0,
             pesoUnitario: Number(currentItem.pesoUnitario) || 0,
         };
@@ -753,7 +760,7 @@ export default function MaterialsPage() {
             });
             return;
         }
-        append({ ...result.data, id: Date.now().toString() });
+        append(result.data);
         setCurrentItem(emptyRequisitionItem);
     };
 
