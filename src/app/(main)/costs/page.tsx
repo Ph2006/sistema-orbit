@@ -61,12 +61,26 @@ const requisitionItemSchema = z.object({
   inspectionStatus: z.enum(inspectionStatuses).optional(),
 });
 
+const segmentOptions = [
+  "Insumos de pintura", 
+  "Matéria-Prima", 
+  "Ensaios não-destrutivos", 
+  "Tratamento Térmico", 
+  "Emborrachamento", 
+  "Dobra", 
+  "Corte a laser", 
+  "Usinagem CNC", 
+  "Eletroerosão", 
+  "Usinagem", 
+  "Insumos de solda"
+];
+
 const supplierSchema = z.object({
   id: z.string().optional(),
   supplierCode: z.string().optional(),
   
   // 1. Dados Gerais
-  razaoSocial: z.string().min(3, "Razão social é obrigatória."),
+  razaoSocial: z.string().optional(),
   nomeFantasia: z.string().optional(),
   cnpj: z.string().min(14, "CNPJ inválido.").max(18, "CNPJ inválido."),
   inscricaoEstadual: z.string().optional(),
@@ -76,9 +90,9 @@ const supplierSchema = z.object({
   status: z.enum(["ativo", "inativo"]).default("ativo"),
 
   // 2. Contato e Endereço
-  telefone: z.string().min(10, "Telefone inválido."),
-  primaryEmail: z.string().email("E-mail inválido."),
-  salesContactName: z.string().min(3, "Contato comercial obrigatório."),
+  telefone: z.string().optional(),
+  primaryEmail: z.string().email("E-mail inválido.").optional(),
+  salesContactName: z.string().optional(),
   address: z.object({
     zipCode: z.string().optional(),
     street: z.string().optional(),
@@ -289,16 +303,17 @@ export default function CostsPage() {
     
     const onSupplierSubmit = async (values: Supplier) => {
         try {
-            const finalNomeFantasia = values.nomeFantasia || values.razaoSocial;
+            const finalNomeFantasia = values.nomeFantasia || values.razaoSocial || '';
+            const razaoSocial = values.razaoSocial || '';
 
             const dataToSave = {
                 ...values,
+                razaoSocial: razaoSocial,
                 nomeFantasia: finalNomeFantasia,
-                name: finalNomeFantasia, // Ensure both fields are set for consistency
+                name: finalNomeFantasia, 
                 lastUpdate: Timestamp.now(),
             };
 
-            // Generate a code if one doesn't exist (for both new and existing suppliers)
             if (!dataToSave.supplierCode) {
                 const highestCode = suppliers.reduce((max, s) => {
                     const codeNum = parseInt(s.supplierCode || "0", 10);
@@ -307,11 +322,11 @@ export default function CostsPage() {
                 dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
             }
 
-            if (selectedSupplier?.id) { // Editing existing supplier
+            if (selectedSupplier?.id) { 
                 const { id, ...updateData } = dataToSave;
                 await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), updateData, { merge: true });
                 toast({ title: "Fornecedor atualizado com sucesso!" });
-            } else { // Adding new supplier
+            } else { 
                 dataToSave.firstRegistrationDate = Timestamp.now();
                 await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
                 toast({ title: "Fornecedor adicionado com sucesso!" });
@@ -597,7 +612,7 @@ export default function CostsPage() {
                     <ScrollArea className="flex-grow mt-4 pr-6">
                       <TabsContent value="general" className="space-y-4">
                         <FormField control={supplierForm.control} name="status" render={({ field }) => (<FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="ativo">Ativo</SelectItem><SelectItem value="inativo">Inativo</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="cnpj" render={({ field }) => (<FormItem><FormLabel>CNPJ</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-2 gap-4">
@@ -605,16 +620,33 @@ export default function CostsPage() {
                           <FormField control={supplierForm.control} name="inscricaoMunicipal" render={({ field }) => (<FormItem><FormLabel>Inscrição Municipal</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                          <div className="grid md:grid-cols-2 gap-4">
-                          <FormField control={supplierForm.control} name="segment" render={({ field }) => (<FormItem><FormLabel>Segmento</FormLabel><FormControl><Input placeholder="Ex: Metalúrgico, Pintura" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                           <FormField control={supplierForm.control} name="segment" render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Segmento</FormLabel>
+                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Selecione um segmento" />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            {segmentOptions.map(option => (
+                                                <SelectItem key={option} value={option}>{option}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                </FormItem>
+                            )} />
                           <FormField control={supplierForm.control} name="category" render={({ field }) => (<FormItem><FormLabel>Categoria</FormLabel><FormControl><Input placeholder="Ex: Matéria-prima, Serviço" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                          {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>Código: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {selectedSupplier.firstRegistrationDate ? format(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p><p>Última atualização: {selectedSupplier.lastUpdate ? format(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p></div>)}
                       </TabsContent>
                       <TabsContent value="contact" className="space-y-4">
-                        <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do Responsável Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do Responsável Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-2 gap-4">
-                          <FormField control={supplierForm.control} name="telefone" render={({ field }) => (<FormItem><FormLabel>Telefone</FormLabel><FormControl><Input placeholder="(XX) XXXXX-XXXX" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="primaryEmail" render={({ field }) => (<FormItem><FormLabel>E-mail Principal</FormLabel><FormControl><Input type="email" placeholder="contato@fornecedor.com" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="telefone" render={({ field }) => (<FormItem><FormLabel>Telefone</FormLabel><FormControl><Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="primaryEmail" render={({ field }) => (<FormItem><FormLabel>E-mail Principal</FormLabel><FormControl><Input type="email" placeholder="contato@fornecedor.com" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                         <FormField control={supplierForm.control} name="address.street" render={({ field }) => (<FormItem><FormLabel>Logradouro</FormLabel><FormControl><Input placeholder="Rua, Avenida..." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-3 gap-4">
