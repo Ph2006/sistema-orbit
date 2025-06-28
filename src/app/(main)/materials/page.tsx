@@ -727,7 +727,7 @@ export default function MaterialsPage() {
                         <DialogDescription>{selectedRequisition ? "Altere os dados da requisição." : "Preencha as informações para solicitar materiais."}</DialogDescription>
                     </DialogHeader>
                     <Form {...requisitionForm}>
-                        <form onSubmit={requisitionForm.handleSubmit(onSubmit)} className="flex-grow flex flex-col min-h-0">
+                        <form onSubmit={requisitionForm.handleSubmit(onRequisitionSubmit)} className="flex-grow flex flex-col min-h-0">
                             <Tabs defaultValue="details" className="flex-grow flex flex-col min-h-0">
                                 <TabsList>
                                     <TabsTrigger value="details">Detalhes da Requisição</TabsTrigger>
@@ -890,3 +890,5 @@ export default function MaterialsPage() {
         </>
     );
 }
+
+    
