@@ -79,6 +79,7 @@ const cuttingPlanSchema = z.object({
     totalYieldPercentage: z.number(),
     totalScrapLength: z.number(),
   }).optional(),
+  deliveryDate: z.date().optional().nullable(),
 }).optional();
 
 const requisitionSchema = z.object({
@@ -108,7 +109,7 @@ const requisitionSchema = z.object({
 type Requisition = z.infer<typeof requisitionSchema>;
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 type CuttingPlan = z.infer<typeof cuttingPlanSchema>;
-type OrderInfo = { id: string; internalOS: string; };
+type OrderInfo = { id: string; internalOS: string; customerName: string; deliveryDate?: Date; };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
@@ -175,6 +176,7 @@ export default function MaterialsPage() {
                 kerf: 3,
                 items: [],
                 materialDescription: "",
+                deliveryDate: null,
             }
         },
     });
@@ -199,7 +201,12 @@ export default function MaterialsPage() {
               .map(doc => {
                   const data = doc.data();
                   if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) return null;
-                  return { id: doc.id, internalOS: data.internalOS.toString() };
+                  return { 
+                    id: doc.id, 
+                    internalOS: data.internalOS.toString(),
+                    customerName: data.customer?.name || data.customerName || 'N/A',
+                    deliveryDate: data.deliveryDate?.toDate() || undefined
+                  };
               })
               .filter((order): order is OrderInfo => order !== null);
             setOrders(ordersDataList);
@@ -225,16 +232,24 @@ export default function MaterialsPage() {
                         approvalDate: data.approval.approvalDate?.toDate() || null,
                     } : {},
                     items: (data.items || []).map((item: any, index: number) => ({
-                        ...item,
                         id: item.id || `${d.id}-${index}`,
+                        description: item.description,
+                        quantityRequested: item.quantityRequested,
+                        unit: item.unit,
                         code: item.code || '',
                         material: item.material || '',
                         dimensao: item.dimensao || '',
+                        pesoUnitario: item.pesoUnitario || 0,
                         notes: item.notes || '',
                         deliveryDate: item.deliveryDate?.toDate() || null,
                         status: item.status || "Pendente",
+                        quantityFulfilled: item.quantityFulfilled || 0,
                     })),
-                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()}))
+                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
+                    cuttingPlan: data.cuttingPlan ? {
+                        ...data.cuttingPlan,
+                        deliveryDate: data.cuttingPlan.deliveryDate?.toDate() || null,
+                    } : undefined,
                 } as Requisition
             });
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
@@ -269,8 +284,14 @@ export default function MaterialsPage() {
         if (requisition) {
             form.reset({
                 ...requisition,
-                cuttingPlan: requisition.cuttingPlan || { stockLength: 6000, kerf: 3, items: [], materialDescription: "" }
+                cuttingPlan: requisition.cuttingPlan || { stockLength: 6000, kerf: 3, items: [], materialDescription: "", deliveryDate: null }
             });
+             if (requisition.cuttingPlan?.summary) {
+                setPlanResults({
+                    patterns: requisition.cuttingPlan.patterns || [],
+                    summary: requisition.cuttingPlan.summary,
+                });
+            }
         } else {
             form.reset({
                 date: new Date(),
@@ -278,7 +299,7 @@ export default function MaterialsPage() {
                 items: [],
                 history: [],
                 requestedBy: user?.displayName || user?.email || undefined,
-                cuttingPlan: { stockLength: 6000, kerf: 3, items: [], materialDescription: "" }
+                cuttingPlan: { stockLength: 6000, kerf: 3, items: [], materialDescription: "", deliveryDate: null }
             });
         }
         setIsFormOpen(true);
@@ -325,7 +346,7 @@ export default function MaterialsPage() {
             };
             
             dataToSave.items = values.items.map(item => ({
-                id: item.id || '',
+                id: item.id || Date.now().toString(),
                 code: item.code || '',
                 material: item.material || '',
                 dimensao: item.dimensao || '',
@@ -335,14 +356,14 @@ export default function MaterialsPage() {
                 quantityFulfilled: item.quantityFulfilled || 0,
                 unit: item.unit,
                 notes: item.notes || '',
-                deliveryDate: item.deliveryDate ? Timestamp.fromDate(item.deliveryDate) : null,
+                deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null,
                 status: item.status || 'Pendente',
             }));
 
             if (values.approval) {
               dataToSave.approval = {
                   approvedBy: values.approval.approvedBy || null,
-                  approvalDate: values.approval.approvalDate ? Timestamp.fromDate(values.approval.approvalDate) : null,
+                  approvalDate: values.approval.approvalDate ? Timestamp.fromDate(new Date(values.approval.approvalDate)) : null,
                   justification: values.approval.justification || null,
               }
             } else {
@@ -355,6 +376,7 @@ export default function MaterialsPage() {
                   stockLength: Number(values.cuttingPlan.stockLength) || 0,
                   kerf: Number(values.cuttingPlan.kerf) || 0,
                   leftoverThreshold: Number(values.cuttingPlan.leftoverThreshold) || 0,
+                  deliveryDate: values.cuttingPlan.deliveryDate ? Timestamp.fromDate(new Date(values.cuttingPlan.deliveryDate)) : null,
                   items: values.cuttingPlan.items.map(item => ({
                       code: item.code || '',
                       description: item.description,
@@ -399,6 +421,7 @@ export default function MaterialsPage() {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const companySnap = await getDoc(companyRef);
             const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
+            const orderInfo = orders.find(o => o.id === requisitionToExport.orderId);
 
             const docPdf = new jsPDF({ orientation: "landscape" });
             const pageWidth = docPdf.internal.pageSize.width;
@@ -410,15 +433,21 @@ export default function MaterialsPage() {
             }
             docPdf.setFontSize(18);
             docPdf.text(`Requisição de Material Nº: ${requisitionToExport.requisitionNumber}`, pageWidth / 2, 20, { align: 'center' });
-
+            
             docPdf.setFontSize(10);
             const subheaderY = 35;
             docPdf.text(`Data: ${format(new Date(requisitionToExport.date), 'dd/MM/yyyy')}`, 15, subheaderY);
             docPdf.text(`Solicitante: ${requisitionToExport.requestedBy}`, 15, subheaderY + 5);
+            docPdf.text(`Status: ${requisitionToExport.status}`, 15, subheaderY + 10);
+
+            const os = orderInfo?.internalOS || 'N/A';
+            const customerName = orderInfo?.customerName || 'N/A';
+            const orderDeliveryDate = orderInfo?.deliveryDate ? format(new Date(orderInfo.deliveryDate), 'dd/MM/yyyy') : 'N/A';
             
-            const os = orders.find(o => o.id === requisitionToExport.orderId)?.internalOS || 'N/A';
             docPdf.text(`OS Vinculada: ${os}`, pageWidth - 15, subheaderY, { align: 'right' });
-            docPdf.text(`Status: ${requisitionToExport.status}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
+            docPdf.text(`Cliente: ${customerName}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
+            docPdf.text(`Entrega do Pedido: ${orderDeliveryDate}`, pageWidth - 15, subheaderY + 10, { align: 'right' });
+
 
             const head = [['Cód.', 'Descrição', 'Dimensão', 'Material', 'Qtd.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
             const body = requisitionToExport.items.map(item => [
@@ -433,7 +462,7 @@ export default function MaterialsPage() {
             ]);
 
             autoTable(docPdf, {
-                startY: 50,
+                startY: 55,
                 head,
                 body,
                 styles: { fontSize: 8 },
@@ -484,6 +513,7 @@ export default function MaterialsPage() {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const companySnap = await getDoc(companyRef);
             const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
+            const orderInfo = orders.find(o => o.id === formValues.orderId);
     
             const docPdf = new jsPDF();
             const pageWidth = docPdf.internal.pageSize.width;
@@ -499,10 +529,15 @@ export default function MaterialsPage() {
     
             docPdf.setFontSize(16).setFont(undefined, 'bold');
             docPdf.text('Plano de Corte', pageWidth / 2, y + 5, { align: 'center' });
+            y += 7;
             docPdf.setFontSize(10).setFont(undefined, 'normal');
             const reqNumber = formValues.requisitionNumber || 'NOVO';
-            docPdf.text(`Requisição Nº: ${reqNumber}`, pageWidth / 2, y + 12, { align: 'center' });
-            y += 25;
+            docPdf.text(`Requisição Nº: ${reqNumber}`, pageWidth / 2, y + 5, { align: 'center' });
+            y += 5;
+            docPdf.setFontSize(9).setFont(undefined, 'normal');
+            docPdf.text(`OS: ${orderInfo?.internalOS || 'N/A'} | Cliente: ${orderInfo?.customerName || 'N/A'}`, pageWidth / 2, y + 5, { align: 'center' });
+
+            y = 50;
     
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('Parâmetros de Entrada', 15, y);
             y += 6;
@@ -514,6 +549,7 @@ export default function MaterialsPage() {
                     ['Material da Barra:', plan.materialDescription || 'Não especificado'],
                     ['Comprimento da Barra:', `${plan.stockLength} mm`],
                     ['Espessura do Corte (Kerf):', `${plan.kerf} mm`],
+                    ['Entrega Prevista do Corte:', plan.deliveryDate ? format(new Date(plan.deliveryDate), 'dd/MM/yyyy') : 'N/A'],
                 ],
             });
             y = (docPdf as any).lastAutoTable.finalY + 10;
@@ -682,7 +718,10 @@ export default function MaterialsPage() {
         const finalPatterns = Array.from(patternMap.entries()).map(([patternKey, data]) => {
             const patternString = patternKey
                 .split(',')
-                .map(part => part.replace('x', ' x '))
+                .map(part => {
+                    const [count, length] = part.split('x');
+                    return `${count} x ${length}`;
+                })
                 .join(' + ');
 
             const piecesUsedSum = data.pieces.reduce((sum, p) => sum + p, 0);
@@ -777,14 +816,18 @@ export default function MaterialsPage() {
 
     const handleAddItem = () => {
         const dataToValidate = {
-            ...currentItem,
             id: Date.now().toString(),
+            description: currentItem.description,
             quantityRequested: Number(currentItem.quantityRequested) || 0,
-            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+            unit: currentItem.unit,
             code: currentItem.code || '',
             material: currentItem.material || '',
             dimensao: currentItem.dimensao || '',
+            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
             notes: currentItem.notes || '',
+            deliveryDate: currentItem.deliveryDate,
+            status: currentItem.status,
+            quantityFulfilled: currentItem.quantityFulfilled
         };
 
         const result = requisitionItemSchema.safeParse(dataToValidate);
@@ -805,14 +848,18 @@ export default function MaterialsPage() {
         if (editItemIndex === null) return;
 
         const dataToValidate = {
-            ...currentItem,
             id: currentItem.id || Date.now().toString(),
+            description: currentItem.description,
             quantityRequested: Number(currentItem.quantityRequested) || 0,
-            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+            unit: currentItem.unit,
             code: currentItem.code || '',
             material: currentItem.material || '',
             dimensao: currentItem.dimensao || '',
+            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
             notes: currentItem.notes || '',
+            deliveryDate: currentItem.deliveryDate,
+            status: currentItem.status,
+            quantityFulfilled: currentItem.quantityFulfilled
         };
 
         const result = requisitionItemSchema.safeParse(dataToValidate);
@@ -1140,6 +1187,19 @@ export default function MaterialsPage() {
                                                      <FormField control={form.control} name="cuttingPlan.leftoverThreshold" render={({ field }) => (
                                                         <FormItem><FormLabel>Aceitar sobras menores que (mm)</FormLabel><FormControl><Input type="number" placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                     )} />
+                                                     <FormField control={form.control} name="cuttingPlan.deliveryDate" render={({ field }) => (
+                                                        <FormItem><FormLabel>Entrega Prevista do Plano</FormLabel>
+                                                            <Popover>
+                                                                <PopoverTrigger asChild><FormControl>
+                                                                    <Button variant={"outline"} className={cn("w-full pl-3 text-left", !field.value && "text-muted-foreground")}>
+                                                                        {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                                                    </Button>
+                                                                </FormControl></PopoverTrigger>
+                                                                <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent>
+                                                            </Popover><FormMessage />
+                                                        </FormItem>
+                                                    )} />
                                                 </CardContent>
                                             </Card>
                                             <Card>
@@ -1221,7 +1281,7 @@ export default function MaterialsPage() {
                                             <Card>
                                                 <CardHeader><CardTitle>Resultados do Plano</CardTitle><CardDescription>Padrões de corte para otimizar o uso do material.</CardDescription></CardHeader>
                                                 <CardContent>
-                                                    {planResults ? (
+                                                    {(planResults || watchedCutPlan?.summary) ? (
                                                         <>
                                                             <Table>
                                                                 <TableHeader>
@@ -1233,7 +1293,7 @@ export default function MaterialsPage() {
                                                                     </TableRow>
                                                                 </TableHeader>
                                                                 <TableBody>
-                                                                    {planResults.patterns.map(p => (
+                                                                    {(planResults?.patterns || watchedCutPlan?.patterns || []).map((p: any) => (
                                                                         <TableRow key={p.patternId}>
                                                                             <TableCell className="text-xs">{p.patternString}</TableCell>
                                                                             <TableCell>{(p.barUsage || 0).toFixed(0)}mm / <span className="text-destructive">{(p.leftover || 0).toFixed(0)}mm</span></TableCell>
@@ -1245,9 +1305,9 @@ export default function MaterialsPage() {
                                                             </Table>
                                                             <Separator className="my-4" />
                                                             <div className="text-sm space-y-2">
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Total de Barras:</span> <span>{planResults.summary.totalBars}</span></div>
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Rendimento Total:</span> <span>{planResults.summary.totalYieldPercentage.toFixed(2)}%</span></div>
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Sucata Total (%):</span> <span className="text-destructive">{planResults.summary.totalScrapPercentage.toFixed(2)}%</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Total de Barras:</span> <span>{(planResults?.summary || watchedCutPlan?.summary)?.totalBars}</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Rendimento Total:</span> <span>{((planResults?.summary || watchedCutPlan?.summary)?.totalYieldPercentage || 0).toFixed(2)}%</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Sucata Total (%):</span> <span className="text-destructive">{((planResults?.summary || watchedCutPlan?.summary)?.totalScrapPercentage || 0).toFixed(2)}%</span></div>
                                                             </div>
                                                         </>
                                                     ) : (
