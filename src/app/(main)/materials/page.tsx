@@ -66,8 +66,10 @@ const cuttingPlanItemSchema = z.object({
 
 type CuttingPlanItem = z.infer<typeof cuttingPlanItemSchema>;
 
-
 const cuttingPlanSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.date(),
   materialDescription: z.string().optional(),
   stockLength: z.coerce.number().min(1, "Comprimento da barra é obrigatório."),
   kerf: z.coerce.number().min(0, "Espessura do corte não pode ser negativa.").default(0),
@@ -81,7 +83,7 @@ const cuttingPlanSchema = z.object({
     totalScrapLength: z.number(),
   }).optional(),
   deliveryDate: z.date().optional().nullable(),
-}).optional();
+});
 
 const requisitionSchema = z.object({
   id: z.string().optional(),
@@ -96,7 +98,7 @@ const requisitionSchema = z.object({
     name: z.string().optional(),
   }).optional(),
   items: z.array(requisitionItemSchema).min(1, "A requisição deve ter pelo menos um item."),
-  cuttingPlan: cuttingPlanSchema,
+  cuttingPlans: z.array(cuttingPlanSchema).optional(),
   approval: z.object({
     approvedBy: z.string().optional(),
     approvalDate: z.date().optional().nullable(),
@@ -154,7 +156,6 @@ export default function MaterialsPage() {
     const [selectedRequisition, setSelectedRequisition] = useState<Requisition | null>(null);
     const [requisitionToDelete, setRequisitionToDelete] = useState<Requisition | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
-    const [planResults, setPlanResults] = useState<PlanResult | null>(null);
     const { user, loading: authLoading } = useAuth();
     const { toast } = useToast();
 
@@ -167,6 +168,7 @@ export default function MaterialsPage() {
     const emptyCutItem: CuttingPlanItem = { description: "", length: 0, quantity: 1, code: '' };
     const [currentCutItem, setCurrentCutItem] = useState<CuttingPlanItem>(emptyCutItem);
     const [editCutIndex, setEditCutIndex] = useState<number | null>(null);
+    const [activeCutPlanIndex, setActiveCutPlanIndex] = useState(0);
 
 
     const form = useForm<Requisition>({
@@ -176,19 +178,15 @@ export default function MaterialsPage() {
             status: "Pendente",
             items: [],
             history: [],
-            cuttingPlan: {
-                stockLength: 6000,
-                kerf: 3,
-                items: [],
-                materialDescription: "",
-                deliveryDate: null,
-            }
+            cuttingPlans: [],
         },
     });
 
     const { fields, append, remove, update } = useFieldArray({ control: form.control, name: "items" });
-    const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: form.control, name: "cuttingPlan.items" });
-    const watchedCutPlan = form.watch("cuttingPlan");
+    const { fields: cuttingPlanArray, append: appendCuttingPlan, remove: removeCuttingPlan } = useFieldArray({ control: form.control, name: "cuttingPlans" });
+    const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: form.control, name: `cuttingPlans.${activeCutPlanIndex}.items` });
+    const watchedCuttingPlans = form.watch("cuttingPlans");
+    const watchedActivePlan = form.watch(`cuttingPlans.${activeCutPlanIndex}`);
     const watchedOrderId = form.watch("orderId");
 
 
@@ -240,6 +238,31 @@ export default function MaterialsPage() {
             
             const reqsList: Requisition[] = reqsSnapshot.docs.map(d => {
                 const data = d.data();
+                
+                const cuttingPlansData = (data.cuttingPlans || []).map((plan: any, index: number) => ({
+                    ...plan,
+                    id: plan.id || `${d.id}-plan-${index}`,
+                    name: plan.name || `Plano de Corte ${index + 1}`,
+                    createdAt: plan.createdAt?.toDate() || new Date(),
+                    deliveryDate: plan.deliveryDate?.toDate() || null,
+                    items: plan.items || [],
+                    patterns: plan.patterns || [],
+                    summary: plan.summary || null,
+                }));
+
+                // Old data migration
+                if (data.cuttingPlan && cuttingPlansData.length === 0) {
+                    const migratedPlan = {
+                        ...data.cuttingPlan,
+                        id: `${d.id}-plan-migrated`,
+                        name: 'Plano de Corte (Migrado)',
+                        createdAt: data.date.toDate() || new Date(),
+                        deliveryDate: data.cuttingPlan.deliveryDate?.toDate() || null,
+                    };
+                    delete migratedPlan.cuttingPlan;
+                    cuttingPlansData.push(migratedPlan);
+                }
+
                 return {
                     ...data,
                     id: d.id,
@@ -251,9 +274,9 @@ export default function MaterialsPage() {
                     } : {},
                     items: (data.items || []).map((item: any, index: number) => ({
                         id: item.id || `${d.id}-${index}`,
-                        description: item.description,
-                        quantityRequested: item.quantityRequested,
-                        unit: item.unit,
+                        description: item.description || '',
+                        quantityRequested: item.quantityRequested || 0,
+                        unit: item.unit || '',
                         code: item.code || '',
                         material: item.material || '',
                         dimensao: item.dimensao || '',
@@ -264,16 +287,7 @@ export default function MaterialsPage() {
                         quantityFulfilled: item.quantityFulfilled || 0,
                     })),
                     history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
-                    cuttingPlan: data.cuttingPlan ? {
-                        ...data.cuttingPlan,
-                        materialDescription: data.cuttingPlan.materialDescription || '',
-                        deliveryDate: data.cuttingPlan.deliveryDate?.toDate() || null,
-                        items: (data.cuttingPlan.items || []).map((item: any) => ({
-                            ...item,
-                        })),
-                        patterns: data.cuttingPlan.patterns || [],
-                        summary: data.cuttingPlan.summary || null,
-                    } : undefined,
+                    cuttingPlans: cuttingPlansData,
                 } as Requisition
             });
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
@@ -310,7 +324,6 @@ export default function MaterialsPage() {
     }, [watchedOrderId, orders, form]);
 
     const handleOpenForm = (requisition: Requisition | null = null) => {
-        setPlanResults(null);
         setSelectedRequisition(requisition);
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
         setEditItemIndex(null);
@@ -318,16 +331,23 @@ export default function MaterialsPage() {
         setEditCutIndex(null);
 
         if (requisition) {
+            const plans = (requisition.cuttingPlans && requisition.cuttingPlans.length > 0)
+                ? requisition.cuttingPlans
+                : [{
+                    id: Date.now().toString(),
+                    name: 'Plano de Corte 1',
+                    createdAt: new Date(),
+                    stockLength: 6000,
+                    kerf: 3,
+                    items: [],
+                    deliveryDate: null,
+                    materialDescription: ''
+                }];
             form.reset({
                 ...requisition,
-                cuttingPlan: requisition.cuttingPlan || { stockLength: 6000, kerf: 3, items: [], materialDescription: "", deliveryDate: null }
+                cuttingPlans: plans,
             });
-             if (requisition.cuttingPlan?.summary) {
-                setPlanResults({
-                    patterns: requisition.cuttingPlan.patterns || [],
-                    summary: requisition.cuttingPlan.summary,
-                });
-            }
+            setActiveCutPlanIndex(0);
         } else {
             form.reset({
                 date: new Date(),
@@ -335,8 +355,18 @@ export default function MaterialsPage() {
                 items: [],
                 history: [],
                 requestedBy: user?.displayName || user?.email || undefined,
-                cuttingPlan: { stockLength: 6000, kerf: 3, items: [], materialDescription: "", deliveryDate: null }
+                cuttingPlans: [{
+                    id: Date.now().toString(),
+                    name: 'Plano de Corte 1',
+                    createdAt: new Date(),
+                    stockLength: 6000,
+                    kerf: 3,
+                    items: [],
+                    deliveryDate: null,
+                    materialDescription: ''
+                }]
             });
+            setActiveCutPlanIndex(0);
         }
         setIsFormOpen(true);
     };
@@ -409,24 +439,27 @@ export default function MaterialsPage() {
               dataToSave.approval = null;
             }
 
-            if (values.cuttingPlan && (values.cuttingPlan.items?.length > 0 || values.cuttingPlan.summary)) {
-                dataToSave.cuttingPlan = {
-                  materialDescription: values.cuttingPlan.materialDescription || '',
-                  stockLength: Number(values.cuttingPlan.stockLength) || 0,
-                  kerf: Number(values.cuttingPlan.kerf) || 0,
-                  leftoverThreshold: Number(values.cuttingPlan.leftoverThreshold) || 0,
-                  deliveryDate: values.cuttingPlan.deliveryDate ? Timestamp.fromDate(new Date(values.cuttingPlan.deliveryDate)) : null,
-                  items: (values.cuttingPlan.items || []).map(item => ({
-                      code: item.code || '',
-                      description: item.description,
-                      length: Number(item.length) || 0,
-                      quantity: Number(item.quantity) || 0,
-                  })),
-                  patterns: values.cuttingPlan.patterns || [],
-                  summary: values.cuttingPlan.summary || null,
-                }
+            if (values.cuttingPlans && values.cuttingPlans.length > 0) {
+                dataToSave.cuttingPlans = values.cuttingPlans.map(plan => ({
+                    id: plan.id,
+                    name: plan.name,
+                    createdAt: plan.createdAt ? Timestamp.fromDate(new Date(plan.createdAt)) : Timestamp.now(),
+                    materialDescription: plan.materialDescription || '',
+                    stockLength: Number(plan.stockLength) || 0,
+                    kerf: Number(plan.kerf) || 0,
+                    leftoverThreshold: Number(plan.leftoverThreshold) || 0,
+                    deliveryDate: plan.deliveryDate ? Timestamp.fromDate(new Date(plan.deliveryDate)) : null,
+                    items: (plan.items || []).map(item => ({
+                        code: item.code || '',
+                        description: item.description,
+                        length: Number(item.length) || 0,
+                        quantity: Number(item.quantity) || 0,
+                    })),
+                    patterns: plan.patterns || [],
+                    summary: plan.summary || null,
+                }));
             } else {
-                dataToSave.cuttingPlan = null;
+                dataToSave.cuttingPlans = [];
             }
 
             if (selectedRequisition?.id) {
@@ -538,10 +571,9 @@ export default function MaterialsPage() {
     
     const handleExportCutPlanPDF = async () => {
         const formValues = form.getValues();
-        const plan = formValues.cuttingPlan;
-        const results = planResults || (plan && plan.summary) ? { patterns: plan.patterns, summary: plan.summary } : null;
+        const plan = formValues.cuttingPlans?.[activeCutPlanIndex];
     
-        if (!results || !plan || !plan.items || plan.items.length === 0) {
+        if (!plan || !plan.items || plan.items.length === 0 || !plan.summary) {
             toast({ variant: 'destructive', title: 'Nenhum plano gerado', description: 'Adicione itens e gere um plano de corte antes de exportar.' });
             return;
         }
@@ -571,7 +603,7 @@ export default function MaterialsPage() {
             y += 7;
             docPdf.setFontSize(10).setFont(undefined, 'normal');
             const reqNumber = formValues.requisitionNumber || 'NOVO';
-            docPdf.text(`Requisição Nº: ${reqNumber}`, pageWidth / 2, y + 5, { align: 'center' });
+            docPdf.text(`Requisição Nº: ${reqNumber} - ${plan.name}`, pageWidth / 2, y + 5, { align: 'center' });
             y += 5;
             docPdf.setFontSize(9).setFont(undefined, 'normal');
             const customerName = formValues.customer?.name || orderInfo?.customerName || 'N/A';
@@ -609,7 +641,7 @@ export default function MaterialsPage() {
             autoTable(docPdf, {
                 startY: y,
                 head: [['#', 'Padrão de Corte (Peças x Comp.)', 'Sobra (mm)', 'Nº de Barras', 'Rendimento', 'Exec. [ ]']],
-                body: results.patterns.map((p: any) => [
+                body: plan.patterns!.map((p: any) => [
                     p.patternId,
                     p.patternString,
                     (Number(p.leftover) || 0).toFixed(2),
@@ -635,13 +667,13 @@ export default function MaterialsPage() {
                 theme: 'plain',
                 styles: { fontSize: 9 },
                 body: [
-                    ['Total de Barras Necessárias:', results.summary.totalBars.toString()],
-                    ['Rendimento Total:', `${results.summary.totalYieldPercentage.toFixed(2)}%`],
-                    ['Sucata Total:', `${results.summary.totalScrapPercentage.toFixed(2)}%`],
+                    ['Total de Barras Necessárias:', plan.summary!.totalBars.toString()],
+                    ['Rendimento Total:', `${plan.summary!.totalYieldPercentage.toFixed(2)}%`],
+                    ['Sucata Total:', `${plan.summary!.totalScrapPercentage.toFixed(2)}%`],
                 ],
             });
     
-            docPdf.save(`PlanoCorte_Req_${reqNumber}.pdf`);
+            docPdf.save(`PlanoCorte_Req_${reqNumber}_${plan.name.replace(/\s+/g, '_')}.pdf`);
     
         } catch (error) {
             console.error("Error exporting cut plan PDF:", error);
@@ -683,7 +715,8 @@ export default function MaterialsPage() {
     }, [requisitions]);
 
     const generateCuttingPlan = () => {
-        const cuttingPlanValues = form.getValues('cuttingPlan');
+        const cuttingPlanValues = form.getValues(`cuttingPlans.${activeCutPlanIndex}`);
+
         if (!cuttingPlanValues) {
             toast({ variant: 'destructive', title: 'Erro', description: 'Plano de corte não inicializado.' });
             return;
@@ -786,9 +819,8 @@ export default function MaterialsPage() {
                 totalScrapLength: totalScrap,
             },
         };
-        setPlanResults(results);
-        form.setValue('cuttingPlan.patterns', results.patterns);
-        form.setValue('cuttingPlan.summary', results.summary);
+        form.setValue(`cuttingPlans.${activeCutPlanIndex}.patterns`, results.patterns);
+        form.setValue(`cuttingPlans.${activeCutPlanIndex}.summary`, results.summary);
         toast({ title: "Plano de Corte Gerado!", description: "Os resultados foram calculados e exibidos." });
     };
 
@@ -830,7 +862,7 @@ export default function MaterialsPage() {
 
     const handleEditCutItem = (index: number) => {
         setEditCutIndex(index);
-        setCurrentCutItem(form.getValues(`cuttingPlan.items.${index}`));
+        setCurrentCutItem(form.getValues(`cuttingPlans.${activeCutPlanIndex}.items.${index}`));
     };
     
     const handleCancelEditCutItem = () => {
@@ -918,6 +950,31 @@ export default function MaterialsPage() {
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
         setEditItemIndex(null);
     };
+
+    const handleAddNewCutPlan = () => {
+        const newPlan = {
+            id: Date.now().toString(),
+            name: `Plano de Corte ${watchedCuttingPlans.length + 1}`,
+            createdAt: new Date(),
+            stockLength: 6000,
+            kerf: 3,
+            items: [],
+            deliveryDate: null,
+            materialDescription: ''
+        };
+        appendCuttingPlan(newPlan as any);
+        setActiveCutPlanIndex(watchedCuttingPlans.length);
+    };
+
+    const handleRemoveCutPlan = (index: number) => {
+        removeCuttingPlan(index);
+        if (activeCutPlanIndex >= index && activeCutPlanIndex > 0) {
+            setActiveCutPlanIndex(activeCutPlanIndex - 1);
+        } else {
+            setActiveCutPlanIndex(0);
+        }
+    };
+
 
     return (
         <>
@@ -1210,24 +1267,54 @@ export default function MaterialsPage() {
                                     )}
                                 </TabsContent>
                                 <TabsContent value="cuttingPlan">
+                                    <div className="flex items-center gap-1 mb-4 border-b">
+                                        {watchedCuttingPlans?.map((plan, index) => (
+                                            <div key={plan.id} className="relative">
+                                                <Button
+                                                    type="button"
+                                                    variant={activeCutPlanIndex === index ? 'secondary' : 'ghost'}
+                                                    onClick={() => setActiveCutPlanIndex(index)}
+                                                    className={cn(watchedCuttingPlans && watchedCuttingPlans.length > 1 && "pr-8")}
+                                                >
+                                                    {plan.name}
+                                                </Button>
+                                                {watchedCuttingPlans && watchedCuttingPlans.length > 1 && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="absolute top-1/2 right-1 -translate-y-1/2 h-6 w-6 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                                                        onClick={() => handleRemoveCutPlan(index)}
+                                                    >
+                                                        <X className="h-4 w-4" />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        ))}
+                                        <Button type="button" variant="outline" size="icon" onClick={handleAddNewCutPlan}>
+                                            <PlusCircle className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    
+                                    {watchedCuttingPlans && watchedCuttingPlans.length > 0 && activeCutPlanIndex < watchedCuttingPlans.length && (
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                         <div className="space-y-6">
                                             <Card>
                                                 <CardHeader><CardTitle>Parâmetros de Entrada</CardTitle></CardHeader>
                                                 <CardContent className="space-y-4">
-                                                    <FormField control={form.control} name="cuttingPlan.materialDescription" render={({ field }) => (
+                                                    <FormField control={form.control} name={`cuttingPlans.${activeCutPlanIndex}.materialDescription`} render={({ field }) => (
                                                         <FormItem><FormLabel>Descrição do Material da Barra</FormLabel><FormControl><Input placeholder="Ex: Cantoneira 2 x 3/16" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                     )} />
-                                                    <FormField control={form.control} name="cuttingPlan.stockLength" render={({ field }) => (
+                                                    <FormField control={form.control} name={`cuttingPlans.${activeCutPlanIndex}.stockLength`} render={({ field }) => (
                                                         <FormItem><FormLabel>Comprimento da Barra (mm)</FormLabel><FormControl><Input type="number" placeholder="6000" {...field} /></FormControl><FormMessage /></FormItem>
                                                     )} />
-                                                    <FormField control={form.control} name="cuttingPlan.kerf" render={({ field }) => (
+                                                    <FormField control={form.control} name={`cuttingPlans.${activeCutPlanIndex}.kerf`} render={({ field }) => (
                                                         <FormItem><FormLabel>Espessura do Corte / Kerf (mm)</FormLabel><FormControl><Input type="number" placeholder="3" {...field} /></FormControl><FormMessage /></FormItem>
                                                     )} />
-                                                     <FormField control={form.control} name="cuttingPlan.leftoverThreshold" render={({ field }) => (
+                                                     <FormField control={form.control} name={`cuttingPlans.${activeCutPlanIndex}.leftoverThreshold`} render={({ field }) => (
                                                         <FormItem><FormLabel>Aceitar sobras menores que (mm)</FormLabel><FormControl><Input type="number" placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                                     )} />
-                                                     <FormField control={form.control} name="cuttingPlan.deliveryDate" render={({ field }) => (
+                                                     <FormField control={form.control} name={`cuttingPlans.${activeCutPlanIndex}.deliveryDate`} render={({ field }) => (
                                                         <FormItem><FormLabel>Entrega Prevista do Plano</FormLabel>
                                                             <Popover>
                                                                 <PopoverTrigger asChild><FormControl>
@@ -1321,7 +1408,7 @@ export default function MaterialsPage() {
                                             <Card>
                                                 <CardHeader><CardTitle>Resultados do Plano</CardTitle><CardDescription>Padrões de corte para otimizar o uso do material.</CardDescription></CardHeader>
                                                 <CardContent>
-                                                    {(planResults || watchedCutPlan?.summary) ? (
+                                                    {(watchedActivePlan?.summary) ? (
                                                         <>
                                                             <Table>
                                                                 <TableHeader>
@@ -1333,7 +1420,7 @@ export default function MaterialsPage() {
                                                                     </TableRow>
                                                                 </TableHeader>
                                                                 <TableBody>
-                                                                    {(planResults?.patterns || watchedCutPlan?.patterns || []).map((p: any) => (
+                                                                    {(watchedActivePlan.patterns || []).map((p: any) => (
                                                                         <TableRow key={p.patternId}>
                                                                             <TableCell className="text-xs">{p.patternString}</TableCell>
                                                                             <TableCell>{(p.barUsage || 0).toFixed(0)}mm / <span className="text-destructive">{(p.leftover || 0).toFixed(0)}mm</span></TableCell>
@@ -1345,9 +1432,9 @@ export default function MaterialsPage() {
                                                             </Table>
                                                             <Separator className="my-4" />
                                                             <div className="text-sm space-y-2">
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Total de Barras:</span> <span>{(planResults?.summary || watchedCutPlan?.summary)?.totalBars}</span></div>
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Rendimento Total:</span> <span>{((planResults?.summary || watchedCutPlan?.summary)?.totalYieldPercentage || 0).toFixed(2)}%</span></div>
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Sucata Total (%):</span> <span className="text-destructive">{((planResults?.summary || watchedCutPlan?.summary)?.totalScrapPercentage || 0).toFixed(2)}%</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Total de Barras:</span> <span>{watchedActivePlan.summary?.totalBars}</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Rendimento Total:</span> <span>{(watchedActivePlan.summary?.totalYieldPercentage || 0).toFixed(2)}%</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Sucata Total (%):</span> <span className="text-destructive">{(watchedActivePlan.summary?.totalScrapPercentage || 0).toFixed(2)}%</span></div>
                                                             </div>
                                                         </>
                                                     ) : (
@@ -1359,6 +1446,7 @@ export default function MaterialsPage() {
                                             </Card>
                                         </div>
                                     </div>
+                                    )}
                                 </TabsContent>
                                 <TabsContent value="approval" className="space-y-6">
                                     <Card>
@@ -1433,7 +1521,7 @@ export default function MaterialsPage() {
                                         type="button" 
                                         variant="outline" 
                                         onClick={handleExportCutPlanPDF} 
-                                        disabled={!watchedCutPlan?.items?.length || (!planResults && !watchedCutPlan?.summary)}
+                                        disabled={!watchedActivePlan?.items?.length || !watchedActivePlan?.summary}
                                     >
                                         <GanttChart className="mr-2 h-4 w-4" /> Exportar Plano de Corte
                                     </Button>
