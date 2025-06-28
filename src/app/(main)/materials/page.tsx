@@ -211,9 +211,9 @@ export default function MaterialsPage() {
                   
                   let deliveryDate: Date | undefined = undefined;
                     if (data.deliveryDate) {
-                        if (typeof data.deliveryDate.toDate === 'function') {
+                         if (typeof data.deliveryDate.toDate === 'function') {
                             deliveryDate = data.deliveryDate.toDate();
-                        } else if (!isNaN(new Date(data.deliveryDate).getTime())) {
+                        } else if (data.deliveryDate && !isNaN(new Date(data.deliveryDate).getTime())) {
                             deliveryDate = new Date(data.deliveryDate);
                         }
                     }
@@ -272,6 +272,8 @@ export default function MaterialsPage() {
                             ...item,
                             isExecuted: item.isExecuted || false,
                         })),
+                        patterns: data.cuttingPlan.patterns || [],
+                        summary: data.cuttingPlan.summary || null,
                     } : undefined,
                 } as Requisition
             });
@@ -407,6 +409,7 @@ export default function MaterialsPage() {
             }
 
             if (values.cuttingPlan && values.cuttingPlan.items?.length > 0) {
+                const currentPlan = planResults || (values.cuttingPlan.summary ? { patterns: values.cuttingPlan.patterns, summary: values.cuttingPlan.summary } : null);
                 dataToSave.cuttingPlan = {
                   materialDescription: values.cuttingPlan.materialDescription || '',
                   stockLength: Number(values.cuttingPlan.stockLength) || 0,
@@ -420,8 +423,8 @@ export default function MaterialsPage() {
                       quantity: Number(item.quantity) || 0,
                       isExecuted: item.isExecuted || false,
                   })),
-                  patterns: planResults?.patterns || values.cuttingPlan.patterns || [],
-                  summary: planResults?.summary || values.cuttingPlan.summary || null,
+                  patterns: currentPlan?.patterns || [],
+                  summary: currentPlan?.summary || null,
                 }
             } else {
                 dataToSave.cuttingPlan = null;
@@ -692,14 +695,12 @@ export default function MaterialsPage() {
             const quantityNum = Math.floor(Number(item.quantity) || 0);
             const lengthNum = Number(item.length) || 0;
             if (quantityNum > 0 && lengthNum > 0) {
-                // Create an array with 'quantityNum' copies of the piece.
-                return Array(quantityNum).fill(null).map(() => ({
+                return Array.from({ length: quantityNum }, () => ({
                     code: item.code || '',
                     description: item.description,
                     length: lengthNum
                 }));
             }
-            // Return an empty array if the item is invalid, flatMap will remove it.
             return [];
         });
         
@@ -733,51 +734,36 @@ export default function MaterialsPage() {
             }
         }
         
-        const patternMap = new Map<string, { pieces: number[], count: number }>();
-        bins.forEach(bin => {
+        let patternId = 1;
+        let totalScrap = 0;
+        const finalPatterns = bins.map(bin => {
             const pieceCounts = new Map<number, number>();
             bin.pieces.forEach(p => {
                 pieceCounts.set(p, (pieceCounts.get(p) || 0) + 1);
             });
             
             const sortedPieces = Array.from(pieceCounts.entries()).sort(([a], [b]) => b - a);
-            const patternKey = sortedPieces.map(([length, count]) => `${count}x${length}`).join(',');
-
-            const entry = patternMap.get(patternKey);
-            if (entry) {
-                entry.count++;
-            } else {
-                patternMap.set(patternKey, { pieces: bin.pieces, count: 1 });
-            }
-        });
-
-        let patternId = 1;
-        let totalScrap = 0;
-        const finalPatterns = Array.from(patternMap.entries()).map(([patternKey, data]) => {
-            const patternString = patternKey
-                .split(',')
-                .map(part => {
-                    const [count, length] = part.split('x');
-                    return `${count} x ${length}`;
-                })
+            const patternString = sortedPieces
+                .map(([length, count]) => `${count} x ${length}mm`)
                 .join(' + ');
 
-            const piecesUsedSum = data.pieces.reduce((sum, p) => sum + p, 0);
-            const kerfTotal = Math.max(0, data.pieces.length -1) * kerfNum;
+            const piecesUsedSum = bin.pieces.reduce((sum, p) => sum + p, 0);
+            const kerfTotal = Math.max(0, bin.pieces.length - 1) * kerfNum;
             const barUsage = piecesUsedSum + kerfTotal;
             const leftover = stockLengthNum - barUsage;
-            totalScrap += leftover * data.count;
+            totalScrap += leftover;
 
             return {
                 patternId: patternId++,
                 patternString,
-                pieces: data.pieces,
+                pieces: bin.pieces,
                 barUsage: Number(barUsage) || 0,
                 leftover: Number(leftover) || 0,
                 yieldPercentage: Number((piecesUsedSum / stockLengthNum) * 100) || 0,
-                barsNeeded: data.count,
+                barsNeeded: 1,
             };
         });
+
 
         const totalBars = bins.length;
         const totalMaterialLength = totalBars * stockLengthNum;
