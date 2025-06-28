@@ -189,182 +189,105 @@ export default function MaterialsPage() {
     const watchedActivePlan = form.watch(`cuttingPlans.${activeCutPlanIndex}`);
     const watchedOrderId = form.watch("orderId");
 
-
-    const fetchData = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
-    setIsLoadingData(true);
-    try {
-        const [reqsSnapshot, ordersSnapshot, teamSnapshot] = await Promise.all([
-            getDocs(collection(db, "companies", "mecald", "materialRequisitions")),
-            getDocs(collection(db, "companies", "mecald", "orders")),
-            getDoc(doc(db, "companies", "mecald", "settings", "team")),
-        ]);
-
-        const ordersDataList = ordersSnapshot.docs
-          .map(doc => {
-              const data = doc.data();
-              if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) return null;
-              
-              let deliveryDate: Date | undefined = undefined;
-                if (data.deliveryDate) {
-                    if (typeof data.deliveryDate.toDate === 'function') {
-                        deliveryDate = data.deliveryDate.toDate();
-                    } else if (data.deliveryDate && !isNaN(new Date(data.deliveryDate).getTime())) {
-                        deliveryDate = new Date(data.deliveryDate);
-                    }
-                }
-              
-              return { 
-                id: doc.id, 
-                internalOS: data.internalOS.toString(),
-                customerName: data.customer?.name || data.customerName || 'N/A',
-                customerId: data.customer?.id || data.customerId || '',
-                deliveryDate: deliveryDate
-              };
-          })
-          .filter((order): order is OrderInfo => order !== null);
-        setOrders(ordersDataList);
-
-        if (teamSnapshot.exists()) {
-            const teamData = teamSnapshot.data();
-            if (teamData && Array.isArray(teamData.members)) {
-                 const membersList = teamData.members
-                    .filter((m: any) => m && m.name)
-                    .map((m: any) => ({ id: m.id?.toString() || m.name, name: m.name, }));
-                setTeam(membersList);
-            }
-        }
+    // 3. Função de teste para verificar se os planos estão no form
+    const testCuttingPlansInForm = () => {
+        console.log('🧪 === TESTE DOS PLANOS NO FORMULÁRIO ===');
         
-        const reqsListPromises = reqsSnapshot.docs.map(async (d) => {
-            const data = d.data();
-            const reqId = d.id;
-
-            try {
-                const cuttingPlansSnap = await getDocs(collection(db, "companies", "mecald", "materialRequisitions", reqId, "cuttingPlans"));
-                const cuttingPlansData = cuttingPlansSnap.docs.map(planDoc => {
-                    const planData = planDoc.data();
-                    console.log('Carregando plano:', planDoc.id, planData);
-                    
-                    return {
-                        id: planDoc.id,
-                        name: planData.name || `Plano de Corte`,
-                        materialDescription: planData.materialDescription || '',
-                        stockLength: Number(planData.stockLength) || 0,
-                        kerf: Number(planData.kerf) || 0,
-                        leftoverThreshold: Number(planData.leftoverThreshold) || 0,
-                        createdAt: planData.createdAt?.toDate() || new Date(),
-                        deliveryDate: planData.deliveryDate?.toDate() || null,
-                        items: (planData.items || []).map((item: any) => ({
-                            code: item.code || '',
-                            description: item.description || '',
-                            length: Number(item.length) || 0,
-                            quantity: Number(item.quantity) || 0,
-                        })),
-                        patterns: planData.patterns || [],
-                        summary: planData.summary || null,
-                    };
-                });
-                
-                return {
-                    ...data,
-                    id: d.id,
-                    date: data.date.toDate(),
-                    customer: data.customer || undefined,
-                    approval: data.approval ? {
-                        ...data.approval,
-                        approvalDate: data.approval.approvalDate?.toDate() || null,
-                    } : {},
-                    items: (data.items || []).map((item: any, index: number) => ({
-                        id: item.id || `${d.id}-${index}`,
-                        description: item.description || '',
-                        quantityRequested: item.quantityRequested || 0,
-                        unit: item.unit || '',
-                        code: item.code || '',
-                        material: item.material || '',
-                        dimensao: item.dimensao || '',
-                        pesoUnitario: item.pesoUnitario || 0,
-                        notes: item.notes || '',
-                        deliveryDate: item.deliveryDate?.toDate() || null,
-                        status: item.status || "Pendente",
-                        quantityFulfilled: item.quantityFulfilled || 0,
-                    })),
-                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
-                    cuttingPlans: cuttingPlansData,
-                } as Requisition
-            } catch (planError) {
-                console.error('Erro ao carregar planos de corte para requisição', reqId, planError);
-                return {
-                    ...data,
-                    id: d.id,
-                    date: data.date.toDate(),
-                    customer: data.customer || undefined,
-                    approval: data.approval ? {
-                        ...data.approval,
-                        approvalDate: data.approval.approvalDate?.toDate() || null,
-                    } : {},
-                    items: (data.items || []).map((item: any, index: number) => ({
-                        id: item.id || `${d.id}-${index}`,
-                        description: item.description || '',
-                        quantityRequested: item.quantityRequested || 0,
-                        unit: item.unit || '',
-                        code: item.code || '',
-                        material: item.material || '',
-                        dimensao: item.dimensao || '',
-                        pesoUnitario: item.pesoUnitario || 0,
-                        notes: item.notes || '',
-                        deliveryDate: item.deliveryDate?.toDate() || null,
-                        status: item.status || "Pendente",
-                        quantityFulfilled: item.quantityFulfilled || 0,
-                    })),
-                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
-                    cuttingPlans: [],
-                } as Requisition
-            }
-        });
-
-        const reqsList = await Promise.all(reqsListPromises);
-        setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
+        const formData = form.getValues();
+        console.log('📋 Dados completos do form:', formData);
+        console.log('✂️ Planos específicos:', formData.cuttingPlans);
+        console.log('📊 Quantidade de planos:', formData.cuttingPlans?.length || 0);
         
-    } catch (error: any) {
-        console.error("Error fetching data:", error);
-        let description = "Não foi possível buscar os dados do sistema.";
-        if (error.code === 'permission-denied') {
-            description = "Permissão negada. Verifique as regras de segurança do seu Firestore.";
-        }
-        toast({ variant: "destructive", title: "Erro ao Carregar Dados", description, duration: 8000 });
-    } finally {
-        setIsLoading(false);
-        setIsLoadingData(false);
-    }
-}, [user, toast]);
-
-    const checkFirestoreRules = async () => {
-        try {
-            console.log('🔒 Verificando permissões do Firestore...');
-            
-            const testRead = await getDocs(collection(db, "companies", "mecald", "materialRequisitions"));
-            console.log('✅ Leitura autorizada:', testRead.size, 'documentos');
-            
-            if (testRead.docs.length > 0) {
-                const firstDocId = testRead.docs[0].id;
-                const testSubcollectionRead = await getDocs(collection(db, "companies", "mecald", "materialRequisitions", firstDocId, "cuttingPlans"));
-                console.log('✅ Leitura de subcoleção autorizada:', testSubcollectionRead.size, 'planos');
-            }
-            
-        } catch (error) {
-            console.error('❌ Erro de permissões:', error);
-            toast({
-                variant: "destructive",
-                title: "Erro de Permissões",
-                description: "Verifique as regras de segurança do Firestore. Detalhes no console."
+        if (formData.cuttingPlans && formData.cuttingPlans.length > 0) {
+            formData.cuttingPlans.forEach((plan, index) => {
+                console.log(`🔍 Plano ${index}:`, plan);
+                console.log(`  - Nome: ${plan.name}`);
+                console.log(`  - Items: ${plan.items?.length || 0}`);
+                console.log(`  - Patterns: ${plan.patterns?.length || 0}`);
+                console.log(`  - Summary:`, plan.summary);
             });
         }
+        
+        toast({
+            title: "Debug dos planos",
+            description: `${formData.cuttingPlans?.length || 0} planos encontrados. Veja o console.`
+        });
     };
+
+    // 2. Função fetchData simplificada para ler os planos
+    const fetchData = useCallback(async () => {
+        if (!user) return;
+        
+        console.log('📥 Carregando dados...');
+        setIsLoading(true);
+        setIsLoadingData(true);
+        
+        try {
+            // Carregar apenas requisições primeiro
+            const reqsSnapshot = await getDocs(collection(db, "companies", "mecald", "materialRequisitions"));
+            console.log('📄 Requisições encontradas:', reqsSnapshot.size);
+            
+            const loadedRequisitions = reqsSnapshot.docs.map(doc => {
+                const data = doc.data();
+                console.log('📋 Requisição carregada:', doc.id, data);
+                
+                return {
+                    id: doc.id,
+                    date: data.date?.toDate ? data.date.toDate() : new Date(data.date),
+                    status: data.status || 'Pendente',
+                    requestedBy: data.requestedBy || 'Usuário',
+                    items: data.items || [],
+                    cuttingPlans: data.cuttingPlans || [], // IMPORTANTE: Carregar os planos
+                    requisitionNumber: data.requisitionNumber || doc.id.slice(-5) // Usar ID como número temporário
+                };
+            });
+            
+            setRequisitions(loadedRequisitions as any);
+            console.log('✅ Requisições carregadas:', loadedRequisitions.length);
+            
+            // Carregar orders e team de forma simples (opcional)
+            try {
+                const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+                const ordersData = ordersSnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    internalOS: doc.data().internalOS || doc.id,
+                    customerName: doc.data().customer?.name || 'Cliente',
+                    customerId: doc.data().customer?.id || ''
+                }));
+                setOrders(ordersData as any);
+            } catch (ordersError: any) {
+                console.warn('⚠️ Erro ao carregar orders:', ordersError);
+                setOrders([]);
+            }
+            
+            try {
+                const teamDoc = await getDoc(doc(db, "companies", "mecald", "settings", "team"));
+                if (teamDoc.exists()) {
+                    const teamData = teamDoc.data().members || [];
+                    setTeam(teamData.map((m: any) => ({ id: m.id || m.name, name: m.name })));
+                } else {
+                    setTeam([{ id: 'default', name: 'Usuário Padrão' }]);
+                }
+            } catch (teamError: any) {
+                console.warn('⚠️ Erro ao carregar team:', teamError);
+                setTeam([{ id: 'default', name: 'Usuário Padrão' }]);
+            }
+            
+        } catch (error: any) {
+            console.error('❌ Erro ao carregar dados:', error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao carregar", 
+                description: error.message 
+            });
+        } finally {
+            setIsLoading(false);
+            setIsLoadingData(false);
+        }
+    }, [user, toast]);
 
     useEffect(() => {
         if (user && !authLoading) {
-            checkFirestoreRules();
             fetchData();
         }
     }, [user, authLoading, fetchData]);
@@ -449,171 +372,107 @@ export default function MaterialsPage() {
             setRequisitionToDelete(null);
         }
     };
-
-    const debugFormValues = () => {
-        console.log('🔍 DEBUG: Verificando valores do formulário...');
-        const allFormValues = form.getValues();
-        console.log('📋 Todos os valores do form:', allFormValues);
-        console.log('✂️ Planos de corte específicos:', allFormValues.cuttingPlans);
-        console.log('📊 Plano ativo (index):', activeCutPlanIndex);
-        
-        if (allFormValues.cuttingPlans && allFormValues.cuttingPlans[activeCutPlanIndex]) {
-            console.log('🎯 Plano ativo detalhado:', allFormValues.cuttingPlans[activeCutPlanIndex]);
-        }
-        
-        return allFormValues;
-    };
     
+    // 1. Função para salvar APENAS o essencial
     const onSubmit = async (data: Requisition) => {
-        console.log('🚀 === INÍCIO DO SALVAMENTO ===');
+        console.log('🚀 === SALVAMENTO ULTRA SIMPLES ===');
         
-        const formValues = debugFormValues();
-        
-        if (!formValues.cuttingPlans || formValues.cuttingPlans.length === 0) {
-            console.log('⚠️ PROBLEMA: Nenhum plano de corte encontrado no formulário!');
-            console.log('🔧 Criando plano padrão...');
-            
-            formValues.cuttingPlans = [{
-                id: Date.now().toString(),
-                name: 'Plano de Corte 1',
-                createdAt: new Date(),
-                stockLength: 6000,
-                kerf: 3,
-                items: [],
-                deliveryDate: null,
-                materialDescription: '',
-                patterns: [],
-                summary: null
-            }];
-        }
-    
-        console.log('✂️ PLANOS QUE SERÃO SALVOS:', formValues.cuttingPlans);
-    
         try {
-            const newHistoryEntry = {
-                timestamp: new Date(),
-                user: user?.email || "Sistema",
-                action: selectedRequisition ? "Edição" : "Criação",
-                details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
-            };
-            const finalHistory = [...(formValues.history || []), newHistoryEntry];
-    
-            const dataToSave: any = {
-                date: Timestamp.fromDate(formValues.date),
-                status: formValues.status,
-                requestedBy: formValues.requestedBy,
-                department: formValues.department || null,
-                orderId: formValues.orderId || null,
-                customer: formValues.customer || null,
-                generalNotes: formValues.generalNotes || null,
-                history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
-                requisitionNumber: formValues.requisitionNumber || null,
+            const formData = form.getValues();
+            console.log('📋 Dados do form:', formData);
+            
+            // Dados básicos da requisição
+            const saveData: any = {
+                // Campos básicos obrigatórios
+                date: new Date(), // Usar Date simples primeiro
+                status: formData.status || 'Pendente',
+                requestedBy: formData.requestedBy || 'Usuário',
+                
+                // Items básicos
+                items: (formData.items || []).map(item => ({
+                    description: item.description || '',
+                    quantityRequested: Number(item.quantityRequested) || 0,
+                    unit: item.unit || '',
+                    status: 'Pendente'
+                })),
+                
+                // PLANOS DE CORTE - VERSION ULTRA SIMPLES
+                cuttingPlans: []
             };
             
-            dataToSave.items = (formValues.items || []).map(item => ({
-                id: item.id || Date.now().toString(),
-                code: item.code || '',
-                material: item.material || '',
-                dimensao: item.dimensao || '',
-                pesoUnitario: item.pesoUnitario || 0,
-                description: item.description,
-                quantityRequested: item.quantityRequested,
-                quantityFulfilled: item.quantityFulfilled || 0,
-                unit: item.unit,
-                notes: item.notes || '',
-                deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null,
-                status: item.status || 'Pendente',
-            }));
-    
-            if (formValues.approval) {
-                dataToSave.approval = {
-                    approvedBy: formValues.approval.approvedBy || null,
-                    approvalDate: formValues.approval.approvalDate ? Timestamp.fromDate(new Date(formValues.approval.approvalDate)) : null,
-                    justification: formValues.approval.justification || null,
-                }
-            } else {
-                dataToSave.approval = null;
+            // Processar planos de corte de forma MUITO simples
+            if (formData.cuttingPlans && formData.cuttingPlans.length > 0) {
+                console.log('✂️ Processando planos:', formData.cuttingPlans.length);
+                
+                saveData.cuttingPlans = formData.cuttingPlans.map((plan, index) => {
+                    console.log(`🔧 Plano ${index}:`, plan);
+                    
+                    const simplePlan = {
+                        id: plan.id || `plan_${index}`,
+                        name: plan.name || `Plano ${index + 1}`,
+                        stockLength: Number(plan.stockLength) || 6000,
+                        kerf: Number(plan.kerf) || 3,
+                        materialDescription: plan.materialDescription || '',
+                        
+                        // Items do plano
+                        items: (plan.items || []).map(item => ({
+                            description: item.description || '',
+                            length: Number(item.length) || 0,
+                            quantity: Number(item.quantity) || 0
+                        })),
+                        
+                        // Resultados (se existirem)
+                        patterns: plan.patterns || [],
+                        summary: plan.summary || null
+                    };
+                    
+                    console.log(`✅ Plano ${index} processado:`, simplePlan);
+                    return simplePlan;
+                });
             }
-    
-            console.log('🔧 Preparando planos de corte para o Firestore...');
             
-            dataToSave.cuttingPlans = formValues.cuttingPlans.map((plan, index) => {
-                console.log(`🛠️ Processando plano ${index + 1}:`, plan);
-                
-                const processedPlan = {
-                    id: plan.id || `plan_${Date.now()}_${index}`,
-                    name: plan.name || `Plano de Corte ${index + 1}`,
-                    materialDescription: plan.materialDescription || '',
-                    stockLength: Number(plan.stockLength) || 0,
-                    kerf: Number(plan.kerf) || 0,
-                    leftoverThreshold: Number(plan.leftoverThreshold) || 0,
-                    createdAt: plan.createdAt ? Timestamp.fromDate(new Date(plan.createdAt)) : Timestamp.now(),
-                    deliveryDate: plan.deliveryDate ? Timestamp.fromDate(new Date(plan.deliveryDate)) : null,
-                    items: (plan.items || []).map(item => ({
-                        code: item.code || '',
-                        description: item.description || '',
-                        length: Number(item.length) || 0,
-                        quantity: Number(item.quantity) || 0,
-                    })),
-                    patterns: plan.patterns || [],
-                    summary: plan.summary || null,
-                };
-                
-                console.log(`✅ Plano processado ${index + 1}:`, processedPlan);
-                return processedPlan;
+            console.log('💾 Dados finais para salvar:', saveData);
+            
+            // Salvar no Firestore de forma simples
+            if (selectedRequisition?.id) {
+                console.log('📝 Atualizando requisição existente:', selectedRequisition.id);
+                const docRef = doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id);
+                await setDoc(docRef, saveData, { merge: true });
+                console.log('✅ Atualização concluída');
+            } else {
+                console.log('🆕 Criando nova requisição');
+                const collectionRef = collection(db, "companies", "mecald", "materialRequisitions");
+                const docRef = await addDoc(collectionRef, saveData);
+                console.log('✅ Nova requisição criada:', docRef.id);
+            }
+            
+            console.log('🎉 SALVAMENTO CONCLUÍDO!');
+            
+            toast({ 
+                title: "Sucesso!", 
+                description: "Requisição salva com planos de corte!" 
             });
-    
-            console.log('💾 DADOS FINAIS PARA SALVAR:', dataToSave);
-            console.log('✂️ PLANOS FINAIS:', dataToSave.cuttingPlans);
-    
-            let requisitionId: string;
-            let isNewRequisition = !selectedRequisition?.id;
-    
-            if (isNewRequisition) {
-                console.log('🆕 Criando nova requisição...');
-                const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
-                const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
-                const newRequisitionData = { ...dataToSave, requisitionNumber: (highestNumber + 1).toString().padStart(5, '0') };
-                
-                console.log('📤 Enviando para Firestore:', newRequisitionData);
-                const newDocRef = await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), newRequisitionData);
-                requisitionId = newDocRef.id;
-                console.log('✅ Nova requisição criada com ID:', requisitionId);
-            } else {
-                console.log('📝 Atualizando requisição existente:', selectedRequisition!.id);
-                requisitionId = selectedRequisition!.id;
-                
-                console.log('📤 Enviando update para Firestore:', dataToSave);
-                await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", requisitionId), dataToSave);
-                console.log('✅ Requisição atualizada com sucesso');
-            }
-    
-            console.log('🎉 === SALVAMENTO CONCLUÍDO COM SUCESSO ===');
-            toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
+            
             setIsFormOpen(false);
             await fetchData();
             
-        } catch (error) {
-            console.error("❌ === ERRO NO SALVAMENTO ===", error);
+        } catch (error: any) {
+            console.error('❌ ERRO:', error);
+            
+            // Log detalhado do erro
+            if (error.code) {
+                console.error('🔥 Código do erro:', error.code);
+            }
+            if (error.message) {
+                console.error('📝 Mensagem:', error.message);
+            }
+            
             toast({ 
                 variant: "destructive", 
                 title: "Erro ao salvar", 
-                description: `Erro: ${error.message || 'Erro desconhecido'}. Verifique o console.` 
+                description: error.message || 'Erro desconhecido' 
             });
         }
-    };
-    
-    const testCuttingPlansCapture = () => {
-        console.log('🧪 TESTE: Captura dos planos de corte');
-        const formValues = form.getValues();
-        console.log('📊 Form watch cuttingPlans:', form.watch('cuttingPlans'));
-        console.log('📊 Form getValues cuttingPlans:', formValues.cuttingPlans);
-        console.log('📊 watchedCuttingPlans state:', watchedCuttingPlans);
-        
-        toast({
-            title: "Debug dos planos",
-            description: `Encontrados ${formValues.cuttingPlans?.length || 0} planos. Veja o console.`
-        });
     };
 
     const handleExportPDF = async () => {
@@ -1676,7 +1535,7 @@ export default function MaterialsPage() {
                                     >
                                         <GanttChart className="mr-2 h-4 w-4" /> Exportar Plano de Corte
                                     </Button>
-                                    <Button type="button" variant="outline" onClick={testCuttingPlansCapture}>
+                                    <Button type="button" variant="outline" onClick={testCuttingPlansInForm}>
                                         🧪 Testar Captura
                                     </Button>
                                 </div>
