@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil, FileDown, AlertTriangle, GanttChart, BrainCircuit, X } from "lucide-react";
+import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil, FileDown, AlertTriangle, GanttChart, BrainCircuit, X, XCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -41,6 +41,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 // Schemas & Constants
 const itemStatuses = ["Pendente", "Estoque", "Recebido (Aguardando Inspeção)", "Inspecionado e Aprovado", "Inspecionado e Rejeitado"] as const;
+const inspectionStatuses = ["Pendente", "Aprovado", "Aprovado com ressalvas", "Rejeitado"] as const;
 
 const requisitionItemSchema = z.object({
   id: z.string(),
@@ -55,6 +56,15 @@ const requisitionItemSchema = z.object({
   deliveryDate: z.date().optional().nullable(),
   notes: z.string().optional(),
   status: z.string().optional().default("Pendente"),
+  
+  // New fields for cost center
+  supplierName: z.string().optional(),
+  invoiceNumber: z.string().optional(),
+  invoiceItemValue: z.coerce.number().optional(),
+  certificateNumber: z.string().optional(),
+  storageLocation: z.string().optional(),
+  deliveryReceiptDate: z.date().optional().nullable(),
+  inspectionStatus: z.enum(inspectionStatuses).optional().default("Pendente"),
 });
 
 const requisitionSchema = z.object({
@@ -170,7 +180,7 @@ export default function MaterialsPage() {
     const { toast } = useToast();
 
     // State for the temporary item form
-    const emptyRequisitionItem: RequisitionItem = { id: Date.now().toString(), description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null };
+    const emptyRequisitionItem: RequisitionItem = { id: Date.now().toString(), description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null, inspectionStatus: "Pendente" };
     const [currentItem, setCurrentItem] = useState<RequisitionItem>(emptyRequisitionItem);
     const [editItemIndex, setEditItemIndex] = useState<number | null>(null);
 
@@ -235,7 +245,20 @@ export default function MaterialsPage() {
             
             const reqsList = reqsSnapshot.docs.map(d => {
                 const data = d.data();
-                return { ...data, id: d.id, date: data.date.toDate(), customer: data.customer || undefined, approval: data.approval ? { ...data.approval, approvalDate: data.approval.approvalDate?.toDate() || null, } : {}, items: (data.items || []).map((item: any, index: number) => ({ id: item.id || `${d.id}-${index}`, ...item, deliveryDate: item.deliveryDate?.toDate() || null, })), history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})), } as Requisition;
+                return { 
+                    ...data, 
+                    id: d.id, 
+                    date: data.date.toDate(), 
+                    customer: data.customer || undefined, 
+                    approval: data.approval ? { ...data.approval, approvalDate: data.approval.approvalDate?.toDate() || null, } : {}, 
+                    items: (data.items || []).map((item: any, index: number) => ({ 
+                        id: item.id || `${d.id}-${index}`, 
+                        ...item, 
+                        deliveryDate: item.deliveryDate?.toDate() || null,
+                        deliveryReceiptDate: item.deliveryReceiptDate?.toDate() || null
+                    })), 
+                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})), 
+                } as Requisition;
             });
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
 
@@ -324,7 +347,14 @@ export default function MaterialsPage() {
         try {
             const newHistoryEntry = { timestamp: new Date(), user: user?.email || "Sistema", action: selectedRequisition ? "Edição" : "Criação", details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` };
             const finalHistory = [...(data.history || []), newHistoryEntry];
-            const dataToSave: any = { ...data, history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), date: Timestamp.fromDate(data.date), items: data.items.map(item => ({ ...item, deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, })) };
+            
+            const dataToSave: any = { ...data, history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), date: Timestamp.fromDate(data.date), 
+                items: data.items.map(item => ({ 
+                    ...item, 
+                    deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, 
+                    deliveryReceiptDate: item.deliveryReceiptDate ? Timestamp.fromDate(new Date(item.deliveryReceiptDate)) : null
+                })) 
+            };
             
             if (data.approval) { dataToSave.approval = { ...data.approval, approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null } } 
             else { dataToSave.approval = null; }
@@ -478,7 +508,7 @@ export default function MaterialsPage() {
     const overdueItems = useMemo(() => {
         return requisitions.flatMap(req => 
             req.items
-                .filter(item => item.deliveryDate && isPast(endOfDay(item.deliveryDate)) && item.status !== 'Inspecionado e Aprovado')
+                .filter(item => item.deliveryDate && isPast(endOfDay(item.deliveryDate)) && !["Inspecionado e Aprovado", "Inspecionado e Rejeitado"].includes(item.status))
                 .map(item => ({
                     ...item,
                     fullId: `${req.id}-${item.id}`,
@@ -697,13 +727,11 @@ export default function MaterialsPage() {
                         <DialogDescription>{selectedRequisition ? "Altere os dados da requisição." : "Preencha as informações para solicitar materiais."}</DialogDescription>
                     </DialogHeader>
                     <Form {...requisitionForm}>
-                        <form onSubmit={requisitionForm.handleSubmit(onRequisitionSubmit)} className="flex-grow flex flex-col min-h-0">
+                        <form onSubmit={requisitionForm.handleSubmit(onSubmit)} className="flex-grow flex flex-col min-h-0">
                             <Tabs defaultValue="details" className="flex-grow flex flex-col min-h-0">
                                 <TabsList>
                                     <TabsTrigger value="details">Detalhes da Requisição</TabsTrigger>
                                     <TabsTrigger value="items">Lista de Materiais</TabsTrigger>
-                                    <TabsTrigger value="approval">Aprovação</TabsTrigger>
-                                    <TabsTrigger value="history">Histórico</TabsTrigger>
                                 </TabsList>
                                 <div className="flex-grow mt-4 overflow-hidden">
                                 <ScrollArea className="h-full pr-6">
@@ -739,7 +767,6 @@ export default function MaterialsPage() {
                                                     <div><Label>Peso Unit. (kg)</Label><Input type="number" step="0.01" value={currentItem.pesoUnitario || ''} onChange={e => handleCurrentItemChange('pesoUnitario', e.target.value)} /></div>
                                                     <div className="flex flex-col space-y-2"><Label>Entrega Prevista</Label><Popover><PopoverTrigger asChild><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !currentItem.deliveryDate && "text-muted-foreground")}>{currentItem.deliveryDate ? format(currentItem.deliveryDate, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={currentItem.deliveryDate || undefined} onSelect={date => handleCurrentItemChange('deliveryDate', date)} /></PopoverContent></Popover></div>
                                                 </div>
-                                                {selectedRequisition && ( <div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><Label>Qtd. Atendida</Label><Input type="number" value={currentItem.quantityFulfilled || 0} onChange={e => handleCurrentItemChange('quantityFulfilled', e.target.value)} /></div><div><Label>Status do Item</Label><Select value={currentItem.status} onValueChange={value => handleCurrentItemChange('status', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{itemStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div></div> )}
                                                 <div><Label>Observações</Label><Input placeholder="Ex: Certificado de qualidade" value={currentItem.notes || ''} onChange={e => handleCurrentItemChange('notes', e.target.value)} /></div>
                                             </div>
                                              <div className="flex justify-end gap-2">{editItemIndex !== null && ( <Button type="button" variant="outline" onClick={handleCancelEditItem}>Cancelar Edição</Button> )}<Button type="button" onClick={editItemIndex !== null ? handleUpdateItem : handleAddItem}><PlusCircle className="mr-2 h-4 w-4" />{editItemIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}</Button></div>
@@ -752,20 +779,6 @@ export default function MaterialsPage() {
                                                 </Table></CardContent>
                                         </Card>
                                     )}
-                                </TabsContent>
-                                <TabsContent value="approval" className="space-y-6">
-                                    <Card><CardHeader><CardTitle>Autorização</CardTitle></CardHeader>
-                                        <CardContent className="space-y-4">
-                                             <FormField control={requisitionForm.control} name="approval.approvedBy" render={({ field }) => ( <FormItem><FormLabel>Aprovador</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um aprovador"/></SelectTrigger></FormControl><SelectContent>{team.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                                            <FormField control={requisitionForm.control} name="approval.approvalDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data de Aprovação</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-                                            <FormField control={requisitionForm.control} name="approval.justification" render={({ field }) => ( <FormItem><FormLabel>Justificativa</FormLabel><FormControl><Textarea placeholder="Descreva a justificativa para aprovação ou reprovação." {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem> )} />
-                                        </CardContent>
-                                    </Card>
-                                </TabsContent>
-                                <TabsContent value="history">
-                                    <Card><CardHeader><CardTitle>Histórico de Alterações</CardTitle></CardHeader>
-                                        <CardContent>{(requisitionForm.getValues('history') || []).length > 0 ? ( <ul className="space-y-4">{requisitionForm.getValues('history')?.map((log, index) => ( <li key={index} className="flex gap-4 text-sm"><div className="flex flex-col items-center"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary"><History className="h-4 w-4" /></span>{index < requisitionForm.getValues('history')!.length - 1 && <div className="h-full w-px bg-border" />}</div><div><p className="font-semibold">{log.action} por {log.user}</p><p className="text-muted-foreground">{format(log.timestamp, "dd/MM/yyyy 'às' HH:mm")}</p>{log.details && <p className="text-xs mt-1">{log.details}</p>}</div></li> )).sort((a,b) => b.key! > a.key! ? 1 : -1)}</ul> ) : ( <p className="text-center text-muted-foreground py-4">Nenhum histórico.</p> )}</CardContent>
-                                    </Card>
                                 </TabsContent>
                                 </ScrollArea>
                                 </div>
