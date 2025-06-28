@@ -96,6 +96,7 @@ const dimensionalMeasurementSchema = z.object({
 
 const dimensionalReportSchema = z.object({
   id: z.string().optional(),
+  reportNumber: z.string().optional(),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
   partIdentifier: z.string().optional(),
@@ -381,7 +382,7 @@ export default function QualityPage() {
           orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', overallResult
         } as DimensionalReport;
       });
-      setDimensionalReports(dimReportsList.sort((a, b) => b.inspectionDate.getTime() - a.inspectionDate.getTime()));
+      setDimensionalReports(dimReportsList.sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0)));
 
       const weldInspectionsList = weldingInspectionsSnapshot.docs.map(doc => {
           const data = doc.data();
@@ -430,7 +431,8 @@ export default function QualityPage() {
       return dimensionalReports.filter(
           (rep) =>
               rep.orderNumber.toLowerCase().includes(query) ||
-              rep.itemName.toLowerCase().includes(query)
+              rep.itemName.toLowerCase().includes(query) ||
+              rep.reportNumber?.toLowerCase().includes(query)
       );
   }, [dimensionalReports, inspectionSearchQuery]);
 
@@ -553,6 +555,12 @@ export default function QualityPage() {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório atualizado!" });
        } else {
+        const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "dimensionalReports"));
+        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10));
+        const highestNumber = Math.max(0, ...existingNumbers);
+        const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
+        (dataToSave as any).reportNumber = newReportNumber;
+
          await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), dataToSave);
          toast({ title: "Relatório dimensional criado!" });
        }
@@ -582,7 +590,7 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', quantityInspected: undefined, measurements: [], photos: [], partIdentifier: '', customerInspector: '' }); }
+    else { dimensionalReportForm.reset({ reportNumber: '', inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', quantityInspected: undefined, measurements: [], photos: [], partIdentifier: '', customerInspector: '' }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
@@ -639,7 +647,7 @@ export default function QualityPage() {
         
         if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
         docPdf.setFontSize(16).setFont(undefined, 'bold');
-        docPdf.text('Relatório de Inspeção Dimensional', pageWidth / 2, y + 8, { align: 'center' });
+        docPdf.text(`Relatório Dimensional Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
         y += 25;
 
         docPdf.setFontSize(10).setFont(undefined, 'normal');
@@ -720,30 +728,37 @@ export default function QualityPage() {
             }
             finalY = y > finalY ? y : finalY;
         }
-
-        const signatureY = pageHeight - 35;
-        if (finalY > signatureY - 20) {
-            docPdf.addPage();
-            finalY = 20;
-        } else {
-            finalY = signatureY;
-        }
-
-        docPdf.setFontSize(10).setFont(undefined, 'normal');
         
-        const enterpriseInspectorX = 15;
-        docPdf.line(enterpriseInspectorX, finalY, enterpriseInspectorX + 85, finalY);
-        docPdf.text(report.inspectedBy, enterpriseInspectorX, finalY + 5);
-        docPdf.text('Inspetor Responsável (Empresa)', enterpriseInspectorX, finalY + 10);
+        const footerText = `DIM-MEC-2025-01.REV0`;
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            
+            // Add signatures
+            const signatureY = pageHeight - 35;
+            if (i === pageCount) { // only on last page
+                docPdf.setFontSize(10).setFont(undefined, 'normal');
+                
+                const enterpriseInspectorX = 15;
+                docPdf.line(enterpriseInspectorX, signatureY, enterpriseInspectorX + 85, signatureY);
+                docPdf.text(report.inspectedBy, enterpriseInspectorX, signatureY + 5);
+                docPdf.text('Inspetor Responsável (Empresa)', enterpriseInspectorX, signatureY + 10);
 
-        if (report.customerInspector) {
-            const customerInspectorX = pageWidth - 15 - 85;
-            docPdf.line(customerInspectorX, finalY, customerInspectorX + 85, finalY);
-            docPdf.text(report.customerInspector, customerInspectorX, finalY + 5);
-            docPdf.text('Inspetor Responsável (Cliente)', customerInspectorX, finalY + 10);
+                if (report.customerInspector) {
+                    const customerInspectorX = pageWidth - 15 - 85;
+                    docPdf.line(customerInspectorX, signatureY, customerInspectorX + 85, signatureY);
+                    docPdf.text(report.customerInspector, customerInspectorX, signatureY + 5);
+                    docPdf.text('Inspetor Responsável (Cliente)', customerInspectorX, signatureY + 10);
+                }
+            }
+
+            // Add footer
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(footerText, 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
         }
         
-        docPdf.save(`RelatorioDimensional_${orderInfo?.number || report.id}.pdf`);
+        docPdf.save(`RelatorioDimensional_${report.reportNumber || report.id}.pdf`);
 
     } catch (error) {
         console.error("Error exporting PDF:", error);
@@ -832,7 +847,7 @@ export default function QualityPage() {
                       <div className="relative">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                           <Input
-                              placeholder="Buscar por Nº do Pedido ou Item..."
+                              placeholder="Buscar por Nº do Pedido, Nº do Relatório ou Item..."
                               value={inspectionSearchQuery}
                               onChange={(e) => setInspectionSearchQuery(e.target.value)}
                               className="pl-9 w-full md:w-1/3"
@@ -864,16 +879,18 @@ export default function QualityPage() {
                       <AccordionContent className="pt-2">
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenDimensionalForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                       <TableBody>{filteredDimensionalReports.length > 0 ? filteredDimensionalReports.map(rep => (
-                                          <TableRow key={rep.id}><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
+                                          <TableRow key={rep.id}>
+                                          <TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell>
+                                          <TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(rep.overallResult)}>{rep.overallResult}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
                                               <Button variant="ghost" size="icon" onClick={() => handleDimensionalReportPDF(rep)}><FileDown className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" onClick={() => handleOpenDimensionalForm(rep)}><Pencil className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'dimensional')}><Trash2 className="h-4 w-4" /></Button>
                                           </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório dimensional.</TableCell></TableRow>}
+                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório dimensional.</TableCell></TableRow>}
                                       </TableBody></Table>}
                               </CardContent></Card>
                       </AccordionContent>
@@ -1337,6 +1354,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
