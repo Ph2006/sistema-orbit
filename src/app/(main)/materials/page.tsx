@@ -99,7 +99,7 @@ const cuttingPlanItemSchema = z.object({
 
 const standaloneCuttingPlanSchema = z.object({
   id: z.string().optional(),
-  name: z.string().min(3, "O nome do plano é obrigatório."),
+  planNumber: z.string().optional(),
   createdAt: z.date(),
   orderId: z.string().optional(),
   customer: z.object({
@@ -187,7 +187,7 @@ export default function MaterialsPage() {
 
     const cuttingPlanForm = useForm<CuttingPlan>({
         resolver: zodResolver(standaloneCuttingPlanSchema),
-        defaultValues: { name: "", createdAt: new Date(), stockLength: 6000, kerf: 3, items: [] },
+        defaultValues: { planNumber: "", createdAt: new Date(), stockLength: 6000, kerf: 3, items: [] },
     });
 
     const { fields: reqItems, append: appendReqItem, remove: removeReqItem, update: updateReqItem } = useFieldArray({ control: requisitionForm.control, name: "items" });
@@ -240,7 +240,7 @@ export default function MaterialsPage() {
                 const data = d.data();
                 return { ...data, id: d.id, createdAt: data.createdAt.toDate(), deliveryDate: data.deliveryDate?.toDate() || null } as CuttingPlan;
             });
-            setCuttingPlansList(plansList.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+            setCuttingPlansList(plansList.sort((a, b) => (parseInt(b.planNumber || "0") || 0) - (parseInt(a.planNumber || "0") || 0)));
             
         } catch (error: any) {
             console.error("Error fetching data:", error);
@@ -285,7 +285,7 @@ export default function MaterialsPage() {
         setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() });
         setEditCutIndex(null);
         if (plan) { cuttingPlanForm.reset(plan); } 
-        else { cuttingPlanForm.reset({ name: "", createdAt: new Date(), stockLength: 6000, kerf: 3, items: [] }); }
+        else { cuttingPlanForm.reset({ planNumber: "", createdAt: new Date(), stockLength: 6000, kerf: 3, items: [] }); }
         setIsCuttingPlanFormOpen(true);
     };
 
@@ -343,6 +343,9 @@ export default function MaterialsPage() {
             if (selectedCuttingPlan) {
                 await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), dataToSave);
             } else {
+                const planNumbers = cuttingPlansList.map(p => parseInt(p.planNumber || "0", 10)).filter(n => !isNaN(n));
+                const highestNumber = planNumbers.length > 0 ? Math.max(...planNumbers) : 0;
+                dataToSave.planNumber = (highestNumber + 1).toString().padStart(5, '0');
                 await addDoc(collection(db, "companies", "mecald", "cuttingPlans"), dataToSave);
             }
             toast({ title: selectedCuttingPlan ? "Plano atualizado!" : "Plano de Corte criado!" });
@@ -417,10 +420,7 @@ export default function MaterialsPage() {
 
             if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch (e) { console.error("Error adding logo to PDF:", e); } }
             docPdf.setFontSize(16).setFont(undefined, 'bold');
-            docPdf.text('Plano de Corte', pageWidth / 2, y + 5, { align: 'center' });
-            y += 7;
-            docPdf.setFontSize(10).setFont(undefined, 'normal');
-            docPdf.text(plan.name, pageWidth / 2, y + 5, { align: 'center' });
+            docPdf.text(`Plano de Corte Nº ${plan.planNumber}`, pageWidth / 2, y + 5, { align: 'center' });
             y += 5;
             docPdf.setFontSize(9).setFont(undefined, 'normal');
             const customerName = plan.customer?.name || orderInfo?.customerName || 'N/A';
@@ -442,7 +442,7 @@ export default function MaterialsPage() {
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('Resumo do Plano', 15, y); y += 6;
             autoTable(docPdf, { startY: y, theme: 'plain', styles: { fontSize: 9 }, body: [ ['Total de Barras Necessárias:', plan.summary!.totalBars.toString()], ['Rendimento Total:', `${plan.summary!.totalYieldPercentage.toFixed(2)}%`], ['Sucata Total:', `${plan.summary!.totalScrapPercentage.toFixed(2)}%`], ], });
     
-            docPdf.save(`PlanoCorte_${plan.name.replace(/\s+/g, '_')}.pdf`);
+            docPdf.save(`PlanoCorte_${plan.planNumber}.pdf`);
         } catch (error) {
             console.error("Error exporting cut plan PDF:", error);
             toast({ variant: "destructive", title: "Erro ao exportar", description: "Não foi possível gerar o PDF do plano de corte." });
@@ -451,7 +451,20 @@ export default function MaterialsPage() {
     
     // Filters & Memoized values
     const filteredRequisitions = useMemo(() => requisitions.filter(r => searchQuery === "" || r.requisitionNumber?.toLowerCase().includes(searchQuery.toLowerCase()) || r.requestedBy?.toLowerCase().includes(searchQuery.toLowerCase()) || r.status.toLowerCase().includes(searchQuery.toLowerCase()) || r.items.some(i => i.description.toLowerCase().includes(searchQuery.toLowerCase()))), [requisitions, searchQuery]);
-    const filteredCuttingPlans = useMemo(() => cuttingPlansList.filter(p => searchQuery === "" || p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.materialDescription?.toLowerCase().includes(searchQuery.toLowerCase()) || p.customer?.name?.toLowerCase().includes(searchQuery.toLowerCase())), [cuttingPlansList, searchQuery]);
+    
+    const filteredCuttingPlans = useMemo(() => {
+        return cuttingPlansList.filter(p => {
+            if (searchQuery === "") return true;
+            const query = searchQuery.toLowerCase();
+            const order = orders.find(o => o.id === p.orderId);
+            return (
+                p.planNumber?.toLowerCase().includes(query) ||
+                order?.internalOS?.toLowerCase().includes(query) ||
+                p.materialDescription?.toLowerCase().includes(query) ||
+                p.customer?.name?.toLowerCase().includes(query)
+            );
+        });
+    }, [cuttingPlansList, searchQuery, orders]);
     
     const getStatusVariant = (status: Requisition['status']) => { switch (status) { case "Pendente": return "secondary"; case "Aprovada": return "default"; case "Reprovada": return "destructive"; case "Cancelada": return "destructive"; case "Atendida Parcialmente": return "outline"; case "Atendida Totalmente": return "default"; default: return "outline"; } }
 
@@ -573,23 +586,36 @@ export default function MaterialsPage() {
                             <CardContent>
                                 {isLoading ? <Skeleton className="h-64 w-full" /> : (
                                     <Table>
-                                        <TableHeader><TableRow><TableHead>Nome do Plano</TableHead><TableHead>Material</TableHead><TableHead>Cliente Vinculado</TableHead><TableHead>Data Criação</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Nº do Plano</TableHead>
+                                                <TableHead>OS Interna</TableHead>
+                                                <TableHead>Material</TableHead>
+                                                <TableHead>Cliente Vinculado</TableHead>
+                                                <TableHead>Data Criação</TableHead>
+                                                <TableHead className="text-right">Ações</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
                                         <TableBody>
                                             {filteredCuttingPlans.length > 0 ? (
-                                                filteredCuttingPlans.map(plan => (
-                                                    <TableRow key={plan.id}>
-                                                        <TableCell className="font-medium">{plan.name}</TableCell>
-                                                        <TableCell>{plan.materialDescription}</TableCell>
-                                                        <TableCell>{plan.customer?.name || orders.find(o => o.id === plan.orderId)?.customerName || 'N/A'}</TableCell>
-                                                        <TableCell>{format(plan.createdAt, 'dd/MM/yyyy')}</TableCell>
-                                                        <TableCell className="text-right">
-                                                          <Button variant="ghost" size="icon" onClick={() => handleExportCutPlanPDF(plan)}><FileDown className="h-4 w-4" /></Button>
-                                                          <Button variant="ghost" size="icon" onClick={() => handleOpenCuttingPlanForm(plan)}><Pencil className="h-4 w-4" /></Button>
-                                                          <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteCuttingPlan(plan)}><Trash2 className="h-4 w-4" /></Button>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))
-                                            ) : ( <TableRow><TableCell colSpan={5} className="h-24 text-center">Nenhum plano de corte encontrado.</TableCell></TableRow> )}
+                                                filteredCuttingPlans.map(plan => {
+                                                    const orderInfo = orders.find(o => o.id === plan.orderId);
+                                                    return (
+                                                        <TableRow key={plan.id}>
+                                                            <TableCell className="font-medium">{plan.planNumber}</TableCell>
+                                                            <TableCell>{orderInfo?.internalOS || 'N/A'}</TableCell>
+                                                            <TableCell>{plan.materialDescription}</TableCell>
+                                                            <TableCell>{plan.customer?.name || orderInfo?.customerName || 'N/A'}</TableCell>
+                                                            <TableCell>{format(plan.createdAt, 'dd/MM/yyyy')}</TableCell>
+                                                            <TableCell className="text-right">
+                                                              <Button variant="ghost" size="icon" onClick={() => handleExportCutPlanPDF(plan)}><FileDown className="h-4 w-4" /></Button>
+                                                              <Button variant="ghost" size="icon" onClick={() => handleOpenCuttingPlanForm(plan)}><Pencil className="h-4 w-4" /></Button>
+                                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteCuttingPlan(plan)}><Trash2 className="h-4 w-4" /></Button>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    )
+                                                })
+                                            ) : ( <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum plano de corte encontrado.</TableCell></TableRow> )}
                                         </TableBody>
                                     </Table>
                                 )}
@@ -691,7 +717,7 @@ export default function MaterialsPage() {
             <Dialog open={isCuttingPlanFormOpen} onOpenChange={setIsCuttingPlanFormOpen}>
                 <DialogContent className="max-w-5xl h-[95vh] flex flex-col">
                     <DialogHeader>
-                        <DialogTitle>{selectedCuttingPlan ? `Editar Plano de Corte: ${selectedCuttingPlan.name}` : "Novo Plano de Corte"}</DialogTitle>
+                        <DialogTitle>{selectedCuttingPlan ? `Editar Plano de Corte Nº ${selectedCuttingPlan.planNumber}` : "Novo Plano de Corte"}</DialogTitle>
                         <DialogDescription>{selectedCuttingPlan ? "Altere os dados do plano." : "Crie um novo plano de otimização de corte."}</DialogDescription>
                     </DialogHeader>
                      <Form {...cuttingPlanForm}>
@@ -701,7 +727,6 @@ export default function MaterialsPage() {
                                     <Card>
                                         <CardHeader><CardTitle>Informações Gerais</CardTitle></CardHeader>
                                         <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            <FormField control={cuttingPlanForm.control} name="name" render={({ field }) => ( <FormItem><FormLabel>Nome do Plano</FormLabel><FormControl><Input placeholder="Ex: Corte de Vigas" {...field} /></FormControl><FormMessage /></FormItem> )}/>
                                             <FormField control={cuttingPlanForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>OS Vinculada (Opcional)</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS"/></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
                                             <FormItem><FormLabel>Cliente Vinculado</FormLabel><Input value={cuttingPlanForm.watch('customer.name') || 'Selecione uma OS'} disabled /></FormItem>
                                         </CardContent>
