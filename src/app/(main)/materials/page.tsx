@@ -236,33 +236,25 @@ export default function MaterialsPage() {
                 }
             }
             
-            const reqsList: Requisition[] = reqsSnapshot.docs.map(d => {
+            const reqsListPromises = reqsSnapshot.docs.map(async (d) => {
                 const data = d.data();
-                
-                const cuttingPlansData = (data.cuttingPlans || []).map((plan: any, index: number) => ({
-                    ...plan,
-                    id: plan.id || `${d.id}-plan-${index}`,
-                    name: plan.name || `Plano de Corte ${index + 1}`,
-                    createdAt: plan.createdAt?.toDate() || new Date(),
-                    deliveryDate: plan.deliveryDate?.toDate() || null,
-                    items: plan.items || [],
-                    patterns: plan.patterns || [],
-                    summary: plan.summary || null,
-                }));
+                const reqId = d.id;
 
-                // Old data migration
-                if (data.cuttingPlan && cuttingPlansData.length === 0) {
-                    const migratedPlan = {
-                        ...data.cuttingPlan,
-                        id: `${d.id}-plan-migrated`,
-                        name: 'Plano de Corte (Migrado)',
-                        createdAt: data.date.toDate() || new Date(),
-                        deliveryDate: data.cuttingPlan.deliveryDate?.toDate() || null,
+                const cuttingPlansSnap = await getDocs(collection(db, "companies", "mecald", "materialRequisitions", reqId, "cuttingPlans"));
+                const cuttingPlansData = cuttingPlansSnap.docs.map(planDoc => {
+                    const planData = planDoc.data();
+                    return {
+                        ...planData,
+                        id: planDoc.id,
+                        createdAt: planData.createdAt?.toDate() || new Date(),
+                        deliveryDate: planData.deliveryDate?.toDate() || null,
+                        items: planData.items || [],
+                        patterns: planData.patterns || [],
+                        summary: planData.summary || null,
+                        name: planData.name || `Plano de Corte`,
                     };
-                    delete migratedPlan.cuttingPlan;
-                    cuttingPlansData.push(migratedPlan);
-                }
-
+                });
+                
                 return {
                     ...data,
                     id: d.id,
@@ -290,6 +282,8 @@ export default function MaterialsPage() {
                     cuttingPlans: cuttingPlansData,
                 } as Requisition
             });
+
+            const reqsList = await Promise.all(reqsListPromises);
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
             
         } catch (error: any) {
@@ -378,19 +372,31 @@ export default function MaterialsPage() {
 
     const confirmDelete = async () => {
         if (!requisitionToDelete?.id) return;
+        const reqId = requisitionToDelete.id;
         try {
-            await deleteDoc(doc(db, "companies", "mecald", "materialRequisitions", requisitionToDelete.id));
-            toast({ title: "Requisição excluída!", description: "A requisição foi removida com sucesso." });
+            const plansCollectionRef = collection(db, "companies", "mecald", "materialRequisitions", reqId, "cuttingPlans");
+            const plansSnapshot = await getDocs(plansCollectionRef);
+            const batch = writeBatch(db);
+            plansSnapshot.docs.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+
+            await deleteDoc(doc(db, "companies", "mecald", "materialRequisitions", reqId));
+
+            toast({ title: "Requisição excluída!", description: "A requisição e seus planos de corte foram removidos." });
             await fetchData();
         } catch (error) {
             toast({ variant: "destructive", title: "Erro ao excluir", description: "Não foi possível remover a requisição." });
         } finally {
             setIsDeleting(false);
+            setRequisitionToDelete(null);
         }
     };
 
     const onSubmit = async (data: Requisition) => {
-        const values = form.getValues();
+        const formValues = form.getValues();
+        const { cuttingPlans, ...requisitionCoreData } = formValues;
 
         try {
             const newHistoryEntry = {
@@ -399,22 +405,21 @@ export default function MaterialsPage() {
                 action: selectedRequisition ? "Edição" : "Criação",
                 details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
             };
+            const finalHistory = [...(requisitionCoreData.history || []), newHistoryEntry];
     
-            const finalHistory = [...(values.history || []), newHistoryEntry];
-    
-            const dataToSave: any = {
-                date: Timestamp.fromDate(values.date),
-                status: values.status,
-                requestedBy: values.requestedBy,
-                department: values.department || null,
-                orderId: values.orderId || null,
-                customer: values.customer || null,
-                generalNotes: values.generalNotes || null,
+            const mainDataToSave: any = {
+                date: Timestamp.fromDate(requisitionCoreData.date),
+                status: requisitionCoreData.status,
+                requestedBy: requisitionCoreData.requestedBy,
+                department: requisitionCoreData.department || null,
+                orderId: requisitionCoreData.orderId || null,
+                customer: requisitionCoreData.customer || null,
+                generalNotes: requisitionCoreData.generalNotes || null,
                 history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
-                requisitionNumber: values.requisitionNumber || null,
+                requisitionNumber: requisitionCoreData.requisitionNumber || null,
             };
             
-            dataToSave.items = values.items.map(item => ({
+            mainDataToSave.items = (requisitionCoreData.items || []).map(item => ({
                 id: item.id || Date.now().toString(),
                 code: item.code || '',
                 material: item.material || '',
@@ -429,52 +434,69 @@ export default function MaterialsPage() {
                 status: item.status || 'Pendente',
             }));
 
-            if (values.approval) {
-              dataToSave.approval = {
-                  approvedBy: values.approval.approvedBy || null,
-                  approvalDate: values.approval.approvalDate ? Timestamp.fromDate(new Date(values.approval.approvalDate)) : null,
-                  justification: values.approval.justification || null,
+            if (requisitionCoreData.approval) {
+              mainDataToSave.approval = {
+                  approvedBy: requisitionCoreData.approval.approvedBy || null,
+                  approvalDate: requisitionCoreData.approval.approvalDate ? Timestamp.fromDate(new Date(requisitionCoreData.approval.approvalDate)) : null,
+                  justification: requisitionCoreData.approval.justification || null,
               }
             } else {
-              dataToSave.approval = null;
+              mainDataToSave.approval = null;
             }
 
-            if (values.cuttingPlans && values.cuttingPlans.length > 0) {
-                dataToSave.cuttingPlans = values.cuttingPlans.map(plan => ({
-                    id: plan.id,
-                    name: plan.name,
+            let requisitionId: string;
+            let isNewRequisition = !selectedRequisition?.id;
+
+            if (isNewRequisition) {
+                const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
+                const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
+                const newRequisitionData = { ...mainDataToSave, requisitionNumber: (highestNumber + 1).toString().padStart(5, '0') };
+                const newDocRef = await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), newRequisitionData);
+                requisitionId = newDocRef.id;
+            } else {
+                requisitionId = selectedRequisition!.id;
+                await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", requisitionId), mainDataToSave);
+            }
+
+            // Handle cutting plans subcollection
+            const batch = writeBatch(db);
+            const plansSubcollectionRef = collection(db, "companies", "mecald", "materialRequisitions", requisitionId, "cuttingPlans");
+
+            if (!isNewRequisition) {
+                const existingPlansSnapshot = await getDocs(plansSubcollectionRef);
+                const existingPlanIds = new Set(existingPlansSnapshot.docs.map(doc => doc.id));
+                const currentPlanIds = new Set((cuttingPlans || []).map(p => p.id));
+                
+                existingPlanIds.forEach(id => {
+                    if (!currentPlanIds.has(id)) {
+                        batch.delete(doc(plansSubcollectionRef, id));
+                    }
+                });
+            }
+            
+            (cuttingPlans || []).forEach(plan => {
+                const { id: planId, ...planData } = plan;
+                const planDocRef = doc(plansSubcollectionRef, planId);
+                const planDataForFirestore = {
+                    ...planData,
                     createdAt: plan.createdAt ? Timestamp.fromDate(new Date(plan.createdAt)) : Timestamp.now(),
-                    materialDescription: plan.materialDescription || '',
+                    deliveryDate: plan.deliveryDate ? Timestamp.fromDate(new Date(plan.deliveryDate)) : null,
                     stockLength: Number(plan.stockLength) || 0,
                     kerf: Number(plan.kerf) || 0,
                     leftoverThreshold: Number(plan.leftoverThreshold) || 0,
-                    deliveryDate: plan.deliveryDate ? Timestamp.fromDate(new Date(plan.deliveryDate)) : null,
                     items: (plan.items || []).map(item => ({
                         code: item.code || '',
                         description: item.description,
                         length: Number(item.length) || 0,
                         quantity: Number(item.quantity) || 0,
                     })),
-                    patterns: plan.patterns || [],
-                    summary: plan.summary || null,
-                }));
-            } else {
-                dataToSave.cuttingPlans = [];
-            }
+                };
+                batch.set(planDocRef, planDataForFirestore, { merge: true });
+            });
 
-            if (selectedRequisition?.id) {
-                await setDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave, { merge: true });
-                toast({ title: "Requisição atualizada!", description: "As alterações foram salvas com sucesso." });
-            } else {
-                const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
-                const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
-                
-                const newData = { ...dataToSave, requisitionNumber: (highestNumber + 1).toString().padStart(5, '0') };
-                
-                await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), newData);
-                toast({ title: "Requisição criada!", description: "A nova requisição foi salva." });
-            }
+            await batch.commit();
 
+            toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
             setIsFormOpen(false);
             await fetchData();
         } catch (error) {
