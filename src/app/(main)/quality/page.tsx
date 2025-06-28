@@ -149,6 +149,10 @@ type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string,
 type WeldingInspection = z.infer<typeof weldingInspectionSchema> & { id: string, orderNumber: string, itemName: string };
 type PaintingReport = z.infer<typeof paintingReportSchema> & { id: string, orderNumber: string, itemName: string };
 type TeamMember = { id: string; name: string };
+type CompanyData = {
+    nomeFantasia?: string;
+    logo?: { preview?: string };
+};
 
 
 // --- HELPER FUNCTIONS ---
@@ -264,7 +268,7 @@ export default function QualityPage() {
       measurements: []
     },
   });
-  const { fields: measurementFields, append: appendMeasurement, remove: removeMeasurement } = useFieldArray({
+  const { fields: measurementFields, append: appendMeasurement, remove: removeMeasurement, update: updateMeasurement } = useFieldArray({
       control: dimensionalReportForm.control,
       name: "measurements"
   });
@@ -588,6 +592,12 @@ export default function QualityPage() {
         docPdf.text(`Data: ${format(report.inspectionDate, 'dd/MM/yyyy')}`, pageWidth - 15, y, { align: 'right' });
         docPdf.text(`Inspetor: ${report.inspectedBy}`, pageWidth - 15, y + 5, { align: 'right' });
         docPdf.text(`Resultado Geral: ${report.overallResult}`, pageWidth - 15, y + 10, { align: 'right' });
+        
+        if (report.photosUrl) {
+            docPdf.setTextColor(60, 120, 255); // Blue link color
+            docPdf.textWithLink('Link para Fotos do Processo', 15, y + 20, { url: report.photosUrl });
+            docPdf.setTextColor(0, 0, 0); // Reset color
+        }
         y += 25;
 
         const body = report.measurements.map(m => {
@@ -813,7 +823,7 @@ export default function QualityPage() {
       <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <Dialog open={isInspectionFormOpen} onOpenChange={setIsInspectionFormOpen}>
-        <DialogContent className="sm:max-w-3xl h-[90vh] flex flex-col">
+        <DialogContent className="max-w-3xl h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
                 {dialogType === 'material' && (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material')}
@@ -832,7 +842,7 @@ export default function QualityPage() {
                                 <MaterialInspectionForm form={materialInspectionForm} orders={orders} teamMembers={teamMembers} />
                             )}
                             {dialogType === 'dimensional' && (
-                                <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement }} calibrations={calibrations} toast={toast} />
+                                <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement, update: updateMeasurement }} calibrations={calibrations} toast={toast} />
                             )}
                              {dialogType === 'welding' && (
                                  <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} />
@@ -883,6 +893,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
     
     const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
+    const [editMeasurementIndex, setEditMeasurementIndex] = useState<number | null>(null);
 
     const handleAddMeasurement = () => {
         const nominal = parseFloat(newMeasurement.nominalValue);
@@ -919,6 +930,64 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         });
         setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
     };
+    
+    const handleEditMeasurement = (index: number) => {
+        const measurementToEdit = fieldArrayProps.fields[index];
+        setNewMeasurement({
+            dimensionName: measurementToEdit.dimensionName,
+            nominalValue: measurementToEdit.nominalValue.toString(),
+            toleranceMin: measurementToEdit.toleranceMin?.toString() ?? '',
+            toleranceMax: measurementToEdit.toleranceMax?.toString() ?? '',
+            measuredValue: measurementToEdit.measuredValue.toString(),
+            instrumentUsed: measurementToEdit.instrumentUsed,
+        });
+        setEditMeasurementIndex(index);
+    };
+
+    const handleUpdateMeasurement = () => {
+        if (editMeasurementIndex === null) return;
+        
+        const nominal = parseFloat(newMeasurement.nominalValue);
+        const measured = parseFloat(newMeasurement.measuredValue);
+        const tolMin = newMeasurement.toleranceMin !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMin)) : null;
+        const tolMax = newMeasurement.toleranceMax !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMax)) : null;
+
+        if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
+            toast({
+                variant: "destructive",
+                title: "Campos obrigatórios",
+                description: "Por favor, preencha o Nome da Dimensão, Valor Nominal, Valor Medido e selecione um Instrumento.",
+            });
+            return;
+        }
+
+        let result: "Conforme" | "Não Conforme" = "Conforme";
+        const lowerBound = tolMin !== null ? nominal - tolMin : nominal;
+        const upperBound = tolMax !== null ? nominal + tolMax : nominal;
+        
+        if (measured < lowerBound || measured > upperBound) {
+            result = "Não Conforme";
+        }
+        
+        fieldArrayProps.update(editMeasurementIndex, {
+            ...fieldArrayProps.fields[editMeasurementIndex],
+            dimensionName: newMeasurement.dimensionName,
+            nominalValue: nominal,
+            toleranceMin: tolMin ?? undefined,
+            toleranceMax: tolMax ?? undefined,
+            measuredValue: measured,
+            instrumentUsed: newMeasurement.instrumentUsed,
+            result: result,
+        });
+
+        setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
+        setEditMeasurementIndex(null);
+    };
+    
+    const handleCancelEdit = () => {
+        setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
+        setEditMeasurementIndex(null);
+    };
 
     return (<>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -942,12 +1011,15 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                     <TableCell>{field.toleranceMin ?? '-'}</TableCell><TableCell>{field.toleranceMax ?? '-'}</TableCell>
                     <TableCell>{field.measuredValue}</TableCell><TableCell>{field.instrumentUsed}</TableCell>
                     <TableCell><Badge variant={getStatusVariant(field.result)}>{field.result}</Badge></TableCell>
-                    <TableCell><Button type="button" variant="ghost" size="icon" onClick={() => fieldArrayProps.remove(index)}><Trash2 className="h-4 w-4 text-destructive"/></Button></TableCell>
+                    <TableCell className="flex items-center">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => handleEditMeasurement(index)}><Pencil className="h-4 w-4" /></Button>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => fieldArrayProps.remove(index)}><Trash2 className="h-4 w-4 text-destructive"/></Button>
+                    </TableCell>
                 </TableRow>))}
             </TableBody></Table>
             )}
             <div className="mt-4 space-y-4 p-4 border rounded-md">
-                <h4 className="font-medium">Adicionar Nova Medição</h4>
+                <h4 className="font-medium">{editMeasurementIndex !== null ? 'Editar Medição' : 'Adicionar Nova Medição'}</h4>
                 <div>
                     <Label>Nome da Dimensão</Label>
                     <Input value={newMeasurement.dimensionName} onChange={(e) => setNewMeasurement({...newMeasurement, dimensionName: e.target.value})} placeholder="Ex: Diâmetro externo"/>
@@ -983,7 +1055,13 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                         </SelectContent>
                     </Select>
                 </div>
-                 <div className="flex justify-end mt-4"><Button type="button" size="sm" onClick={handleAddMeasurement}><PlusCircle className="mr-2 h-4 w-4" />Adicionar Medição</Button></div>
+                 <div className="flex justify-end mt-4 gap-2">
+                    {editMeasurementIndex !== null && <Button type="button" variant="outline" size="sm" onClick={handleCancelEdit}>Cancelar</Button>}
+                    <Button type="button" size="sm" onClick={editMeasurementIndex !== null ? handleUpdateMeasurement : handleAddMeasurement}>
+                        <PlusCircle className="mr-2 h-4 w-4" />
+                        {editMeasurementIndex !== null ? 'Atualizar Medição' : 'Adicionar Medição'}
+                    </Button>
+                </div>
             </div>
            
         </CardContent></Card>
@@ -1044,6 +1122,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
