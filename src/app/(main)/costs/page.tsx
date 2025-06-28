@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -28,6 +28,10 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
 
 const inspectionStatuses = ["Pendente", "Aprovado", "Aprovado com ressalvas", "Rejeitado"] as const;
 
@@ -58,15 +62,63 @@ const requisitionItemSchema = z.object({
 });
 
 const supplierSchema = z.object({
-    id: z.string().optional(),
-    nomeFantasia: z.string().min(3, { message: "O nome fantasia é obrigatório." }),
-    razaoSocial: z.string().min(3, { message: "A razão social é obrigatória." }),
-    cnpjCpf: z.string().min(11, { message: "O CNPJ/CPF deve ser válido." }),
-    contatoPrincipal: z.string().min(3, { message: "O nome do contato é obrigatório." }),
-    telefone: z.string().min(10, { message: "O telefone deve ser válido." }),
-    email: z.string().email({ message: "O e-mail é inválido." }),
-    endereco: z.string().optional(),
+  id: z.string().optional(),
+  supplierCode: z.string().optional(),
+  
+  // 1. Dados Gerais
+  razaoSocial: z.string().min(3, "Razão social é obrigatória."),
+  nomeFantasia: z.string().min(3, "Nome fantasia é obrigatório."),
+  cnpj: z.string().min(14, "CNPJ inválido.").max(18, "CNPJ inválido."),
+  inscricaoEstadual: z.string().optional(),
+  inscricaoMunicipal: z.string().optional(),
+  segment: z.string().optional(),
+  category: z.string().optional(),
+  status: z.enum(["ativo", "inativo"]).default("ativo"),
+
+  // 2. Contato e Endereço
+  telefone: z.string().min(10, "Telefone inválido."),
+  primaryEmail: z.string().email("E-mail inválido."),
+  salesContactName: z.string().min(3, "Contato comercial obrigatório."),
+  address: z.object({
+    zipCode: z.string().optional(),
+    street: z.string().optional(),
+    number: z.string().optional(),
+    complement: z.string().optional(),
+    neighborhood: z.string().optional(),
+    cityState: z.string().optional(),
+  }).optional(),
+
+  // 3. Dados Bancários
+  bankInfo: z.object({
+    bank: z.string().optional(),
+    agency: z.string().optional(),
+    accountNumber: z.string().optional(),
+    accountType: z.enum(["Pessoa Jurídica", "Pessoa Física"]).optional(),
+    pix: z.string().optional(),
+  }).optional(),
+
+  // 4. Informações Comerciais
+  commercialInfo: z.object({
+    paymentTerms: z.string().optional(),
+    avgLeadTimeDays: z.coerce.number().optional(),
+    shippingMethods: z.string().optional(),
+    shippingIncluded: z.boolean().default(false),
+  }).optional(),
+
+  // 5. Documentações - will store URLs
+  documentation: z.object({
+    contratoSocialUrl: z.string().url().optional().or(z.literal('')),
+    cartaoCnpjUrl: z.string().url().optional().or(z.literal('')),
+    certidoesNegativasUrl: z.string().url().optional().or(z.literal('')),
+    isoCertificateUrl: z.string().url().optional().or(z.literal('')),
+    alvaraUrl: z.string().url().optional().or(z.literal('')),
+  }).optional(),
+
+  // 6. Histórico
+  firstRegistrationDate: z.date().optional(),
+  lastUpdate: z.date().optional(),
 });
+
 
 type Supplier = z.infer<typeof supplierSchema>;
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
@@ -102,6 +154,13 @@ export default function CostsPage() {
 
     const supplierForm = useForm<Supplier>({
         resolver: zodResolver(supplierSchema),
+        defaultValues: {
+            status: 'ativo',
+            address: {},
+            bankInfo: {},
+            commercialInfo: {},
+            documentation: {},
+        }
     });
 
     const fetchRequisitions = useCallback(async () => {
@@ -146,7 +205,12 @@ export default function CostsPage() {
         setIsLoadingSuppliers(true);
         try {
             const suppliersSnapshot = await getDocs(collection(db, "companies", "mecald", "suppliers"));
-            const suppliersList: Supplier[] = suppliersSnapshot.docs.map(d => ({ ...d.data(), id: d.id }) as Supplier);
+            const suppliersList: Supplier[] = suppliersSnapshot.docs.map(d => ({ 
+              ...d.data(), 
+              id: d.id,
+              firstRegistrationDate: d.data().firstRegistrationDate?.toDate(),
+              lastUpdate: d.data().lastUpdate?.toDate(),
+            }) as Supplier);
             setSuppliers(suppliersList);
         } catch (error) {
             console.error("Error fetching suppliers:", error);
@@ -225,12 +289,23 @@ export default function CostsPage() {
     
     const onSupplierSubmit = async (values: Supplier) => {
         try {
-            if (selectedSupplier) {
-                const { id, ...dataToSave } = values;
-                await updateDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id!), dataToSave);
+            const dataToSave = {
+                ...values,
+                lastUpdate: Timestamp.now(),
+            };
+
+            if (selectedSupplier?.id) {
+                const { id, ...updateData } = dataToSave;
+                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), updateData, { merge: true });
                 toast({ title: "Fornecedor atualizado com sucesso!" });
             } else {
-                await addDoc(collection(db, "companies", "mecald", "suppliers"), values);
+                const highestCode = suppliers.reduce((max, s) => {
+                    const codeNum = parseInt(s.supplierCode || "0");
+                    return codeNum > max ? codeNum : max;
+                }, 0);
+                dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
+                dataToSave.firstRegistrationDate = Timestamp.now();
+                await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
                 toast({ title: "Fornecedor adicionado com sucesso!" });
             }
             setIsSupplierFormOpen(false);
@@ -243,7 +318,7 @@ export default function CostsPage() {
 
     const handleAddSupplierClick = () => {
         setSelectedSupplier(null);
-        supplierForm.reset();
+        supplierForm.reset({ status: 'ativo', address: {}, bankInfo: {}, commercialInfo: {}, documentation: {} });
         setIsSupplierFormOpen(true);
     };
 
@@ -278,6 +353,8 @@ export default function CostsPage() {
         if (lowerStatus.includes("aprovado")) return "default";
         if (lowerStatus.includes("rejeitado")) return "destructive";
         if (lowerStatus.includes("recebido")) return "secondary";
+        if (lowerStatus.includes("ativo")) return "default";
+        if (lowerStatus.includes("inativo")) return "destructive";
         return "outline";
     };
 
@@ -377,10 +454,11 @@ export default function CostsPage() {
                              <Table>
                                 <TableHeader>
                                     <TableRow>
+                                        <TableHead>Código</TableHead>
                                         <TableHead>Nome Fantasia</TableHead>
-                                        <TableHead>CNPJ/CPF</TableHead>
-                                        <TableHead>Contato Principal</TableHead>
-                                        <TableHead>Telefone</TableHead>
+                                        <TableHead>CNPJ</TableHead>
+                                        <TableHead>Segmento</TableHead>
+                                        <TableHead>Status</TableHead>
                                         <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -388,10 +466,11 @@ export default function CostsPage() {
                                     {suppliers.length > 0 ? (
                                         suppliers.map((supplier) => (
                                             <TableRow key={supplier.id}>
+                                                <TableCell className="font-mono">{supplier.supplierCode}</TableCell>
                                                 <TableCell className="font-medium">{supplier.nomeFantasia}</TableCell>
-                                                <TableCell>{supplier.cnpjCpf}</TableCell>
-                                                <TableCell>{supplier.contatoPrincipal}</TableCell>
-                                                <TableCell>{supplier.telefone}</TableCell>
+                                                <TableCell>{supplier.cnpj}</TableCell>
+                                                <TableCell>{supplier.segment || '-'}</TableCell>
+                                                <TableCell><Badge variant={getStatusVariant(supplier.status)}>{supplier.status}</Badge></TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex items-center justify-end gap-2">
                                                         <Button variant="ghost" size="icon" onClick={() => handleEditSupplierClick(supplier)}>
@@ -406,7 +485,7 @@ export default function CostsPage() {
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={5} className="h-24 text-center">Nenhum fornecedor cadastrado.</TableCell>
+                                            <TableCell colSpan={6} className="h-24 text-center">Nenhum fornecedor cadastrado.</TableCell>
                                         </TableRow>
                                     )}
                                 </TableBody>
@@ -493,23 +572,96 @@ export default function CostsPage() {
       </Dialog>
       
       <Dialog open={isSupplierFormOpen} onOpenChange={setIsSupplierFormOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-4xl h-[90vh]">
             <DialogHeader>
-              <DialogTitle>{selectedSupplier ? "Editar Fornecedor" : "Adicionar Fornecedor"}</DialogTitle>
-              <DialogDescription>Preencha os dados do fornecedor.</DialogDescription>
+              <DialogTitle>{selectedSupplier ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia}` : "Adicionar Novo Fornecedor"}</DialogTitle>
+              <DialogDescription>Preencha os dados completos do fornecedor.</DialogDescription>
             </DialogHeader>
             <Form {...supplierForm}>
-                <form onSubmit={supplierForm.handleSubmit(onSupplierSubmit)} className="space-y-4 pt-4">
-                    <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                    <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                    <FormField control={supplierForm.control} name="cnpjCpf" render={({ field }) => (<FormItem><FormLabel>CNPJ/CPF</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                    <FormField control={supplierForm.control} name="contatoPrincipal" render={({ field }) => (<FormItem><FormLabel>Contato Principal</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                    <FormField control={supplierForm.control} name="telefone" render={({ field }) => (<FormItem><FormLabel>Telefone</FormLabel><FormControl><Input placeholder="(XX) XXXXX-XXXX" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                    <FormField control={supplierForm.control} name="email" render={({ field }) => (<FormItem><FormLabel>E-mail</FormLabel><FormControl><Input type="email" placeholder="contato@fornecedor.com" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                    <FormField control={supplierForm.control} name="endereco" render={({ field }) => (<FormItem><FormLabel>Endereço</FormLabel><FormControl><Textarea placeholder="Endereço completo (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                    <DialogFooter>
+                <form onSubmit={supplierForm.handleSubmit(onSupplierSubmit)} className="flex flex-col h-full">
+                  <Tabs defaultValue="general" className="flex-grow flex flex-col">
+                    <TabsList>
+                      <TabsTrigger value="general">Gerais</TabsTrigger>
+                      <TabsTrigger value="contact">Contato e Endereço</TabsTrigger>
+                      <TabsTrigger value="commercial">Comercial e Bancário</TabsTrigger>
+                      <TabsTrigger value="docs">Documentos</TabsTrigger>
+                    </TabsList>
+                    <ScrollArea className="flex-grow mt-4 pr-6">
+                      <TabsContent value="general" className="space-y-4">
+                        <FormField control={supplierForm.control} name="status" render={({ field }) => (<FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="ativo">Ativo</SelectItem><SelectItem value="inativo">Inativo</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="cnpj" render={({ field }) => (<FormItem><FormLabel>CNPJ</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <FormField control={supplierForm.control} name="inscricaoEstadual" render={({ field }) => (<FormItem><FormLabel>Inscrição Estadual</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="inscricaoMunicipal" render={({ field }) => (<FormItem><FormLabel>Inscrição Municipal</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        </div>
+                         <div className="grid md:grid-cols-2 gap-4">
+                          <FormField control={supplierForm.control} name="segment" render={({ field }) => (<FormItem><FormLabel>Segmento</FormLabel><FormControl><Input placeholder="Ex: Metalúrgico, Pintura" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="category" render={({ field }) => (<FormItem><FormLabel>Categoria</FormLabel><FormControl><Input placeholder="Ex: Matéria-prima, Serviço" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        </div>
+                         {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>Código: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {selectedSupplier.firstRegistrationDate ? format(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p><p>Última atualização: {selectedSupplier.lastUpdate ? format(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p></div>)}
+                      </TabsContent>
+                      <TabsContent value="contact" className="space-y-4">
+                        <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do Responsável Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <FormField control={supplierForm.control} name="telefone" render={({ field }) => (<FormItem><FormLabel>Telefone</FormLabel><FormControl><Input placeholder="(XX) XXXXX-XXXX" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="primaryEmail" render={({ field }) => (<FormItem><FormLabel>E-mail Principal</FormLabel><FormControl><Input type="email" placeholder="contato@fornecedor.com" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        </div>
+                        <FormField control={supplierForm.control} name="address.street" render={({ field }) => (<FormItem><FormLabel>Logradouro</FormLabel><FormControl><Input placeholder="Rua, Avenida..." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <div className="grid md:grid-cols-3 gap-4">
+                          <FormField control={supplierForm.control} name="address.number" render={({ field }) => (<FormItem><FormLabel>Número</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="address.complement" render={({ field }) => (<FormItem><FormLabel>Complemento</FormLabel><FormControl><Input placeholder="Apto, Bloco, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                           <FormField control={supplierForm.control} name="address.zipCode" render={({ field }) => (<FormItem><FormLabel>CEP</FormLabel><FormControl><Input placeholder="00000-000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        </div>
+                        <div className="grid md:grid-cols-2 gap-4">
+                          <FormField control={supplierForm.control} name="address.neighborhood" render={({ field }) => (<FormItem><FormLabel>Bairro</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="address.cityState" render={({ field }) => (<FormItem><FormLabel>Cidade / Estado</FormLabel><FormControl><Input placeholder="Ex: São Paulo / SP" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        </div>
+                      </TabsContent>
+                      <TabsContent value="commercial" className="space-y-4">
+                        <Card><CardHeader><CardTitle className="text-lg">Informações Comerciais</CardTitle></CardHeader>
+                            <CardContent className="space-y-4">
+                                <FormField control={supplierForm.control} name="commercialInfo.paymentTerms" render={({ field }) => (<FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input placeholder="Ex: 28 DDL" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                <FormField control={supplierForm.control} name="commercialInfo.avgLeadTimeDays" render={({ field }) => (<FormItem><FormLabel>Prazo Médio de Entrega (dias)</FormLabel><FormControl><Input type="number" placeholder="Ex: 15" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                <FormField control={supplierForm.control} name="commercialInfo.shippingMethods" render={({ field }) => (<FormItem><FormLabel>Formas de Envio</FormLabel><FormControl><Input placeholder="Ex: Transportadora, Retirada" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                <FormField control={supplierForm.control} name="commercialInfo.shippingIncluded" render={({ field }) => (
+                                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                                        <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                                        <div className="space-y-1 leading-none"><FormLabel>Frete incluso no preço?</FormLabel></div>
+                                    </FormItem>
+                                )}/>
+                            </CardContent>
+                        </Card>
+                        <Card><CardHeader><CardTitle className="text-lg">Dados Bancários</CardTitle></CardHeader>
+                            <CardContent className="space-y-4">
+                                <FormField control={supplierForm.control} name="bankInfo.bank" render={({ field }) => (<FormItem><FormLabel>Banco</FormLabel><FormControl><Input placeholder="Nome do banco" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    <FormField control={supplierForm.control} name="bankInfo.agency" render={({ field }) => (<FormItem><FormLabel>Agência</FormLabel><FormControl><Input placeholder="0000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                    <FormField control={supplierForm.control} name="bankInfo.accountNumber" render={({ field }) => (<FormItem><FormLabel>Conta Corrente</FormLabel><FormControl><Input placeholder="00000-0" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                </div>
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    <FormField control={supplierForm.control} name="bankInfo.accountType" render={({ field }) => (<FormItem><FormLabel>Tipo de Conta</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione..."/></SelectTrigger></FormControl><SelectContent><SelectItem value="Pessoa Jurídica">Pessoa Jurídica</SelectItem><SelectItem value="Pessoa Física">Pessoa Física</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
+                                    <FormField control={supplierForm.control} name="bankInfo.pix" render={({ field }) => (<FormItem><FormLabel>Chave PIX</FormLabel><FormControl><Input placeholder="CNPJ, e-mail, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                </div>
+                            </CardContent>
+                        </Card>
+                      </TabsContent>
+                      <TabsContent value="docs" className="space-y-4">
+                        <FormDescription>Anexe os documentos do fornecedor. Salve os arquivos em um serviço de nuvem (como Google Drive) e cole o link compartilhável aqui.</FormDescription>
+                        <FormField control={supplierForm.control} name="documentation.contratoSocialUrl" render={({ field }) => (<FormItem><FormLabel>Link do Contrato Social</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.cartaoCnpjUrl" render={({ field }) => (<FormItem><FormLabel>Link do Cartão CNPJ</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.certidoesNegativasUrl" render={({ field }) => (<FormItem><FormLabel>Link das Certidões Negativas</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.isoCertificateUrl" render={({ field }) => (<FormItem><FormLabel>Link do Certificado ISO (se aplicável)</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.alvaraUrl" render={({ field }) => (<FormItem><FormLabel>Link do Alvará/Licença (se aplicável)</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                      </TabsContent>
+                    </ScrollArea>
+                  </Tabs>
+                    <DialogFooter className="pt-4 border-t">
                         <Button type="button" variant="outline" onClick={() => setIsSupplierFormOpen(false)}>Cancelar</Button>
-                        <Button type="submit">{selectedSupplier ? 'Salvar Alterações' : 'Adicionar'}</Button>
+                        <Button type="submit" disabled={supplierForm.formState.isSubmitting}>
+                            {supplierForm.formState.isSubmitting ? "Salvando..." : (selectedSupplier ? 'Salvar Alterações' : 'Adicionar Fornecedor')}
+                        </Button>
                     </DialogFooter>
                 </form>
             </Form>
