@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -128,7 +127,7 @@ const costEntrySchema = z.object({
 
 type CostEntryData = z.infer<typeof costEntrySchema>;
 
-type Supplier = z.infer<typeof supplierSchema> & { id: string, supplierCode?: string };
+type Supplier = z.infer<typeof supplierSchema> & { id: string, supplierCode?: string, name?: string };
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 
 type Requisition = {
@@ -169,10 +168,41 @@ export default function CostsPage() {
         resolver: zodResolver(supplierSchema),
         defaultValues: {
             status: 'ativo',
-            address: {},
-            bankInfo: {},
-            commercialInfo: {},
-            documentation: {},
+            razaoSocial: '',
+            nomeFantasia: '',
+            cnpj: '',
+            inscricaoEstadual: '',
+            inscricaoMunicipal: '',
+            segment: '',
+            telefone: '',
+            primaryEmail: '',
+            salesContactName: '',
+            address: {
+                zipCode: '',
+                street: '',
+                number: '',
+                complement: '',
+                neighborhood: '',
+                cityState: '',
+            },
+            bankInfo: {
+                bank: '',
+                agency: '',
+                accountNumber: '',
+                pix: '',
+            },
+            commercialInfo: {
+                paymentTerms: '',
+                shippingMethods: '',
+                shippingIncluded: false,
+            },
+            documentation: {
+                contratoSocialUrl: '',
+                cartaoCnpjUrl: '',
+                certidoesNegativasUrl: '',
+                isoCertificateUrl: '',
+                alvaraUrl: '',
+            },
         }
     });
     
@@ -358,16 +388,15 @@ export default function CostsPage() {
             if (razaoSocial === '' && finalNomeFantasia !== '') {
                 razaoSocial = finalNomeFantasia;
             }
-
+    
             const dataToSave: any = {
                 ...values,
                 razaoSocial: razaoSocial,
                 nomeFantasia: finalNomeFantasia,
-                name: finalNomeFantasia, // Sync with name field
+                name: finalNomeFantasia,
                 lastUpdate: Timestamp.now(),
             };
     
-            // Ensure supplier code exists
             if (!selectedSupplier.supplierCode) {
                 const highestCode = suppliers.reduce((max, s) => {
                     const codeNum = parseInt(s.supplierCode || "0", 10);
@@ -428,7 +457,10 @@ export default function CostsPage() {
             
             const newSupplier = { ...dataToSave, id: docRef.id };
             setSelectedSupplier(newSupplier as Supplier);
-            supplierForm.reset(newSupplier);
+            supplierForm.reset({
+                ...supplierForm.getValues(),
+                ...newSupplier
+            });
             setIsSupplierFormOpen(true);
             toast({ title: "Novo fornecedor criado.", description: "Por favor, preencha os detalhes." });
         } catch(e) {
@@ -439,7 +471,15 @@ export default function CostsPage() {
 
     const handleEditSupplierClick = (supplier: Supplier) => {
         setSelectedSupplier(supplier);
-        const { id, ...formData } = supplier;
+        const formValues = {
+            ...supplierForm.getValues(), // Start with defaults
+            ...supplier, // Override with supplier data from firestore
+            address: { ...supplierForm.getValues().address, ...(supplier.address || {}) },
+            bankInfo: { ...supplierForm.getValues().bankInfo, ...(supplier.bankInfo || {}) },
+            commercialInfo: { ...supplierForm.getValues().commercialInfo, ...(supplier.commercialInfo || {}) },
+            documentation: { ...supplierForm.getValues().documentation, ...(supplier.documentation || {}) },
+        };
+        const { id, ...formData } = formValues;
         supplierForm.reset(formData);
         setIsSupplierFormOpen(true);
     };
@@ -733,7 +773,7 @@ export default function CostsPage() {
                                        </SelectTrigger>
                                    </FormControl>
                                    <SelectContent>
-                                       {suppliers.map(s => <SelectItem key={s.id!} value={s.nomeFantasia || s.razaoSocial!}>{s.nomeFantasia || s.razaoSocial}</SelectItem>)}
+                                       {suppliers.map(s => <SelectItem key={s.id} value={s.nomeFantasia || s.razaoSocial || ''}>{s.nomeFantasia || s.razaoSocial || 'Fornecedor sem nome'}</SelectItem>)}
                                    </SelectContent>
                                </Select>
                                <FormMessage />
@@ -789,7 +829,7 @@ export default function CostsPage() {
       <Dialog open={isSupplierFormOpen} onOpenChange={setIsSupplierFormOpen}>
         <DialogContent className="max-w-4xl h-[90vh]">
             <DialogHeader>
-              <DialogTitle>{selectedSupplier ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia || selectedSupplier.razaoSocial}` : "Adicionar Novo Fornecedor"}</DialogTitle>
+              <DialogTitle>{selectedSupplier?.id ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia || selectedSupplier.razaoSocial}` : "Adicionar Novo Fornecedor"}</DialogTitle>
               <DialogDescription>Preencha os dados completos do fornecedor.</DialogDescription>
             </DialogHeader>
             <Form {...supplierForm}>
@@ -889,7 +929,7 @@ export default function CostsPage() {
                     <DialogFooter className="pt-4 border-t">
                         <Button type="button" variant="outline" onClick={() => setIsSupplierFormOpen(false)}>Cancelar</Button>
                         <Button type="submit" disabled={supplierForm.formState.isSubmitting}>
-                            {supplierForm.formState.isSubmitting ? "Salvando..." : (selectedSupplier ? 'Salvar Alterações' : 'Adicionar Fornecedor')}
+                            {supplierForm.formState.isSubmitting ? "Salvando..." : (selectedSupplier?.id ? 'Salvar Alterações' : 'Adicionar Fornecedor')}
                         </Button>
                     </DialogFooter>
                 </form>
@@ -915,5 +955,4 @@ export default function CostsPage() {
       </AlertDialog>
     </>
     );
-
-    
+}
