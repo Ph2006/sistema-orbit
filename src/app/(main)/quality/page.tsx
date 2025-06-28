@@ -287,7 +287,7 @@ export default function QualityPage() {
   });
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
     try {
-       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate) };
+       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), dryFilmThickness: values.dryFilmThickness ?? null, };
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "paintingReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório de pintura atualizado!" });
@@ -486,7 +486,7 @@ export default function QualityPage() {
       const dataToSave = { 
         ...values, 
         receiptDate: Timestamp.fromDate(values.receiptDate),
-        quantityReceived: values.quantityReceived || null,
+        quantityReceived: values.quantityReceived ?? null,
       };
       if (selectedInspection) {
         await setDoc(doc(db, "companies", "mecald", "rawMaterialInspections", selectedInspection.id), dataToSave);
@@ -630,7 +630,14 @@ export default function QualityPage() {
             startY: y,
             head: [['Dimensão', 'Nominal', 'Tol. Inferior (-)', 'Tol. Superior (+)', 'Medido', 'Instrumento', 'Resultado']],
             body: body,
-            headStyles: { fillColor: [40, 40, 40] }
+            headStyles: { fillColor: [40, 40, 40] },
+            didParseCell: (data) => {
+                if(data.section === 'body' && data.column.index === 6) {
+                    if (data.cell.text[0] === 'Não Conforme') {
+                        data.cell.styles.textColor = [255, 0, 0];
+                    }
+                }
+            }
         });
 
         let finalY = (docPdf as any).lastAutoTable.finalY;
@@ -864,7 +871,7 @@ export default function QualityPage() {
         <Form {...rncForm}><form onSubmit={rncForm.handleSubmit(onRncSubmit)} className="space-y-4 pt-4">
           <FormField control={rncForm.control} name="date" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
           <FormField control={rncForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="item" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={value => { const selectedItem = availableRncItems.find(i => i.id === value); if (selectedItem) field.onChange(selectedItem); }} value={field.value?.id || ""}><FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+          <FormField control={rncForm.control} name="item" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={value => { const selectedItem = availableRncItems.find(i => i.id === value); if (selectedItem) field.onChange(selectedItem); }} value={field.value?.id || ""}><FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
           <FormField control={rncForm.control} name="type" render={({ field }) => ( <FormItem><FormLabel>Tipo de Não Conformidade</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Interna">Interna</SelectItem><SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
           <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} /></FormControl><FormMessage /></FormItem> )}/>
           <FormField control={rncForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Aberta">Aberta</SelectItem><SelectItem value="Em Análise">Em Análise</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
@@ -1109,7 +1116,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                             {totalItemQuantity > 0 ? (
                                 Array.from({ length: totalItemQuantity }, (_, i) => i + 1).map(num => (
                                     <SelectItem key={num} value={`Peça ${num} de ${totalItemQuantity}`}>
-                                        Peça {num} de ${totalItemQuantity}
+                                        Peça {num} de {totalItemQuantity}
                                     </SelectItem>
                                 ))
                             ) : (
@@ -1273,6 +1280,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
