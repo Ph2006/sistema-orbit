@@ -483,7 +483,11 @@ export default function QualityPage() {
   // --- INSPECTION HANDLERS ---
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
-      const dataToSave = { ...values, receiptDate: Timestamp.fromDate(values.receiptDate) };
+      const dataToSave = { 
+        ...values, 
+        receiptDate: Timestamp.fromDate(values.receiptDate),
+        quantityReceived: values.quantityReceived || null,
+      };
       if (selectedInspection) {
         await setDoc(doc(db, "companies", "mecald", "rawMaterialInspections", selectedInspection.id), dataToSave);
         toast({ title: "Relatório atualizado!" });
@@ -496,7 +500,11 @@ export default function QualityPage() {
   };
   const onDimensionalReportSubmit = async (values: z.infer<typeof dimensionalReportSchema>) => {
     try {
-       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate) };
+       const dataToSave = { 
+        ...values, 
+        inspectionDate: Timestamp.fromDate(values.inspectionDate),
+        customerInspector: values.customerInspector || null,
+      };
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório atualizado!" });
@@ -1265,6 +1273,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
