@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc, setDoc, arrayUnion } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -83,7 +83,7 @@ const supplierSchema = z.object({
   inscricaoEstadual: z.string().optional(),
   inscricaoMunicipal: z.string().optional(),
   segment: z.string().optional(),
-  status: z.enum(["ativo", "inativo"]).default("ativo"),
+  status: z.enum(["ativo", "inativo"]).optional().default("ativo"),
   telefone: z.string().optional(),
   primaryEmail: z.string().email("E-mail inválido.").optional().or(z.literal('')),
   salesContactName: z.string().optional(),
@@ -106,7 +106,7 @@ const supplierSchema = z.object({
     paymentTerms: z.string().optional(),
     avgLeadTimeDays: z.coerce.number().optional(),
     shippingMethods: z.string().optional(),
-    shippingIncluded: z.boolean().default(false),
+    shippingIncluded: z.boolean().optional().default(false),
   }).optional(),
   documentation: z.object({
     contratoSocialUrl: z.string().url().optional().or(z.literal('')),
@@ -128,7 +128,7 @@ const costEntrySchema = z.object({
 
 type CostEntryData = z.infer<typeof costEntrySchema>;
 
-type Supplier = z.infer<typeof supplierSchema> & { id: string, supplierCode?: string, name?: string };
+type Supplier = z.infer<typeof supplierSchema> & { id: string, name?: string };
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 
 type Requisition = {
@@ -166,10 +166,12 @@ const emptySupplierFormValues: z.infer<typeof supplierSchema> = {
         bank: '',
         agency: '',
         accountNumber: '',
+        accountType: undefined,
         pix: '',
     },
     commercialInfo: {
         paymentTerms: '',
+        avgLeadTimeDays: undefined,
         shippingMethods: '',
         shippingIncluded: false,
     },
@@ -387,20 +389,26 @@ export default function CostsPage() {
                 nomeFantasia: values.nomeFantasia || values.razaoSocial || '',
                 lastUpdate: Timestamp.now(),
             };
+    
             dataToSave.name = dataToSave.nomeFantasia;
             
-            if (selectedSupplier?.id) { // UPDATE
-                dataToSave.supplierCode = selectedSupplier.supplierCode; // Preserve existing code
+            if (selectedSupplier) { // UPDATE
                 await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
                 toast({ title: "Fornecedor atualizado com sucesso!" });
             } else { // CREATE
-                const highestCode = suppliers.reduce((max, s) => {
-                    const codeNum = parseInt(s.supplierCode || "0", 10);
+                const batch = writeBatch(db);
+                const newSupplierRef = doc(collection(db, "companies", "mecald", "suppliers"));
+                const suppliersSnapshot = await getDocs(collection(db, "companies", "mecald", "suppliers"));
+                const highestCode = suppliersSnapshot.docs.reduce((max, s) => {
+                    const codeNum = parseInt(s.data().supplierCode || "0", 10);
                     return !isNaN(codeNum) && codeNum > max ? codeNum : max;
                 }, 0);
+    
+                dataToSave.id = newSupplierRef.id;
                 dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
                 dataToSave.firstRegistrationDate = Timestamp.now();
-                await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
+                batch.set(newSupplierRef, dataToSave);
+                await batch.commit();
                 toast({ title: "Fornecedor criado com sucesso!" });
             }
     
@@ -444,7 +452,6 @@ export default function CostsPage() {
     };
 
     const handleEditSupplierClick = (supplier: Supplier) => {
-        setSelectedSupplier(supplier);
         const formData = {
             ...emptySupplierFormValues,
             ...supplier,
@@ -453,10 +460,7 @@ export default function CostsPage() {
             commercialInfo: { ...emptySupplierFormValues.commercialInfo, ...(supplier.commercialInfo || {}) },
             documentation: { ...emptySupplierFormValues.documentation, ...(supplier.documentation || {}) },
         };
-        if (formData.commercialInfo.avgLeadTimeDays === undefined || formData.commercialInfo.avgLeadTimeDays === null) {
-          // @ts-ignore
-          formData.commercialInfo.avgLeadTimeDays = ''; 
-        }
+        setSelectedSupplier(formData);
         supplierForm.reset(formData);
         setIsSupplierFormOpen(true);
     };
@@ -600,7 +604,7 @@ export default function CostsPage() {
                                     {suppliers.length > 0 ? (
                                         suppliers.map((supplier) => (
                                             <TableRow key={supplier.id}>
-                                                <TableCell className="font-mono">{supplier.supplierCode}</TableCell>
+                                                <TableCell className="font-mono">{supplier.supplierCode || 'N/A'}</TableCell>
                                                 <TableCell className="font-medium">{supplier.nomeFantasia || supplier.razaoSocial}</TableCell>
                                                 <TableCell>{supplier.cnpj}</TableCell>
                                                 <TableCell>{supplier.segment || '-'}</TableCell>
@@ -804,21 +808,21 @@ export default function CostsPage() {
       </Dialog>
       
       <Dialog open={isSupplierFormOpen} onOpenChange={setIsSupplierFormOpen}>
-        <DialogContent className="max-w-4xl h-[90vh]">
+        <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>{selectedSupplier?.id ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia || selectedSupplier.razaoSocial || ''}` : "Adicionar Novo Fornecedor"}</DialogTitle>
               <DialogDescription>Preencha os dados completos do fornecedor.</DialogDescription>
             </DialogHeader>
             <Form {...supplierForm}>
-                <form onSubmit={supplierForm.handleSubmit(onSupplierSubmit)} className="flex flex-col h-full">
-                  <Tabs defaultValue="general" className="flex-grow flex flex-col">
+                <form onSubmit={supplierForm.handleSubmit(onSupplierSubmit)} className="flex-1 flex flex-col min-h-0">
+                  <Tabs defaultValue="general" className="flex-1 flex flex-col min-h-0">
                     <TabsList>
                       <TabsTrigger value="general">Gerais</TabsTrigger>
                       <TabsTrigger value="contact">Contato e Endereço</TabsTrigger>
                       <TabsTrigger value="commercial">Comercial e Bancário</TabsTrigger>
                       <TabsTrigger value="docs">Documentos</TabsTrigger>
                     </TabsList>
-                    <ScrollArea className="flex-grow mt-4 pr-6">
+                    <ScrollArea className="flex-1 mt-4 pr-6">
                       <TabsContent value="general" className="space-y-4">
                         <FormField control={supplierForm.control} name="status" render={({ field }) => (<FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="ativo">Ativo</SelectItem><SelectItem value="inativo">Inativo</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
@@ -903,7 +907,7 @@ export default function CostsPage() {
                       </TabsContent>
                     </ScrollArea>
                   </Tabs>
-                    <DialogFooter className="pt-4 border-t">
+                    <DialogFooter className="pt-4 border-t flex-shrink-0">
                         <Button type="button" variant="outline" onClick={() => setIsSupplierFormOpen(false)}>Cancelar</Button>
                         <Button type="submit" disabled={supplierForm.formState.isSubmitting}>
                             {supplierForm.formState.isSubmitting ? "Salvando..." : (selectedSupplier?.id ? 'Salvar Alterações' : 'Adicionar Fornecedor')}
