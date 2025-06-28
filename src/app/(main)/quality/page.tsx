@@ -5,10 +5,10 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format } from "date-fns";
+import { format, addMonths, isPast, isFuture, differenceInDays } from "date-fns";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,15 +18,18 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-// Schemas
+
+// --- SCHEMAS ---
 const nonConformanceSchema = z.object({
   id: z.string().optional(),
   date: z.date({ required_error: "A data é obrigatória." }),
@@ -40,35 +43,129 @@ const nonConformanceSchema = z.object({
   status: z.enum(["Aberta", "Em Análise", "Concluída"]),
 });
 
+const calibrationSchema = z.object({
+  id: z.string().optional(),
+  internalCode: z.string().min(1, "O código interno é obrigatório."),
+  equipmentName: z.string().min(1, "O nome do equipamento é obrigatório."),
+  modelSerial: z.string().optional(),
+  manufacturer: z.string().optional(),
+  location: z.string().optional(),
+  category: z.string().optional(),
+  lastCalibrationDate: z.date({ required_error: "A data da última calibração é obrigatória." }),
+  calibrationIntervalMonths: z.coerce.number().min(0, "O intervalo deve ser um número positivo."),
+  result: z.enum(["Aprovado", "Reprovado", "Aprovado com Ajuste"]),
+  responsible: z.string().optional(),
+  norm: z.string().optional(),
+  certificateUrl: z.string().url("Insira uma URL válida.").or(z.literal('')).optional(),
+  notes: z.string().optional(),
+});
+
+
+// --- TYPES ---
 type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string };
 type OrderInfo = { id: string, number: string, customerId: string, customerName: string, items: { id: string, description: string }[] };
+type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 
-// Main Component
+
+// --- HELPER FUNCTIONS ---
+const getCalibrationStatus = (calibration: Calibration) => {
+    const nextDueDate = addMonths(calibration.lastCalibrationDate, calibration.calibrationIntervalMonths);
+    const today = new Date();
+    
+    if (isPast(nextDueDate)) {
+      return { text: "Vencida", variant: "destructive", icon: XCircle };
+    }
+    if (differenceInDays(nextDueDate, today) <= 30) {
+      return { text: "Pendente", variant: "secondary", icon: AlertTriangle };
+    }
+    return { text: "Em dia", variant: "default", icon: CheckCircle };
+};
+
+const getStatusVariant = (status: string) => {
+    switch (status) {
+        case 'Aberta': return 'destructive';
+        case 'Em Análise': return 'secondary';
+        case 'Concluída': return 'default';
+        default: return 'outline';
+    }
+};
+
+const PlaceholderCard = ({ title, description, icon: Icon }: { title: string; description: string; icon: React.ElementType }) => (
+    <Card className="text-center">
+      <CardHeader>
+        <div className="flex justify-center mb-2">
+            <Icon className="w-10 h-10 text-muted-foreground" />
+        </div>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Badge variant="outline">A ser implementado</Badge>
+      </CardContent>
+    </Card>
+);
+
+
+// --- MAIN COMPONENT ---
 export default function QualityPage() {
+  const [activeTab, setActiveTab] = useState("rnc");
+  
+  // RNC State
   const [reports, setReports] = useState<NonConformance[]>([]);
   const [orders, setOrders] = useState<OrderInfo[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRncFormOpen, setIsRncFormOpen] = useState(false);
+  const [isRncDeleting, setIsRncDeleting] = useState(false);
   const [selectedReport, setSelectedReport] = useState<NonConformance | null>(null);
   const [reportToDelete, setReportToDelete] = useState<NonConformance | null>(null);
 
+  // Calibration State
+  const [calibrations, setCalibrations] = useState<Calibration[]>([]);
+  const [isCalibrationFormOpen, setIsCalibrationFormOpen] = useState(false);
+  const [isCalibrationDeleting, setIsCalibrationDeleting] = useState(false);
+  const [selectedCalibration, setSelectedCalibration] = useState<Calibration | null>(null);
+  const [calibrationToDelete, setCalibrationToDelete] = useState<Calibration | null>(null);
+  
+  // General State
+  const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  const form = useForm<z.infer<typeof nonConformanceSchema>>({
+  // --- FORMS ---
+  const rncForm = useForm<z.infer<typeof nonConformanceSchema>>({
     resolver: zodResolver(nonConformanceSchema),
-    defaultValues: {
-      date: new Date(),
-      status: "Aberta",
-    },
+    defaultValues: { date: new Date(), status: "Aberta", },
   });
 
+  const calibrationForm = useForm<z.infer<typeof calibrationSchema>>({
+    resolver: zodResolver(calibrationSchema),
+    defaultValues: {
+      internalCode: "",
+      equipmentName: "",
+      modelSerial: "",
+      manufacturer: "",
+      location: "",
+      category: "",
+      lastCalibrationDate: new Date(),
+      calibrationIntervalMonths: 12,
+      result: "Aprovado",
+      responsible: "",
+      norm: "",
+      certificateUrl: "",
+      notes: "",
+    }
+  });
+
+  // --- DATA FETCHING ---
   const fetchAllData = async () => {
     if (!user) return;
     setIsLoading(true);
     try {
-      const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+      const [ordersSnapshot, reportsSnapshot, calibrationsSnapshot] = await Promise.all([
+        getDocs(collection(db, "companies", "mecald", "orders")),
+        getDocs(collection(db, "companies", "mecald", "qualityReports")),
+        getDocs(collection(db, "companies", "mecald", "calibrations")),
+      ]);
+
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
         const data = doc.data();
         return {
@@ -76,15 +173,11 @@ export default function QualityPage() {
           number: data.quotationNumber || data.orderNumber || 'N/A',
           customerId: data.customer?.id || data.customerId || '',
           customerName: data.customer?.name || data.customerName || 'N/A',
-          items: (data.items || []).map((item: any, index: number) => ({
-            id: item.id || `${doc.id}-${index}`,
-            description: item.description,
-          })),
+          items: (data.items || []).map((item: any, index: number) => ({ id: item.id || `${doc.id}-${index}`, description: item.description, })),
         };
       });
       setOrders(ordersList);
 
-      const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "qualityReports"));
       const reportsList = reportsSnapshot.docs.map(doc => {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
@@ -101,9 +194,20 @@ export default function QualityPage() {
         } as NonConformance;
       });
       setReports(reportsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
+
+      const calibrationsList = calibrationsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          lastCalibrationDate: data.lastCalibrationDate.toDate(),
+        } as Calibration;
+      });
+      setCalibrations(calibrationsList);
+
     } catch (error) {
       console.error("Error fetching quality data:", error);
-      toast({ variant: "destructive", title: "Erro ao buscar dados", description: "Não foi possível carregar os relatórios de qualidade." });
+      toast({ variant: "destructive", title: "Erro ao buscar dados" });
     } finally {
       setIsLoading(false);
     }
@@ -115,24 +219,16 @@ export default function QualityPage() {
     }
   }, [user, authLoading]);
 
-  const onSubmit = async (values: z.infer<typeof nonConformanceSchema>) => {
+  
+  // --- RNC HANDLERS ---
+  const onRncSubmit = async (values: z.infer<typeof nonConformanceSchema>) => {
     try {
       const order = orders.find(o => o.id === values.orderId);
-      if (!order) {
-        toast({ variant: "destructive", title: "Erro", description: "Pedido selecionado não encontrado." });
-        return;
-      }
+      if (!order) throw new Error("Pedido selecionado não encontrado.");
       
       const dataToSave = {
-        date: Timestamp.fromDate(values.date),
-        orderId: values.orderId,
-        itemId: values.item.id,
-        itemDescription: values.item.description,
-        customerId: order.customerId,
-        customerName: order.customerName,
-        description: values.description,
-        type: values.type,
-        status: values.status,
+        date: Timestamp.fromDate(values.date), orderId: values.orderId, itemId: values.item.id, itemDescription: values.item.description,
+        customerId: order.customerId, customerName: order.customerName, description: values.description, type: values.type, status: values.status,
       };
 
       if (selectedReport) {
@@ -142,8 +238,7 @@ export default function QualityPage() {
         await addDoc(collection(db, "companies", "mecald", "qualityReports"), dataToSave);
         toast({ title: "Relatório de não conformidade criado!" });
       }
-
-      setIsFormOpen(false);
+      setIsRncFormOpen(false);
       await fetchAllData();
     } catch (error) {
       console.error("Error saving report:", error);
@@ -151,232 +246,246 @@ export default function QualityPage() {
     }
   };
 
-  const handleAddClick = () => {
+  const handleAddRncClick = () => {
     setSelectedReport(null);
-    form.reset({ date: new Date(), status: "Aberta", type: "Interna" });
-    setIsFormOpen(true);
+    rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna" });
+    setIsRncFormOpen(true);
   };
 
-  const handleEditClick = (report: NonConformance) => {
+  const handleEditRncClick = (report: NonConformance) => {
     setSelectedReport(report);
-    form.reset({
-        ...report,
-        item: { id: report.item.id, description: report.item.description }
-    });
-    setIsFormOpen(true);
+    rncForm.reset({ ...report, item: { id: report.item.id, description: report.item.description } });
+    setIsRncFormOpen(true);
   };
   
-  const handleDeleteClick = (report: NonConformance) => {
+  const handleDeleteRncClick = (report: NonConformance) => {
     setReportToDelete(report);
-    setIsDeleting(true);
+    setIsRncDeleting(true);
   };
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmRncDelete = async () => {
     if (!reportToDelete) return;
     try {
       await deleteDoc(doc(db, "companies", "mecald", "qualityReports", reportToDelete.id));
       toast({ title: "Relatório excluído!" });
-      setIsDeleting(false);
+      setIsRncDeleting(false);
       await fetchAllData();
     } catch (error) {
       toast({ variant: "destructive", title: "Erro ao excluir relatório" });
     }
   };
 
-  const watchedOrderId = form.watch("orderId");
+  const watchedRncOrderId = rncForm.watch("orderId");
   const availableItems = useMemo(() => {
-    if (!watchedOrderId) return [];
-    return orders.find(o => o.id === watchedOrderId)?.items || [];
-  }, [watchedOrderId, orders]);
+    if (!watchedRncOrderId) return [];
+    return orders.find(o => o.id === watchedRncOrderId)?.items || [];
+  }, [watchedRncOrderId, orders]);
   
-  useEffect(() => {
-      form.setValue('item', {id: '', description: ''});
-  }, [watchedOrderId, form]);
+  useEffect(() => { rncForm.setValue('item', {id: '', description: ''}); }, [watchedRncOrderId, rncForm]);
 
-  const getStatusVariant = (status: string) => {
-      switch (status) {
-          case 'Aberta': return 'destructive';
-          case 'Em Análise': return 'secondary';
-          case 'Concluída': return 'default';
-          default: return 'outline';
-      }
+
+  // --- CALIBRATION HANDLERS ---
+  const onCalibrationSubmit = async (values: z.infer<typeof calibrationSchema>) => {
+    try {
+        const dataToSave = { ...values, lastCalibrationDate: Timestamp.fromDate(values.lastCalibrationDate) };
+        const id = selectedCalibration ? selectedCalibration.id : values.internalCode;
+
+        if (id.includes('/') || id.includes('..')) {
+            toast({ variant: 'destructive', title: 'Código Inválido', description: 'O código do equipamento não pode conter / ou ..'});
+            return;
+        }
+
+        const docRef = doc(db, "companies", "mecald", "calibrations", id);
+        await setDoc(docRef, dataToSave);
+
+        toast({ title: selectedCalibration ? "Calibração atualizada!" : "Equipamento adicionado!" });
+        setIsCalibrationFormOpen(false);
+        await fetchAllData();
+    } catch (error) {
+        console.error("Error saving calibration:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar calibração" });
+    }
   };
+
+  const handleAddCalibrationClick = () => {
+    setSelectedCalibration(null);
+    calibrationForm.reset({
+      internalCode: "", equipmentName: "", modelSerial: "", manufacturer: "", location: "", category: "",
+      lastCalibrationDate: new Date(), calibrationIntervalMonths: 12, result: "Aprovado", responsible: "", norm: "", certificateUrl: "", notes: "",
+    });
+    setIsCalibrationFormOpen(true);
+  };
+
+  const handleEditCalibrationClick = (calibration: Calibration) => {
+    setSelectedCalibration(calibration);
+    calibrationForm.reset(calibration);
+    setIsCalibrationFormOpen(true);
+  };
+
+  const handleDeleteCalibrationClick = (calibration: Calibration) => {
+    setCalibrationToDelete(calibration);
+    setIsCalibrationDeleting(true);
+  };
+
+  const handleConfirmCalibrationDelete = async () => {
+    if (!calibrationToDelete) return;
+    try {
+        await deleteDoc(doc(db, "companies", "mecald", "calibrations", calibrationToDelete.id));
+        toast({ title: "Registro de calibração excluído!" });
+        setIsCalibrationDeleting(false);
+        await fetchAllData();
+    } catch (error) {
+        toast({ variant: "destructive", title: "Erro ao excluir registro" });
+    }
+  };
+
 
   return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
           <h1 className="text-3xl font-bold tracking-tight font-headline">Controle de Qualidade</h1>
-          <Button onClick={handleAddClick}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Registrar Não Conformidade
-          </Button>
         </div>
-        <Card>
-          <CardHeader>
-            <CardTitle>Relatórios de Não Conformidade (RNC)</CardTitle>
-            <CardDescription>
-              Gerencie todas as não conformidades internas e reclamações de clientes.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-                <Skeleton className="h-64 w-full" />
-            ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Pedido</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead>Item</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {reports.length > 0 ? (
-                  reports.map((report) => (
-                    <TableRow key={report.id}>
-                      <TableCell>{format(report.date, 'dd/MM/yyyy')}</TableCell>
-                      <TableCell>{report.orderNumber}</TableCell>
-                      <TableCell>{report.customerName}</TableCell>
-                      <TableCell>{report.item.description}</TableCell>
-                      <TableCell>{report.type}</TableCell>
-                      <TableCell><Badge variant={getStatusVariant(report.status)}>{report.status}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => handleEditClick(report)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteClick(report)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
-                      Nenhum relatório de não conformidade encontrado.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-            )}
-          </CardContent>
-        </Card>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <TabsList>
+                <TabsTrigger value="rnc">Relatórios de Não Conformidade (RNC)</TabsTrigger>
+                <TabsTrigger value="calibrations">Calibração de Equipamentos</TabsTrigger>
+                <TabsTrigger value="inspections">Inspeções e Documentos</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="rnc">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle>Histórico de RNCs</CardTitle>
+                      <CardDescription>Gerencie todas as não conformidades internas e reclamações de clientes.</CardDescription>
+                    </div>
+                    <Button onClick={handleAddRncClick}><PlusCircle className="mr-2 h-4 w-4" />Registrar Não Conformidade</Button>
+                </CardHeader>
+                <CardContent>
+                  {isLoading ? <Skeleton className="h-64 w-full" /> :
+                  <Table>
+                    <TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Cliente</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {reports.length > 0 ? (
+                        reports.map((report) => (
+                          <TableRow key={report.id}>
+                            <TableCell>{format(report.date, 'dd/MM/yyyy')}</TableCell><TableCell>{report.orderNumber}</TableCell><TableCell>{report.customerName}</TableCell>
+                            <TableCell>{report.item.description}</TableCell><TableCell>{report.type}</TableCell>
+                            <TableCell><Badge variant={getStatusVariant(report.status)}>{report.status}</Badge></TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="icon" onClick={() => handleEditRncClick(report)}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRncClick(report)}><Trash2 className="h-4 w-4" /></Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : ( <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de não conformidade encontrado.</TableCell></TableRow> )}
+                    </TableBody>
+                  </Table> }
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="calibrations">
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                        <div>
+                            <CardTitle>Controle de Calibração</CardTitle>
+                            <CardDescription>Gerencie a calibração de todos os instrumentos e máquinas da empresa.</CardDescription>
+                        </div>
+                        <Button onClick={handleAddCalibrationClick}><PlusCircle className="mr-2 h-4 w-4" />Adicionar Equipamento</Button>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoading ? <Skeleton className="h-64 w-full" /> :
+                        <Table>
+                            <TableHeader><TableRow><TableHead>Equipamento</TableHead><TableHead>Cód. Interno</TableHead><TableHead>Local</TableHead><TableHead>Última Cal.</TableHead><TableHead>Próxima Cal.</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                            <TableBody>
+                            {calibrations.length > 0 ? (
+                                calibrations.map((cal) => {
+                                    const status = getCalibrationStatus(cal);
+                                    return (
+                                    <TableRow key={cal.id}>
+                                        <TableCell className="font-medium">{cal.equipmentName}</TableCell>
+                                        <TableCell>{cal.internalCode}</TableCell>
+                                        <TableCell>{cal.location}</TableCell>
+                                        <TableCell>{format(cal.lastCalibrationDate, 'dd/MM/yyyy')}</TableCell>
+                                        <TableCell>{format(addMonths(cal.lastCalibrationDate, cal.calibrationIntervalMonths), 'dd/MM/yyyy')}</TableCell>
+                                        <TableCell><Badge variant={status.variant} className="gap-1"><status.icon className="h-3.5 w-3.5" />{status.text}</Badge></TableCell>
+                                        <TableCell className="text-right">
+                                            <Button variant="ghost" size="icon" onClick={() => handleEditCalibrationClick(cal)}><Pencil className="h-4 w-4" /></Button>
+                                            <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteCalibrationClick(cal)}><Trash2 className="h-4 w-4" /></Button>
+                                        </TableCell>
+                                    </TableRow>
+                                    );
+                                })
+                            ) : ( <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum equipamento cadastrado para calibração.</TableCell></TableRow> )}
+                            </TableBody>
+                        </Table>}
+                    </CardContent>
+                </Card>
+            </TabsContent>
+            
+            <TabsContent value="inspections">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <PlaceholderCard title="Inspeção de Matéria-Prima" description="Verificação de materiais recebidos." icon={Beaker} />
+                    <PlaceholderCard title="Relatório Dimensional" description="Controle de medidas e tolerâncias." icon={Wrench} />
+                    <PlaceholderCard title="Inspeção de Solda" description="Registros de ensaios (LP, UT, Visual)." icon={ShieldCheck} />
+                    <PlaceholderCard title="Controle de Pintura" description="Verificação de camada e aderência." icon={SlidersHorizontal} />
+                    <PlaceholderCard title="Procedimentos Técnicos" description="Gestão de documentos (WPS, PIT, etc.)." icon={BookOpen} />
+                    <PlaceholderCard title="Lições Aprendidas" description="Base de conhecimento para melhoria contínua." icon={BrainCircuit} />
+                    <PlaceholderCard title="Chamados para Engenharia" description="Controle de solicitações e respostas." icon={Phone} />
+                </div>
+            </TabsContent>
+
+        </Tabs>
       </div>
 
-      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+      <Dialog open={isRncFormOpen} onOpenChange={setIsRncFormOpen}>
           <DialogContent>
-              <DialogHeader>
-                  <DialogTitle>{selectedReport ? "Editar Relatório" : "Registrar Não Conformidade"}</DialogTitle>
-                  <DialogDescription>Preencha os detalhes para registrar o ocorrido.</DialogDescription>
-              </DialogHeader>
-              <Form {...form}>
-                  <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
-                        <FormField control={form.control} name="date" render={({ field }) => (
-                            <FormItem className="flex flex-col">
-                                <FormLabel>Data da Ocorrência</FormLabel>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <FormControl>
-                                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
-                                                {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}
-                                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                            </Button>
-                                        </FormControl>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                        <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
-                                    </PopoverContent>
-                                </Popover>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                        <FormField control={form.control} name="orderId" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Pedido</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl>
-                                    <SelectContent>
-                                        {orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
-                         <FormField control={form.control} name="item" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Item Afetado</FormLabel>
-                                <Select onValueChange={value => {
-                                    const selectedItem = availableItems.find(i => i.id === value);
-                                    if (selectedItem) field.onChange(selectedItem);
-                                }} value={field.value?.id || ""}>
-                                    <FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl>
-                                    <SelectContent>
-                                        {availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
-                        <FormField control={form.control} name="type" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Tipo de Não Conformidade</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl>
-                                    <SelectContent>
-                                        <SelectItem value="Interna">Interna</SelectItem>
-                                        <SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                        <FormField control={form.control} name="description" render={({ field }) => (
-                          <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} /></FormControl><FormMessage /></FormItem>
-                        )}/>
-                         <FormField control={form.control} name="status" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Status</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl>
-                                    <SelectContent>
-                                        <SelectItem value="Aberta">Aberta</SelectItem>
-                                        <SelectItem value="Em Análise">Em Análise</SelectItem>
-                                        <SelectItem value="Concluída">Concluída</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                      <DialogFooter>
-                          <Button type="submit">Salvar</Button>
-                      </DialogFooter>
-                  </form>
-              </Form>
+              <DialogHeader><DialogTitle>{selectedReport ? "Editar Relatório" : "Registrar Não Conformidade"}</DialogTitle><DialogDescription>Preencha os detalhes para registrar o ocorrido.</DialogDescription></DialogHeader>
+              <Form {...rncForm}><form onSubmit={rncForm.handleSubmit(onRncSubmit)} className="space-y-4 pt-4">
+                  <FormField control={rncForm.control} name="date" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+                  <FormField control={rncForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                  <FormField control={rncForm.control} name="item" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={value => { const selectedItem = availableItems.find(i => i.id === value); if (selectedItem) field.onChange(selectedItem); }} value={field.value?.id || ""}><FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                  <FormField control={rncForm.control} name="type" render={({ field }) => ( <FormItem><FormLabel>Tipo de Não Conformidade</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Interna">Interna</SelectItem><SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+                  <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} /></FormControl><FormMessage /></FormItem> )}/>
+                  <FormField control={rncForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Aberta">Aberta</SelectItem><SelectItem value="Em Análise">Em Análise</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+                  <DialogFooter><Button type="submit">Salvar</Button></DialogFooter>
+              </form></Form>
           </DialogContent>
       </Dialog>
       
-      <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
-        <AlertDialogContent>
-            <AlertDialogHeader>
-            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-            <AlertDialogDescription>
-                Esta ação não pode ser desfeita. Isso excluirá permanentemente o relatório de não conformidade.
-            </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
-                Sim, excluir
-            </AlertDialogAction>
-            </AlertDialogFooter>
-        </AlertDialogContent>
+      <AlertDialog open={isRncDeleting} onOpenChange={setIsRncDeleting}>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o relatório de não conformidade.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmRncDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isCalibrationFormOpen} onOpenChange={setIsCalibrationFormOpen}>
+        <DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>{selectedCalibration ? "Editar Calibração" : "Adicionar Equipamento para Calibração"}</DialogTitle><DialogDescription>Preencha os dados do equipamento e seu plano de calibração.</DialogDescription></DialogHeader>
+          <Form {...calibrationForm}><form onSubmit={calibrationForm.handleSubmit(onCalibrationSubmit)} className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField control={calibrationForm.control} name="equipmentName" render={({ field }) => ( <FormItem><FormLabel>Nome do Equipamento</FormLabel><FormControl><Input placeholder="Ex: Paquímetro Digital Mitutoyo" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="internalCode" render={({ field }) => ( <FormItem><FormLabel>Código Interno</FormLabel><FormControl><Input placeholder="Ex: PAQ-001" {...field} disabled={!!selectedCalibration} /></FormControl><FormMessage /></FormItem> )}/>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <FormField control={calibrationForm.control} name="location" render={({ field }) => ( <FormItem><FormLabel>Localização</FormLabel><FormControl><Input placeholder="Ex: Metrologia" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="manufacturer" render={({ field }) => ( <FormItem><FormLabel>Fabricante</FormLabel><FormControl><Input placeholder="Ex: Mitutoyo" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="modelSerial" render={({ field }) => ( <FormItem><FormLabel>Modelo/Série</FormLabel><FormControl><Input placeholder="Ex: 500-196-30B" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField control={calibrationForm.control} name="lastCalibrationDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Última Calibração</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+                <FormField control={calibrationForm.control} name="calibrationIntervalMonths" render={({ field }) => ( <FormItem><FormLabel>Intervalo (meses)</FormLabel><FormControl><Input type="number" placeholder="12" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+            </div>
+             <FormField control={calibrationForm.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado da Última Cal.</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com Ajuste">Aprovado com Ajuste</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+            <FormField control={calibrationForm.control} name="certificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" placeholder="https://..." {...field} /></FormControl><FormMessage /></FormItem> )}/>
+            <DialogFooter><Button type="button" variant="outline" onClick={() => setIsCalibrationFormOpen(false)}>Cancelar</Button><Button type="submit">{selectedCalibration ? 'Salvar Alterações' : 'Adicionar'}</Button></DialogFooter>
+          </form></Form>
+        </DialogContent>
+      </Dialog>
+      
+      <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
+      </AlertDialog>
+
     </>
   );
 }
