@@ -241,7 +241,6 @@ export default function MaterialsPage() {
             // Processar requisições - MUDANÇA: ler planos do documento principal
             const reqsList = reqsSnapshot.docs.map(d => {
                 const data = d.data();
-                console.log('📄 Carregando requisição:', d.id, data);
                 
                 // Processar planos de corte do documento principal
                 const cuttingPlansData = (data.cuttingPlans || []).map((planData: any) => ({
@@ -262,8 +261,6 @@ export default function MaterialsPage() {
                     patterns: planData.patterns || [],
                     summary: planData.summary || null,
                 }));
-                
-                console.log('✂️ Planos carregados:', cuttingPlansData);
                 
                 return {
                     ...data,
@@ -294,7 +291,6 @@ export default function MaterialsPage() {
             });
     
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
-            console.log('✅ Dados carregados com sucesso:', reqsList.length, 'requisições');
             
         } catch (error: any) {
             console.error("Error fetching data:", error);
@@ -322,7 +318,7 @@ export default function MaterialsPage() {
             toast({
                 variant: "destructive",
                 title: "Erro de Permissões",
-                description: "Verifique as regras de segurança do Firestore. Detalhes no console."
+                description: "Verifique as regras de segurança do seu Firestore. Detalhes no console."
             });
         }
     };
@@ -415,11 +411,49 @@ export default function MaterialsPage() {
         }
     };
 
+    // 1. Primeiro, vamos verificar se os planos estão sendo capturados corretamente no form
+    const debugFormValues = () => {
+        console.log('🔍 DEBUG: Verificando valores do formulário...');
+        const allFormValues = form.getValues();
+        console.log('📋 Todos os valores do form:', allFormValues);
+        console.log('✂️ Planos de corte específicos:', allFormValues.cuttingPlans);
+        console.log('📊 Plano ativo (index):', activeCutPlanIndex);
+        
+        if (allFormValues.cuttingPlans && allFormValues.cuttingPlans[activeCutPlanIndex]) {
+            console.log('🎯 Plano ativo detalhado:', allFormValues.cuttingPlans[activeCutPlanIndex]);
+        }
+        
+        return allFormValues;
+    };
+
+    // 2. Função onSubmit corrigida com logs específicos
     const onSubmit = async (data: Requisition) => {
-        console.log('🔄 Iniciando onSubmit...');
-        const formValues = form.getValues();
-        console.log('📋 Form values completos:', formValues);
-    
+        console.log('🚀 === INÍCIO DO SALVAMENTO ===');
+        
+        // Debug dos valores do form
+        const formValues = debugFormValues();
+        
+        if (!formValues.cuttingPlans || formValues.cuttingPlans.length === 0) {
+            console.log('⚠️ PROBLEMA: Nenhum plano de corte encontrado no formulário!');
+            console.log('🔧 Criando plano padrão...');
+            
+            // Se não há planos, vamos criar um vazio para não quebrar o salvamento
+            formValues.cuttingPlans = [{
+                id: Date.now().toString(),
+                name: 'Plano de Corte 1',
+                createdAt: new Date(),
+                stockLength: 6000,
+                kerf: 3,
+                items: [],
+                deliveryDate: null,
+                materialDescription: '',
+                patterns: [],
+                summary: null
+            }];
+        }
+
+        console.log('✂️ PLANOS QUE SERÃO SALVOS:', formValues.cuttingPlans);
+
         try {
             const newHistoryEntry = {
                 timestamp: new Date(),
@@ -428,8 +462,8 @@ export default function MaterialsPage() {
                 details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
             };
             const finalHistory = [...(formValues.history || []), newHistoryEntry];
-    
-            // Preparar dados principais incluindo os planos de corte
+
+            // Preparar dados principais
             const dataToSave: any = {
                 date: Timestamp.fromDate(formValues.date),
                 status: formValues.status,
@@ -457,7 +491,7 @@ export default function MaterialsPage() {
                 deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null,
                 status: item.status || 'Pendente',
             }));
-    
+
             // Preparar aprovação
             if (formValues.approval) {
                 dataToSave.approval = {
@@ -468,14 +502,16 @@ export default function MaterialsPage() {
             } else {
                 dataToSave.approval = null;
             }
-    
-            // MUDANÇA PRINCIPAL: Salvar planos como array no documento principal
-            if (formValues.cuttingPlans && Array.isArray(formValues.cuttingPlans) && formValues.cuttingPlans.length > 0) {
-                console.log('✂️ Preparando', formValues.cuttingPlans.length, 'planos de corte...');
+
+            // *** PARTE CRÍTICA: PREPARAR PLANOS DE CORTE ***
+            console.log('🔧 Preparando planos de corte para o Firestore...');
+            
+            dataToSave.cuttingPlans = formValues.cuttingPlans.map((plan, index) => {
+                console.log(`🛠️ Processando plano ${index + 1}:`, plan);
                 
-                dataToSave.cuttingPlans = formValues.cuttingPlans.map(plan => ({
-                    id: plan.id,
-                    name: plan.name || 'Plano de Corte',
+                const processedPlan = {
+                    id: plan.id || `plan_${Date.now()}_${index}`,
+                    name: plan.name || `Plano de Corte ${index + 1}`,
                     materialDescription: plan.materialDescription || '',
                     stockLength: Number(plan.stockLength) || 0,
                     kerf: Number(plan.kerf) || 0,
@@ -490,42 +526,44 @@ export default function MaterialsPage() {
                     })),
                     patterns: plan.patterns || [],
                     summary: plan.summary || null,
-                }));
+                };
                 
-                console.log('💾 Planos preparados:', dataToSave.cuttingPlans);
-            } else {
-                dataToSave.cuttingPlans = [];
-                console.log('ℹ️ Nenhum plano de corte para salvar');
-            }
-    
-            console.log('💾 Dados finais preparados para salvar:', dataToSave);
-    
+                console.log(`✅ Plano processado ${index + 1}:`, processedPlan);
+                return processedPlan;
+            });
+
+            console.log('💾 DADOS FINAIS PARA SALVAR:', dataToSave);
+            console.log('✂️ PLANOS FINAIS:', dataToSave.cuttingPlans);
+
             let requisitionId: string;
             let isNewRequisition = !selectedRequisition?.id;
-    
+
             if (isNewRequisition) {
                 console.log('🆕 Criando nova requisição...');
                 const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
                 const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
                 const newRequisitionData = { ...dataToSave, requisitionNumber: (highestNumber + 1).toString().padStart(5, '0') };
                 
+                console.log('📤 Enviando para Firestore:', newRequisitionData);
                 const newDocRef = await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), newRequisitionData);
                 requisitionId = newDocRef.id;
                 console.log('✅ Nova requisição criada com ID:', requisitionId);
             } else {
                 console.log('📝 Atualizando requisição existente:', selectedRequisition!.id);
                 requisitionId = selectedRequisition!.id;
+                
+                console.log('📤 Enviando update para Firestore:', dataToSave);
                 await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", requisitionId), dataToSave);
                 console.log('✅ Requisição atualizada com sucesso');
             }
-    
-            console.log('🎉 Salvamento concluído com sucesso!');
+
+            console.log('🎉 === SALVAMENTO CONCLUÍDO COM SUCESSO ===');
             toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
             setIsFormOpen(false);
             await fetchData();
             
         } catch (error: any) {
-            console.error("❌ Erro geral no onSubmit:", error);
+            console.error("❌ === ERRO NO SALVAMENTO ===", error);
             toast({ 
                 variant: "destructive", 
                 title: "Erro ao salvar", 
@@ -766,7 +804,7 @@ export default function MaterialsPage() {
     }, [requisitions]);
 
     const generateCuttingPlan = () => {
-        console.log('🧮 Iniciando geração do plano de corte...');
+        console.log('🧮 === GERAÇÃO DO PLANO DE CORTE ===');
         console.log('📌 Plano ativo:', activeCutPlanIndex);
         
         const cuttingPlanValues = form.getValues(`cuttingPlans.${activeCutPlanIndex}`);
@@ -787,14 +825,14 @@ export default function MaterialsPage() {
             return;
         }
     
+        // ... (resto do algoritmo de geração permanece igual) ...
+        
         const stockLengthNum = Number(stockLength);
         const kerfNum = Number(kerf || 0);
-        console.log('🔢 Valores numéricos - Comprimento:', stockLengthNum, 'Kerf:', kerfNum);
     
         const allPieces: { code?: string; description: string; length: number }[] = (items || []).flatMap(item => {
             const quantityNum = Math.floor(Number(item.quantity) || 0);
             const lengthNum = Number(item.length) || 0;
-            console.log('🧩 Processando item:', item.description, 'Qtd:', quantityNum, 'Comp:', lengthNum);
             
             if (quantityNum > 0 && lengthNum > 0) {
                 return Array.from({ length: quantityNum }, () => ({
@@ -806,24 +844,16 @@ export default function MaterialsPage() {
             return [];
         });
         
-        console.log('🎯 Peças processadas:', allPieces);
-        
         if (allPieces.length === 0) {
-            console.error('❌ Nenhuma peça válida encontrada');
             toast({ variant: 'destructive', title: 'Nenhum item válido', description: 'Verifique as quantidades e comprimentos dos itens.' });
             return;
         }
     
-        // Algoritmo de bin packing (mesmo código anterior, mas com logs)
         allPieces.sort((a, b) => b.length - a.length);
-        console.log('📊 Peças ordenadas:', allPieces);
     
         const bins: { pieces: number[]; remaining: number }[] = [];
         for (const piece of allPieces) {
-            if (piece.length > stockLengthNum) {
-                console.warn('⚠️ Peça muito grande ignorada:', piece);
-                continue;
-            }
+            if (piece.length > stockLengthNum) continue;
     
             let placed = false;
             for (const bin of bins) {
@@ -843,8 +873,6 @@ export default function MaterialsPage() {
                 });
             }
         }
-        
-        console.log('📦 Bins gerados:', bins);
         
         let patternId = 1;
         let totalScrap = 0;
@@ -891,16 +919,19 @@ export default function MaterialsPage() {
             },
         };
         
-        console.log('🎉 Resultados finais:', results);
+        console.log('🎉 Resultados gerados:', results);
         
         // Definir valores no formulário
-        console.log('💾 Atualizando formulário...');
         form.setValue(`cuttingPlans.${activeCutPlanIndex}.patterns`, results.patterns);
         form.setValue(`cuttingPlans.${activeCutPlanIndex}.summary`, results.summary);
         
-        // Verificar se foi salvo corretamente
+        // Verificação pós-definição
         const updatedPlan = form.getValues(`cuttingPlans.${activeCutPlanIndex}`);
         console.log('✅ Plano atualizado no formulário:', updatedPlan);
+        
+        // VERIFICAÇÃO CRÍTICA: Os dados estão realmente no form?
+        const allFormData = form.getValues();
+        console.log('🔍 Todos os dados do form após gerar plano:', allFormData.cuttingPlans);
         
         toast({ title: "Plano de Corte Gerado!", description: "Os resultados foram calculados e exibidos." });
     };
