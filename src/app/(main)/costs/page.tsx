@@ -76,7 +76,6 @@ const segmentOptions = [
 ];
 
 const supplierSchema = z.object({
-  id: z.string().optional(),
   supplierCode: z.string().optional(),
   razaoSocial: z.string().optional(),
   nomeFantasia: z.string().optional(),
@@ -87,7 +86,7 @@ const supplierSchema = z.object({
   category: z.string().optional(),
   status: z.enum(["ativo", "inativo"]).default("ativo"),
   telefone: z.string().optional(),
-  primaryEmail: z.string().email("E-mail inválido.").optional(),
+  primaryEmail: z.string().email("E-mail inválido.").optional().or(z.literal('')),
   salesContactName: z.string().optional(),
   address: z.object({
     zipCode: z.string().optional(),
@@ -130,7 +129,7 @@ const costEntrySchema = z.object({
 
 type CostEntryData = z.infer<typeof costEntrySchema>;
 
-type Supplier = z.infer<typeof supplierSchema>;
+type Supplier = z.infer<typeof supplierSchema> & { id?: string };
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 
 type Requisition = {
@@ -167,7 +166,7 @@ export default function CostsPage() {
         resolver: zodResolver(itemUpdateSchema),
     });
 
-    const supplierForm = useForm<Supplier>({
+    const supplierForm = useForm<z.infer<typeof supplierSchema>>({
         resolver: zodResolver(supplierSchema),
         defaultValues: {
             status: 'ativo',
@@ -224,12 +223,15 @@ export default function CostsPage() {
         setIsLoadingSuppliers(true);
         try {
             const suppliersSnapshot = await getDocs(collection(db, "companies", "mecald", "suppliers"));
-            const suppliersList: Supplier[] = suppliersSnapshot.docs.map(d => ({ 
-              ...d.data(), 
-              id: d.id,
-              firstRegistrationDate: d.data().firstRegistrationDate?.toDate(),
-              lastUpdate: d.data().lastUpdate?.toDate(),
-            }) as Supplier);
+            const suppliersList: Supplier[] = suppliersSnapshot.docs.map(d => {
+              const data = d.data();
+              return { 
+                id: d.id,
+                ...data,
+                firstRegistrationDate: data.firstRegistrationDate?.toDate(),
+                lastUpdate: data.lastUpdate?.toDate(),
+              } as Supplier
+            });
             setSuppliers(suppliersList);
         } catch (error) {
             console.error("Error fetching suppliers:", error);
@@ -346,7 +348,7 @@ export default function CostsPage() {
         }
     };
     
-    const onSupplierSubmit = async (values: Supplier) => {
+    const onSupplierSubmit = async (values: z.infer<typeof supplierSchema>) => {
         try {
             const finalNomeFantasia = values.nomeFantasia || values.razaoSocial || '';
             const razaoSocial = values.razaoSocial || '';
@@ -369,8 +371,7 @@ export default function CostsPage() {
             }
 
             if (selectedSupplier?.id) { 
-                const { id, ...updateData } = dataToSave;
-                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), updateData, { merge: true });
+                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
                 toast({ title: "Fornecedor atualizado com sucesso!" });
             } else { 
                 dataToSave.firstRegistrationDate = Timestamp.now();
@@ -378,6 +379,7 @@ export default function CostsPage() {
                 toast({ title: "Fornecedor adicionado com sucesso!" });
             }
             setIsSupplierFormOpen(false);
+            setSelectedSupplier(null);
             await fetchSuppliers();
         } catch (error) {
             console.error("Error saving supplier:", error);
@@ -417,7 +419,8 @@ export default function CostsPage() {
 
     const handleEditSupplierClick = (supplier: Supplier) => {
         setSelectedSupplier(supplier);
-        supplierForm.reset(supplier);
+        const { id, ...formData } = supplier;
+        supplierForm.reset(formData);
         setIsSupplierFormOpen(true);
     };
 
@@ -720,7 +723,7 @@ export default function CostsPage() {
                             <FormItem className="flex flex-col"><FormLabel>Data de Entrega</FormLabel>
                                 <Popover><PopoverTrigger asChild>
                                     <FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl>
-                                </PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover>
+                                </PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent></Popover>
                                 <FormMessage />
                             </FormItem>
                         )} />
