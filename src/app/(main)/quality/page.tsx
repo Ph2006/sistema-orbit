@@ -886,7 +886,7 @@ export default function QualityPage() {
       <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <Dialog open={isInspectionFormOpen} onOpenChange={setIsInspectionFormOpen}>
-        <DialogContent className="max-w-3xl h-[90vh] flex flex-col">
+        <DialogContent className="max-w-5xl h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
                 {dialogType === 'material' && (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material')}
@@ -952,8 +952,18 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
 
 function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, calibrations, toast }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], fieldArrayProps: any, calibrations: Calibration[], toast: any }) {
     const watchedOrderId = form.watch("orderId");
+    const watchedItemId = form.watch("itemId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
-    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    useEffect(() => { form.setValue('itemId', ''); form.setValue('partIdentifier', ''); }, [watchedOrderId, form]);
+    
+    const selectedItemInfo = useMemo(() => {
+        if (!watchedItemId) return null;
+        return availableItems.find(i => i.id === watchedItemId);
+    }, [watchedItemId, availableItems]);
+    const totalItemQuantity = selectedItemInfo?.quantity || 0;
+    useEffect(() => {
+      form.setValue('partIdentifier', '');
+    }, [watchedItemId, form]);
     
     const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
     const [editMeasurementIndex, setEditMeasurementIndex] = useState<number | null>(null);
@@ -1079,15 +1089,34 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     };
 
     return (<>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="partIdentifier" render={({ field }) => ( 
+                <FormItem>
+                    <FormLabel>Peça Inspecionada</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={!watchedItemId || totalItemQuantity === 0}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Selecione a peça" /></SelectTrigger></FormControl>
+                        <SelectContent>
+                            {totalItemQuantity > 0 ? (
+                                Array.from({ length: totalItemQuantity }, (_, i) => i + 1).map(num => (
+                                    <SelectItem key={num} value={`Peça ${num} de ${totalItemQuantity}`}>
+                                        Peça {num} de ${totalItemQuantity}
+                                    </SelectItem>
+                                ))
+                            ) : (
+                                <SelectItem value="none" disabled>Selecione um item primeiro</SelectItem>
+                            )}
+                        </SelectContent>
+                    </Select>
+                    <FormMessage />
+                </FormItem>
+            )} />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças Inspecionadas</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 10" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças Inspecionadas</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 1" /></FormControl><FormMessage /></FormItem> )}/>
         </div>
-        <FormField control={form.control} name="partIdentifier" render={({ field }) => ( <FormItem><FormLabel>Peça(s) Inspecionada(s) / Nº de Série</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Peça 1 de 2, S/N 12345" /></FormControl><FormMessage /></FormItem> )}/>
 
 
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
@@ -1236,6 +1265,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
