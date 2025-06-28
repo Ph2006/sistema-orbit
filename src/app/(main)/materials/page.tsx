@@ -159,7 +159,7 @@ export default function MaterialsPage() {
     const { toast } = useToast();
 
     // State for the temporary item form
-    const emptyRequisitionItem: RequisitionItem = { id: '', description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null };
+    const emptyRequisitionItem: RequisitionItem = { id: Date.now().toString(), description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null };
     const [currentItem, setCurrentItem] = useState<RequisitionItem>(emptyRequisitionItem);
     const [editItemIndex, setEditItemIndex] = useState<number | null>(null);
 
@@ -210,7 +210,7 @@ export default function MaterialsPage() {
                   
                   let deliveryDate: Date | undefined = undefined;
                     if (data.deliveryDate) {
-                         if (typeof data.deliveryDate.toDate === 'function') {
+                        if (typeof data.deliveryDate.toDate === 'function') {
                             deliveryDate = data.deliveryDate.toDate();
                         } else if (data.deliveryDate && !isNaN(new Date(data.deliveryDate).getTime())) {
                             deliveryDate = new Date(data.deliveryDate);
@@ -311,7 +311,7 @@ export default function MaterialsPage() {
     const handleOpenForm = (requisition: Requisition | null = null) => {
         setPlanResults(null);
         setSelectedRequisition(requisition);
-        setCurrentItem(emptyRequisitionItem);
+        setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
         setEditItemIndex(null);
         setCurrentCutItem(emptyCutItem);
         setEditCutIndex(null);
@@ -359,6 +359,9 @@ export default function MaterialsPage() {
     };
 
     const onSubmit = async (values: Requisition) => {
+        // Use getValues() to ensure the latest form state is used, especially for nested objects updated with setValue
+        const currentValues = form.getValues();
+
         try {
             const newHistoryEntry = {
                 timestamp: new Date(),
@@ -367,21 +370,21 @@ export default function MaterialsPage() {
                 details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
             };
     
-            const finalHistory = [...(values.history || []), newHistoryEntry];
+            const finalHistory = [...(currentValues.history || []), newHistoryEntry];
     
             const dataToSave: any = {
-                date: Timestamp.fromDate(values.date),
-                status: values.status,
-                requestedBy: values.requestedBy,
-                department: values.department || null,
-                orderId: values.orderId || null,
-                customer: values.customer || null,
-                generalNotes: values.generalNotes || null,
+                date: Timestamp.fromDate(currentValues.date),
+                status: currentValues.status,
+                requestedBy: currentValues.requestedBy,
+                department: currentValues.department || null,
+                orderId: currentValues.orderId || null,
+                customer: currentValues.customer || null,
+                generalNotes: currentValues.generalNotes || null,
                 history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
-                requisitionNumber: values.requisitionNumber || null,
+                requisitionNumber: currentValues.requisitionNumber || null,
             };
             
-            dataToSave.items = values.items.map(item => ({
+            dataToSave.items = currentValues.items.map(item => ({
                 id: item.id || Date.now().toString(),
                 code: item.code || '',
                 material: item.material || '',
@@ -396,31 +399,31 @@ export default function MaterialsPage() {
                 status: item.status || 'Pendente',
             }));
 
-            if (values.approval) {
+            if (currentValues.approval) {
               dataToSave.approval = {
-                  approvedBy: values.approval.approvedBy || null,
-                  approvalDate: values.approval.approvalDate ? Timestamp.fromDate(new Date(values.approval.approvalDate)) : null,
-                  justification: values.approval.justification || null,
+                  approvedBy: currentValues.approval.approvedBy || null,
+                  approvalDate: currentValues.approval.approvalDate ? Timestamp.fromDate(new Date(currentValues.approval.approvalDate)) : null,
+                  justification: currentValues.approval.justification || null,
               }
             } else {
               dataToSave.approval = null;
             }
 
-            if (values.cuttingPlan && values.cuttingPlan.items?.length > 0) {
+            if (currentValues.cuttingPlan && (currentValues.cuttingPlan.items?.length > 0 || currentValues.cuttingPlan.summary)) {
                 dataToSave.cuttingPlan = {
-                  materialDescription: values.cuttingPlan.materialDescription || '',
-                  stockLength: Number(values.cuttingPlan.stockLength) || 0,
-                  kerf: Number(values.cuttingPlan.kerf) || 0,
-                  leftoverThreshold: Number(values.cuttingPlan.leftoverThreshold) || 0,
-                  deliveryDate: values.cuttingPlan.deliveryDate ? Timestamp.fromDate(new Date(values.cuttingPlan.deliveryDate)) : null,
-                  items: values.cuttingPlan.items.map(item => ({
+                  materialDescription: currentValues.cuttingPlan.materialDescription || '',
+                  stockLength: Number(currentValues.cuttingPlan.stockLength) || 0,
+                  kerf: Number(currentValues.cuttingPlan.kerf) || 0,
+                  leftoverThreshold: Number(currentValues.cuttingPlan.leftoverThreshold) || 0,
+                  deliveryDate: currentValues.cuttingPlan.deliveryDate ? Timestamp.fromDate(new Date(currentValues.cuttingPlan.deliveryDate)) : null,
+                  items: (currentValues.cuttingPlan.items || []).map(item => ({
                       code: item.code || '',
                       description: item.description,
                       length: Number(item.length) || 0,
                       quantity: Number(item.quantity) || 0,
                   })),
-                  patterns: values.cuttingPlan.patterns || [],
-                  summary: values.cuttingPlan.summary || null,
+                  patterns: currentValues.cuttingPlan.patterns || [],
+                  summary: currentValues.cuttingPlan.summary || null,
                 }
             } else {
                 dataToSave.cuttingPlan = null;
@@ -595,16 +598,9 @@ export default function MaterialsPage() {
             y += 6;
             autoTable(docPdf, {
                 startY: y,
-                head: [['Código', 'Descrição', 'Comprimento (mm)', 'Quantidade', 'Exec. [ ]']],
-                body: plan.items.map(item => [item.code || '-', item.description, item.length, item.quantity, '']),
-                headStyles: { fillColor: [40, 40, 40] },
-                 didDrawCell: function (data) {
-                    if (data.section === 'body' && data.column.index === 4) {
-                        const x = data.cell.x + (data.cell.width / 2) - 2;
-                        const y = data.cell.y + (data.cell.height / 2) - 2;
-                        docPdf.rect(x, y, 4, 4);
-                    }
-                }
+                head: [['Código', 'Descrição', 'Comprimento (mm)', 'Quantidade']],
+                body: plan.items.map(item => [item.code || '-', item.description, item.length, item.quantity]),
+                headStyles: { fillColor: [40, 40, 40] }
             });
             y = (docPdf as any).lastAutoTable.finalY + 10;
     
@@ -612,15 +608,23 @@ export default function MaterialsPage() {
             y += 6;
             autoTable(docPdf, {
                 startY: y,
-                head: [['#', 'Padrão de Corte (Peças x Comp.)', 'Sobra (mm)', 'Nº de Barras', 'Rendimento']],
+                head: [['#', 'Padrão de Corte (Peças x Comp.)', 'Sobra (mm)', 'Nº de Barras', 'Rendimento', 'Exec. [ ]']],
                 body: results.patterns.map((p: any) => [
                     p.patternId,
                     p.patternString,
                     (Number(p.leftover) || 0).toFixed(2),
                     p.barsNeeded,
-                    `${(Number(p.yieldPercentage) || 0).toFixed(1)}%`
+                    `${(Number(p.yieldPercentage) || 0).toFixed(1)}%`,
+                    ''
                 ]),
-                headStyles: { fillColor: [40, 40, 40] }
+                headStyles: { fillColor: [40, 40, 40] },
+                didDrawCell: function (data) {
+                    if (data.section === 'body' && data.column.index === 5) {
+                        const x = data.cell.x + (data.cell.width / 2) - 2;
+                        const y = data.cell.y + (data.cell.height / 2) - 2;
+                        docPdf.rect(x, y, 4, 4);
+                    }
+                }
             });
             y = (docPdf as any).lastAutoTable.finalY + 10;
     
@@ -764,7 +768,7 @@ export default function MaterialsPage() {
                 barUsage: Number(barUsage) || 0,
                 leftover: Number(leftover) || 0,
                 yieldPercentage: Number((piecesUsedSum / stockLengthNum) * 100) || 0,
-                barsNeeded: 1,
+                barsNeeded: 1, // Each bin represents one bar
             };
         });
 
@@ -844,38 +848,6 @@ export default function MaterialsPage() {
 
     const handleAddItem = () => {
         const dataToValidate = {
-            id: Date.now().toString(),
-            description: currentItem.description,
-            quantityRequested: Number(currentItem.quantityRequested) || 0,
-            unit: currentItem.unit,
-            code: currentItem.code || '',
-            material: currentItem.material || '',
-            dimensao: currentItem.dimensao || '',
-            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
-            notes: currentItem.notes || '',
-            deliveryDate: currentItem.deliveryDate,
-            status: currentItem.status,
-            quantityFulfilled: currentItem.quantityFulfilled
-        };
-
-        const result = requisitionItemSchema.safeParse(dataToValidate);
-        if (!result.success) {
-            const firstError = result.error.errors[0];
-            toast({
-                variant: 'destructive',
-                title: `Erro de validação: ${firstError.path[0]}`,
-                description: firstError.message
-            });
-            return;
-        }
-        append(result.data);
-        setCurrentItem(emptyRequisitionItem);
-    };
-
-    const handleUpdateItem = () => {
-        if (editItemIndex === null) return;
-
-        const dataToValidate = {
             id: currentItem.id || Date.now().toString(),
             description: currentItem.description,
             quantityRequested: Number(currentItem.quantityRequested) || 0,
@@ -900,8 +872,40 @@ export default function MaterialsPage() {
             });
             return;
         }
+        append(result.data);
+        setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
+    };
+
+    const handleUpdateItem = () => {
+        if (editItemIndex === null) return;
+
+        const dataToValidate = {
+            id: currentItem.id,
+            description: currentItem.description,
+            quantityRequested: Number(currentItem.quantityRequested) || 0,
+            unit: currentItem.unit,
+            code: currentItem.code || '',
+            material: currentItem.material || '',
+            dimensao: currentItem.dimensao || '',
+            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+            notes: currentItem.notes || '',
+            deliveryDate: currentItem.deliveryDate,
+            status: currentItem.status,
+            quantityFulfilled: currentItem.quantityFulfilled
+        };
+
+        const result = requisitionItemSchema.safeParse(dataToValidate);
+        if (!result.success) {
+            const firstError = result.error.errors[0];
+            toast({
+                variant: 'destructive',
+                title: `Erro de validação: ${firstError.path[0]}`,
+                description: firstError.message
+            });
+            return;
+        }
         update(editItemIndex, result.data);
-        setCurrentItem(emptyRequisitionItem);
+        setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
         setEditItemIndex(null);
     };
 
@@ -911,7 +915,7 @@ export default function MaterialsPage() {
     };
     
     const handleCancelEditItem = () => {
-        setCurrentItem(emptyRequisitionItem);
+        setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
         setEditItemIndex(null);
     };
 
