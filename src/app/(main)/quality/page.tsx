@@ -10,6 +10,9 @@ import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, setD
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, addMonths, isPast, differenceInDays } from "date-fns";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -96,11 +99,9 @@ const dimensionalReportSchema = z.object({
   itemId: z.string({ required_error: "Selecione um item." }),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
+  photosUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
   notes: z.string().optional(),
   measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
-}).refine(data => {
-    const overallResult = data.measurements.every(m => m.result === "Conforme");
-    return true; // this is just to allow the schema to pass, logic is handled in submission.
 });
 
 const weldingInspectionSchema = z.object({
@@ -517,7 +518,7 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', measurements: [] }); }
+    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, photosUrl: '', notes: '', measurements: [] }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
@@ -558,6 +559,57 @@ export default function QualityPage() {
     }
   };
 
+  const handleDimensionalReportPDF = async (report: DimensionalReport) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: { nomeFantasia?: string, logo?: { preview?: string } } = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === report.orderId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        let y = 15;
+        
+        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text('Relatório de Inspeção Dimensional', pageWidth / 2, y + 8, { align: 'center' });
+        y += 25;
+
+        docPdf.setFontSize(10).setFont(undefined, 'normal');
+        docPdf.text(`Pedido: ${orderInfo?.number || 'N/A'}`, 15, y);
+        docPdf.text(`Cliente: ${orderInfo?.customerName || 'N/A'}`, 15, y + 5);
+        docPdf.text(`Item: ${report.itemName}`, 15, y + 10);
+        
+        docPdf.text(`Data: ${format(report.inspectionDate, 'dd/MM/yyyy')}`, pageWidth - 15, y, { align: 'right' });
+        docPdf.text(`Inspetor: ${report.inspectedBy}`, pageWidth - 15, y + 5, { align: 'right' });
+        docPdf.text(`Resultado Geral: ${report.overallResult}`, pageWidth - 15, y + 10, { align: 'right' });
+        y += 20;
+
+        autoTable(docPdf, {
+            startY: y,
+            head: [['Dimensão', 'Nominal', 'Tol. Mín', 'Tol. Máx', 'Medido', 'Instrumento', 'Resultado']],
+            body: report.measurements.map(m => [
+                m.dimensionName,
+                m.nominalValue.toString(),
+                m.toleranceMin?.toString() ?? '-',
+                m.toleranceMax?.toString() ?? '-',
+                m.measuredValue.toString(),
+                m.instrumentUsed,
+                m.result
+            ]),
+            headStyles: { fillColor: [40, 40, 40] }
+        });
+
+        docPdf.save(`RelatorioDimensional_${orderInfo?.number || report.id}.pdf`);
+
+    } catch (error) {
+        console.error("Error exporting PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+    }
+  };
+
+
   const currentForm = useMemo(() => {
     switch(dialogType) {
         case 'material': return materialInspectionForm;
@@ -567,18 +619,6 @@ export default function QualityPage() {
         default: return null;
     }
   }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm]);
-  
-  const watchedDimensionalOrderId = dimensionalReportForm.watch("orderId");
-  const availableDimensionalItems = useMemo(() => { if (!watchedDimensionalOrderId) return []; return orders.find(o => o.id === watchedDimensionalOrderId)?.items || []; }, [watchedDimensionalOrderId, orders]);
-  useEffect(() => { dimensionalReportForm.setValue('itemId', ''); }, [watchedDimensionalOrderId, dimensionalReportForm]);
-
-  const getAvailableItemsForForm = (form: any) => {
-    const orderId = form.watch("orderId");
-    return useMemo(() => {
-      if (!orderId) return [];
-      return orders.find(o => o.id === orderId)?.items || [];
-    }, [orderId, orders]);
-  };
   
   const watchedWeldingInspectionType = weldingInspectionForm.watch('inspectionType');
 
@@ -674,6 +714,7 @@ export default function QualityPage() {
                                           <TableRow key={rep.id}><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(rep.overallResult)}>{rep.overallResult}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
+                                              <Button variant="ghost" size="icon" onClick={() => handleDimensionalReportPDF(rep)}><FileDown className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" onClick={() => handleOpenDimensionalForm(rep)}><Pencil className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'dimensional')}><Trash2 className="h-4 w-4" /></Button>
                                           </TableCell></TableRow>
@@ -883,7 +924,8 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                 </TableRow>))}
             </TableBody></Table>
             )}
-            <div className="mt-4 space-y-4">
+            <div className="mt-4 space-y-4 p-4 border rounded-md">
+                <h4 className="font-medium">Adicionar Nova Medição</h4>
                 <div>
                     <Label>Nome da Dimensão</Label>
                     <Input value={newMeasurement.dimensionName} onChange={(e) => setNewMeasurement({...newMeasurement, dimensionName: e.target.value})} placeholder="Ex: Diâmetro externo"/>
@@ -919,11 +961,13 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                         </SelectContent>
                     </Select>
                 </div>
+                 <div className="flex justify-end mt-4"><Button type="button" size="sm" onClick={handleAddMeasurement}><PlusCircle className="mr-2 h-4 w-4" />Adicionar Medição</Button></div>
             </div>
-            <div className="flex justify-end mt-4"><Button type="button" size="sm" onClick={handleAddMeasurement}>Adicionar Medição</Button></div>
+           
         </CardContent></Card>
         
         <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="photosUrl" render={({ field }) => ( <FormItem><FormLabel>Link para Fotos do Processo</FormLabel><FormControl><Input type="url" {...field} placeholder="https://drive.google.com/..." /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
@@ -978,4 +1022,5 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
