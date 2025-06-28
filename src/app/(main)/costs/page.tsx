@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -288,8 +289,9 @@ export default function CostsPage() {
     
     const onSupplierSubmit = async (values: Supplier) => {
         try {
-            const dataToSave: Supplier = {
+            const dataToSave = {
                 ...values,
+                name: values.nomeFantasia, // Link 'name' to 'nomeFantasia'
                 lastUpdate: Timestamp.now(),
             };
 
