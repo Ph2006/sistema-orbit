@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -142,6 +143,44 @@ type Requisition = {
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
 type OrderInfo = { id: string; internalOS: string; customerName: string; costEntries?: any[] };
 
+const emptySupplierFormValues: z.infer<typeof supplierSchema> = {
+    status: 'ativo',
+    razaoSocial: '',
+    nomeFantasia: '',
+    cnpj: '',
+    inscricaoEstadual: '',
+    inscricaoMunicipal: '',
+    segment: '',
+    telefone: '',
+    primaryEmail: '',
+    salesContactName: '',
+    address: {
+        zipCode: '',
+        street: '',
+        number: '',
+        complement: '',
+        neighborhood: '',
+        cityState: '',
+    },
+    bankInfo: {
+        bank: '',
+        agency: '',
+        accountNumber: '',
+        pix: '',
+    },
+    commercialInfo: {
+        paymentTerms: '',
+        shippingMethods: '',
+        shippingIncluded: false,
+    },
+    documentation: {
+        contratoSocialUrl: '',
+        cartaoCnpjUrl: '',
+        certidoesNegativasUrl: '',
+        isoCertificateUrl: '',
+        alvaraUrl: '',
+    },
+};
 
 export default function CostsPage() {
     const [requisitions, setRequisitions] = useState<Requisition[]>([]);
@@ -166,44 +205,7 @@ export default function CostsPage() {
 
     const supplierForm = useForm<z.infer<typeof supplierSchema>>({
         resolver: zodResolver(supplierSchema),
-        defaultValues: {
-            status: 'ativo',
-            razaoSocial: '',
-            nomeFantasia: '',
-            cnpj: '',
-            inscricaoEstadual: '',
-            inscricaoMunicipal: '',
-            segment: '',
-            telefone: '',
-            primaryEmail: '',
-            salesContactName: '',
-            address: {
-                zipCode: '',
-                street: '',
-                number: '',
-                complement: '',
-                neighborhood: '',
-                cityState: '',
-            },
-            bankInfo: {
-                bank: '',
-                agency: '',
-                accountNumber: '',
-                pix: '',
-            },
-            commercialInfo: {
-                paymentTerms: '',
-                shippingMethods: '',
-                shippingIncluded: false,
-            },
-            documentation: {
-                contratoSocialUrl: '',
-                cartaoCnpjUrl: '',
-                certidoesNegativasUrl: '',
-                isoCertificateUrl: '',
-                alvaraUrl: '',
-            },
-        }
+        defaultValues: emptySupplierFormValues
     });
     
     const costEntryForm = useForm<CostEntryData>({
@@ -378,35 +380,29 @@ export default function CostsPage() {
     };
     
     const onSupplierSubmit = async (values: z.infer<typeof supplierSchema>) => {
-        if (!selectedSupplier) return;
         try {
-            let finalNomeFantasia = values.nomeFantasia || values.razaoSocial || '';
-            let razaoSocial = values.razaoSocial || '';
-            if (finalNomeFantasia === '' && razaoSocial !== '') {
-                finalNomeFantasia = razaoSocial;
-            }
-            if (razaoSocial === '' && finalNomeFantasia !== '') {
-                razaoSocial = finalNomeFantasia;
-            }
-    
             const dataToSave: any = {
                 ...values,
-                razaoSocial: razaoSocial,
-                nomeFantasia: finalNomeFantasia,
-                name: finalNomeFantasia,
+                razaoSocial: values.razaoSocial || values.nomeFantasia || '',
+                nomeFantasia: values.nomeFantasia || values.razaoSocial || '',
                 lastUpdate: Timestamp.now(),
             };
-    
-            if (!selectedSupplier.supplierCode) {
+            dataToSave.name = dataToSave.nomeFantasia;
+            
+            if (selectedSupplier?.id) { // UPDATE
+                dataToSave.supplierCode = selectedSupplier.supplierCode; // Preserve existing code
+                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
+                toast({ title: "Fornecedor atualizado com sucesso!" });
+            } else { // CREATE
                 const highestCode = suppliers.reduce((max, s) => {
                     const codeNum = parseInt(s.supplierCode || "0", 10);
                     return !isNaN(codeNum) && codeNum > max ? codeNum : max;
                 }, 0);
                 dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
+                dataToSave.firstRegistrationDate = Timestamp.now();
+                await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
+                toast({ title: "Fornecedor criado com sucesso!" });
             }
-    
-            await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
-            toast({ title: "Fornecedor atualizado com sucesso!" });
     
             setIsSupplierFormOpen(false);
             setSelectedSupplier(null);
@@ -441,45 +437,26 @@ export default function CostsPage() {
         }
     };
 
-    const handleAddSupplierClick = async () => {
-        try {
-            const dataToSave: Partial<Supplier> = {
-                status: 'ativo',
-                firstRegistrationDate: new Date(),
-                lastUpdate: new Date(),
-                nomeFantasia: 'Novo Fornecedor (editar)',
-                cnpj: '00.000.000/0000-00',
-            };
-
-            const docRef = await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
-            
-            await fetchSuppliers();
-            
-            const newSupplier = { ...dataToSave, id: docRef.id };
-            setSelectedSupplier(newSupplier as Supplier);
-            supplierForm.reset({
-                ...supplierForm.getValues(),
-                ...newSupplier
-            });
-            setIsSupplierFormOpen(true);
-            toast({ title: "Novo fornecedor criado.", description: "Por favor, preencha os detalhes." });
-        } catch(e) {
-             console.error("Error creating new supplier:", e);
-            toast({ variant: "destructive", title: "Erro ao criar fornecedor" });
-        }
+    const handleAddSupplierClick = () => {
+        setSelectedSupplier(null);
+        supplierForm.reset(emptySupplierFormValues);
+        setIsSupplierFormOpen(true);
     };
 
     const handleEditSupplierClick = (supplier: Supplier) => {
         setSelectedSupplier(supplier);
-        const formValues = {
-            ...supplierForm.getValues(), // Start with defaults
-            ...supplier, // Override with supplier data from firestore
-            address: { ...supplierForm.getValues().address, ...(supplier.address || {}) },
-            bankInfo: { ...supplierForm.getValues().bankInfo, ...(supplier.bankInfo || {}) },
-            commercialInfo: { ...supplierForm.getValues().commercialInfo, ...(supplier.commercialInfo || {}) },
-            documentation: { ...supplierForm.getValues().documentation, ...(supplier.documentation || {}) },
+        const formData = {
+            ...emptySupplierFormValues,
+            ...supplier,
+            address: { ...emptySupplierFormValues.address, ...(supplier.address || {}) },
+            bankInfo: { ...emptySupplierFormValues.bankInfo, ...(supplier.bankInfo || {}) },
+            commercialInfo: { ...emptySupplierFormValues.commercialInfo, ...(supplier.commercialInfo || {}) },
+            documentation: { ...emptySupplierFormValues.documentation, ...(supplier.documentation || {}) },
         };
-        const { id, ...formData } = formValues;
+        if (formData.commercialInfo.avgLeadTimeDays === undefined || formData.commercialInfo.avgLeadTimeDays === null) {
+          // @ts-ignore
+          formData.commercialInfo.avgLeadTimeDays = ''; 
+        }
         supplierForm.reset(formData);
         setIsSupplierFormOpen(true);
     };
@@ -829,7 +806,7 @@ export default function CostsPage() {
       <Dialog open={isSupplierFormOpen} onOpenChange={setIsSupplierFormOpen}>
         <DialogContent className="max-w-4xl h-[90vh]">
             <DialogHeader>
-              <DialogTitle>{selectedSupplier?.id ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia || selectedSupplier.razaoSocial}` : "Adicionar Novo Fornecedor"}</DialogTitle>
+              <DialogTitle>{selectedSupplier?.id ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia || selectedSupplier.razaoSocial || ''}` : "Adicionar Novo Fornecedor"}</DialogTitle>
               <DialogDescription>Preencha os dados completos do fornecedor.</DialogDescription>
             </DialogHeader>
             <Form {...supplierForm}>
