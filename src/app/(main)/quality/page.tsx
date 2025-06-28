@@ -12,6 +12,7 @@ import { useAuth } from "../layout";
 import { format, addMonths, isPast, differenceInDays } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import Image from "next/image";
 
 
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -97,10 +98,12 @@ const dimensionalReportSchema = z.object({
   id: z.string().optional(),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
+  partIdentifier: z.string().optional(),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
+  customerInspector: z.string().optional(),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
   quantityInspected: z.coerce.number().min(1, "A quantidade inspecionada é obrigatória.").optional(),
-  photosUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
+  photos: z.array(z.string()).optional(),
   notes: z.string().optional(),
   measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
 });
@@ -263,9 +266,12 @@ export default function QualityPage() {
     resolver: zodResolver(dimensionalReportSchema),
     defaultValues: {
       inspectionDate: new Date(),
-      orderId: undefined, itemId: undefined, inspectedBy: undefined, photosUrl: '', notes: '',
+      orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '',
       quantityInspected: undefined,
-      measurements: []
+      measurements: [],
+      photos: [],
+      partIdentifier: '',
+      customerInspector: '',
     },
   });
   const { fields: measurementFields, append: appendMeasurement, remove: removeMeasurement, update: updateMeasurement } = useFieldArray({
@@ -524,7 +530,7 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, photosUrl: '', notes: '', quantityInspected: undefined, measurements: [] }); }
+    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', quantityInspected: undefined, measurements: [], photos: [], partIdentifier: '', customerInspector: '' }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
@@ -576,6 +582,7 @@ export default function QualityPage() {
 
         const docPdf = new jsPDF();
         const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
         let y = 15;
         
         if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
@@ -587,16 +594,13 @@ export default function QualityPage() {
         docPdf.text(`Pedido: ${orderInfo?.number || 'N/A'}`, 15, y);
         docPdf.text(`Cliente: ${orderInfo?.customerName || 'N/A'}`, 15, y + 5);
         docPdf.text(`Item: ${report.itemName} (Cód: ${itemInfo?.code || 'N/A'})`, 15, y + 10);
-        docPdf.text(`Quantidade Inspecionada: ${report.quantityInspected || 'N/A'}`, 15, y + 15);
+        docPdf.text(`Peça(s) Inspecionada(s): ${report.partIdentifier || 'N/A'}`, 15, y + 15);
         
         docPdf.text(`Data: ${format(report.inspectionDate, 'dd/MM/yyyy')}`, pageWidth - 15, y, { align: 'right' });
         docPdf.text(`Inspetor: ${report.inspectedBy}`, pageWidth - 15, y + 5, { align: 'right' });
         docPdf.text(`Resultado Geral: ${report.overallResult}`, pageWidth - 15, y + 10, { align: 'right' });
-        
-        if (report.photosUrl) {
-            docPdf.setTextColor(60, 120, 255); // Blue link color
-            docPdf.textWithLink('Link para Fotos do Processo', 15, y + 20, { url: report.photosUrl });
-            docPdf.setTextColor(0, 0, 0); // Reset color
+        if (report.quantityInspected) {
+          docPdf.text(`Quantidade Inspecionada: ${report.quantityInspected}`, pageWidth - 15, y + 15, { align: 'right' });
         }
         y += 25;
 
@@ -621,6 +625,65 @@ export default function QualityPage() {
             headStyles: { fillColor: [40, 40, 40] }
         });
 
+        let finalY = (docPdf as any).lastAutoTable.finalY;
+
+        if (report.photos && report.photos.length > 0) {
+            y = finalY + 10;
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Fotos da Inspeção', 15, y);
+            y += 7;
+
+            const photoWidth = (pageWidth - 45) / 2;
+            const photoHeight = photoWidth * (3/4);
+            let x = 15;
+
+            for (const photoDataUri of report.photos) {
+                if (y + photoHeight > pageHeight - 45) {
+                    docPdf.addPage();
+                    y = 20;
+                    x = 15;
+                }
+                
+                try {
+                    docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
+                } catch(e) {
+                    console.error("jsPDF error adding image: ", e);
+                    docPdf.text("Erro ao carregar imagem", x, y + 10);
+                }
+
+                if (x === 15) {
+                    x = 15 + photoWidth + 15;
+                } else {
+                    x = 15;
+                    y += photoHeight + 5;
+                }
+            }
+            finalY = y > finalY ? y : finalY;
+        }
+
+        const signatureY = pageHeight - 35;
+        if (finalY > signatureY - 20) {
+            docPdf.addPage();
+            finalY = 20;
+        } else {
+            finalY = signatureY;
+        }
+
+        docPdf.setFontSize(10).setFont(undefined, 'normal');
+        
+        const enterpriseInspectorX = 15;
+        docPdf.line(enterpriseInspectorX, finalY, enterpriseInspectorX + 85, finalY);
+        docPdf.text(report.inspectedBy, enterpriseInspectorX, finalY + 5);
+        docPdf.text('Inspetor Responsável (Empresa)', enterpriseInspectorX, finalY + 10);
+
+        if (report.customerInspector) {
+            const customerInspectorX = pageWidth - 15 - 85;
+            docPdf.line(customerInspectorX, finalY, customerInspectorX + 85, finalY);
+            docPdf.text(report.customerInspector, customerInspectorX, finalY + 5);
+            docPdf.text('Inspetor Responsável (Cliente)', customerInspectorX, finalY + 10);
+        }
+        
         docPdf.save(`RelatorioDimensional_${orderInfo?.number || report.id}.pdf`);
 
     } catch (error) {
@@ -895,6 +958,32 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
     const [editMeasurementIndex, setEditMeasurementIndex] = useState<number | null>(null);
 
+    const watchedPhotos = form.watch("photos", []);
+
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+
+        const currentPhotos = form.getValues("photos") || [];
+        
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const removePhoto = (index: number) => {
+        const currentPhotos = form.getValues("photos") || [];
+        const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+        form.setValue("photos", updatedPhotos, { shouldValidate: true });
+    };
+
     const handleAddMeasurement = () => {
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
@@ -998,6 +1087,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças Inspecionadas</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 10" /></FormControl><FormMessage /></FormItem> )}/>
         </div>
+        <FormField control={form.control} name="partIdentifier" render={({ field }) => ( <FormItem><FormLabel>Peça(s) Inspecionada(s) / Nº de Série</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Peça 1 de 2, S/N 12345" /></FormControl><FormMessage /></FormItem> )}/>
 
 
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
@@ -1066,8 +1156,32 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
            
         </CardContent></Card>
         
-        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="photosUrl" render={({ field }) => ( <FormItem><FormLabel>Link para Fotos do Processo</FormLabel><FormControl><Input type="url" {...field} value={field.value ?? ''} placeholder="https://drive.google.com/..." /></FormControl><FormMessage /></FormItem> )}/>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente (Nome)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )}/>
+        </div>
+        
+        <FormItem>
+            <FormLabel>Fotos da Inspeção</FormLabel>
+            <FormControl>
+                <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
+            </FormControl>
+            <FormDescription>Selecione uma ou mais imagens para anexar ao relatório. Imagens grandes podem demorar para salvar.</FormDescription>
+            {watchedPhotos && watchedPhotos.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                    {watchedPhotos.map((photo, index) => (
+                        <div key={index} className="relative">
+                            <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                            <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                <Trash2 className="h-3 w-3" />
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            )}
+            <FormMessage />
+        </FormItem>
+
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
@@ -1122,6 +1236,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
