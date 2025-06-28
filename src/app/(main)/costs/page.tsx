@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc, setDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc, setDoc, arrayUnion } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -78,8 +78,6 @@ const segmentOptions = [
 const supplierSchema = z.object({
   id: z.string().optional(),
   supplierCode: z.string().optional(),
-  
-  // 1. Dados Gerais
   razaoSocial: z.string().optional(),
   nomeFantasia: z.string().optional(),
   cnpj: z.string().min(14, "CNPJ inválido.").max(18, "CNPJ inválido."),
@@ -88,8 +86,6 @@ const supplierSchema = z.object({
   segment: z.string().optional(),
   category: z.string().optional(),
   status: z.enum(["ativo", "inativo"]).default("ativo"),
-
-  // 2. Contato e Endereço
   telefone: z.string().optional(),
   primaryEmail: z.string().email("E-mail inválido.").optional(),
   salesContactName: z.string().optional(),
@@ -101,8 +97,6 @@ const supplierSchema = z.object({
     neighborhood: z.string().optional(),
     cityState: z.string().optional(),
   }).optional(),
-
-  // 3. Dados Bancários
   bankInfo: z.object({
     bank: z.string().optional(),
     agency: z.string().optional(),
@@ -110,16 +104,12 @@ const supplierSchema = z.object({
     accountType: z.enum(["Pessoa Jurídica", "Pessoa Física"]).optional(),
     pix: z.string().optional(),
   }).optional(),
-
-  // 4. Informações Comerciais
   commercialInfo: z.object({
     paymentTerms: z.string().optional(),
     avgLeadTimeDays: z.coerce.number().optional(),
     shippingMethods: z.string().optional(),
     shippingIncluded: z.boolean().default(false),
   }).optional(),
-
-  // 5. Documentações - will store URLs
   documentation: z.object({
     contratoSocialUrl: z.string().url().optional().or(z.literal('')),
     cartaoCnpjUrl: z.string().url().optional().or(z.literal('')),
@@ -127,12 +117,18 @@ const supplierSchema = z.object({
     isoCertificateUrl: z.string().url().optional().or(z.literal('')),
     alvaraUrl: z.string().url().optional().or(z.literal('')),
   }).optional(),
-
-  // 6. Histórico
   firstRegistrationDate: z.date().optional(),
   lastUpdate: z.date().optional(),
 });
 
+const costEntrySchema = z.object({
+  orderId: z.string({ required_error: "Selecione uma Ordem de Serviço." }),
+  description: z.string().min(3, "A descrição é obrigatória."),
+  quantity: z.coerce.number().min(0.01, "A quantidade deve ser maior que zero."),
+  unitCost: z.coerce.number().min(0.01, "O custo unitário deve ser maior que zero."),
+});
+
+type CostEntryData = z.infer<typeof costEntrySchema>;
 
 type Supplier = z.infer<typeof supplierSchema>;
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
@@ -147,12 +143,17 @@ type Requisition = {
 };
 
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
+type OrderInfo = { id: string; internalOS: string; customerName: string; costEntries?: any[] };
+
 
 export default function CostsPage() {
     const [requisitions, setRequisitions] = useState<Requisition[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [orders, setOrders] = useState<OrderInfo[]>([]);
+    const [recentCostEntries, setRecentCostEntries] = useState<any[]>([]);
     const [isLoadingRequisitions, setIsLoadingRequisitions] = useState(true);
     const [isLoadingSuppliers, setIsLoadingSuppliers] = useState(true);
+    const [isLoadingOrders, setIsLoadingOrders] = useState(true);
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isSupplierFormOpen, setIsSupplierFormOpen] = useState(false);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
@@ -175,6 +176,10 @@ export default function CostsPage() {
             commercialInfo: {},
             documentation: {},
         }
+    });
+    
+    const costEntryForm = useForm<CostEntryData>({
+        resolver: zodResolver(costEntrySchema),
     });
 
     const fetchRequisitions = useCallback(async () => {
@@ -233,13 +238,53 @@ export default function CostsPage() {
             setIsLoadingSuppliers(false);
         }
     }, [user, toast]);
+    
+    const fetchOrders = useCallback(async () => {
+        if (!user) return;
+        setIsLoadingOrders(true);
+        try {
+            const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+            const ordersList: OrderInfo[] = ordersSnapshot.docs
+                .filter(doc => !['Concluído', 'Cancelado'].includes(doc.data().status))
+                .map(doc => {
+                    const data = doc.data();
+                    return {
+                        id: doc.id,
+                        internalOS: data.internalOS || 'N/A',
+                        customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
+                        costEntries: data.costEntries || [],
+                    };
+                });
+            setOrders(ordersList);
+
+            const allEntries = ordersList.flatMap(order => 
+                (order.costEntries || []).map((entry: any) => ({
+                    ...entry,
+                    orderId: order.id,
+                    internalOS: order.internalOS,
+                    customerName: order.customerName,
+                    entryDate: entry.entryDate?.toDate(),
+                }))
+            ).sort((a, b) => b.entryDate?.getTime() - a.entryDate?.getTime());
+
+            setRecentCostEntries(allEntries);
+
+        } catch (error) {
+            console.error("Error fetching orders:", error);
+            toast({ variant: "destructive", title: "Erro ao buscar Ordens de Serviço" });
+        } finally {
+            setIsLoadingOrders(false);
+        }
+    }, [user, toast]);
+
 
     useEffect(() => {
         if (!authLoading && user) {
             fetchRequisitions();
             fetchSuppliers();
+            fetchOrders();
         }
-    }, [user, authLoading, fetchRequisitions, fetchSuppliers]);
+    }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
 
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
         setSelectedItem({ ...item, requisitionId });
@@ -306,13 +351,14 @@ export default function CostsPage() {
             const finalNomeFantasia = values.nomeFantasia || values.razaoSocial || '';
             const razaoSocial = values.razaoSocial || '';
 
-            const dataToSave = {
+            const dataToSave: any = {
                 ...values,
                 razaoSocial: razaoSocial,
                 nomeFantasia: finalNomeFantasia,
-                name: finalNomeFantasia, 
                 lastUpdate: Timestamp.now(),
             };
+            dataToSave.name = finalNomeFantasia;
+
 
             if (!dataToSave.supplierCode) {
                 const highestCode = suppliers.reduce((max, s) => {
@@ -336,6 +382,30 @@ export default function CostsPage() {
         } catch (error) {
             console.error("Error saving supplier:", error);
             toast({ variant: "destructive", title: "Erro ao salvar fornecedor" });
+        }
+    };
+
+    const onCostEntrySubmit = async (values: CostEntryData) => {
+        const orderRef = doc(db, "companies", "mecald", "orders", values.orderId);
+        const costEntry = {
+            id: Date.now().toString(),
+            description: values.description,
+            quantity: values.quantity,
+            unitCost: values.unitCost,
+            totalCost: values.quantity * values.unitCost,
+            entryDate: Timestamp.now(),
+            enteredBy: user?.email || 'Sistema',
+        };
+        try {
+            await updateDoc(orderRef, {
+                costEntries: arrayUnion(costEntry)
+            });
+            toast({ title: "Custo lançado!", description: `O custo foi adicionado à OS selecionada.` });
+            costEntryForm.reset();
+            await fetchOrders();
+        } catch (error) {
+            console.error("Error adding cost entry:", error);
+            toast({ variant: "destructive", title: "Erro ao lançar custo." });
         }
     };
 
@@ -391,6 +461,7 @@ export default function CostsPage() {
             <TabsList>
                 <TabsTrigger value="receipts">Recebimento de Materiais</TabsTrigger>
                 <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
+                <TabsTrigger value="costEntry">Lançamento de Custos</TabsTrigger>
             </TabsList>
             <TabsContent value="receipts">
                 <Card>
@@ -517,6 +588,104 @@ export default function CostsPage() {
                     </CardContent>
                 </Card>
             </TabsContent>
+            <TabsContent value="costEntry" className="space-y-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Lançamento de Custo na OS</CardTitle>
+                        <CardDescription>
+                            Registre custos de itens de almoxarifado, consumíveis ou outros serviços diretamente em uma Ordem de Serviço.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Form {...costEntryForm}>
+                            <form onSubmit={costEntryForm.handleSubmit(onCostEntrySubmit)} className="space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <FormField control={costEntryForm.control} name="orderId" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Ordem de Serviço (OS)</FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS" /></SelectTrigger></FormControl>
+                                                <SelectContent>
+                                                    {isLoadingOrders ? <SelectItem value="loading" disabled>Carregando...</SelectItem> : 
+                                                    orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS} - {o.customerName}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                    <FormField control={costEntryForm.control} name="description" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Descrição do Item/Serviço</FormLabel>
+                                            <FormControl><Input placeholder="Ex: Eletrodo 7018, Disco de corte" {...field} /></FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <FormField control={costEntryForm.control} name="quantity" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Quantidade</FormLabel>
+                                            <FormControl><Input type="number" step="0.01" placeholder="1" {...field} /></FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                    <FormField control={costEntryForm.control} name="unitCost" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Custo Unitário (R$)</FormLabel>
+                                            <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                </div>
+                                <div className="flex justify-end">
+                                    <Button type="submit" disabled={costEntryForm.formState.isSubmitting}>
+                                        {costEntryForm.formState.isSubmitting ? 'Lançando...' : 'Lançar Custo'}
+                                    </Button>
+                                </div>
+                            </form>
+                        </Form>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Custos Lançados Recentemente</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoadingOrders ? <Skeleton className="h-48 w-full" /> : 
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Data</TableHead>
+                                    <TableHead>OS</TableHead>
+                                    <TableHead>Descrição</TableHead>
+                                    <TableHead className="text-right">Custo Total</TableHead>
+                                    <TableHead>Lançado por</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {recentCostEntries.length > 0 ? (
+                                    recentCostEntries.slice(0, 10).map(entry => (
+                                        <TableRow key={entry.id}>
+                                            <TableCell>{entry.entryDate ? format(entry.entryDate, 'dd/MM/yyyy HH:mm') : 'N/A'}</TableCell>
+                                            <TableCell>{entry.internalOS}</TableCell>
+                                            <TableCell>{entry.description}</TableCell>
+                                            <TableCell className="text-right font-medium">
+                                                {entry.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </TableCell>
+                                            <TableCell>{entry.enteredBy}</TableCell>
+                                        </TableRow>
+                                    ))
+                                ) : (
+                                    <TableRow>
+                                        <TableCell colSpan={5} className="h-24 text-center">Nenhum custo lançado ainda.</TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                        }
+                    </CardContent>
+                </Card>
+            </TabsContent>
         </Tabs>
       </div>
 
@@ -541,7 +710,7 @@ export default function CostsPage() {
                                        </SelectTrigger>
                                    </FormControl>
                                    <SelectContent>
-                                       {suppliers.map(s => <SelectItem key={s.id!} value={s.nomeFantasia || s.razaoSocial}>{s.nomeFantasia || s.razaoSocial}</SelectItem>)}
+                                       {suppliers.map(s => <SelectItem key={s.id!} value={s.nomeFantasia || s.razaoSocial!}>{s.nomeFantasia || s.razaoSocial}</SelectItem>)}
                                    </SelectContent>
                                </Select>
                                <FormMessage />
@@ -727,3 +896,5 @@ export default function CostsPage() {
     </>
     );
 }
+
+    
