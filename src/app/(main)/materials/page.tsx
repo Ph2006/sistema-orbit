@@ -61,7 +61,7 @@ const requisitionSchema = z.object({
   id: z.string().optional(),
   requisitionNumber: z.string().optional(),
   date: z.date(),
-  status: z.enum(["Pendente", "Aprovada", "Reprovada", "Atendida Parcialmente", "Atendida Totalmente", "Cancelada"]),
+  status: z.enum(["Pendente", "Estoque", "Atendida Parcialmente", "Atendida Totalmente"]),
   requestedBy: z.string().min(1, "Selecione o responsável"),
   department: z.string().optional(),
   orderId: z.string().optional(),
@@ -87,7 +87,7 @@ const requisitionSchema = z.object({
 type Requisition = z.infer<typeof requisitionSchema>;
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 
-const RequisitionStatus: Requisition['status'][] = ["Pendente", "Aprovada", "Reprovada", "Atendida Parcialmente", "Atendida Totalmente", "Cancelada"];
+const RequisitionStatus: Requisition['status'][] = ["Pendente", "Estoque", "Atendida Parcialmente", "Atendida Totalmente"];
 
 const cuttingPlanItemSchema = z.object({
     id: z.string().optional(),
@@ -474,10 +474,34 @@ export default function MaterialsPage() {
             );
         });
     }, [cuttingPlansList, searchQuery, orders]);
-    
-    const getStatusVariant = (status: Requisition['status']) => { switch (status) { case "Pendente": return "secondary"; case "Aprovada": return "default"; case "Reprovada": return "destructive"; case "Cancelada": return "destructive"; case "Atendida Parcialmente": return "outline"; case "Atendida Totalmente": return "default"; default: return "outline"; } }
 
-    const dashboardStats = useMemo(() => ({ pending: requisitions.filter(r => r.status === 'Pendente').length, approved: requisitions.filter(r => r.status === 'Aprovada').length, total: requisitions.length, }), [requisitions]);
+    const overdueItems = useMemo(() => {
+        return requisitions.flatMap(req => 
+            req.items
+                .filter(item => item.deliveryDate && isPast(endOfDay(item.deliveryDate)) && item.status !== 'Inspecionado e Aprovado')
+                .map(item => ({
+                    ...item,
+                    fullId: `${req.id}-${item.id}`,
+                    requisitionNumber: req.requisitionNumber,
+                }))
+        );
+    }, [requisitions]);
+    
+    const getStatusVariant = (status: Requisition['status']) => { 
+        switch (status) { 
+            case "Pendente": return "secondary"; 
+            case "Estoque": return "outline";
+            case "Atendida Parcialmente": return "outline"; 
+            case "Atendida Totalmente": return "default"; 
+            default: return "outline"; 
+        } 
+    }
+
+    const dashboardStats = useMemo(() => ({ 
+        pending: requisitions.filter(r => r.status === 'Pendente').length, 
+        inStock: requisitions.filter(r => r.status === 'Estoque').length, 
+        total: requisitions.length, 
+    }), [requisitions]);
 
     const generateCuttingPlan = () => {
         const cuttingPlanValues = cuttingPlanForm.getValues();
@@ -551,9 +575,42 @@ export default function MaterialsPage() {
                     </TabsList>
                     
                     <TabsContent value="requisitions">
+                        {overdueItems.length > 0 && (
+                            <Card className="mb-4 border-destructive bg-destructive/5">
+                                <CardHeader>
+                                <CardTitle className="text-destructive flex items-center gap-2">
+                                    <AlertTriangle />
+                                    Alertas de Itens Atrasados
+                                </CardTitle>
+                                <CardDescription className="text-destructive/80">
+                                    Os seguintes itens têm data de entrega prevista vencida e não foram marcados como recebidos/aprovados.
+                                </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                <Table>
+                                    <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Item</TableHead>
+                                        <TableHead>Requisição Nº</TableHead>
+                                        <TableHead>Data Prevista</TableHead>
+                                    </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                    {overdueItems.map(item => (
+                                        <TableRow key={item.fullId}>
+                                        <TableCell>{item.description}</TableCell>
+                                        <TableCell>{item.requisitionNumber}</TableCell>
+                                        <TableCell>{item.deliveryDate ? format(item.deliveryDate, 'dd/MM/yyyy') : 'N/A'}</TableCell>
+                                        </TableRow>
+                                    ))}
+                                    </TableBody>
+                                </Table>
+                                </CardContent>
+                            </Card>
+                        )}
                         <div className="grid gap-4 md:grid-cols-3">
-                            <StatCard title="Requisições Pendentes" value={dashboardStats.pending.toString()} icon={Hourglass} description="Aguardando aprovação do gestor" />
-                            <StatCard title="Requisições Aprovadas" value={dashboardStats.approved.toString()} icon={CheckCircle} description="Liberadas para compras ou estoque" />
+                            <StatCard title="Requisições Pendentes" value={dashboardStats.pending.toString()} icon={Hourglass} description="Aguardando atendimento" />
+                            <StatCard title="Itens em Estoque" value={dashboardStats.inStock.toString()} icon={PackageCheck} description="Requisições atendidas pelo estoque" />
                             <StatCard title="Total de Requisições" value={dashboardStats.total.toString()} icon={FileSignature} description="Total de requisições no sistema" />
                         </div>
                         <Card className="mt-4">
@@ -564,21 +621,20 @@ export default function MaterialsPage() {
                             <CardContent>
                                 {isLoading ? <Skeleton className="h-64 w-full" /> : (
                                      <Table>
-                                        <TableHeader><TableRow><TableHead className="w-[50px]">Alerta</TableHead><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Solicitante</TableHead><TableHead>OS Vinculada</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                        <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Solicitante</TableHead><TableHead>OS Vinculada</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                         <TableBody>
                                             {filteredRequisitions.length > 0 ? (
                                                 filteredRequisitions.map(req => (
                                                     <TableRow key={req.id}>
-                                                        <TableCell>{(() => { const overdueItems = req.items.filter(item => item.deliveryDate && isPast(endOfDay(item.deliveryDate)) && item.status !== 'Inspecionado e Aprovado'); if (overdueItems.length > 0) { return ( <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"><AlertTriangle className="h-5 w-5" /></Button></TooltipTrigger><TooltipContent><p className="font-bold">{overdueItems.length} item(s) com entrega atrasada:</p><ul className="list-disc pl-5 mt-1">{overdueItems.map((it, idx) => <li key={idx}>{it.description}</li>)}</ul></TooltipContent></Tooltip></TooltipProvider> ) } return null; })()}</TableCell>
                                                         <TableCell className="font-medium">{req.requisitionNumber || req.id}</TableCell>
                                                         <TableCell>{format(req.date, 'dd/MM/yyyy')}</TableCell>
                                                         <TableCell>{req.requestedBy}</TableCell>
                                                         <TableCell>{orders.find(o => o.id === req.orderId)?.internalOS || 'N/A'}</TableCell>
-                                                        <TableCell><Badge variant={getStatusVariant(req.status)} className={cn(req.status === 'Aprovada' && 'bg-green-600')}>{req.status}</Badge></TableCell>
+                                                        <TableCell><Badge variant={getStatusVariant(req.status)} className={cn(req.status === 'Atendida Totalmente' && 'bg-green-600')}>{req.status}</Badge></TableCell>
                                                         <TableCell className="text-right"><Button variant="ghost" size="icon" onClick={() => handleOpenRequisitionForm(req)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRequisition(req)}><Trash2 className="h-4 w-4" /></Button></TableCell>
                                                     </TableRow>
                                                 ))
-                                            ) : ( <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhuma requisição encontrada.</TableCell></TableRow> )}
+                                            ) : ( <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhuma requisição encontrada.</TableCell></TableRow> )}
                                         </TableBody>
                                     </Table>
                                 )}
