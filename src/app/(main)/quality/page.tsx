@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -234,6 +234,8 @@ export default function QualityPage() {
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
+  const [inspectionSearchQuery, setInspectionSearchQuery] = useState("");
+
 
   // General State
   const [isLoading, setIsLoading] = useState(true);
@@ -410,6 +412,48 @@ export default function QualityPage() {
       fetchAllData();
     }
   }, [user, authLoading]);
+
+  // --- FILTERED DATA ---
+  const filteredMaterialInspections = useMemo(() => {
+      if (!inspectionSearchQuery) return materialInspections;
+      const query = inspectionSearchQuery.toLowerCase();
+      return materialInspections.filter(
+          (insp) =>
+              insp.orderNumber.toLowerCase().includes(query) ||
+              insp.itemName.toLowerCase().includes(query)
+      );
+  }, [materialInspections, inspectionSearchQuery]);
+
+  const filteredDimensionalReports = useMemo(() => {
+      if (!inspectionSearchQuery) return dimensionalReports;
+      const query = inspectionSearchQuery.toLowerCase();
+      return dimensionalReports.filter(
+          (rep) =>
+              rep.orderNumber.toLowerCase().includes(query) ||
+              rep.itemName.toLowerCase().includes(query)
+      );
+  }, [dimensionalReports, inspectionSearchQuery]);
+
+  const filteredWeldingInspections = useMemo(() => {
+      if (!inspectionSearchQuery) return weldingInspections;
+      const query = inspectionSearchQuery.toLowerCase();
+      return weldingInspections.filter(
+          (insp) =>
+              insp.orderNumber.toLowerCase().includes(query) ||
+              insp.itemName.toLowerCase().includes(query)
+      );
+  }, [weldingInspections, inspectionSearchQuery]);
+
+  const filteredPaintingReports = useMemo(() => {
+      if (!inspectionSearchQuery) return paintingReports;
+      const query = inspectionSearchQuery.toLowerCase();
+      return paintingReports.filter(
+          (rep) =>
+              rep.orderNumber.toLowerCase().includes(query) ||
+              rep.itemName.toLowerCase().includes(query)
+      );
+  }, [paintingReports, inspectionSearchQuery]);
+
 
   // --- RNC HANDLERS ---
   const onRncSubmit = async (values: z.infer<typeof nonConformanceSchema>) => {
@@ -783,6 +827,19 @@ export default function QualityPage() {
             </TabsContent>
             
             <TabsContent value="inspections">
+              <Card className="mb-4">
+                  <CardContent className="p-4">
+                      <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <Input
+                              placeholder="Buscar por Nº do Pedido ou Item..."
+                              value={inspectionSearchQuery}
+                              onChange={(e) => setInspectionSearchQuery(e.target.value)}
+                              className="pl-9 w-full md:w-1/3"
+                          />
+                      </div>
+                  </CardContent>
+              </Card>
               <Accordion type="multiple" className="w-full space-y-4">
                   <AccordionItem value="material-inspection">
                       <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><PackageSearch className="h-5 w-5 text-primary" />Inspeção de Matéria-Prima</div></AccordionTrigger>
@@ -790,7 +847,7 @@ export default function QualityPage() {
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenMaterialForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
                                   <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{materialInspections.length > 0 ? materialInspections.map(insp => (
+                                      <TableBody>{filteredMaterialInspections.length > 0 ? filteredMaterialInspections.map(insp => (
                                           <TableRow key={insp.id}><TableCell>{format(insp.receiptDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(insp.inspectionResult)}>{insp.inspectionResult}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
@@ -808,7 +865,7 @@ export default function QualityPage() {
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenDimensionalForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
                                   <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{dimensionalReports.length > 0 ? dimensionalReports.map(rep => (
+                                      <TableBody>{filteredDimensionalReports.length > 0 ? filteredDimensionalReports.map(rep => (
                                           <TableRow key={rep.id}><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(rep.overallResult)}>{rep.overallResult}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
@@ -827,7 +884,7 @@ export default function QualityPage() {
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Nova Inspeção</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
                                   <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{weldingInspections.length > 0 ? weldingInspections.map(insp => (
+                                      <TableBody>{filteredWeldingInspections.length > 0 ? filteredWeldingInspections.map(insp => (
                                           <TableRow key={insp.id}><TableCell>{format(insp.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
                                           <TableCell><Badge variant="outline">{insp.inspectionType}</Badge></TableCell>
                                           <TableCell><Badge variant={getStatusVariant(insp.result)}>{insp.result}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
@@ -846,7 +903,7 @@ export default function QualityPage() {
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenPaintingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
                                   <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo de Tinta</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{paintingReports.length > 0 ? paintingReports.map(rep => (
+                                      <TableBody>{filteredPaintingReports.length > 0 ? filteredPaintingReports.map(rep => (
                                           <TableRow key={rep.id}><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
                                           <TableCell>{rep.paintType}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
@@ -1280,6 +1337,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
