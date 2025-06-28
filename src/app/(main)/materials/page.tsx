@@ -201,11 +201,16 @@ export default function MaterialsPage() {
               .map(doc => {
                   const data = doc.data();
                   if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) return null;
+                  
+                  const deliveryDate = data.deliveryDate && typeof data.deliveryDate.toDate === 'function' 
+                    ? data.deliveryDate.toDate() 
+                    : data.deliveryDate ? new Date(data.deliveryDate) : undefined;
+                  
                   return { 
                     id: doc.id, 
                     internalOS: data.internalOS.toString(),
                     customerName: data.customer?.name || data.customerName || 'N/A',
-                    deliveryDate: data.deliveryDate?.toDate() || undefined
+                    deliveryDate: deliveryDate
                   };
               })
               .filter((order): order is OrderInfo => order !== null);
