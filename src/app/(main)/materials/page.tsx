@@ -266,6 +266,7 @@ export default function MaterialsPage() {
                     history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
                     cuttingPlan: data.cuttingPlan ? {
                         ...data.cuttingPlan,
+                        materialDescription: data.cuttingPlan.materialDescription || '',
                         deliveryDate: data.cuttingPlan.deliveryDate?.toDate() || null,
                         items: (data.cuttingPlan.items || []).map((item: any) => ({
                             ...item,
@@ -358,9 +359,8 @@ export default function MaterialsPage() {
         }
     };
 
-    const onSubmit = async (values: Requisition) => {
-        // Use getValues() to ensure the latest form state is used, especially for nested objects updated with setValue
-        const currentValues = form.getValues();
+    const onSubmit = async (data: Requisition) => {
+        const values = form.getValues();
 
         try {
             const newHistoryEntry = {
@@ -370,21 +370,21 @@ export default function MaterialsPage() {
                 details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
             };
     
-            const finalHistory = [...(currentValues.history || []), newHistoryEntry];
+            const finalHistory = [...(values.history || []), newHistoryEntry];
     
             const dataToSave: any = {
-                date: Timestamp.fromDate(currentValues.date),
-                status: currentValues.status,
-                requestedBy: currentValues.requestedBy,
-                department: currentValues.department || null,
-                orderId: currentValues.orderId || null,
-                customer: currentValues.customer || null,
-                generalNotes: currentValues.generalNotes || null,
+                date: Timestamp.fromDate(values.date),
+                status: values.status,
+                requestedBy: values.requestedBy,
+                department: values.department || null,
+                orderId: values.orderId || null,
+                customer: values.customer || null,
+                generalNotes: values.generalNotes || null,
                 history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
-                requisitionNumber: currentValues.requisitionNumber || null,
+                requisitionNumber: values.requisitionNumber || null,
             };
             
-            dataToSave.items = currentValues.items.map(item => ({
+            dataToSave.items = values.items.map(item => ({
                 id: item.id || Date.now().toString(),
                 code: item.code || '',
                 material: item.material || '',
@@ -399,31 +399,31 @@ export default function MaterialsPage() {
                 status: item.status || 'Pendente',
             }));
 
-            if (currentValues.approval) {
+            if (values.approval) {
               dataToSave.approval = {
-                  approvedBy: currentValues.approval.approvedBy || null,
-                  approvalDate: currentValues.approval.approvalDate ? Timestamp.fromDate(new Date(currentValues.approval.approvalDate)) : null,
-                  justification: currentValues.approval.justification || null,
+                  approvedBy: values.approval.approvedBy || null,
+                  approvalDate: values.approval.approvalDate ? Timestamp.fromDate(new Date(values.approval.approvalDate)) : null,
+                  justification: values.approval.justification || null,
               }
             } else {
               dataToSave.approval = null;
             }
 
-            if (currentValues.cuttingPlan && (currentValues.cuttingPlan.items?.length > 0 || currentValues.cuttingPlan.summary)) {
+            if (values.cuttingPlan && (values.cuttingPlan.items?.length > 0 || values.cuttingPlan.summary)) {
                 dataToSave.cuttingPlan = {
-                  materialDescription: currentValues.cuttingPlan.materialDescription || '',
-                  stockLength: Number(currentValues.cuttingPlan.stockLength) || 0,
-                  kerf: Number(currentValues.cuttingPlan.kerf) || 0,
-                  leftoverThreshold: Number(currentValues.cuttingPlan.leftoverThreshold) || 0,
-                  deliveryDate: currentValues.cuttingPlan.deliveryDate ? Timestamp.fromDate(new Date(currentValues.cuttingPlan.deliveryDate)) : null,
-                  items: (currentValues.cuttingPlan.items || []).map(item => ({
+                  materialDescription: values.cuttingPlan.materialDescription || '',
+                  stockLength: Number(values.cuttingPlan.stockLength) || 0,
+                  kerf: Number(values.cuttingPlan.kerf) || 0,
+                  leftoverThreshold: Number(values.cuttingPlan.leftoverThreshold) || 0,
+                  deliveryDate: values.cuttingPlan.deliveryDate ? Timestamp.fromDate(new Date(values.cuttingPlan.deliveryDate)) : null,
+                  items: (values.cuttingPlan.items || []).map(item => ({
                       code: item.code || '',
                       description: item.description,
                       length: Number(item.length) || 0,
                       quantity: Number(item.quantity) || 0,
                   })),
-                  patterns: currentValues.cuttingPlan.patterns || [],
-                  summary: currentValues.cuttingPlan.summary || null,
+                  patterns: values.cuttingPlan.patterns || [],
+                  summary: values.cuttingPlan.summary || null,
                 }
             } else {
                 dataToSave.cuttingPlan = null;
@@ -744,37 +744,37 @@ export default function MaterialsPage() {
         
         let patternId = 1;
         let totalScrap = 0;
-        const finalPatterns = bins.map(bin => {
+        const finalPatterns: PlanResult['patterns'] = [];
+
+        bins.forEach(bin => {
+            const piecesUsedSum = bin.pieces.reduce((sum, p) => sum + p, 0);
+            const kerfTotal = Math.max(0, bin.pieces.length - 1) * kerfNum;
+            const barUsage = piecesUsedSum + kerfTotal;
+            const leftover = stockLengthNum - barUsage;
+
             const pieceCounts = new Map<number, number>();
             bin.pieces.forEach(p => {
                 pieceCounts.set(p, (pieceCounts.get(p) || 0) + 1);
             });
-            
             const sortedPieces = Array.from(pieceCounts.entries()).sort(([a], [b]) => b - a);
             const patternString = sortedPieces
                 .map(([length, count]) => `${count} x ${length}mm`)
                 .join(' + ');
 
-            const piecesUsedSum = bin.pieces.reduce((sum, p) => sum + p, 0);
-            const kerfTotal = Math.max(0, bin.pieces.length - 1) * kerfNum;
-            const barUsage = piecesUsedSum + kerfTotal;
-            const leftover = stockLengthNum - barUsage;
-            totalScrap += leftover;
-
-            return {
+            finalPatterns.push({
                 patternId: patternId++,
                 patternString,
                 pieces: bin.pieces,
                 barUsage: Number(barUsage) || 0,
                 leftover: Number(leftover) || 0,
                 yieldPercentage: Number((piecesUsedSum / stockLengthNum) * 100) || 0,
-                barsNeeded: 1, // Each bin represents one bar
-            };
+                barsNeeded: 1, 
+            });
         });
-
-
-        const totalBars = bins.length;
+        
+        const totalBars = finalPatterns.length;
         const totalMaterialLength = totalBars * stockLengthNum;
+        totalScrap = finalPatterns.reduce((sum, p) => sum + p.leftover, 0);
         const totalYield = totalMaterialLength > 0 ? ((totalMaterialLength - totalScrap) / totalMaterialLength) * 100 : 0;
 
         const results: PlanResult = {
