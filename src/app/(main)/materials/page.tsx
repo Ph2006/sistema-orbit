@@ -189,6 +189,9 @@ export default function MaterialsPage() {
         resolver: zodResolver(standaloneCuttingPlanSchema),
         defaultValues: { planNumber: "", createdAt: new Date(), stockLength: 6000, kerf: 3, items: [] },
     });
+    
+    // Destructure setValue to use as a stable dependency
+    const { setValue: setCuttingPlanValue } = cuttingPlanForm;
 
     const { fields: reqItems, append: appendReqItem, remove: removeReqItem, update: updateReqItem } = useFieldArray({ control: requisitionForm.control, name: "items" });
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: cuttingPlanForm.control, name: "items" });
@@ -257,17 +260,23 @@ export default function MaterialsPage() {
         if (user && !authLoading) { fetchData(); }
     }, [user, authLoading, fetchData]);
     
+    // Corrected useEffect for customer linking
     useEffect(() => {
+        // Find the selected order based on the watched order ID
         if (watchedCutPlanOrderId) {
             const selectedOrder = orders.find(o => o.id === watchedCutPlanOrderId);
+            // If an order is found, update the customer details in the form
             if (selectedOrder) {
-                cuttingPlanForm.setValue('customer', {
+                setCuttingPlanValue('customer', {
                     id: selectedOrder.customerId,
                     name: selectedOrder.customerName,
                 });
             }
+        // If no order ID is selected, clear the customer details.
+        } else {
+             setCuttingPlanValue('customer', undefined);
         }
-    }, [watchedCutPlanOrderId, orders, cuttingPlanForm]);
+    }, [watchedCutPlanOrderId, orders, setCuttingPlanValue]);
 
 
     // Handlers
