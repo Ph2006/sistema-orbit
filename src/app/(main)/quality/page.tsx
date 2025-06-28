@@ -2,13 +2,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, setDoc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, addMonths, isPast, isFuture, differenceInDays } from "date-fns";
+import { format, addMonths, isPast, differenceInDays } from "date-fns";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +29,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Label } from "@/components/ui/label";
 
 
 // --- SCHEMAS ---
@@ -77,15 +78,61 @@ const rawMaterialInspectionSchema = z.object({
   notes: z.string().optional(),
 });
 
+const dimensionalMeasurementSchema = z.object({
+  id: z.string(),
+  dimensionName: z.string().min(1, "O nome da dimensão é obrigatório."),
+  nominalValue: z.coerce.number(),
+  tolerance: z.string().optional(),
+  measuredValue: z.coerce.number(),
+  result: z.enum(["Conforme", "Não Conforme"]),
+});
+
 const dimensionalReportSchema = z.object({
   id: z.string().optional(),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
   instrumentUsed: z.string().min(1, "O instrumento é obrigatório."),
-  result: z.enum(["Conforme", "Não Conforme"]),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
   reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
+  notes: z.string().optional(),
+  measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
+}).refine(data => {
+    const overallResult = data.measurements.every(m => m.result === "Conforme");
+    return true; // this is just to allow the schema to pass, logic is handled in submission.
+});
+
+const weldingInspectionSchema = z.object({
+  id: z.string().optional(),
+  orderId: z.string({ required_error: "Selecione um pedido." }),
+  itemId: z.string({ required_error: "Selecione um item." }),
+  inspectionType: z.enum(["Visual", "LP - Líquido Penetrante", "UT - Ultrassom"]),
+  inspectionDate: z.date({ required_error: "A data é obrigatória." }),
+  inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
+  result: z.enum(["Aprovado", "Reprovado", "Conforme", "Não Conforme"]),
+  welder: z.string().optional(),
+  process: z.string().optional(), // For Visual
+  acceptanceCriteria: z.string().optional(), // For Visual
+  technician: z.string().optional(), // For LP/UT
+  standard: z.string().optional(), // For LP/UT
+  equipment: z.string().optional(), // For UT
+  reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
+  notes: z.string().optional(),
+});
+
+const paintingReportSchema = z.object({
+  id: z.string().optional(),
+  orderId: z.string({ required_error: "Selecione um pedido." }),
+  itemId: z.string({ required_error: "Selecione um item." }),
+  inspectionDate: z.date({ required_error: "A data é obrigatória." }),
+  paintType: z.string().min(1, "O tipo de tinta é obrigatório."),
+  colorRal: z.string().optional(),
+  surfacePreparation: z.string().optional(), // Ex: SA 2½
+  dryFilmThickness: z.coerce.number().optional(), // in μm
+  instrumentUsed: z.string().optional(),
+  adhesionTestResult: z.enum(["Aprovado", "Reprovado"]).optional(),
+  result: z.enum(["Aprovado", "Reprovado"]),
+  inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   notes: z.string().optional(),
 });
 
@@ -95,7 +142,9 @@ type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, order
 type OrderInfo = { id: string, number: string, customerId: string, customerName: string, items: { id: string, description: string }[] };
 type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id: string, orderNumber: string, itemName: string };
-type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string, orderNumber: string, itemName: string };
+type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string, orderNumber: string, itemName: string, overallResult?: string };
+type WeldingInspection = z.infer<typeof weldingInspectionSchema> & { id: string, orderNumber: string, itemName: string };
+type PaintingReport = z.infer<typeof paintingReportSchema> & { id: string, orderNumber: string, itemName: string };
 type TeamMember = { id: string; name: string };
 
 
@@ -113,7 +162,8 @@ const getCalibrationStatus = (calibration: Calibration) => {
     return { text: "Em dia", variant: "default", icon: CheckCircle };
 };
 
-const getStatusVariant = (status: string) => {
+const getStatusVariant = (status?: string) => {
+    if (!status) return 'outline';
     switch (status) {
         case 'Aberta': return 'destructive';
         case 'Em Análise': return 'secondary';
@@ -166,8 +216,11 @@ export default function QualityPage() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [materialInspections, setMaterialInspections] = useState<RawMaterialInspection[]>([]);
   const [dimensionalReports, setDimensionalReports] = useState<DimensionalReport[]>([]);
+  const [weldingInspections, setWeldingInspections] = useState<WeldingInspection[]>([]);
+  const [paintingReports, setPaintingReports] = useState<PaintingReport[]>([]);
+
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
-  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | null>(null);
+  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | null>(null);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
@@ -202,10 +255,30 @@ export default function QualityPage() {
   const dimensionalReportForm = useForm<z.infer<typeof dimensionalReportSchema>>({
     resolver: zodResolver(dimensionalReportSchema),
     defaultValues: {
-      inspectionDate: new Date(), result: "Conforme",
-      orderId: undefined, itemId: undefined, instrumentUsed: '', inspectedBy: undefined, notes: '', reportUrl: ''
+      inspectionDate: new Date(),
+      orderId: undefined, itemId: undefined, instrumentUsed: '', inspectedBy: undefined, notes: '', reportUrl: '',
+      measurements: []
     },
   });
+  const { fields: measurementFields, append: appendMeasurement, remove: removeMeasurement } = useFieldArray({
+      control: dimensionalReportForm.control,
+      name: "measurements"
+  });
+
+  const weldingInspectionForm = useForm<z.infer<typeof weldingInspectionSchema>>({
+      resolver: zodResolver(weldingInspectionSchema),
+      defaultValues: {
+          inspectionDate: new Date(), inspectionType: "Visual", result: "Conforme", inspectedBy: undefined
+      }
+  });
+
+  const paintingReportForm = useForm<z.infer<typeof paintingReportSchema>>({
+      resolver: zodResolver(paintingReportSchema),
+      defaultValues: {
+          inspectionDate: new Date(), result: "Aprovado", paintType: "", inspectedBy: undefined
+      }
+  });
+
 
   // --- DATA FETCHING ---
   const fetchAllData = async () => {
@@ -214,7 +287,7 @@ export default function QualityPage() {
     try {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
-        materialInspectionsSnapshot, dimensionalReportsSnapshot
+        materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -222,6 +295,8 @@ export default function QualityPage() {
         getDoc(doc(db, "companies", "mecald", "settings", "team")),
         getDocs(collection(db, "companies", "mecald", "rawMaterialInspections")),
         getDocs(collection(db, "companies", "mecald", "dimensionalReports")),
+        getDocs(collection(db, "companies", "mecald", "weldingInspections")),
+        getDocs(collection(db, "companies", "mecald", "paintingReports")),
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -271,12 +346,29 @@ export default function QualityPage() {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
         const item = order?.items.find(i => i.id === data.itemId);
+        const overallResult = (data.measurements || []).every((m: any) => m.result === "Conforme") ? "Conforme" : "Não Conforme";
         return {
           id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(),
-          orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado',
+          orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', overallResult
         } as DimensionalReport;
       });
       setDimensionalReports(dimReportsList.sort((a, b) => b.inspectionDate.getTime() - a.inspectionDate.getTime()));
+
+      const weldInspectionsList = weldingInspectionsSnapshot.docs.map(doc => {
+          const data = doc.data();
+          const order = ordersList.find(o => o.id === data.orderId);
+          const item = order?.items.find(i => i.id === data.itemId);
+          return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as WeldingInspection;
+      });
+      setWeldingInspections(weldInspectionsList.sort((a,b) => b.inspectionDate.getTime() - a.inspectionDate.getTime()));
+
+      const paintReportsList = paintingReportsSnapshot.docs.map(doc => {
+          const data = doc.data();
+          const order = ordersList.find(o => o.id === data.orderId);
+          const item = order?.items.find(i => i.id === data.itemId);
+          return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as PaintingReport;
+      });
+      setPaintingReports(paintReportsList.sort((a,b) => b.inspectionDate.getTime() - a.inspectionDate.getTime()));
 
     } catch (error) {
       console.error("Error fetching quality data:", error);
@@ -379,7 +471,7 @@ export default function QualityPage() {
     try {
        const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate) };
        if (selectedInspection) {
-         await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave);
+         await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório atualizado!" });
        } else {
          await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), dataToSave);
@@ -387,6 +479,32 @@ export default function QualityPage() {
        }
        setIsInspectionFormOpen(false); await fetchAllData();
      } catch (error) { console.error("Error saving dimensional report:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
+  };
+  const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
+    try {
+       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate) };
+       if (selectedInspection) {
+         await setDoc(doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id), dataToSave, { merge: true });
+         toast({ title: "Relatório de solda atualizado!" });
+       } else {
+         await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
+         toast({ title: "Relatório de solda criado!" });
+       }
+       setIsInspectionFormOpen(false); await fetchAllData();
+     } catch (error) { console.error("Error saving welding inspection:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
+  };
+   const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
+    try {
+       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate) };
+       if (selectedInspection) {
+         await setDoc(doc(db, "companies", "mecald", "paintingReports", selectedInspection.id), dataToSave, { merge: true });
+         toast({ title: "Relatório de pintura atualizado!" });
+       } else {
+         await addDoc(collection(db, "companies", "mecald", "paintingReports"), dataToSave);
+         toast({ title: "Relatório de pintura criado!" });
+       }
+       setIsInspectionFormOpen(false); await fetchAllData();
+     } catch (error) { console.error("Error saving painting report:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
   };
   const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null) => {
     setSelectedInspection(inspection); setDialogType('material');
@@ -397,31 +515,70 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ inspectionDate: new Date(), result: "Conforme", orderId: undefined, itemId: undefined, instrumentUsed: '', inspectedBy: undefined, notes: '', reportUrl: '' }); }
+    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, instrumentUsed: '', inspectedBy: undefined, notes: '', reportUrl: '', measurements: [] }); }
     setIsInspectionFormOpen(true);
   };
-  const handleDeleteInspectionClick = (inspection: any, type: 'material' | 'dimensional') => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
+  const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
+    setSelectedInspection(report); setDialogType('welding');
+    if (report) { weldingInspectionForm.reset(report); } 
+    else { weldingInspectionForm.reset({ inspectionDate: new Date(), inspectionType: "Visual", result: "Conforme", inspectedBy: undefined }); }
+    setIsInspectionFormOpen(true);
+  };
+  const handleOpenPaintingForm = (report: PaintingReport | null = null) => {
+    setSelectedInspection(report); setDialogType('painting');
+    if (report) { paintingReportForm.reset(report); } 
+    else { paintingReportForm.reset({ inspectionDate: new Date(), result: "Aprovado", paintType: "", inspectedBy: undefined }); }
+    setIsInspectionFormOpen(true);
+  };
+  const handleDeleteInspectionClick = (inspection: any, type: string) => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
   const handleConfirmDeleteInspection = async () => {
     if (!inspectionToDelete) return;
-    const collectionName = inspectionToDelete.type === 'material' ? 'rawMaterialInspections' : 'dimensionalReports';
+    let collectionName = '';
+    switch(inspectionToDelete.type) {
+        case 'material': collectionName = 'rawMaterialInspections'; break;
+        case 'dimensional': collectionName = 'dimensionalReports'; break;
+        case 'welding': collectionName = 'weldingInspections'; break;
+        case 'painting': collectionName = 'paintingReports'; break;
+    }
+    if (!collectionName) return;
     try {
         await deleteDoc(doc(db, "companies", "mecald", collectionName, inspectionToDelete.id));
         toast({ title: "Relatório excluído!" }); setIsDeleteInspectionAlertOpen(false); await fetchAllData();
     } catch (error) { toast({ variant: "destructive", title: "Erro ao excluir relatório" }); }
   };
-  const handleInspectionFormSubmit = (data: any) => {
-    if (dialogType === 'material') { materialInspectionForm.handleSubmit(onMaterialInspectionSubmit)(data); } 
-    else if (dialogType === 'dimensional') { dimensionalReportForm.handleSubmit(onDimensionalReportSubmit)(data); }
-  };
-  const currentForm = dialogType === 'material' ? materialInspectionForm : dimensionalReportForm;
   
-  // Dependent select logic
-  const watchedMaterialOrderId = materialInspectionForm.watch("orderId");
-  const availableMaterialItems = useMemo(() => { if (!watchedMaterialOrderId) return []; return orders.find(o => o.id === watchedMaterialOrderId)?.items || []; }, [watchedMaterialOrderId, orders]);
-  useEffect(() => { materialInspectionForm.setValue('itemId', ''); }, [watchedMaterialOrderId, materialInspectionForm]);
+  const handleInspectionFormSubmit = (data: any) => {
+    switch(dialogType) {
+        case 'material': materialInspectionForm.handleSubmit(onMaterialInspectionSubmit)(data); break;
+        case 'dimensional': dimensionalReportForm.handleSubmit(onDimensionalReportSubmit)(data); break;
+        case 'welding': weldingInspectionForm.handleSubmit(onWeldingInspectionSubmit)(data); break;
+        case 'painting': paintingReportForm.handleSubmit(onPaintingReportSubmit)(data); break;
+    }
+  };
+
+  const currentForm = useMemo(() => {
+    switch(dialogType) {
+        case 'material': return materialInspectionForm;
+        case 'dimensional': return dimensionalReportForm;
+        case 'welding': return weldingInspectionForm;
+        case 'painting': return paintingReportForm;
+        default: return null;
+    }
+  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm]);
+  
   const watchedDimensionalOrderId = dimensionalReportForm.watch("orderId");
   const availableDimensionalItems = useMemo(() => { if (!watchedDimensionalOrderId) return []; return orders.find(o => o.id === watchedDimensionalOrderId)?.items || []; }, [watchedDimensionalOrderId, orders]);
   useEffect(() => { dimensionalReportForm.setValue('itemId', ''); }, [watchedDimensionalOrderId, dimensionalReportForm]);
+
+  const getAvailableItemsForForm = (form: any) => {
+    const orderId = form.watch("orderId");
+    return useMemo(() => {
+      if (!orderId) return [];
+      return orders.find(o => o.id === orderId)?.items || [];
+    }, [orderId, orders]);
+  };
+  
+  const watchedWeldingInspectionType = weldingInspectionForm.watch('inspectionType');
 
   return (
     <>
@@ -513,7 +670,7 @@ export default function QualityPage() {
                                   <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                       <TableBody>{dimensionalReports.length > 0 ? dimensionalReports.map(rep => (
                                           <TableRow key={rep.id}><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
-                                          <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
+                                          <TableCell><Badge variant={getStatusVariant(rep.overallResult)}>{rep.overallResult}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
                                               <Button variant="ghost" size="icon" onClick={() => handleOpenDimensionalForm(rep)}><Pencil className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'dimensional')}><Trash2 className="h-4 w-4" /></Button>
@@ -523,8 +680,44 @@ export default function QualityPage() {
                               </CardContent></Card>
                       </AccordionContent>
                   </AccordionItem>
-                   <AccordionItem value="welding-inspection"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Inspeções de Solda</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Inspeções de Solda" description="Registros de ensaios (LP, UT, Visual)." icon={ShieldCheck} /></AccordionContent></AccordionItem>
-                   <AccordionItem value="painting-inspection"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Controle de Pintura</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Controle de Pintura" description="Verificação de camada e aderência." icon={SlidersHorizontal} /></AccordionContent></AccordionItem>
+                   <AccordionItem value="welding-inspection">
+                      <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Inspeções de Solda</div></AccordionTrigger>
+                      <AccordionContent className="pt-2">
+                          <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Nova Inspeção</Button></CardHeader>
+                              <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                      <TableBody>{weldingInspections.length > 0 ? weldingInspections.map(insp => (
+                                          <TableRow key={insp.id}><TableCell>{format(insp.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
+                                          <TableCell><Badge variant="outline">{insp.inspectionType}</Badge></TableCell>
+                                          <TableCell><Badge variant={getStatusVariant(insp.result)}>{insp.result}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
+                                          <TableCell className="text-right">
+                                              <Button variant="ghost" size="icon" onClick={() => handleOpenWeldingForm(insp)}><Pencil className="h-4 w-4" /></Button>
+                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'welding')}><Trash2 className="h-4 w-4" /></Button>
+                                          </TableCell></TableRow>
+                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhuma inspeção de solda registrada.</TableCell></TableRow>}
+                                      </TableBody></Table>}
+                              </CardContent></Card>
+                      </AccordionContent>
+                   </AccordionItem>
+                   <AccordionItem value="painting-inspection">
+                      <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Controle de Pintura</div></AccordionTrigger>
+                       <AccordionContent className="pt-2">
+                          <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenPaintingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
+                              <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo de Tinta</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                      <TableBody>{paintingReports.length > 0 ? paintingReports.map(rep => (
+                                          <TableRow key={rep.id}><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
+                                          <TableCell>{rep.paintType}</TableCell>
+                                          <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
+                                          <TableCell className="text-right">
+                                              <Button variant="ghost" size="icon" onClick={() => handleOpenPaintingForm(rep)}><Pencil className="h-4 w-4" /></Button>
+                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'painting')}><Trash2 className="h-4 w-4" /></Button>
+                                          </TableCell></TableRow>
+                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de pintura registrado.</TableCell></TableRow>}
+                                      </TableBody></Table>}
+                              </CardContent></Card>
+                      </AccordionContent>
+                   </AccordionItem>
                    <AccordionItem value="procedures"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-primary" />Procedimentos Técnicos</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Procedimentos Técnicos" description="Gestão de documentos (WPS, PIT, etc.)." icon={BookOpen} /></AccordionContent></AccordionItem>
                    <AccordionItem value="lessons-learned"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><BrainCircuit className="h-5 w-5 text-primary" />Lições Aprendidas</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Lições Aprendidas" description="Base de conhecimento para melhoria contínua." icon={BrainCircuit} /></AccordionContent></AccordionItem>
                    <AccordionItem value="engineering-tickets"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><Phone className="h-5 w-5 text-primary" />Chamados para Engenharia</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Chamados para Engenharia" description="Controle de solicitações e respostas." icon={Phone} /></AccordionContent></AccordionItem>
@@ -567,35 +760,173 @@ export default function QualityPage() {
       <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <Dialog open={isInspectionFormOpen} onOpenChange={setIsInspectionFormOpen}>
-        <DialogContent className="sm:max-w-2xl"><DialogHeader>
-            <DialogTitle>{dialogType === 'material' ? (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material') : (selectedInspection ? 'Editar Relatório Dimensional' : 'Novo Relatório Dimensional')}</DialogTitle>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+                {dialogType === 'material' && (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material')}
+                {dialogType === 'dimensional' && (selectedInspection ? 'Editar Relatório Dimensional' : 'Novo Relatório Dimensional')}
+                {dialogType === 'welding' && (selectedInspection ? 'Editar Inspeção de Solda' : 'Nova Inspeção de Solda')}
+                {dialogType === 'painting' && (selectedInspection ? 'Editar Relatório de Pintura' : 'Novo Relatório de Pintura')}
+            </DialogTitle>
             <DialogDescription>Preencha os campos para registrar a inspeção.</DialogDescription>
         </DialogHeader>
-        <Form {...currentForm}>
-            <form onSubmit={currentForm.handleSubmit(handleInspectionFormSubmit)}><ScrollArea className="max-h-[60vh] p-1"><div className="space-y-4 p-2 pr-6">
-            {dialogType === 'material' ? (<>
-                <FormField control={materialInspectionForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                <FormField control={materialInspectionForm.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedMaterialOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableMaterialItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                <FormField control={materialInspectionForm.control} name="receiptDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data de Recebimento</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-                <FormField control={materialInspectionForm.control} name="supplierName" render={({ field }) => ( <FormItem><FormLabel>Fornecedor</FormLabel><FormControl><Input {...field} placeholder="Nome do fornecedor do material" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={materialInspectionForm.control} name="materialStandard" render={({ field }) => ( <FormItem><FormLabel>Norma do Material</FormLabel><FormControl><Input {...field} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={materialInspectionForm.control} name="materialCertificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={materialInspectionForm.control} name="inspectionResult" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com ressalva">Aprovado com ressalva</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-                <FormField control={materialInspectionForm.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
-            </>) : (<>
-                <FormField control={dimensionalReportForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                <FormField control={dimensionalReportForm.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedDimensionalOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableDimensionalItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                <FormField control={dimensionalReportForm.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-                <FormField control={dimensionalReportForm.control} name="instrumentUsed" render={({ field }) => ( <FormItem><FormLabel>Instrumento Utilizado</FormLabel><FormControl><Input {...field} placeholder="Ex: Paquímetro, Micrômetro" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={dimensionalReportForm.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Relatório</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={dimensionalReportForm.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-                <FormField control={dimensionalReportForm.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
-            </>)}
-            <FormField control={currentForm.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
-            </div></ScrollArea><DialogFooter className="pt-4 mt-4 border-t"><Button type="button" variant="outline" onClick={() => setIsInspectionFormOpen(false)}>Cancelar</Button><Button type="submit">Salvar</Button></DialogFooter>
-        </form></Form></DialogContent>
+        {currentForm && (
+            <Form {...currentForm}>
+                <form onSubmit={currentForm.handleSubmit(handleInspectionFormSubmit)}>
+                    <ScrollArea className="max-h-[70vh] p-1"><div className="space-y-4 p-2 pr-6">
+                        {dialogType === 'material' && (
+                            <MaterialInspectionForm form={materialInspectionForm} orders={orders} teamMembers={teamMembers} />
+                        )}
+                        {dialogType === 'dimensional' && (
+                            <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement }} />
+                        )}
+                        {dialogType === 'welding' && (
+                             <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} />
+                        )}
+                         {dialogType === 'painting' && (
+                             <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
+                        )}
+                    </div></ScrollArea>
+                    <DialogFooter className="pt-4 mt-4 border-t">
+                        <Button type="button" variant="outline" onClick={() => setIsInspectionFormOpen(false)}>Cancelar</Button>
+                        <Button type="submit">Salvar</Button>
+                    </DialogFooter>
+                </form>
+            </Form>
+        )}
+        </DialogContent>
       </Dialog>
       <AlertDialog open={isDeleteInspectionAlertOpen} onOpenChange={setIsDeleteInspectionAlertOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita e excluirá permanentemente o relatório de inspeção.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmDeleteInspection} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </>
   );
 }
+
+
+// --- SUB-COMPONENTS FOR FORMS ---
+function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+    const watchedOrderId = form.watch("orderId");
+    const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
+    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+
+    return (<>
+        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="receiptDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data de Recebimento</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="supplierName" render={({ field }) => ( <FormItem><FormLabel>Fornecedor</FormLabel><FormControl><Input {...field} placeholder="Nome do fornecedor do material" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="materialStandard" render={({ field }) => ( <FormItem><FormLabel>Norma do Material</FormLabel><FormControl><Input {...field} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="materialCertificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="inspectionResult" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com ressalva">Aprovado com ressalva</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+    </>);
+}
+
+function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], fieldArrayProps: any }) {
+    const watchedOrderId = form.watch("orderId");
+    const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
+    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    
+    const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', measuredValue: '' });
+
+    const handleAddMeasurement = () => {
+        const nominal = parseFloat(newMeasurement.nominalValue);
+        const measured = parseFloat(newMeasurement.measuredValue);
+        if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured)) {
+            // Add toast notification here
+            return;
+        }
+        fieldArrayProps.append({
+            id: Date.now().toString(),
+            dimensionName: newMeasurement.dimensionName,
+            nominalValue: nominal,
+            measuredValue: measured,
+            // Simple check, can be improved with tolerance
+            result: nominal === measured ? "Conforme" : "Não Conforme", 
+        });
+        setNewMeasurement({ dimensionName: '', nominalValue: '', measuredValue: '' });
+    };
+
+    return (<>
+        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="instrumentUsed" render={({ field }) => ( <FormItem><FormLabel>Instrumento Utilizado</FormLabel><FormControl><Input {...field} placeholder="Ex: Paquímetro, Micrômetro" /></FormControl><FormMessage /></FormItem> )}/>
+        
+        <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
+        <CardContent>
+            {fieldArrayProps.fields.length > 0 && (
+            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Medido</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <TableBody>
+                {fieldArrayProps.fields.map((field: any, index: number) => (
+                <TableRow key={field.id}>
+                    <TableCell>{field.dimensionName}</TableCell><TableCell>{field.nominalValue}</TableCell><TableCell>{field.measuredValue}</TableCell>
+                    <TableCell><Badge variant={getStatusVariant(field.result)}>{field.result}</Badge></TableCell>
+                    <TableCell><Button type="button" variant="ghost" size="icon" onClick={() => fieldArrayProps.remove(index)}><Trash2 className="h-4 w-4 text-destructive"/></Button></TableCell>
+                </TableRow>))}
+            </TableBody></Table>
+            )}
+            <div className="mt-4 grid grid-cols-4 gap-2 items-end">
+                <div className="col-span-2"><Label>Nome da Dimensão</Label><Input value={newMeasurement.dimensionName} onChange={(e) => setNewMeasurement({...newMeasurement, dimensionName: e.target.value})} placeholder="Ex: Diâmetro externo"/></div>
+                <div><Label>Valor Nominal</Label><Input type="number" value={newMeasurement.nominalValue} onChange={(e) => setNewMeasurement({...newMeasurement, nominalValue: e.target.value})} placeholder="100.0"/></div>
+                <div><Label>Valor Medido</Label><Input type="number" value={newMeasurement.measuredValue} onChange={(e) => setNewMeasurement({...newMeasurement, measuredValue: e.target.value})} placeholder="100.1"/></div>
+            </div>
+            <div className="flex justify-end mt-2"><Button type="button" size="sm" onClick={handleAddMeasurement}>Adicionar Medição</Button></div>
+        </CardContent></Card>
+        
+        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+    </>);
+}
+
+function WeldingInspectionForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+    const watchedOrderId = form.watch("orderId");
+    const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
+    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    const inspectionType = form.watch("inspectionType");
+
+    return (<>
+        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="inspectionType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Inspeção</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Visual">Visual</SelectItem><SelectItem value="LP - Líquido Penetrante">LP - Líquido Penetrante</SelectItem><SelectItem value="UT - Ultrassom">UT - Ultrassom</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        
+        {inspectionType === 'Visual' && (<>
+            <FormField control={form.control} name="welder" render={({ field }) => ( <FormItem><FormLabel>Soldador</FormLabel><FormControl><Input {...field} placeholder="Nome do soldador" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="process" render={({ field }) => ( <FormItem><FormLabel>Processo de Solda</FormLabel><FormControl><Input {...field} placeholder="MIG/MAG/TIG/SMAW" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        </>)}
+
+        {(inspectionType === 'LP - Líquido Penetrante' || inspectionType === 'UT - Ultrassom') && (<>
+            <FormField control={form.control} name="technician" render={({ field }) => ( <FormItem><FormLabel>Técnico Responsável</FormLabel><FormControl><Input {...field} placeholder="Nome do técnico" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="standard" render={({ field }) => ( <FormItem><FormLabel>Norma Aplicada</FormLabel><FormControl><Input {...field} placeholder="Ex: ASTM E165" /></FormControl><FormMessage /></FormItem> )}/>
+            {inspectionType === 'UT - Ultrassom' && <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento</FormLabel><FormControl><Input {...field} placeholder="Nome do equipamento de UT" /></FormControl><FormMessage /></FormItem> )}/>}
+            <FormField control={form.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Laudo</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        </>)}
+        
+        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+    </>);
+}
+
+function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+    const watchedOrderId = form.watch("orderId");
+    const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
+    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+
+    return (<>
+        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="paintType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Tinta</FormLabel><FormControl><Input {...field} placeholder="Ex: Primer Epóxi, Esmalte PU" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="colorRal" render={({ field }) => ( <FormItem><FormLabel>Cor (RAL)</FormLabel><FormControl><Input {...field} placeholder="Ex: RAL 7035" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="surfacePreparation" render={({ field }) => ( <FormItem><FormLabel>Preparação da Superfície</FormLabel><FormControl><Input {...field} placeholder="Ex: Jateamento SA 2 1/2" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="dryFilmThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (μm)</FormLabel><FormControl><Input type="number" {...field} placeholder="Ex: 120" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="adhesionTestResult" render={({ field }) => ( <FormItem><FormLabel>Teste de Aderência</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Resultado do teste"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado Geral</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+    </>);
+}
+
+    
