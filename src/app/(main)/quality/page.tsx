@@ -260,6 +260,7 @@ export default function QualityPage() {
     defaultValues: {
       inspectionDate: new Date(),
       orderId: undefined, itemId: undefined, inspectedBy: undefined, photosUrl: '', notes: '',
+      quantityInspected: undefined,
       measurements: []
     },
   });
@@ -519,7 +520,7 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, photosUrl: '', notes: '', measurements: [] }); }
+    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, photosUrl: '', notes: '', quantityInspected: undefined, measurements: [] }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
@@ -867,6 +868,7 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
         <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="receiptDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data de Recebimento</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="supplierName" render={({ field }) => ( <FormItem><FormLabel>Fornecedor</FormLabel><FormControl><Input {...field} placeholder="Nome do fornecedor do material" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="quantityReceived" render={({ field }) => ( <FormItem><FormLabel>Quantidade Recebida</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Qtd. conforme NF" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="materialStandard" render={({ field }) => ( <FormItem><FormLabel>Norma do Material</FormLabel><FormControl><Input {...field} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="materialCertificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="inspectionResult" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com ressalva">Aprovado com ressalva</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
@@ -925,7 +927,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças Inspecionadas</FormLabel><FormControl><Input type="number" {...field} placeholder="Ex: 10" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças Inspecionadas</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 10" /></FormControl><FormMessage /></FormItem> )}/>
         </div>
 
 
@@ -1035,13 +1037,14 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="paintType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Tinta</FormLabel><FormControl><Input {...field} placeholder="Ex: Primer Epóxi, Esmalte PU" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="colorRal" render={({ field }) => ( <FormItem><FormLabel>Cor (RAL)</FormLabel><FormControl><Input {...field} placeholder="Ex: RAL 7035" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="surfacePreparation" render={({ field }) => ( <FormItem><FormLabel>Preparação da Superfície</FormLabel><FormControl><Input {...field} placeholder="Ex: Jateamento SA 2 1/2" /></FormControl><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="dryFilmThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (μm)</FormLabel><FormControl><Input type="number" {...field} placeholder="Ex: 120" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="dryFilmThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (μm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 120" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="adhesionTestResult" render={({ field }) => ( <FormItem><FormLabel>Teste de Aderência</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Resultado do teste"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado Geral</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
