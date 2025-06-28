@@ -258,7 +258,7 @@ export default function QualityPage() {
     resolver: zodResolver(dimensionalReportSchema),
     defaultValues: {
       inspectionDate: new Date(),
-      orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '',
+      orderId: undefined, itemId: undefined, inspectedBy: undefined, photosUrl: '', notes: '',
       measurements: []
     },
   });
@@ -803,7 +803,7 @@ export default function QualityPage() {
       <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <Dialog open={isInspectionFormOpen} onOpenChange={setIsInspectionFormOpen}>
-        <DialogContent className="sm:max-w-3xl">
+        <DialogContent className="sm:max-w-3xl h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
                 {dialogType === 'material' && (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material')}
@@ -815,22 +815,24 @@ export default function QualityPage() {
         </DialogHeader>
         {currentForm && (
             <Form {...currentForm}>
-                <form onSubmit={currentForm.handleSubmit(handleInspectionFormSubmit)}>
-                    <ScrollArea className="max-h-[70vh] p-1"><div className="space-y-4 p-2 pr-6">
-                        {dialogType === 'material' && (
-                            <MaterialInspectionForm form={materialInspectionForm} orders={orders} teamMembers={teamMembers} />
-                        )}
-                        {dialogType === 'dimensional' && (
-                            <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement }} calibrations={calibrations} toast={toast} />
-                        )}
-                         {dialogType === 'welding' && (
-                             <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} />
-                        )}
-                         {dialogType === 'painting' && (
-                             <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
-                        )}
-                    </div></ScrollArea>
-                    <DialogFooter className="pt-4 mt-4 border-t">
+                <form onSubmit={currentForm.handleSubmit(handleInspectionFormSubmit)} className="flex-1 flex flex-col min-h-0">
+                    <ScrollArea className="flex-1 p-1 pr-4">
+                        <div className="space-y-4 p-2">
+                            {dialogType === 'material' && (
+                                <MaterialInspectionForm form={materialInspectionForm} orders={orders} teamMembers={teamMembers} />
+                            )}
+                            {dialogType === 'dimensional' && (
+                                <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement }} calibrations={calibrations} toast={toast} />
+                            )}
+                             {dialogType === 'welding' && (
+                                 <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} />
+                            )}
+                             {dialogType === 'painting' && (
+                                 <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
+                            )}
+                        </div>
+                    </ScrollArea>
+                    <DialogFooter className="pt-4 mt-4 border-t flex-shrink-0">
                         <Button type="button" variant="outline" onClick={() => setIsInspectionFormOpen(false)}>Cancelar</Button>
                         <Button type="submit">Salvar</Button>
                     </DialogFooter>
@@ -1022,5 +1024,6 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
