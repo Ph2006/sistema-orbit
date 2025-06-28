@@ -370,7 +370,7 @@ export default function CustomersPage() {
                       <FormItem>
                         <FormLabel>Razão Social</FormLabel>
                         <FormControl>
-                          <Input placeholder="Nome jurídico da empresa" {...field} />
+                          <Input placeholder="Nome jurídico da empresa" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -383,7 +383,7 @@ export default function CustomersPage() {
                       <FormItem>
                         <FormLabel>Nome Fantasia</FormLabel>
                         <FormControl>
-                          <Input placeholder="Nome comercial da empresa" {...field} />
+                          <Input placeholder="Nome comercial da empresa" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -396,7 +396,7 @@ export default function CustomersPage() {
                       <FormItem>
                         <FormLabel>CNPJ / CPF</FormLabel>
                         <FormControl>
-                          <Input placeholder="00.000.000/0000-00" {...field} />
+                          <Input placeholder="00.000.000/0000-00" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -435,7 +435,7 @@ export default function CustomersPage() {
                       <FormItem>
                         <FormLabel>Contato Principal</FormLabel>
                         <FormControl>
-                          <Input placeholder="Nome da pessoa de contato" {...field} />
+                          <Input placeholder="Nome da pessoa de contato" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -448,7 +448,7 @@ export default function CustomersPage() {
                       <FormItem>
                         <FormLabel>E-mail Comercial</FormLabel>
                         <FormControl>
-                          <Input placeholder="contato@empresa.com" {...field} />
+                          <Input placeholder="contato@empresa.com" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -461,7 +461,7 @@ export default function CustomersPage() {
                       <FormItem>
                         <FormLabel>Telefone / WhatsApp</FormLabel>
                         <FormControl>
-                          <Input placeholder="(XX) XXXXX-XXXX" {...field} />
+                          <Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>

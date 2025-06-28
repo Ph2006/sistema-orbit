@@ -578,7 +578,7 @@ export default function TasksPage() {
                 <FormField control={resourceForm.control} name="name" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Nome do Recurso</FormLabel>
-                    <FormControl><Input placeholder="Ex: Torno CNC, Equipe de Montagem" {...field} /></FormControl>
+                    <FormControl><Input placeholder="Ex: Torno CNC, Equipe de Montagem" {...field} value={field.value ?? ''} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />

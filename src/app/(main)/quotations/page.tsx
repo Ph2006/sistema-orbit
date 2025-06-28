@@ -1057,10 +1057,10 @@ export default function QuotationsPage() {
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <FormField control={form.control} name="paymentTerms" render={({ field }) => (
-                                            <FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                                            <FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                         )}/>
                                         <FormField control={form.control} name="deliveryTime" render={({ field }) => (
-                                            <FormItem><FormLabel>Prazo de Entrega</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                                            <FormItem><FormLabel>Prazo de Entrega</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                         )}/>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1260,7 +1260,7 @@ export default function QuotationsPage() {
                                         <FormItem>
                                             <FormLabel>Nº do Pedido de Compra do Cliente</FormLabel>
                                             <FormControl>
-                                                <Input placeholder="Ex: PC-12345" {...field} />
+                                                <Input placeholder="Ex: PC-12345" {...field} value={field.value ?? ''} />
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>

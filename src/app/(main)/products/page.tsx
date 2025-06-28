@@ -523,7 +523,7 @@ export default function ProductsPage() {
                   <FormField control={form.control} name="code" render={({ field }) => (
                       <FormItem>
                           <FormLabel>Código do Produto</FormLabel>
-                          <FormControl><Input placeholder="Ex: PROD-001" {...field} /></FormControl>
+                          <FormControl><Input placeholder="Ex: PROD-001" {...field} value={field.value ?? ''} /></FormControl>
                           <FormDescription>Alterar o código criará um novo registro para o produto.</FormDescription>
                           <FormMessage />
                       </FormItem>
@@ -531,7 +531,7 @@ export default function ProductsPage() {
                   <FormField control={form.control} name="description" render={({ field }) => (
                       <FormItem>
                           <FormLabel>Descrição</FormLabel>
-                          <FormControl><Textarea placeholder="Descrição detalhada do produto ou serviço" {...field} /></FormControl>
+                          <FormControl><Textarea placeholder="Descrição detalhada do produto ou serviço" {...field} value={field.value ?? ''} /></FormControl>
                           <FormMessage />
                       </FormItem>
                   )} />
@@ -539,7 +539,7 @@ export default function ProductsPage() {
                       <FormField control={form.control} name="unitPrice" render={({ field }) => (
                           <FormItem>
                               <FormLabel>Preço Unitário (R$)</FormLabel>
-                              <FormControl><Input type="number" placeholder="0.00" {...field} /></FormControl>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
                               <FormMessage />
                           </FormItem>
                       )} />

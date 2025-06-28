@@ -1444,14 +1444,14 @@ export default function OrdersPage() {
                                                                          <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
                                                                             <FormItem>
                                                                                 <FormLabel>Quantidade</FormLabel>
-                                                                                <FormControl><Input type="number" placeholder="0" {...field} /></FormControl>
+                                                                                <FormControl><Input type="number" placeholder="0" {...field} value={field.value ?? ''} /></FormControl>
                                                                                 <FormMessage />
                                                                             </FormItem>
                                                                         )}/>
                                                                          <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
                                                                             <FormItem>
                                                                                 <FormLabel>Peso Unit. (kg)</FormLabel>
-                                                                                <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl>
+                                                                                <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
                                                                                 <FormMessage />
                                                                             </FormItem>
                                                                         )}/>

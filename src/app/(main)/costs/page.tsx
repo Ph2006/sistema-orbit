@@ -616,7 +616,7 @@ export default function CostsPage() {
                                     <FormField control={costEntryForm.control} name="description" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Descrição do Item/Serviço</FormLabel>
-                                            <FormControl><Input placeholder="Ex: Eletrodo 7018, Disco de corte" {...field} /></FormControl>
+                                            <FormControl><Input placeholder="Ex: Eletrodo 7018, Disco de corte" {...field} value={field.value ?? ''} /></FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     )} />
@@ -625,14 +625,14 @@ export default function CostsPage() {
                                     <FormField control={costEntryForm.control} name="quantity" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Quantidade</FormLabel>
-                                            <FormControl><Input type="number" step="0.01" placeholder="1" {...field} /></FormControl>
+                                            <FormControl><Input type="number" step="0.01" placeholder="1" {...field} value={field.value ?? ''} /></FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     )} />
                                     <FormField control={costEntryForm.control} name="unitCost" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Custo Unitário (R$)</FormLabel>
-                                            <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} /></FormControl>
+                                            <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     )} />
@@ -783,7 +783,7 @@ export default function CostsPage() {
                         <FormField control={supplierForm.control} name="status" render={({ field }) => (<FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="ativo">Ativo</SelectItem><SelectItem value="inativo">Inativo</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="cnpj" render={({ field }) => (<FormItem><FormLabel>CNPJ</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="cnpj" render={({ field }) => (<FormItem><FormLabel>CNPJ</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-2 gap-4">
                           <FormField control={supplierForm.control} name="inscricaoEstadual" render={({ field }) => (<FormItem><FormLabel>Inscrição Estadual</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                           <FormField control={supplierForm.control} name="inscricaoMunicipal" render={({ field }) => (<FormItem><FormLabel>Inscrição Municipal</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
@@ -896,5 +896,3 @@ export default function CostsPage() {
     </>
     );
 }
-
-    
