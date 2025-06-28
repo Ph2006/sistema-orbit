@@ -587,7 +587,7 @@ export default function QualityPage() {
         docPdf.text(`Pedido: ${orderInfo?.number || 'N/A'}`, 15, y);
         docPdf.text(`Cliente: ${orderInfo?.customerName || 'N/A'}`, 15, y + 5);
         docPdf.text(`Item: ${report.itemName} (Cód: ${itemInfo?.code || 'N/A'})`, 15, y + 10);
-        docPdf.text(`Qtd. Total: ${itemInfo?.quantity || 'N/A'} | Qtd. Inspecionada: ${report.quantityInspected || 'N/A'}`, 15, y + 15);
+        docPdf.text(`Quantidade Inspecionada: ${report.quantityInspected || 'N/A'}`, 15, y + 15);
         
         docPdf.text(`Data: ${format(report.inspectionDate, 'dd/MM/yyyy')}`, pageWidth - 15, y, { align: 'right' });
         docPdf.text(`Inspetor: ${report.inspectedBy}`, pageWidth - 15, y + 5, { align: 'right' });
@@ -1122,6 +1122,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
