@@ -62,7 +62,6 @@ const cuttingPlanItemSchema = z.object({
     description: z.string().min(1, "Descrição é obrigatória"),
     length: z.coerce.number().min(1, "Comprimento deve ser > 0"),
     quantity: z.coerce.number().min(1, "Quantidade deve ser > 0"),
-    isExecuted: z.boolean().optional().default(false),
 });
 
 type CuttingPlanItem = z.infer<typeof cuttingPlanItemSchema>;
@@ -165,7 +164,7 @@ export default function MaterialsPage() {
     const [editItemIndex, setEditItemIndex] = useState<number | null>(null);
 
     // State for the temporary cut item form
-    const emptyCutItem: CuttingPlanItem = { description: "", length: 0, quantity: 1, code: '', isExecuted: false };
+    const emptyCutItem: CuttingPlanItem = { description: "", length: 0, quantity: 1, code: '' };
     const [currentCutItem, setCurrentCutItem] = useState<CuttingPlanItem>(emptyCutItem);
     const [editCutIndex, setEditCutIndex] = useState<number | null>(null);
 
@@ -270,7 +269,6 @@ export default function MaterialsPage() {
                         deliveryDate: data.cuttingPlan.deliveryDate?.toDate() || null,
                         items: (data.cuttingPlan.items || []).map((item: any) => ({
                             ...item,
-                            isExecuted: item.isExecuted || false,
                         })),
                         patterns: data.cuttingPlan.patterns || [],
                         summary: data.cuttingPlan.summary || null,
@@ -409,7 +407,6 @@ export default function MaterialsPage() {
             }
 
             if (values.cuttingPlan && values.cuttingPlan.items?.length > 0) {
-                const currentPlan = planResults || (values.cuttingPlan.summary ? { patterns: values.cuttingPlan.patterns, summary: values.cuttingPlan.summary } : null);
                 dataToSave.cuttingPlan = {
                   materialDescription: values.cuttingPlan.materialDescription || '',
                   stockLength: Number(values.cuttingPlan.stockLength) || 0,
@@ -421,10 +418,9 @@ export default function MaterialsPage() {
                       description: item.description,
                       length: Number(item.length) || 0,
                       quantity: Number(item.quantity) || 0,
-                      isExecuted: item.isExecuted || false,
                   })),
-                  patterns: currentPlan?.patterns || [],
-                  summary: currentPlan?.summary || null,
+                  patterns: values.cuttingPlan.patterns || [],
+                  summary: values.cuttingPlan.summary || null,
                 }
             } else {
                 dataToSave.cuttingPlan = null;
@@ -575,7 +571,8 @@ export default function MaterialsPage() {
             docPdf.text(`Requisição Nº: ${reqNumber}`, pageWidth / 2, y + 5, { align: 'center' });
             y += 5;
             docPdf.setFontSize(9).setFont(undefined, 'normal');
-            docPdf.text(`OS: ${orderInfo?.internalOS || 'N/A'} | Cliente: ${orderInfo?.customerName || 'N/A'}`, pageWidth / 2, y + 5, { align: 'center' });
+            const customerName = formValues.customer?.name || orderInfo?.customerName || 'N/A';
+            docPdf.text(`OS: ${orderInfo?.internalOS || 'N/A'} | Cliente: ${customerName}`, pageWidth / 2, y + 5, { align: 'center' });
 
             y = 50;
     
@@ -598,9 +595,16 @@ export default function MaterialsPage() {
             y += 6;
             autoTable(docPdf, {
                 startY: y,
-                head: [['Código', 'Descrição', 'Comprimento (mm)', 'Quantidade']],
-                body: plan.items.map(item => [item.code || '-', item.description, item.length, item.quantity]),
-                headStyles: { fillColor: [40, 40, 40] }
+                head: [['Código', 'Descrição', 'Comprimento (mm)', 'Quantidade', 'Exec. [ ]']],
+                body: plan.items.map(item => [item.code || '-', item.description, item.length, item.quantity, '']),
+                headStyles: { fillColor: [40, 40, 40] },
+                 didDrawCell: function (data) {
+                    if (data.section === 'body' && data.column.index === 4) {
+                        const x = data.cell.x + (data.cell.width / 2) - 2;
+                        const y = data.cell.y + (data.cell.height / 2) - 2;
+                        docPdf.rect(x, y, 4, 4);
+                    }
+                }
             });
             y = (docPdf as any).lastAutoTable.finalY + 10;
     
@@ -1280,7 +1284,6 @@ export default function MaterialsPage() {
                                                         <Table>
                                                             <TableHeader>
                                                                 <TableRow>
-                                                                    <TableHead className="w-[50px]">Exec.</TableHead>
                                                                     <TableHead>Código</TableHead>
                                                                     <TableHead>Descrição</TableHead>
                                                                     <TableHead>Comp. (mm)</TableHead>
@@ -1291,14 +1294,6 @@ export default function MaterialsPage() {
                                                             <TableBody>
                                                                 {cutItems.map((item, index) => (
                                                                     <TableRow key={item.id}>
-                                                                        <TableCell>
-                                                                            <Checkbox
-                                                                                checked={item.isExecuted}
-                                                                                onCheckedChange={(checked) => {
-                                                                                    updateCutItem(index, { ...item, isExecuted: !!checked });
-                                                                                }}
-                                                                            />
-                                                                        </TableCell>
                                                                         <TableCell>{item.code}</TableCell>
                                                                         <TableCell>{item.description}</TableCell>
                                                                         <TableCell>{item.length}</TableCell>
