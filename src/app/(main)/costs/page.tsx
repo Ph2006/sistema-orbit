@@ -67,7 +67,7 @@ const supplierSchema = z.object({
   
   // 1. Dados Gerais
   razaoSocial: z.string().min(3, "Razão social é obrigatória."),
-  nomeFantasia: z.string().min(3, "Nome fantasia é obrigatório."),
+  nomeFantasia: z.string().optional(),
   cnpj: z.string().min(14, "CNPJ inválido.").max(18, "CNPJ inválido."),
   inscricaoEstadual: z.string().optional(),
   inscricaoMunicipal: z.string().optional(),
@@ -289,9 +289,12 @@ export default function CostsPage() {
     
     const onSupplierSubmit = async (values: Supplier) => {
         try {
+            const finalNomeFantasia = values.nomeFantasia || values.razaoSocial;
+
             const dataToSave = {
                 ...values,
-                name: values.nomeFantasia, // Link 'name' to 'nomeFantasia'
+                nomeFantasia: finalNomeFantasia,
+                name: finalNomeFantasia, // Ensure both fields are set for consistency
                 lastUpdate: Timestamp.now(),
             };
 
@@ -472,7 +475,7 @@ export default function CostsPage() {
                                         suppliers.map((supplier) => (
                                             <TableRow key={supplier.id}>
                                                 <TableCell className="font-mono">{supplier.supplierCode}</TableCell>
-                                                <TableCell className="font-medium">{supplier.nomeFantasia}</TableCell>
+                                                <TableCell className="font-medium">{supplier.nomeFantasia || supplier.razaoSocial}</TableCell>
                                                 <TableCell>{supplier.cnpj}</TableCell>
                                                 <TableCell>{supplier.segment || '-'}</TableCell>
                                                 <TableCell><Badge variant={getStatusVariant(supplier.status)}>{supplier.status}</Badge></TableCell>
@@ -523,7 +526,7 @@ export default function CostsPage() {
                                        </SelectTrigger>
                                    </FormControl>
                                    <SelectContent>
-                                       {suppliers.map(s => <SelectItem key={s.id!} value={s.nomeFantasia}>{s.nomeFantasia}</SelectItem>)}
+                                       {suppliers.map(s => <SelectItem key={s.id!} value={s.nomeFantasia || s.razaoSocial}>{s.nomeFantasia || s.razaoSocial}</SelectItem>)}
                                    </SelectContent>
                                </Select>
                                <FormMessage />
@@ -579,7 +582,7 @@ export default function CostsPage() {
       <Dialog open={isSupplierFormOpen} onOpenChange={setIsSupplierFormOpen}>
         <DialogContent className="max-w-4xl h-[90vh]">
             <DialogHeader>
-              <DialogTitle>{selectedSupplier ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia}` : "Adicionar Novo Fornecedor"}</DialogTitle>
+              <DialogTitle>{selectedSupplier ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia || selectedSupplier.razaoSocial}` : "Adicionar Novo Fornecedor"}</DialogTitle>
               <DialogDescription>Preencha os dados completos do fornecedor.</DialogDescription>
             </DialogHeader>
             <Form {...supplierForm}>
@@ -595,7 +598,7 @@ export default function CostsPage() {
                       <TabsContent value="general" className="space-y-4">
                         <FormField control={supplierForm.control} name="status" render={({ field }) => (<FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="ativo">Ativo</SelectItem><SelectItem value="inativo">Inativo</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial" {...field} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="cnpj" render={({ field }) => (<FormItem><FormLabel>CNPJ</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-2 gap-4">
                           <FormField control={supplierForm.control} name="inscricaoEstadual" render={({ field }) => (<FormItem><FormLabel>Inscrição Estadual</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
@@ -678,7 +681,7 @@ export default function CostsPage() {
             <AlertDialogHeader>
                 <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
                 <AlertDialogDescription>
-                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o fornecedor <span className="font-bold">{supplierToDelete?.nomeFantasia}</span>.
+                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o fornecedor <span className="font-bold">{supplierToDelete?.nomeFantasia || supplierToDelete?.razaoSocial}</span>.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
