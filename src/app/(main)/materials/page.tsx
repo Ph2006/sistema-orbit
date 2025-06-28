@@ -183,38 +183,12 @@ export default function MaterialsPage() {
     });
 
     const { fields, append, remove, update } = useFieldArray({ control: form.control, name: "items" });
-    const { fields: cuttingPlanArray, append: appendCuttingPlan, remove: removeCuttingPlan } = useFieldArray({ control: form.control, name: "cuttingPlans" });
+    const { fields: cuttingPlanArray, append: appendCuttingPlan, remove: removeCuttingPlan, update: updateCuttingPlan } = useFieldArray({ control: form.control, name: "cuttingPlans" });
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: form.control, name: `cuttingPlans.${activeCutPlanIndex}.items` });
     const watchedCuttingPlans = form.watch("cuttingPlans");
     const watchedActivePlan = form.watch(`cuttingPlans.${activeCutPlanIndex}`);
     const watchedOrderId = form.watch("orderId");
 
-    // 3. Função de teste para verificar se os planos estão no form
-    const testCuttingPlansInForm = () => {
-        console.log('🧪 === TESTE DOS PLANOS NO FORMULÁRIO ===');
-        
-        const formData = form.getValues();
-        console.log('📋 Dados completos do form:', formData);
-        console.log('✂️ Planos específicos:', formData.cuttingPlans);
-        console.log('📊 Quantidade de planos:', formData.cuttingPlans?.length || 0);
-        
-        if (formData.cuttingPlans && formData.cuttingPlans.length > 0) {
-            formData.cuttingPlans.forEach((plan, index) => {
-                console.log(`🔍 Plano ${index}:`, plan);
-                console.log(`  - Nome: ${plan.name}`);
-                console.log(`  - Items: ${plan.items?.length || 0}`);
-                console.log(`  - Patterns: ${plan.patterns?.length || 0}`);
-                console.log(`  - Summary:`, plan.summary);
-            });
-        }
-        
-        toast({
-            title: "Debug dos planos",
-            description: `${formData.cuttingPlans?.length || 0} planos encontrados. Veja o console.`
-        });
-    };
-
-    // 2. Função fetchData simplificada para ler os planos
     const fetchData = useCallback(async () => {
         if (!user) return;
         
@@ -373,7 +347,6 @@ export default function MaterialsPage() {
         }
     };
     
-    // 1. Função para salvar APENAS o essencial
     const onSubmit = async (data: Requisition) => {
         console.log('🚀 === SALVAMENTO ULTRA SIMPLES ===');
         
@@ -821,15 +794,15 @@ export default function MaterialsPage() {
         };
         
         console.log('🎉 Resultados gerados:', results);
+
+        const updatedPlan = {
+            ...cuttingPlanValues,
+            patterns: results.patterns,
+            summary: results.summary,
+        };
+        updateCuttingPlan(activeCutPlanIndex, updatedPlan as any);
         
-        form.setValue(`cuttingPlans.${activeCutPlanIndex}.patterns`, results.patterns);
-        form.setValue(`cuttingPlans.${activeCutPlanIndex}.summary`, results.summary);
-        
-        const updatedPlan = form.getValues(`cuttingPlans.${activeCutPlanIndex}`);
-        console.log('✅ Plano atualizado no formulário:', updatedPlan);
-        
-        const allFormData = form.getValues();
-        console.log('🔍 Todos os dados do form após gerar plano:', allFormData.cuttingPlans);
+        console.log('✅ Plano atualizado no formulário via updateCuttingPlan.');
         
         toast({ title: "Plano de Corte Gerado!", description: "Os resultados foram calculados e exibidos." });
     };
@@ -1535,9 +1508,6 @@ export default function MaterialsPage() {
                                     >
                                         <GanttChart className="mr-2 h-4 w-4" /> Exportar Plano de Corte
                                     </Button>
-                                    <Button type="button" variant="outline" onClick={testCuttingPlansInForm}>
-                                        🧪 Testar Captura
-                                    </Button>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
@@ -1570,3 +1540,5 @@ export default function MaterialsPage() {
         </>
     );
 }
+
+    
