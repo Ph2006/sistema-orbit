@@ -99,6 +99,7 @@ const dimensionalReportSchema = z.object({
   itemId: z.string({ required_error: "Selecione um item." }),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
+  quantityInspected: z.coerce.number().min(1, "A quantidade inspecionada é obrigatória.").optional(),
   photosUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
   notes: z.string().optional(),
   measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
@@ -141,7 +142,7 @@ const paintingReportSchema = z.object({
 
 // --- TYPES ---
 type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string };
-type OrderInfo = { id: string, number: string, customerId: string, customerName: string, items: { id: string, description: string }[] };
+type OrderInfo = { id: string, number: string, customerId: string, customerName: string, items: { id: string, description: string, code?: string, quantity?: number }[] };
 type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id: string, orderNumber: string, itemName: string };
 type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string, orderNumber: string, itemName: string, overallResult?: string };
@@ -319,7 +320,7 @@ export default function QualityPage() {
         return {
           id: doc.id, number: data.quotationNumber || data.orderNumber || 'N/A', customerId: data.customer?.id || data.customerId || '',
           customerName: data.customer?.name || data.customerName || 'N/A',
-          items: (data.items || []).map((item: any, index: number) => ({ id: item.id || `${doc.id}-${index}`, description: item.description, })),
+          items: (data.items || []).map((item: any, index: number) => ({ id: item.id || `${doc.id}-${index}`, description: item.description, code: item.code, quantity: item.quantity })),
         };
       });
       setOrders(ordersList);
@@ -566,6 +567,7 @@ export default function QualityPage() {
         const companySnap = await getDoc(companyRef);
         const companyData: { nomeFantasia?: string, logo?: { preview?: string } } = companySnap.exists() ? companySnap.data() as any : {};
         const orderInfo = orders.find(o => o.id === report.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
 
         const docPdf = new jsPDF();
         const pageWidth = docPdf.internal.pageSize.width;
@@ -579,25 +581,32 @@ export default function QualityPage() {
         docPdf.setFontSize(10).setFont(undefined, 'normal');
         docPdf.text(`Pedido: ${orderInfo?.number || 'N/A'}`, 15, y);
         docPdf.text(`Cliente: ${orderInfo?.customerName || 'N/A'}`, 15, y + 5);
-        docPdf.text(`Item: ${report.itemName}`, 15, y + 10);
+        docPdf.text(`Item: ${report.itemName} (Cód: ${itemInfo?.code || 'N/A'})`, 15, y + 10);
+        docPdf.text(`Qtd Inspecionada: ${report.quantityInspected || 'N/A'} de ${itemInfo?.quantity || 'N/A'}`, 15, y + 15);
         
         docPdf.text(`Data: ${format(report.inspectionDate, 'dd/MM/yyyy')}`, pageWidth - 15, y, { align: 'right' });
         docPdf.text(`Inspetor: ${report.inspectedBy}`, pageWidth - 15, y + 5, { align: 'right' });
         docPdf.text(`Resultado Geral: ${report.overallResult}`, pageWidth - 15, y + 10, { align: 'right' });
-        y += 20;
+        y += 25;
 
-        autoTable(docPdf, {
-            startY: y,
-            head: [['Dimensão', 'Nominal', 'Tol. Mín', 'Tol. Máx', 'Medido', 'Instrumento', 'Resultado']],
-            body: report.measurements.map(m => [
+        const body = report.measurements.map(m => {
+            const instrument = calibrations.find(c => c.equipmentName === m.instrumentUsed);
+            const instrumentDisplay = instrument ? `${instrument.equipmentName} (Cód: ${instrument.internalCode})` : m.instrumentUsed;
+            return [
                 m.dimensionName,
                 m.nominalValue.toString(),
                 m.toleranceMin?.toString() ?? '-',
                 m.toleranceMax?.toString() ?? '-',
                 m.measuredValue.toString(),
-                m.instrumentUsed,
+                instrumentDisplay,
                 m.result
-            ]),
+            ];
+        });
+
+        autoTable(docPdf, {
+            startY: y,
+            head: [['Dimensão', 'Nominal', 'Tol. Inferior (-)', 'Tol. Superior (+)', 'Medido', 'Instrumento', 'Resultado']],
+            body: body,
             headStyles: { fillColor: [40, 40, 40] }
         });
 
@@ -876,8 +885,8 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const handleAddMeasurement = () => {
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
-        const min = newMeasurement.toleranceMin !== '' ? parseFloat(newMeasurement.toleranceMin) : null;
-        const max = newMeasurement.toleranceMax !== '' ? parseFloat(newMeasurement.toleranceMax) : null;
+        const tolMin = newMeasurement.toleranceMin !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMin)) : null;
+        const tolMax = newMeasurement.toleranceMax !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMax)) : null;
     
         if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
             toast({
@@ -889,7 +898,10 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         }
     
         let result: "Conforme" | "Não Conforme" = "Conforme";
-        if ((min !== null && measured < min) || (max !== null && measured > max)) {
+        const lowerBound = tolMin !== null ? nominal - tolMin : null;
+        const upperBound = tolMax !== null ? nominal + tolMax : null;
+
+        if ((lowerBound !== null && measured < lowerBound) || (upperBound !== null && measured > upperBound)) {
             result = "Não Conforme";
         }
         
@@ -897,8 +909,8 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             id: Date.now().toString(),
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
-            toleranceMin: min ?? undefined,
-            toleranceMax: max ?? undefined,
+            toleranceMin: tolMin ?? undefined,
+            toleranceMax: tolMax ?? undefined,
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
             result: result,
@@ -907,14 +919,20 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     };
 
     return (<>
-        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças Inspecionadas</FormLabel><FormControl><Input type="number" {...field} placeholder="Ex: 10" /></FormControl><FormMessage /></FormItem> )}/>
+        </div>
+
 
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
         <CardContent>
             {fieldArrayProps.fields.length > 0 && (
-            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tol. Mín.</TableHead><TableHead>Tol. Máx.</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tol. (-)</TableHead><TableHead>Tol. (+)</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
             <TableBody>
                 {fieldArrayProps.fields.map((field: any, index: number) => (
                 <TableRow key={field.id}>
@@ -938,12 +956,12 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                         <Input type="number" step="any" value={newMeasurement.nominalValue} onChange={(e) => setNewMeasurement({...newMeasurement, nominalValue: e.target.value})} placeholder="100.0"/>
                     </div>
                     <div>
-                        <Label>Tol. Mínima</Label>
-                        <Input type="number" step="any" value={newMeasurement.toleranceMin} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMin: e.target.value})} placeholder="99.9"/>
+                        <Label>Tolerância Inferior (-)</Label>
+                        <Input type="number" step="any" value={newMeasurement.toleranceMin} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMin: e.target.value})} placeholder="Ex: 0.1"/>
                     </div>
                     <div>
-                        <Label>Tol. Máxima</Label>
-                        <Input type="number" step="any" value={newMeasurement.toleranceMax} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMax: e.target.value})} placeholder="100.1"/>
+                        <Label>Tolerância Superior (+)</Label>
+                        <Input type="number" step="any" value={newMeasurement.toleranceMax} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMax: e.target.value})} placeholder="Ex: 0.2"/>
                     </div>
                     <div>
                         <Label>Valor Medido</Label>
@@ -1024,6 +1042,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
