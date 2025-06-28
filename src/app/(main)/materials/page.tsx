@@ -37,6 +37,7 @@ import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Schemas & Constants
 const itemStatuses = ["Pendente", "Estoque", "Recebido (Aguardando Inspeção)", "Inspecionado e Aprovado", "Inspecionado e Rejeitado"] as const;
@@ -61,6 +62,7 @@ const cuttingPlanItemSchema = z.object({
     description: z.string().min(1, "Descrição é obrigatória"),
     length: z.coerce.number().min(1, "Comprimento deve ser > 0"),
     quantity: z.coerce.number().min(1, "Quantidade deve ser > 0"),
+    isExecuted: z.boolean().optional().default(false),
 });
 
 type CuttingPlanItem = z.infer<typeof cuttingPlanItemSchema>;
@@ -90,6 +92,10 @@ const requisitionSchema = z.object({
   requestedBy: z.string().min(1, "Selecione o responsável"),
   department: z.string().optional(),
   orderId: z.string().optional(),
+  customer: z.object({
+    id: z.string().optional(),
+    name: z.string().optional(),
+  }).optional(),
   items: z.array(requisitionItemSchema).min(1, "A requisição deve ter pelo menos um item."),
   cuttingPlan: cuttingPlanSchema,
   approval: z.object({
@@ -109,7 +115,7 @@ const requisitionSchema = z.object({
 type Requisition = z.infer<typeof requisitionSchema>;
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 type CuttingPlan = z.infer<typeof cuttingPlanSchema>;
-type OrderInfo = { id: string; internalOS: string; customerName: string; deliveryDate?: Date; };
+type OrderInfo = { id: string; internalOS: string; customerName: string; customerId: string, deliveryDate?: Date; };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
@@ -159,7 +165,7 @@ export default function MaterialsPage() {
     const [editItemIndex, setEditItemIndex] = useState<number | null>(null);
 
     // State for the temporary cut item form
-    const emptyCutItem: CuttingPlanItem = { description: "", length: 0, quantity: 1, code: '' };
+    const emptyCutItem: CuttingPlanItem = { description: "", length: 0, quantity: 1, code: '', isExecuted: false };
     const [currentCutItem, setCurrentCutItem] = useState<CuttingPlanItem>(emptyCutItem);
     const [editCutIndex, setEditCutIndex] = useState<number | null>(null);
 
@@ -184,6 +190,7 @@ export default function MaterialsPage() {
     const { fields, append, remove, update } = useFieldArray({ control: form.control, name: "items" });
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: form.control, name: "cuttingPlan.items" });
     const watchedCutPlan = form.watch("cuttingPlan");
+    const watchedOrderId = form.watch("orderId");
 
 
     const fetchData = useCallback(async () => {
@@ -202,14 +209,20 @@ export default function MaterialsPage() {
                   const data = doc.data();
                   if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) return null;
                   
-                  const deliveryDate = data.deliveryDate && typeof data.deliveryDate.toDate === 'function' 
-                    ? data.deliveryDate.toDate() 
-                    : data.deliveryDate ? new Date(data.deliveryDate) : undefined;
+                  let deliveryDate: Date | undefined = undefined;
+                    if (data.deliveryDate) {
+                        if (typeof data.deliveryDate.toDate === 'function') {
+                            deliveryDate = data.deliveryDate.toDate();
+                        } else if (!isNaN(new Date(data.deliveryDate).getTime())) {
+                            deliveryDate = new Date(data.deliveryDate);
+                        }
+                    }
                   
                   return { 
                     id: doc.id, 
                     internalOS: data.internalOS.toString(),
                     customerName: data.customer?.name || data.customerName || 'N/A',
+                    customerId: data.customer?.id || data.customerId || '',
                     deliveryDate: deliveryDate
                   };
               })
@@ -232,6 +245,7 @@ export default function MaterialsPage() {
                     ...data,
                     id: d.id,
                     date: data.date.toDate(),
+                    customer: data.customer || undefined,
                     approval: data.approval ? {
                         ...data.approval,
                         approvalDate: data.approval.approvalDate?.toDate() || null,
@@ -254,6 +268,10 @@ export default function MaterialsPage() {
                     cuttingPlan: data.cuttingPlan ? {
                         ...data.cuttingPlan,
                         deliveryDate: data.cuttingPlan.deliveryDate?.toDate() || null,
+                        items: (data.cuttingPlan.items || []).map((item: any) => ({
+                            ...item,
+                            isExecuted: item.isExecuted || false,
+                        })),
                     } : undefined,
                 } as Requisition
             });
@@ -277,6 +295,18 @@ export default function MaterialsPage() {
             fetchData();
         }
     }, [user, authLoading, fetchData]);
+
+    useEffect(() => {
+        if (watchedOrderId) {
+            const selectedOrder = orders.find(o => o.id === watchedOrderId);
+            if (selectedOrder) {
+                form.setValue('customer', {
+                    id: selectedOrder.customerId,
+                    name: selectedOrder.customerName,
+                });
+            }
+        }
+    }, [watchedOrderId, orders, form]);
 
     const handleOpenForm = (requisition: Requisition | null = null) => {
         setPlanResults(null);
@@ -345,6 +375,7 @@ export default function MaterialsPage() {
                 requestedBy: values.requestedBy,
                 department: values.department || null,
                 orderId: values.orderId || null,
+                customer: values.customer || null,
                 generalNotes: values.generalNotes || null,
                 history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
                 requisitionNumber: values.requisitionNumber || null,
@@ -387,6 +418,7 @@ export default function MaterialsPage() {
                       description: item.description,
                       length: Number(item.length) || 0,
                       quantity: Number(item.quantity) || 0,
+                      isExecuted: item.isExecuted || false,
                   })),
                   patterns: planResults?.patterns || values.cuttingPlan.patterns || [],
                   summary: planResults?.summary || values.cuttingPlan.summary || null,
@@ -656,19 +688,20 @@ export default function MaterialsPage() {
         const stockLengthNum = Number(stockLength);
         const kerfNum = Number(kerf || 0);
 
-        const allPieces: { code?: string; description: string; length: number }[] = [];
-        if (items) {
-            items.forEach(item => {
-                const quantityNum = Math.floor(Number(item.quantity) || 0);
-                const lengthNum = Number(item.length) || 0;
-        
-                if (quantityNum > 0 && lengthNum > 0) {
-                    for (let i = 0; i < quantityNum; i++) {
-                        allPieces.push({ code: item.code || '', description: item.description, length: lengthNum });
-                    }
-                }
-            });
-        }
+        const allPieces: { code?: string; description: string; length: number }[] = (items || []).flatMap(item => {
+            const quantityNum = Math.floor(Number(item.quantity) || 0);
+            const lengthNum = Number(item.length) || 0;
+            if (quantityNum > 0 && lengthNum > 0) {
+                // Create an array with 'quantityNum' copies of the piece.
+                return Array(quantityNum).fill(null).map(() => ({
+                    code: item.code || '',
+                    description: item.description,
+                    length: lengthNum
+                }));
+            }
+            // Return an empty array if the item is invalid, flatMap will remove it.
+            return [];
+        });
         
         if (allPieces.length === 0) {
             toast({ variant: 'destructive', title: 'Nenhum item válido', description: 'Verifique as quantidades e comprimentos dos itens.' });
@@ -1060,6 +1093,14 @@ export default function MaterialsPage() {
                                             </Select><FormMessage />
                                             </FormItem>
                                         )} />
+                                         <FormItem>
+                                            <FormLabel>Cliente Vinculado</FormLabel>
+                                            <Input
+                                                value={form.watch('customer.name') || 'Selecione uma OS para vincular'}
+                                                disabled
+                                                className="cursor-default"
+                                            />
+                                        </FormItem>
                                     </CardContent>
                                   </Card>
                                   <Card>
@@ -1253,6 +1294,7 @@ export default function MaterialsPage() {
                                                         <Table>
                                                             <TableHeader>
                                                                 <TableRow>
+                                                                    <TableHead className="w-[50px]">Exec.</TableHead>
                                                                     <TableHead>Código</TableHead>
                                                                     <TableHead>Descrição</TableHead>
                                                                     <TableHead>Comp. (mm)</TableHead>
@@ -1263,6 +1305,14 @@ export default function MaterialsPage() {
                                                             <TableBody>
                                                                 {cutItems.map((item, index) => (
                                                                     <TableRow key={item.id}>
+                                                                        <TableCell>
+                                                                            <Checkbox
+                                                                                checked={item.isExecuted}
+                                                                                onCheckedChange={(checked) => {
+                                                                                    updateCutItem(index, { ...item, isExecuted: !!checked });
+                                                                                }}
+                                                                            />
+                                                                        </TableCell>
                                                                         <TableCell>{item.code}</TableCell>
                                                                         <TableCell>{item.description}</TableCell>
                                                                         <TableCell>{item.length}</TableCell>
