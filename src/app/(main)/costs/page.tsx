@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -289,21 +288,25 @@ export default function CostsPage() {
     
     const onSupplierSubmit = async (values: Supplier) => {
         try {
-            const dataToSave = {
+            const dataToSave: Supplier = {
                 ...values,
                 lastUpdate: Timestamp.now(),
             };
 
-            if (selectedSupplier?.id) {
+            // Generate a code if one doesn't exist (for both new and existing suppliers)
+            if (!dataToSave.supplierCode) {
+                const highestCode = suppliers.reduce((max, s) => {
+                    const codeNum = parseInt(s.supplierCode || "0", 10);
+                    return !isNaN(codeNum) && codeNum > max ? codeNum : max;
+                }, 0);
+                dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
+            }
+
+            if (selectedSupplier?.id) { // Editing existing supplier
                 const { id, ...updateData } = dataToSave;
                 await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), updateData, { merge: true });
                 toast({ title: "Fornecedor atualizado com sucesso!" });
-            } else {
-                const highestCode = suppliers.reduce((max, s) => {
-                    const codeNum = parseInt(s.supplierCode || "0");
-                    return codeNum > max ? codeNum : max;
-                }, 0);
-                dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
+            } else { // Adding new supplier
                 dataToSave.firstRegistrationDate = Timestamp.now();
                 await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
                 toast({ title: "Fornecedor adicionado com sucesso!" });
@@ -687,5 +690,3 @@ export default function CostsPage() {
     </>
     );
 }
-
-    
