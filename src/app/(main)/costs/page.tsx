@@ -83,7 +83,6 @@ const supplierSchema = z.object({
   inscricaoEstadual: z.string().optional(),
   inscricaoMunicipal: z.string().optional(),
   segment: z.string().optional(),
-  category: z.string().optional(),
   status: z.enum(["ativo", "inativo"]).default("ativo"),
   telefone: z.string().optional(),
   primaryEmail: z.string().email("E-mail inválido.").optional().or(z.literal('')),
@@ -129,7 +128,7 @@ const costEntrySchema = z.object({
 
 type CostEntryData = z.infer<typeof costEntrySchema>;
 
-type Supplier = z.infer<typeof supplierSchema> & { id?: string };
+type Supplier = z.infer<typeof supplierSchema> & { id: string, supplierCode?: string };
 type RequisitionItem = z.infer<typeof requisitionItemSchema>;
 
 type Requisition = {
@@ -349,35 +348,37 @@ export default function CostsPage() {
     };
     
     const onSupplierSubmit = async (values: z.infer<typeof supplierSchema>) => {
+        if (!selectedSupplier) return;
         try {
-            const finalNomeFantasia = values.nomeFantasia || values.razaoSocial || '';
-            const razaoSocial = values.razaoSocial || '';
+            let finalNomeFantasia = values.nomeFantasia || values.razaoSocial || '';
+            let razaoSocial = values.razaoSocial || '';
+            if (finalNomeFantasia === '' && razaoSocial !== '') {
+                finalNomeFantasia = razaoSocial;
+            }
+            if (razaoSocial === '' && finalNomeFantasia !== '') {
+                razaoSocial = finalNomeFantasia;
+            }
 
             const dataToSave: any = {
                 ...values,
                 razaoSocial: razaoSocial,
                 nomeFantasia: finalNomeFantasia,
+                name: finalNomeFantasia, // Sync with name field
                 lastUpdate: Timestamp.now(),
             };
-            dataToSave.name = finalNomeFantasia;
-
-
-            if (!dataToSave.supplierCode) {
+    
+            // Ensure supplier code exists
+            if (!selectedSupplier.supplierCode) {
                 const highestCode = suppliers.reduce((max, s) => {
                     const codeNum = parseInt(s.supplierCode || "0", 10);
                     return !isNaN(codeNum) && codeNum > max ? codeNum : max;
                 }, 0);
                 dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
             }
-
-            if (selectedSupplier?.id) { 
-                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
-                toast({ title: "Fornecedor atualizado com sucesso!" });
-            } else { 
-                dataToSave.firstRegistrationDate = Timestamp.now();
-                await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
-                toast({ title: "Fornecedor adicionado com sucesso!" });
-            }
+    
+            await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
+            toast({ title: "Fornecedor atualizado com sucesso!" });
+    
             setIsSupplierFormOpen(false);
             setSelectedSupplier(null);
             await fetchSuppliers();
@@ -411,10 +412,29 @@ export default function CostsPage() {
         }
     };
 
-    const handleAddSupplierClick = () => {
-        setSelectedSupplier(null);
-        supplierForm.reset({ status: 'ativo', address: {}, bankInfo: {}, commercialInfo: {}, documentation: {} });
-        setIsSupplierFormOpen(true);
+    const handleAddSupplierClick = async () => {
+        try {
+            const dataToSave: Partial<Supplier> = {
+                status: 'ativo',
+                firstRegistrationDate: new Date(),
+                lastUpdate: new Date(),
+                nomeFantasia: 'Novo Fornecedor (editar)',
+                cnpj: '00.000.000/0000-00',
+            };
+
+            const docRef = await addDoc(collection(db, "companies", "mecald", "suppliers"), dataToSave);
+            
+            await fetchSuppliers();
+            
+            const newSupplier = { ...dataToSave, id: docRef.id };
+            setSelectedSupplier(newSupplier as Supplier);
+            supplierForm.reset(newSupplier);
+            setIsSupplierFormOpen(true);
+            toast({ title: "Novo fornecedor criado.", description: "Por favor, preencha os detalhes." });
+        } catch(e) {
+             console.error("Error creating new supplier:", e);
+            toast({ variant: "destructive", title: "Erro ao criar fornecedor" });
+        }
     };
 
     const handleEditSupplierClick = (supplier: Supplier) => {
@@ -791,27 +811,24 @@ export default function CostsPage() {
                           <FormField control={supplierForm.control} name="inscricaoEstadual" render={({ field }) => (<FormItem><FormLabel>Inscrição Estadual</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                           <FormField control={supplierForm.control} name="inscricaoMunicipal" render={({ field }) => (<FormItem><FormLabel>Inscrição Municipal</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
-                         <div className="grid md:grid-cols-2 gap-4">
-                           <FormField control={supplierForm.control} name="segment" render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Segmento</FormLabel>
-                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                        <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Selecione um segmento" />
-                                            </SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
-                                            {segmentOptions.map(option => (
-                                                <SelectItem key={option} value={option}>{option}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )} />
-                          <FormField control={supplierForm.control} name="category" render={({ field }) => (<FormItem><FormLabel>Categoria</FormLabel><FormControl><Input placeholder="Ex: Matéria-prima, Serviço" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        </div>
+                        <FormField control={supplierForm.control} name="segment" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Segmento</FormLabel>
+                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                    <FormControl>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione um segmento" />
+                                        </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                        {segmentOptions.map(option => (
+                                            <SelectItem key={option} value={option}>{option}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <FormMessage />
+                            </FormItem>
+                        )} />
                          {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>Código: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {selectedSupplier.firstRegistrationDate ? format(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p><p>Última atualização: {selectedSupplier.lastUpdate ? format(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p></div>)}
                       </TabsContent>
                       <TabsContent value="contact" className="space-y-4">
@@ -898,4 +915,5 @@ export default function CostsPage() {
       </AlertDialog>
     </>
     );
-}
+
+    
