@@ -95,8 +95,6 @@ const dimensionalReportSchema = z.object({
   itemId: z.string({ required_error: "Selecione um item." }),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
-  reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
-  photosUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
   notes: z.string().optional(),
   measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
 }).refine(data => {
@@ -258,7 +256,7 @@ export default function QualityPage() {
     resolver: zodResolver(dimensionalReportSchema),
     defaultValues: {
       inspectionDate: new Date(),
-      orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', reportUrl: '', photosUrl: '',
+      orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '',
       measurements: []
     },
   });
@@ -518,7 +516,7 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', reportUrl: '', photosUrl: '', measurements: [] }); }
+    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', measurements: [] }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
@@ -868,8 +866,6 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Relatório (PDF)</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="photosUrl" render={({ field }) => ( <FormItem><FormLabel>Link para Fotos do Processo</FormLabel><FormControl><Input type="url" {...field} placeholder="https://..." /></FormControl><FormMessage /></FormItem> )}/>
 
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
         <CardContent>
