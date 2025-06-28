@@ -82,7 +82,8 @@ const dimensionalMeasurementSchema = z.object({
   id: z.string(),
   dimensionName: z.string().min(1, "O nome da dimensão é obrigatório."),
   nominalValue: z.coerce.number(),
-  tolerance: z.string().optional(),
+  toleranceMin: z.coerce.number().optional(),
+  toleranceMax: z.coerce.number().optional(),
   measuredValue: z.coerce.number(),
   instrumentUsed: z.string({ required_error: "O instrumento é obrigatório." }),
   result: z.enum(["Conforme", "Não Conforme"]),
@@ -95,6 +96,7 @@ const dimensionalReportSchema = z.object({
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
   reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
+  photosUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
   notes: z.string().optional(),
   measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
 }).refine(data => {
@@ -256,7 +258,7 @@ export default function QualityPage() {
     resolver: zodResolver(dimensionalReportSchema),
     defaultValues: {
       inspectionDate: new Date(),
-      orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', reportUrl: '',
+      orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', reportUrl: '', photosUrl: '',
       measurements: []
     },
   });
@@ -516,7 +518,7 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', reportUrl: '', measurements: [] }); }
+    else { dimensionalReportForm.reset({ inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', reportUrl: '', photosUrl: '', measurements: [] }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
@@ -779,7 +781,7 @@ export default function QualityPage() {
                             <MaterialInspectionForm form={materialInspectionForm} orders={orders} teamMembers={teamMembers} />
                         )}
                         {dialogType === 'dimensional' && (
-                            <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement }} calibrations={calibrations} />
+                            <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement }} calibrations={calibrations} toast={toast} />
                         )}
                         {dialogType === 'welding' && (
                              <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} />
@@ -822,16 +824,19 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
     </>);
 }
 
-function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, calibrations }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], fieldArrayProps: any, calibrations: Calibration[] }) {
+function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, calibrations, toast }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], fieldArrayProps: any, calibrations: Calibration[], toast: any }) {
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
     
-    const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', tolerance: '', measuredValue: '', instrumentUsed: '', result: 'Conforme' });
+    const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
 
     const handleAddMeasurement = () => {
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
+        const min = newMeasurement.toleranceMin !== '' ? parseFloat(newMeasurement.toleranceMin) : null;
+        const max = newMeasurement.toleranceMax !== '' ? parseFloat(newMeasurement.toleranceMax) : null;
+    
         if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
             toast({
                 variant: "destructive",
@@ -840,56 +845,71 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             });
             return;
         }
+    
+        let result: "Conforme" | "Não Conforme" = "Conforme";
+        if ((min !== null && measured < min) || (max !== null && measured > max)) {
+            result = "Não Conforme";
+        }
+        
         fieldArrayProps.append({
             id: Date.now().toString(),
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
-            tolerance: newMeasurement.tolerance,
+            toleranceMin: min ?? undefined,
+            toleranceMax: max ?? undefined,
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
-            result: newMeasurement.result,
+            result: result,
         });
-        setNewMeasurement({ dimensionName: '', nominalValue: '', tolerance: '', measuredValue: '', instrumentUsed: '', result: 'Conforme' });
+        setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
     };
 
     return (<>
         <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-        
+        <FormField control={form.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Relatório (PDF)</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="photosUrl" render={({ field }) => ( <FormItem><FormLabel>Link para Fotos do Processo</FormLabel><FormControl><Input type="url" {...field} placeholder="https://..." /></FormControl><FormMessage /></FormItem> )}/>
+
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
         <CardContent>
             {fieldArrayProps.fields.length > 0 && (
-            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tolerância</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tol. Mín.</TableHead><TableHead>Tol. Máx.</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
             <TableBody>
                 {fieldArrayProps.fields.map((field: any, index: number) => (
                 <TableRow key={field.id}>
-                    <TableCell>{field.dimensionName}</TableCell><TableCell>{field.nominalValue}</TableCell><TableCell>{field.tolerance}</TableCell><TableCell>{field.measuredValue}</TableCell><TableCell>{field.instrumentUsed}</TableCell>
+                    <TableCell>{field.dimensionName}</TableCell><TableCell>{field.nominalValue}</TableCell>
+                    <TableCell>{field.toleranceMin ?? '-'}</TableCell><TableCell>{field.toleranceMax ?? '-'}</TableCell>
+                    <TableCell>{field.measuredValue}</TableCell><TableCell>{field.instrumentUsed}</TableCell>
                     <TableCell><Badge variant={getStatusVariant(field.result)}>{field.result}</Badge></TableCell>
                     <TableCell><Button type="button" variant="ghost" size="icon" onClick={() => fieldArrayProps.remove(index)}><Trash2 className="h-4 w-4 text-destructive"/></Button></TableCell>
                 </TableRow>))}
             </TableBody></Table>
             )}
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                <div className="md:col-span-3">
+            <div className="mt-4 space-y-4">
+                <div>
                     <Label>Nome da Dimensão</Label>
                     <Input value={newMeasurement.dimensionName} onChange={(e) => setNewMeasurement({...newMeasurement, dimensionName: e.target.value})} placeholder="Ex: Diâmetro externo"/>
                 </div>
-                <div>
-                    <Label>Valor Nominal</Label>
-                    <Input type="number" value={newMeasurement.nominalValue} onChange={(e) => setNewMeasurement({...newMeasurement, nominalValue: e.target.value})} placeholder="100.0"/>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <Label>Valor Nominal</Label>
+                        <Input type="number" step="any" value={newMeasurement.nominalValue} onChange={(e) => setNewMeasurement({...newMeasurement, nominalValue: e.target.value})} placeholder="100.0"/>
+                    </div>
+                    <div>
+                        <Label>Tol. Mínima</Label>
+                        <Input type="number" step="any" value={newMeasurement.toleranceMin} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMin: e.target.value})} placeholder="99.9"/>
+                    </div>
+                    <div>
+                        <Label>Tol. Máxima</Label>
+                        <Input type="number" step="any" value={newMeasurement.toleranceMax} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMax: e.target.value})} placeholder="100.1"/>
+                    </div>
+                    <div>
+                        <Label>Valor Medido</Label>
+                        <Input type="number" step="any" value={newMeasurement.measuredValue} onChange={(e) => setNewMeasurement({...newMeasurement, measuredValue: e.target.value})} placeholder="100.05"/>
+                    </div>
                 </div>
-                <div>
-                    <Label>Tolerância</Label>
-                    <Input value={newMeasurement.tolerance} onChange={(e) => setNewMeasurement({...newMeasurement, tolerance: e.target.value})} placeholder="Ex: ±0.1"/>
-                </div>
-                <div>
-                    <Label>Valor Medido</Label>
-                    <Input type="number" value={newMeasurement.measuredValue} onChange={(e) => setNewMeasurement({...newMeasurement, measuredValue: e.target.value})} placeholder="100.1"/>
-                </div>
-            </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                <div className="col-span-1">
+                 <div className="mt-4">
                     <Label>Instrumento Utilizado</Label>
                     <Select value={newMeasurement.instrumentUsed} onValueChange={(value) => setNewMeasurement({...newMeasurement, instrumentUsed: value})}>
                         <SelectTrigger><SelectValue placeholder="Selecione um instrumento" /></SelectTrigger>
@@ -899,16 +919,6 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                             ) : (
                                 <SelectItem value="none" disabled>Cadastre na aba 'Calibração'</SelectItem>
                             )}
-                        </SelectContent>
-                    </Select>
-                </div>
-                <div>
-                    <Label>Resultado</Label>
-                    <Select value={newMeasurement.result} onValueChange={(value) => setNewMeasurement({...newMeasurement, result: value})}>
-                        <SelectTrigger><SelectValue/></SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="Conforme">Conforme</SelectItem>
-                            <SelectItem value="Não Conforme">Não Conforme</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
