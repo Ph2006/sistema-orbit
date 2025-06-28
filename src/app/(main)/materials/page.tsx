@@ -201,6 +201,7 @@ export default function MaterialsPage() {
                 getDoc(doc(db, "companies", "mecald", "settings", "team")),
             ]);
     
+            // Processar orders
             const ordersDataList = ordersSnapshot.docs
               .map(doc => {
                   const data = doc.data();
@@ -226,6 +227,7 @@ export default function MaterialsPage() {
               .filter((order): order is OrderInfo => order !== null);
             setOrders(ordersDataList);
     
+            // Processar team
             if (teamSnapshot.exists()) {
                 const teamData = teamSnapshot.data();
                 if (teamData && Array.isArray(teamData.members)) {
@@ -236,96 +238,63 @@ export default function MaterialsPage() {
                 }
             }
             
-            const reqsListPromises = reqsSnapshot.docs.map(async (d) => {
+            // Processar requisições - MUDANÇA: ler planos do documento principal
+            const reqsList = reqsSnapshot.docs.map(d => {
                 const data = d.data();
-                const reqId = d.id;
-    
-                try {
-                    const cuttingPlansSnap = await getDocs(collection(db, "companies", "mecald", "materialRequisitions", reqId, "cuttingPlans"));
-                    const cuttingPlansData = cuttingPlansSnap.docs.map(planDoc => {
-                        const planData = planDoc.data();
-                        console.log('Carregando plano:', planDoc.id, planData); // Para debug
-                        
-                        return {
-                            id: planDoc.id,
-                            name: planData.name || `Plano de Corte`,
-                            materialDescription: planData.materialDescription || '',
-                            stockLength: Number(planData.stockLength) || 0,
-                            kerf: Number(planData.kerf) || 0,
-                            leftoverThreshold: Number(planData.leftoverThreshold) || 0,
-                            createdAt: planData.createdAt?.toDate() || new Date(),
-                            deliveryDate: planData.deliveryDate?.toDate() || null,
-                            items: (planData.items || []).map((item: any) => ({
-                                code: item.code || '',
-                                description: item.description || '',
-                                length: Number(item.length) || 0,
-                                quantity: Number(item.quantity) || 0,
-                            })),
-                            patterns: planData.patterns || [],
-                            summary: planData.summary || null,
-                        };
-                    });
-                    
-                    return {
-                        ...data,
-                        id: d.id,
-                        date: data.date.toDate(),
-                        customer: data.customer || undefined,
-                        approval: data.approval ? {
-                            ...data.approval,
-                            approvalDate: data.approval.approvalDate?.toDate() || null,
-                        } : {},
-                        items: (data.items || []).map((item: any, index: number) => ({
-                            id: item.id || `${d.id}-${index}`,
-                            description: item.description || '',
-                            quantityRequested: item.quantityRequested || 0,
-                            unit: item.unit || '',
-                            code: item.code || '',
-                            material: item.material || '',
-                            dimensao: item.dimensao || '',
-                            pesoUnitario: item.pesoUnitario || 0,
-                            notes: item.notes || '',
-                            deliveryDate: item.deliveryDate?.toDate() || null,
-                            status: item.status || "Pendente",
-                            quantityFulfilled: item.quantityFulfilled || 0,
-                        })),
-                        history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
-                        cuttingPlans: cuttingPlansData,
-                    } as Requisition
-                } catch (planError) {
-                    console.error('Erro ao carregar planos de corte para requisição', reqId, planError);
-                    // Retorna requisição sem planos em caso de erro
-                    return {
-                        ...data,
-                        id: d.id,
-                        date: data.date.toDate(),
-                        customer: data.customer || undefined,
-                        approval: data.approval ? {
-                            ...data.approval,
-                            approvalDate: data.approval.approvalDate?.toDate() || null,
-                        } : {},
-                        items: (data.items || []).map((item: any, index: number) => ({
-                            id: item.id || `${d.id}-${index}`,
-                            description: item.description || '',
-                            quantityRequested: item.quantityRequested || 0,
-                            unit: item.unit || '',
-                            code: item.code || '',
-                            material: item.material || '',
-                            dimensao: item.dimensao || '',
-                            pesoUnitario: item.pesoUnitario || 0,
-                            notes: item.notes || '',
-                            deliveryDate: item.deliveryDate?.toDate() || null,
-                            status: item.status || "Pendente",
-                            quantityFulfilled: item.quantityFulfilled || 0,
-                        })),
-                        history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
-                        cuttingPlans: [],
-                    } as Requisition
-                }
+                console.log('📄 Carregando requisição:', d.id, data);
+                
+                // Processar planos de corte do documento principal
+                const cuttingPlansData = (data.cuttingPlans || []).map((planData: any) => ({
+                    id: planData.id || Date.now().toString(),
+                    name: planData.name || 'Plano de Corte',
+                    materialDescription: planData.materialDescription || '',
+                    stockLength: Number(planData.stockLength) || 0,
+                    kerf: Number(planData.kerf) || 0,
+                    leftoverThreshold: Number(planData.leftoverThreshold) || 0,
+                    createdAt: planData.createdAt?.toDate() || new Date(),
+                    deliveryDate: planData.deliveryDate?.toDate() || null,
+                    items: (planData.items || []).map((item: any) => ({
+                        code: item.code || '',
+                        description: item.description || '',
+                        length: Number(item.length) || 0,
+                        quantity: Number(item.quantity) || 0,
+                    })),
+                    patterns: planData.patterns || [],
+                    summary: planData.summary || null,
+                }));
+                
+                console.log('✂️ Planos carregados:', cuttingPlansData);
+                
+                return {
+                    ...data,
+                    id: d.id,
+                    date: data.date.toDate(),
+                    customer: data.customer || undefined,
+                    approval: data.approval ? {
+                        ...data.approval,
+                        approvalDate: data.approval.approvalDate?.toDate() || null,
+                    } : {},
+                    items: (data.items || []).map((item: any, index: number) => ({
+                        id: item.id || `${d.id}-${index}`,
+                        description: item.description || '',
+                        quantityRequested: item.quantityRequested || 0,
+                        unit: item.unit || '',
+                        code: item.code || '',
+                        material: item.material || '',
+                        dimensao: item.dimensao || '',
+                        pesoUnitario: item.pesoUnitario || 0,
+                        notes: item.notes || '',
+                        deliveryDate: item.deliveryDate?.toDate() || null,
+                        status: item.status || "Pendente",
+                        quantityFulfilled: item.quantityFulfilled || 0,
+                    })),
+                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})),
+                    cuttingPlans: cuttingPlansData,
+                } as Requisition
             });
     
-            const reqsList = await Promise.all(reqsListPromises);
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
+            console.log('✅ Dados carregados com sucesso:', reqsList.length, 'requisições');
             
         } catch (error: any) {
             console.error("Error fetching data:", error);
@@ -347,13 +316,6 @@ export default function MaterialsPage() {
             // Tentar ler uma requisição existente
             const testRead = await getDocs(collection(db, "companies", "mecald", "materialRequisitions"));
             console.log('✅ Leitura autorizada:', testRead.size, 'documentos');
-            
-            // Tentar ler subcoleção de um documento específico
-            if (testRead.docs.length > 0) {
-                const firstDocId = testRead.docs[0].id;
-                const testSubcollectionRead = await getDocs(collection(db, "companies", "mecald", "materialRequisitions", firstDocId, "cuttingPlans"));
-                console.log('✅ Leitura de subcoleção autorizada:', testSubcollectionRead.size, 'planos');
-            }
             
         } catch (error) {
             console.error('❌ Erro de permissões:', error);
@@ -441,17 +403,9 @@ export default function MaterialsPage() {
         if (!requisitionToDelete?.id) return;
         const reqId = requisitionToDelete.id;
         try {
-            const plansCollectionRef = collection(db, "companies", "mecald", "materialRequisitions", reqId, "cuttingPlans");
-            const plansSnapshot = await getDocs(plansCollectionRef);
-            const batch = writeBatch(db);
-            plansSnapshot.docs.forEach(doc => {
-                batch.delete(doc.ref);
-            });
-            await batch.commit();
-
             await deleteDoc(doc(db, "companies", "mecald", "materialRequisitions", reqId));
 
-            toast({ title: "Requisição excluída!", description: "A requisição e seus planos de corte foram removidos." });
+            toast({ title: "Requisição excluída!", description: "A requisição foi removida." });
             await fetchData();
         } catch (error) {
             toast({ variant: "destructive", title: "Erro ao excluir", description: "Não foi possível remover a requisição." });
@@ -465,10 +419,6 @@ export default function MaterialsPage() {
         console.log('🔄 Iniciando onSubmit...');
         const formValues = form.getValues();
         console.log('📋 Form values completos:', formValues);
-        
-        const { cuttingPlans, ...requisitionCoreData } = formValues;
-        console.log('✂️ Planos de corte extraídos:', cuttingPlans);
-        console.log('📄 Dados da requisição (sem planos):', requisitionCoreData);
     
         try {
             const newHistoryEntry = {
@@ -477,21 +427,23 @@ export default function MaterialsPage() {
                 action: selectedRequisition ? "Edição" : "Criação",
                 details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.`
             };
-            const finalHistory = [...(requisitionCoreData.history || []), newHistoryEntry];
+            const finalHistory = [...(formValues.history || []), newHistoryEntry];
     
-            const mainDataToSave: any = {
-                date: Timestamp.fromDate(requisitionCoreData.date),
-                status: requisitionCoreData.status,
-                requestedBy: requisitionCoreData.requestedBy,
-                department: requisitionCoreData.department || null,
-                orderId: requisitionCoreData.orderId || null,
-                customer: requisitionCoreData.customer || null,
-                generalNotes: requisitionCoreData.generalNotes || null,
+            // Preparar dados principais incluindo os planos de corte
+            const dataToSave: any = {
+                date: Timestamp.fromDate(formValues.date),
+                status: formValues.status,
+                requestedBy: formValues.requestedBy,
+                department: formValues.department || null,
+                orderId: formValues.orderId || null,
+                customer: formValues.customer || null,
+                generalNotes: formValues.generalNotes || null,
                 history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })),
-                requisitionNumber: requisitionCoreData.requisitionNumber || null,
+                requisitionNumber: formValues.requisitionNumber || null,
             };
             
-            mainDataToSave.items = (requisitionCoreData.items || []).map(item => ({
+            // Preparar itens
+            dataToSave.items = (formValues.items || []).map(item => ({
                 id: item.id || Date.now().toString(),
                 code: item.code || '',
                 material: item.material || '',
@@ -506,17 +458,47 @@ export default function MaterialsPage() {
                 status: item.status || 'Pendente',
             }));
     
-            if (requisitionCoreData.approval) {
-                mainDataToSave.approval = {
-                    approvedBy: requisitionCoreData.approval.approvedBy || null,
-                    approvalDate: requisitionCoreData.approval.approvalDate ? Timestamp.fromDate(new Date(requisitionCoreData.approval.approvalDate)) : null,
-                    justification: requisitionCoreData.approval.justification || null,
+            // Preparar aprovação
+            if (formValues.approval) {
+                dataToSave.approval = {
+                    approvedBy: formValues.approval.approvedBy || null,
+                    approvalDate: formValues.approval.approvalDate ? Timestamp.fromDate(new Date(formValues.approval.approvalDate)) : null,
+                    justification: formValues.approval.justification || null,
                 }
             } else {
-                mainDataToSave.approval = null;
+                dataToSave.approval = null;
             }
     
-            console.log('💾 Dados principais preparados para salvar:', mainDataToSave);
+            // MUDANÇA PRINCIPAL: Salvar planos como array no documento principal
+            if (formValues.cuttingPlans && Array.isArray(formValues.cuttingPlans) && formValues.cuttingPlans.length > 0) {
+                console.log('✂️ Preparando', formValues.cuttingPlans.length, 'planos de corte...');
+                
+                dataToSave.cuttingPlans = formValues.cuttingPlans.map(plan => ({
+                    id: plan.id,
+                    name: plan.name || 'Plano de Corte',
+                    materialDescription: plan.materialDescription || '',
+                    stockLength: Number(plan.stockLength) || 0,
+                    kerf: Number(plan.kerf) || 0,
+                    leftoverThreshold: Number(plan.leftoverThreshold) || 0,
+                    createdAt: plan.createdAt ? Timestamp.fromDate(new Date(plan.createdAt)) : Timestamp.now(),
+                    deliveryDate: plan.deliveryDate ? Timestamp.fromDate(new Date(plan.deliveryDate)) : null,
+                    items: (plan.items || []).map(item => ({
+                        code: item.code || '',
+                        description: item.description || '',
+                        length: Number(item.length) || 0,
+                        quantity: Number(item.quantity) || 0,
+                    })),
+                    patterns: plan.patterns || [],
+                    summary: plan.summary || null,
+                }));
+                
+                console.log('💾 Planos preparados:', dataToSave.cuttingPlans);
+            } else {
+                dataToSave.cuttingPlans = [];
+                console.log('ℹ️ Nenhum plano de corte para salvar');
+            }
+    
+            console.log('💾 Dados finais preparados para salvar:', dataToSave);
     
             let requisitionId: string;
             let isNewRequisition = !selectedRequisition?.id;
@@ -525,112 +507,19 @@ export default function MaterialsPage() {
                 console.log('🆕 Criando nova requisição...');
                 const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
                 const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
-                const newRequisitionData = { ...mainDataToSave, requisitionNumber: (highestNumber + 1).toString().padStart(5, '0') };
+                const newRequisitionData = { ...dataToSave, requisitionNumber: (highestNumber + 1).toString().padStart(5, '0') };
+                
                 const newDocRef = await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), newRequisitionData);
                 requisitionId = newDocRef.id;
                 console.log('✅ Nova requisição criada com ID:', requisitionId);
             } else {
                 console.log('📝 Atualizando requisição existente:', selectedRequisition!.id);
                 requisitionId = selectedRequisition!.id;
-                await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", requisitionId), mainDataToSave);
-                console.log('✅ Requisição principal atualizada');
+                await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", requisitionId), dataToSave);
+                console.log('✅ Requisição atualizada com sucesso');
             }
     
-            // PROCESSAMENTO DOS PLANOS DE CORTE COM DEBUG DETALHADO
-            if (cuttingPlans && Array.isArray(cuttingPlans) && cuttingPlans.length > 0) {
-                console.log('✂️ Processando', cuttingPlans.length, 'planos de corte...');
-                
-                try {
-                    const plansSubcollectionRef = collection(db, "companies", "mecald", "materialRequisitions", requisitionId, "cuttingPlans");
-                    console.log('📁 Referência da subcoleção criada:', plansSubcollectionRef.path);
-    
-                    // Limpar planos existentes se não for nova requisição
-                    if (!isNewRequisition) {
-                        console.log('🧹 Limpando planos existentes...');
-                        try {
-                            const existingPlansSnapshot = await getDocs(plansSubcollectionRef);
-                            console.log('📋 Planos existentes encontrados:', existingPlansSnapshot.docs.length);
-                            
-                            const existingPlanIds = new Set(existingPlansSnapshot.docs.map(doc => doc.id));
-                            const currentPlanIds = new Set(cuttingPlans.map(p => p.id));
-                            
-                            console.log('🗂️ IDs existentes:', Array.from(existingPlanIds));
-                            console.log('🆔 IDs atuais:', Array.from(currentPlanIds));
-                            
-                            const batch = writeBatch(db);
-                            let deletionsCount = 0;
-                            
-                            existingPlanIds.forEach(id => {
-                                if (!currentPlanIds.has(id)) {
-                                    console.log('🗑️ Removendo plano:', id);
-                                    batch.delete(doc(plansSubcollectionRef, id));
-                                    deletionsCount++;
-                                }
-                            });
-                            
-                            if (deletionsCount > 0) {
-                                await batch.commit();
-                                console.log(`✅ ${deletionsCount} planos removidos com sucesso`);
-                            }
-                        } catch (cleanupError) {
-                            console.warn('⚠️ Erro na limpeza dos planos existentes:', cleanupError);
-                        }
-                    }
-                    
-                    // Salvar cada plano individualmente para melhor debugging
-                    for (let i = 0; i < cuttingPlans.length; i++) {
-                        const plan = cuttingPlans[i];
-                        console.log(`🔄 Processando plano ${i + 1}/${cuttingPlans.length}:`, plan.name || plan.id);
-                        console.log('📊 Dados do plano:', plan);
-                        
-                        try {
-                            const { id: planId, ...planData } = plan;
-                            const planDocRef = doc(plansSubcollectionRef, planId);
-                            
-                            const planDataForFirestore = {
-                                name: planData.name || `Plano de Corte ${i + 1}`,
-                                materialDescription: planData.materialDescription || '',
-                                stockLength: Number(planData.stockLength) || 0,
-                                kerf: Number(planData.kerf) || 0,
-                                leftoverThreshold: Number(planData.leftoverThreshold) || 0,
-                                createdAt: planData.createdAt ? Timestamp.fromDate(new Date(planData.createdAt)) : Timestamp.now(),
-                                deliveryDate: planData.deliveryDate ? Timestamp.fromDate(new Date(planData.deliveryDate)) : null,
-                                items: (planData.items || []).map(item => ({
-                                    code: item.code || '',
-                                    description: item.description || '',
-                                    length: Number(item.length) || 0,
-                                    quantity: Number(item.quantity) || 0,
-                                })),
-                                patterns: planData.patterns || [],
-                                summary: planData.summary || null,
-                            };
-                            
-                            console.log('💾 Dados preparados para Firestore:', planDataForFirestore);
-                            
-                            await setDoc(planDocRef, planDataForFirestore, { merge: true });
-                            console.log(`✅ Plano ${planId} salvo com sucesso`);
-                            
-                        } catch (planError) {
-                            console.error(`❌ Erro ao salvar plano ${plan.id}:`, planError);
-                            throw planError; // Re-throw para interromper o processo
-                        }
-                    }
-                    
-                    console.log('🎉 Todos os planos de corte foram salvos com sucesso!');
-                    
-                } catch (plansError) {
-                    console.error('❌ Erro no processamento dos planos de corte:', plansError);
-                    // Não vamos fazer throw aqui para não interromper o salvamento da requisição principal
-                    toast({ 
-                        variant: "destructive", 
-                        title: "Erro nos planos de corte", 
-                        description: "A requisição foi salva, mas houve erro nos planos de corte. Verifique o console." 
-                    });
-                }
-            } else {
-                console.log('ℹ️ Nenhum plano de corte para processar');
-            }
-    
+            console.log('🎉 Salvamento concluído com sucesso!');
             toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
             setIsFormOpen(false);
             await fetchData();
