@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -781,7 +782,7 @@ export default function QualityPage() {
                         {dialogType === 'dimensional' && (
                             <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement }} calibrations={calibrations} toast={toast} />
                         )}
-                        {dialogType === 'welding' && (
+                         {dialogType === 'welding' && (
                              <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} />
                         )}
                          {dialogType === 'painting' && (
@@ -977,3 +978,4 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
