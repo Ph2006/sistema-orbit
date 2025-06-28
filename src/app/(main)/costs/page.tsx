@@ -200,6 +200,9 @@ export default function CostsPage() {
     const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
     const { user, loading: authLoading } = useAuth();
     const { toast } = useToast();
+    
+    const [isDeleteCostAlertOpen, setIsDeleteCostAlertOpen] = useState(false);
+    const [costEntryToDelete, setCostEntryToDelete] = useState<any | null>(null);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -484,6 +487,45 @@ export default function CostsPage() {
         }
     };
 
+    const handleDeleteCostEntryClick = (entry: any) => {
+        setCostEntryToDelete(entry);
+        setIsDeleteCostAlertOpen(true);
+    };
+
+    const handleConfirmDeleteCostEntry = async () => {
+        if (!costEntryToDelete) return;
+        const orderRef = doc(db, "companies", "mecald", "orders", costEntryToDelete.orderId);
+        try {
+            const orderSnap = await getDoc(orderRef);
+            if (!orderSnap.exists()) {
+                throw new Error("Ordem de serviço não encontrada.");
+            }
+            const orderData = orderSnap.data();
+            const costEntries = orderData.costEntries || [];
+            
+            const entryToRemove = costEntries.find((e: any) => e.id === costEntryToDelete.id);
+
+            if (!entryToRemove) {
+                toast({ variant: "destructive", title: "Erro", description: "O lançamento de custo já foi removido ou não foi encontrado." });
+                setIsDeleteCostAlertOpen(false);
+                return;
+            }
+
+            await updateDoc(orderRef, {
+                costEntries: arrayRemove(entryToRemove)
+            });
+            
+            toast({ title: "Custo removido!", description: `O lançamento foi removido da OS.` });
+            
+            setIsDeleteCostAlertOpen(false);
+            setCostEntryToDelete(null);
+            await fetchOrders();
+        } catch (error: any) {
+            console.error("Error deleting cost entry:", error);
+            toast({ variant: "destructive", title: "Erro ao remover custo", description: error.message });
+        }
+    };
+
     const getStatusVariant = (status?: string) => {
         if (!status) return "outline";
         const lowerStatus = status.toLowerCase();
@@ -704,6 +746,7 @@ export default function CostsPage() {
                                     <TableHead>Descrição</TableHead>
                                     <TableHead className="text-right">Custo Total</TableHead>
                                     <TableHead>Lançado por</TableHead>
+                                    <TableHead className="text-right">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -717,11 +760,16 @@ export default function CostsPage() {
                                                 {entry.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                             </TableCell>
                                             <TableCell>{entry.enteredBy}</TableCell>
+                                            <TableCell className="text-right">
+                                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteCostEntryClick(entry)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </TableCell>
                                         </TableRow>
                                     ))
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={5} className="h-24 text-center">Nenhum custo lançado ainda.</TableCell>
+                                        <TableCell colSpan={6} className="h-24 text-center">Nenhum custo lançado ainda.</TableCell>
                                     </TableRow>
                                 )}
                             </TableBody>
@@ -929,6 +977,23 @@ export default function CostsPage() {
             <AlertDialogFooter>
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
                 <AlertDialogAction onClick={handleConfirmDeleteSupplier} className="bg-destructive hover:bg-destructive/90">
+                    Sim, excluir
+                </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isDeleteCostAlertOpen} onOpenChange={setIsDeleteCostAlertOpen}>
+        <AlertDialogContent>
+            <AlertDialogHeader>
+                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                <AlertDialogDescription>
+                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o lançamento de custo: <span className="font-bold">{costEntryToDelete?.description}</span> no valor de <span className="font-bold">{costEntryToDelete?.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfirmDeleteCostEntry} className="bg-destructive hover:bg-destructive/90">
                     Sim, excluir
                 </AlertDialogAction>
             </AlertDialogFooter>
