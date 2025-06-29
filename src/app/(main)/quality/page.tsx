@@ -146,6 +146,23 @@ const weldingInspectionSchema = z.object({
   photos: z.array(z.string()).optional(),
 });
 
+const paintingReportSchema = z.object({
+  id: z.string().optional(),
+  reportNumber: z.string().optional(),
+  orderId: z.string({ required_error: "Selecione um pedido." }),
+  itemId: z.string({ required_error: "Selecione um item." }),
+  inspectionDate: z.date({ required_error: "A data é obrigatória." }),
+  result: z.enum(["Aprovado", "Reprovado"]),
+  paintType: z.string().min(1, "O tipo de tinta é obrigatório."),
+  inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
+  dryFilmThickness: z.coerce.number().optional(),
+  colorRal: z.string().optional(),
+  surfacePreparation: z.string().optional(),
+  instrumentUsed: z.string().optional(),
+  adhesionTestResult: z.enum(["Aprovado", "Reprovado"]).optional(),
+  notes: z.string().optional(),
+});
+
 const liquidPenetrantSchema = z.object({
   id: z.string().optional(),
   reportNumber: z.string().optional(),
@@ -335,14 +352,14 @@ export default function QualityPage() {
   const weldingInspectionForm = useForm<z.infer<typeof weldingInspectionSchema>>({
       resolver: zodResolver(weldingInspectionSchema),
       defaultValues: {
-        reportNumber: "",
+        reportNumber: '',
         orderId: undefined,
         itemId: undefined,
-        inspectionDate: new Date(),
-        inspectionType: "Visual",
-        result: "Conforme",
+        inspectionDate: new Date(), 
+        inspectionType: "Visual" as const, 
+        result: "Conforme" as const, 
         inspectedBy: undefined,
-        customerInspector: "",
+        customerInspector: '',
         welderSinete: "",
         weldingProcess: "",
         acceptanceCriteria: "",
@@ -2451,3 +2468,6 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
   </>);
 }
 
+
+
+    
