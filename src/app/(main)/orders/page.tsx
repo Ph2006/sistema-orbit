@@ -555,17 +555,40 @@ export default function OrdersPage() {
                 title: "Pedido atualizado!",
                 description: "Os dados do pedido foram salvos com sucesso.",
             });
-    
-            const updatedOrderList = await fetchOrders();
-            const updatedOrderInState = updatedOrderList.find(o => o.id === selectedOrder.id);
 
-            if (updatedOrderInState) {
-                setSelectedOrder(updatedOrderInState);
-                 form.reset({
-                    ...updatedOrderInState,
-                    status: updatedOrderInState.status as any,
-                });
-            }
+            // Manually update the state for immediate feedback
+            const updatedOrderForState: Order = {
+                ...selectedOrder,
+                quotationNumber: values.quotationNumber!,
+                deliveryDate: values.deliveryDate ? new Date(values.deliveryDate) : undefined,
+                customer: values.customer,
+                projectName: values.projectName,
+                status: values.status,
+                driveLink: values.driveLink,
+                documents: values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                items: values.items.map(item => ({
+                    ...item,
+                    itemDeliveryDate: item.itemDeliveryDate ? new Date(item.itemDeliveryDate) : undefined,
+                    shippingDate: item.shippingDate ? new Date(item.shippingDate) : undefined,
+                    productionPlan: (item.productionPlan || []).map(p => ({
+                        ...p,
+                        startDate: p.startDate ? new Date(p.startDate) : undefined,
+                        completedDate: p.completedDate ? new Date(p.completedDate) : undefined,
+                    })) as any
+                })),
+                totalWeight: totalWeight,
+            };
+
+            setOrders(prevOrders => 
+                prevOrders.map(o => (o.id === updatedOrderForState.id ? updatedOrderForState : o))
+            );
+            
+            setSelectedOrder(updatedOrderForState);
+            
+            form.reset({
+                ...updatedOrderForState,
+                status: updatedOrderForState.status as any,
+            });
     
             setIsEditing(false);
         } catch (error) {
