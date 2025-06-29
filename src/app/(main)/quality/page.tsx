@@ -1744,7 +1744,7 @@ export default function QualityPage() {
         
         addSection('7. Conclusão', [
             ['Resultado Final', report.finalResult],
-            ['Critério de Aceitação', report.acceptanceCriteria],
+            ['Critério de Aceitação Aplicado', report.acceptanceCriteria],
             ['Observações Finais', report.finalNotes],
         ]);
 
@@ -2690,9 +2690,7 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
     return (
     <div className="space-y-4">
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">1. Dados Gerais da Peça e da Soldagem</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">1. Dados Gerais da Peça e da Soldagem</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Número do pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
@@ -2711,9 +2709,7 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
       </Card>
       
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">2. Dados do Soldador</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">2. Dados do Soldador</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
            <FormField control={form.control} name="welderSinete" render={({ field }) => ( <FormItem><FormLabel>Sinete do soldador</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
            <FormField control={form.control} name="welderQualification" render={({ field }) => ( <FormItem><FormLabel>Número da qualificação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
@@ -2753,9 +2749,7 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
       </Card>
 
        <Card>
-        <CardHeader>
-          <CardTitle className="text-base">4. Dados do Ensaio Visual</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">4. Dados do Ensaio Visual</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <FormField control={form.control} name="surfaceCondition" render={({ field }) => ( <FormItem><FormLabel>Condições da Superfície</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Limpa, isenta de respingos" /></FormControl><FormMessage /></FormItem> )}/>
           <FormField control={form.control} name="observedDefects" render={({ field }) => ( <FormItem><FormLabel>Defeitos Observados</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Porosidade, mordedura" /></FormControl><FormMessage /></FormItem> )}/>
@@ -2790,9 +2784,7 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
       </Card>
         
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">5. Registro e Responsáveis</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">5. Registro e Responsáveis</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data do Ensaio</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Responsável técnico</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
@@ -2982,6 +2974,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
         }
         fieldArrayProps.append(result.data);
         setNewResult({ jointCode: '', evaluationResult: 'Conforme' });
+        setEditResultIndex(null);
     };
 
     const handleUpdateResult = () => {
@@ -2997,8 +2990,9 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
     };
 
     return(
+      <>
         <div className="space-y-4">
-             <Card>
+            <Card>
                 <CardHeader><CardTitle className="text-base">1. Dados do Relatório</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem><FormLabel>Data da emissão</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
@@ -3020,7 +3014,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                      <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Oficina" /></FormControl><FormMessage /></FormItem> )} />
                 </CardContent>
             </Card>
-
+            
             <Card>
                 <CardHeader><CardTitle className="text-base">3. Normas e Critérios Aplicados</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3038,7 +3032,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                     <FormField control={form.control} name="equipmentSerial" render={({ field }) => ( <FormItem><FormLabel>Nº de Série</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="equipmentCalibration" render={({ field }) => ( <FormItem><FormLabel>Calibração do Equipamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Certificado + Validade" /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="headType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Cabeçote</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Reto, Angular, etc." /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="frequency" render={({ field }) => ( <FormItem><FormLabel>Frequência (MHz)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="frequency" render={({ field }) => ( <FormItem><FormLabel>Frequência (MHz)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="incidentAngle" render={({ field }) => ( <FormItem><FormLabel>Ângulo de Incidência (°)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="0, 45, 60, etc." /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="couplant" render={({ field }) => ( <FormItem><FormLabel>Acoplante</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Gel, óleo, etc." /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="referenceBlock" render={({ field }) => ( <FormItem><FormLabel>Bloco Padrão de Referência</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="V1, V2, IIW, etc." /></FormControl><FormMessage /></FormItem> )} />
@@ -3049,7 +3043,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                 <CardHeader><CardTitle className="text-base">5. Parâmetros do Ensaio</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="pulseMode" render={({ field }) => ( <FormItem><FormLabel>Modo de Pulso</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Pulso-Eco, etc." /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="range" render={({ field }) => ( <FormItem><FormLabel>Alcance (mm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="range" render={({ field }) => ( <FormItem><FormLabel>Alcance (mm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="gain" render={({ field }) => ( <FormItem><FormLabel>Ganho (dB)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="distanceCorrection" render={({ field }) => ( <FormItem><FormLabel>Correção de Distância</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="scanRate" render={({ field }) => ( <FormItem><FormLabel>Taxa de Varredura (mm/s)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
@@ -3097,7 +3091,17 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                     </div>
                 </CardContent>
             </Card>
+
+            <Card>
+                <CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="rejectionCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Rejeição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Norma ou tabela utilizada" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="finalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Finais</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
         </div>
+      </>
     )
 }
     
@@ -3109,6 +3113,8 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
     
 
 
+
+    
 
     
 
