@@ -118,6 +118,7 @@ const weldingInspectionSchema = z.object({
   inspectionType: z.enum(["Visual", "LP - Líquido Penetrante", "UT - Ultrassom"]),
   inspectionDate: z.date({ required_error: "A data é obrigatória." }),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
+  customerInspector: z.string().optional(),
   result: z.enum(["Aprovado", "Reprovado", "Conforme", "Não Conforme"]),
   welder: z.string().optional(),
   process: z.string().optional(), // For Visual
@@ -290,8 +291,10 @@ export default function QualityPage() {
           inspectionType: "Visual",
           result: "Conforme",
           inspectedBy: undefined,
+          customerInspector: '',
           welder: '',
           process: '',
+          acceptanceCriteria: '',
           technician: '',
           standard: '',
           equipment: '',
@@ -553,7 +556,9 @@ export default function QualityPage() {
         toast({ title: "Relatório atualizado!" });
       } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "rawMaterialInspections"));
-        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10)).filter(n => !isNaN(n));
+        const existingNumbers = reportsSnapshot.docs
+            .map(d => parseInt(d.data().reportNumber || '0', 10))
+            .filter(n => !isNaN(n) && Number.isFinite(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
         dataToSave.reportNumber = newReportNumber;
@@ -576,7 +581,9 @@ export default function QualityPage() {
          toast({ title: "Relatório atualizado!" });
        } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "dimensionalReports"));
-        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10)).filter(n => !isNaN(n));
+        const existingNumbers = reportsSnapshot.docs
+            .map(d => parseInt(d.data().reportNumber || '0', 10))
+            .filter(n => !isNaN(n) && Number.isFinite(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
         (dataToSave as any).reportNumber = newReportNumber;
@@ -589,13 +596,15 @@ export default function QualityPage() {
   };
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
-       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), photos: values.photos || [] };
+       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), photos: values.photos || [], customerInspector: values.customerInspector || null };
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório de solda atualizado!" });
        } else {
          const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
-         const existingNumbers = reportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)).filter(n => !isNaN(n));
+         const existingNumbers = reportsSnapshot.docs
+            .map(d => parseInt((d.data().reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10))
+            .filter(n => !isNaN(n) && Number.isFinite(n));
          const highestNumber = Math.max(0, ...existingNumbers);
          const newReportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, '0')}`;
          (dataToSave as any).reportNumber = newReportNumber;
@@ -614,7 +623,9 @@ export default function QualityPage() {
          toast({ title: "Relatório de pintura atualizado!" });
        } else {
          const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "paintingReports"));
-         const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10)).filter(n => !isNaN(n));
+         const existingNumbers = reportsSnapshot.docs
+            .map(d => parseInt(d.data().reportNumber || '0', 10))
+            .filter(n => !isNaN(n) && Number.isFinite(n));
          const highestNumber = Math.max(0, ...existingNumbers);
          const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
          dataToSave.reportNumber = newReportNumber;
@@ -648,8 +659,10 @@ export default function QualityPage() {
         inspectionType: "Visual" as const, 
         result: "Conforme" as const, 
         inspectedBy: undefined,
+        customerInspector: '',
         welder: '',
         process: '',
+        acceptanceCriteria: '',
         technician: '',
         standard: '',
         equipment: '',
@@ -948,9 +961,9 @@ export default function QualityPage() {
         
         const details = [
             ['Pedido', `${orderInfo?.number || 'N/A'}`, 'Data da Inspeção', format(report.inspectionDate, 'dd/MM/yyyy')],
-            ['Cliente', `${orderInfo?.customerName || 'N/A'}`, 'Inspetor', report.inspectedBy],
-            ['Item', `${itemInfo?.description || 'N/A'}`, 'Tipo de Inspeção', report.inspectionType],
-            ['Resultado Final', { content: report.result, styles: { fontStyle: 'bold' } }, '', '']
+            ['Cliente', `${orderInfo?.customerName || 'N/A'}`, 'Inspetor (Empresa)', report.inspectedBy],
+            ['Item', `${itemInfo?.description || 'N/A'}`, 'Inspetor (Cliente)', report.customerInspector || 'N/A'],
+            ['Resultado Final', { content: report.result, styles: { fontStyle: 'bold' } }, 'Tipo de Inspeção', report.inspectionType]
         ];
 
         if(report.inspectionType === 'Visual') {
@@ -1014,6 +1027,25 @@ export default function QualityPage() {
         const pageCount = docPdf.internal.getNumberOfPages();
         for(let i = 1; i <= pageCount; i++) {
             docPdf.setPage(i);
+            
+             // Add signatures
+            const signatureY = pageHeight - 35;
+            if (i === pageCount) { // only on last page
+                docPdf.setFontSize(10).setFont(undefined, 'normal');
+                
+                const enterpriseInspectorX = 15;
+                docPdf.line(enterpriseInspectorX, signatureY, enterpriseInspectorX + 85, signatureY);
+                docPdf.text(report.inspectedBy, enterpriseInspectorX, signatureY + 5);
+                docPdf.text('Inspetor Responsável (Empresa)', enterpriseInspectorX, signatureY + 10);
+
+                if (report.customerInspector) {
+                    const customerInspectorX = pageWidth - 15 - 85;
+                    docPdf.line(customerInspectorX, signatureY, customerInspectorX + 85, signatureY);
+                    docPdf.text(report.customerInspector, customerInspectorX, signatureY + 5);
+                    docPdf.text('Inspetor Responsável (Cliente)', customerInspectorX, signatureY + 10);
+                }
+            }
+
             docPdf.setFontSize(8).setFont(undefined, 'normal');
             docPdf.text(footerText, 15, pageHeight - 10);
             docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
@@ -1663,7 +1695,10 @@ function WeldingInspectionForm({ form, orders, teamMembers }: { form: any, order
             <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         </>)}
         
-        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável (Empresa)</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente (Nome)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
+        </div>
         <FormItem>
             <FormLabel>Fotos da Inspeção</FormLabel>
             <FormControl>
