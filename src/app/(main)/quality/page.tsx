@@ -387,17 +387,19 @@ const getCalibrationStatus = (calibration: Calibration) => {
     return { text: "Em dia", variant: "default", icon: CheckCircle };
 };
 
-const getStatusVariant = (status?: string) => {
+const getStatusVariant = (status?: string): 'default' | 'secondary' | 'destructive' | 'outline' => {
     if (!status) return 'outline';
     switch (status) {
         case 'Aberta': return 'destructive';
         case 'Em Análise': return 'secondary';
+        case 'Em andamento': return 'secondary';
         case 'Concluída': return 'default';
         case 'Aprovado': return 'default';
         case 'Aprovado com ressalva': return 'secondary';
         case 'Reprovado': return 'destructive';
         case 'Conforme': return 'default';
         case 'Não Conforme': return 'destructive';
+        case 'Pendente': return 'secondary';
         default: return 'outline';
     }
 };
@@ -823,12 +825,13 @@ export default function QualityPage() {
         const paintCount = paintingReports.filter(i => i.orderId === orderId).length;
         const lpCount = liquidPenetrantReports.filter(i => i.orderId === orderId).length;
         const utCount = ultrasoundReports.filter(i => i.orderId === orderId).length;
-        return matCount + dimCount + weldCount + paintCount + lpCount + utCount;
+        const llCount = lessonsLearnedReports.filter(i => i.orderId === orderId).length;
+        return matCount + dimCount + weldCount + paintCount + lpCount + utCount + llCount;
     };
 
     const inspectionsForSelectedOrder = useMemo(() => {
         if (!selectedOrderForInspections) {
-            return { material: [], dimensional: [], welding: [], painting: [], liquidPenetrant: [], ultrasound: [] };
+            return { material: [], dimensional: [], welding: [], painting: [], liquidPenetrant: [], ultrasound: [], lessonsLearned: [] };
         }
         const orderId = selectedOrderForInspections.id;
         return {
@@ -838,8 +841,9 @@ export default function QualityPage() {
             painting: paintingReports.filter(i => i.orderId === orderId),
             liquidPenetrant: liquidPenetrantReports.filter(i => i.orderId === orderId),
             ultrasound: ultrasoundReports.filter(i => i.orderId === orderId),
+            lessonsLearned: lessonsLearnedReports.filter(i => i.orderId === orderId),
         };
-    }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports, liquidPenetrantReports, ultrasoundReports]);
+    }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports, liquidPenetrantReports, ultrasoundReports, lessonsLearnedReports]);
 
 
   // --- RNC HANDLERS ---
@@ -1404,13 +1408,15 @@ export default function QualityPage() {
     setIsInspectionFormOpen(true);
   };
 
-    const handleOpenLessonsLearnedForm = (report: LessonsLearnedReport | null = null) => {
+    const handleOpenLessonsLearnedForm = (report: LessonsLearnedReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
         setSelectedInspection(report);
         setDialogType('lessonsLearned');
         if (report) {
             lessonsLearnedForm.reset(report);
         } else {
             lessonsLearnedForm.reset({
+                orderId: order?.id || undefined,
+                itemId: undefined,
                 emissionDate: new Date(),
                 projectPhase: [],
                 impact: { reprocess: false, delay: false, cost: false, rework: false, materialLoss: false },
@@ -2243,7 +2249,6 @@ export default function QualityPage() {
                 <TabsTrigger value="rnc">Relatórios de Não Conformidade (RNC)</TabsTrigger>
                 <TabsTrigger value="calibrations">Calibração de Equipamentos</TabsTrigger>
                 <TabsTrigger value="inspections">Inspeções e Documentos</TabsTrigger>
-                <TabsTrigger value="lessonsLearned">Lições Aprendidas</TabsTrigger>
             </TabsList>
             
             <TabsContent value="rnc">
@@ -2350,34 +2355,6 @@ export default function QualityPage() {
                 </CardContent>
               </Card>
             </TabsContent>
-
-            <TabsContent value="lessonsLearned">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                    <div><CardTitle>Registro de Lições Aprendidas</CardTitle><CardDescription>Documente e gerencie os aprendizados de cada projeto para melhoria contínua.</CardDescription></div>
-                    <Button onClick={() => handleOpenLessonsLearnedForm(null)}><PlusCircle className="mr-2 h-4 w-4" />Registrar Lição</Button>
-                </CardHeader>
-                <CardContent>
-                  {isLoading ? <Skeleton className="h-64 w-full" /> :
-                  <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Resumo</TableHead><TableHead>Status Ação</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {lessonsLearnedReports.length > 0 ? (
-                        lessonsLearnedReports.map((report) => (<TableRow key={report.id}>
-                            <TableCell className="font-mono">{report.reportNumber}</TableCell>
-                            <TableCell>{format(report.emissionDate, 'dd/MM/yyyy')}</TableCell>
-                            <TableCell>{report.orderNumber}</TableCell>
-                            <TableCell className="max-w-[300px] truncate">{report.lessonSummary}</TableCell>
-                            <TableCell><Badge variant={getStatusVariant(report.actionStatus)}>{report.actionStatus}</Badge></TableCell>
-                            <TableCell className="text-right">
-                              <Button variant="ghost" size="icon" onClick={() => handleLessonsLearnedPDF(report)}><FileDown className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" onClick={() => handleOpenLessonsLearnedForm(report)}><Pencil className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(report, 'lessonsLearned')}><Trash2 className="h-4 w-4" /></Button>
-                            </TableCell></TableRow>))
-                      ) : ( <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhuma lição aprendida registrada.</TableCell></TableRow> )}
-                    </TableBody></Table> }
-                </CardContent></Card>
-            </TabsContent>
-
         </Tabs>
       </div>
 
@@ -2579,6 +2556,54 @@ export default function QualityPage() {
                             description="Visualize e anexe os procedimentos de solda, pintura e inspeção aplicáveis a este pedido."
                             icon={BookOpen} 
                         />
+                    </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="lessons-learned">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
+                        <div className="flex items-center gap-2">
+                            <BrainCircuit className="h-5 w-5 text-primary" />
+                            Lições Aprendidas
+                        </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <Card>
+                            <CardHeader className="flex-row justify-between items-center">
+                                <CardTitle className="text-base">Histórico de Lições Aprendidas</CardTitle>
+                                <Button size="sm" onClick={() => handleOpenLessonsLearnedForm(null)}>
+                                    <PlusCircle className="mr-2 h-4 w-4"/>
+                                    Registrar Lição
+                                </Button>
+                            </CardHeader>
+                            <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Nº</TableHead>
+                                            <TableHead>Data</TableHead>
+                                            <TableHead>Resumo</TableHead>
+                                            <TableHead>Status Ação</TableHead>
+                                            <TableHead className="text-right">Ações</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {inspectionsForSelectedOrder.lessonsLearned.length > 0 ? inspectionsForSelectedOrder.lessonsLearned.map(report => (
+                                            <TableRow key={report.id}>
+                                                <TableCell className="font-mono">{report.reportNumber}</TableCell>
+                                                <TableCell>{format(report.emissionDate, 'dd/MM/yy')}</TableCell>
+                                                <TableCell className="max-w-[200px] truncate">{report.lessonSummary}</TableCell>
+                                                <TableCell><Badge variant={getStatusVariant(report.actionStatus)}>{report.actionStatus}</Badge></TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button variant="ghost" size="icon" onClick={() => handleLessonsLearnedPDF(report)}><FileDown className="h-4 w-4" /></Button>
+                                                    <Button variant="ghost" size="icon" onClick={() => handleOpenLessonsLearnedForm(report)}><Pencil className="h-4 w-4" /></Button>
+                                                    <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(report, 'lessonsLearned')}><Trash2 className="h-4 w-4" /></Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        )) : <TableRow><TableCell colSpan={5} className="h-24 text-center">Nenhuma lição aprendida para este pedido.</TableCell></TableRow>}
+                                    </TableBody>
+                                </Table>
+                                }
+                            </CardContent>
+                        </Card>
                     </AccordionContent>
                 </AccordionItem>
             </Accordion>
