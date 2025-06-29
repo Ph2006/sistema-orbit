@@ -176,7 +176,7 @@ const paintingReportSchema = z.object({
 
 // --- TYPES ---
 type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string };
-type OrderInfo = { id: string, number: string, customerId: string, customerName: string, items: { id: string, description: string, code?: string, quantity?: number }[] };
+type OrderInfo = { id: string; number: string; customerId: string; customerName: string, projectName?: string, items: { id: string, description: string, code?: string, quantity?: number }[] };
 type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id: string, orderNumber: string, itemName: string };
 type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string, orderNumber: string, itemName: string, overallResult?: string };
@@ -266,7 +266,8 @@ export default function QualityPage() {
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
   const [inspectionSearchQuery, setInspectionSearchQuery] = useState("");
-
+  const [isInspectionsDetailOpen, setIsInspectionsDetailOpen] = useState(false);
+  const [selectedOrderForInspections, setSelectedOrderForInspections] = useState<OrderInfo | null>(null);
 
   // General State
   const [isLoading, setIsLoading] = useState(true);
@@ -383,7 +384,10 @@ export default function QualityPage() {
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
         const data = doc.data();
         return {
-          id: doc.id, number: data.quotationNumber || data.orderNumber || 'N/A', customerId: data.customer?.id || data.customerId || '',
+          id: doc.id, 
+          number: data.internalOS || data.quotationNumber || 'N/A', 
+          projectName: data.projectName,
+          customerId: data.customer?.id || data.customerId || '',
           customerName: data.customer?.name || data.customerName || 'N/A',
           items: (data.items || []).map((item: any, index: number) => ({ id: item.id || `${doc.id}-${index}`, description: item.description, code: item.code, quantity: item.quantity })),
         };
@@ -466,49 +470,37 @@ export default function QualityPage() {
   }, [user, authLoading]);
 
   // --- FILTERED DATA ---
-  const filteredMaterialInspections = useMemo(() => {
-      if (!inspectionSearchQuery) return materialInspections;
-      const query = inspectionSearchQuery.toLowerCase();
-      return materialInspections.filter(
-          (insp) =>
-              insp.orderNumber.toLowerCase().includes(query) ||
-              insp.itemName.toLowerCase().includes(query) ||
-              (insp.reportNumber?.toLowerCase() ?? '').includes(query)
-      );
-  }, [materialInspections, inspectionSearchQuery]);
+    const filteredOrders = useMemo(() => {
+        if (!inspectionSearchQuery) return orders;
+        const query = inspectionSearchQuery.toLowerCase();
+        return orders.filter(
+            (order) =>
+                order.number.toLowerCase().includes(query) ||
+                order.customerName.toLowerCase().includes(query) ||
+                (order.projectName?.toLowerCase() ?? '').includes(query)
+        );
+    }, [orders, inspectionSearchQuery]);
 
-  const filteredDimensionalReports = useMemo(() => {
-      if (!inspectionSearchQuery) return dimensionalReports;
-      const query = inspectionSearchQuery.toLowerCase();
-      return dimensionalReports.filter(
-          (rep) =>
-              rep.orderNumber.toLowerCase().includes(query) ||
-              rep.itemName.toLowerCase().includes(query) ||
-              (rep.reportNumber?.toLowerCase() ?? '').includes(query)
-      );
-  }, [dimensionalReports, inspectionSearchQuery]);
+    const getReportCountForOrder = (orderId: string) => {
+        const matCount = materialInspections.filter(i => i.orderId === orderId).length;
+        const dimCount = dimensionalReports.filter(i => i.orderId === orderId).length;
+        const weldCount = weldingInspections.filter(i => i.orderId === orderId).length;
+        const paintCount = paintingReports.filter(i => i.orderId === orderId).length;
+        return matCount + dimCount + weldCount + paintCount;
+    };
 
-  const filteredWeldingInspections = useMemo(() => {
-      if (!inspectionSearchQuery) return weldingInspections;
-      const query = inspectionSearchQuery.toLowerCase();
-      return weldingInspections.filter(
-          (insp) =>
-              insp.orderNumber.toLowerCase().includes(query) ||
-              insp.itemName.toLowerCase().includes(query) ||
-              (insp.reportNumber?.toLowerCase() ?? '').includes(query)
-      );
-  }, [weldingInspections, inspectionSearchQuery]);
-
-  const filteredPaintingReports = useMemo(() => {
-      if (!inspectionSearchQuery) return paintingReports;
-      const query = inspectionSearchQuery.toLowerCase();
-      return paintingReports.filter(
-          (rep) =>
-              rep.orderNumber.toLowerCase().includes(query) ||
-              rep.itemName.toLowerCase().includes(query) ||
-              (rep.reportNumber?.toLowerCase() ?? '').includes(query)
-      );
-  }, [paintingReports, inspectionSearchQuery]);
+    const inspectionsForSelectedOrder = useMemo(() => {
+        if (!selectedOrderForInspections) {
+            return { material: [], dimensional: [], welding: [], painting: [] };
+        }
+        const orderId = selectedOrderForInspections.id;
+        return {
+            material: materialInspections.filter(i => i.orderId === orderId),
+            dimensional: dimensionalReports.filter(i => i.orderId === orderId),
+            welding: weldingInspections.filter(i => i.orderId === orderId),
+            painting: paintingReports.filter(i => i.orderId === orderId),
+        };
+    }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports]);
 
 
   // --- RNC HANDLERS ---
@@ -582,6 +574,11 @@ export default function QualityPage() {
   };
 
   // --- INSPECTION HANDLERS ---
+    const handleOpenInspectionsDetail = (order: OrderInfo) => {
+        setSelectedOrderForInspections(order);
+        setIsInspectionsDetailOpen(true);
+    };
+
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
       const { reportNumber, ...restOfValues } = values;
@@ -636,53 +633,55 @@ export default function QualityPage() {
   };
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
-       // Prepare the data for saving, ensuring correct types and no undefined values.
-       const dataToSave: any = { 
-           ...values,
-           inspectionDate: Timestamp.fromDate(values.inspectionDate), 
-           photos: values.photos || [], 
-           customerInspector: values.customerInspector || null,
-           jointIdentification: values.jointIdentification || '',
-           weldingProcess: values.weldingProcess || '',
-           jointType: values.jointType || '',
-           weldingPosition: values.weldingPosition || '',
-           baseMaterial: values.baseMaterial || '',
-           fillerMaterial: values.fillerMaterial || '',
-           materialThickness: values.materialThickness || '',
-           welderSinete: values.welderSinete || '',
-           welderQualification: values.welderQualification || '',
-           wpsCode: values.wpsCode || '',
-           dimensionalTools: values.dimensionalTools || '',
-           acceptanceCriteria: values.acceptanceCriteria || '',
-           surfaceCondition: values.surfaceCondition || '',
-           observedDefects: values.observedDefects || '',
-           technician: values.technician || '',
-           standard: values.standard || '',
-           equipment: values.equipment || '',
-           reportUrl: values.reportUrl || '',
-           releaseResponsible: values.releaseResponsible || '',
-       };
-       delete (dataToSave as any).id; // Remove schema-only 'id' field before saving to Firestore
-
-       if (selectedInspection) {
-         // Update existing report
-         const docRef = doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id);
-         await setDoc(docRef, dataToSave, { merge: true });
-         toast({ title: "Relatório de solda atualizado!" });
-       } else {
-         // Create new report with a generated number
-         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
-         const existingNumbers = reportsSnapshot.docs
-            .map(d => parseInt((d.data().reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10))
-            .filter(n => !isNaN(n) && Number.isFinite(n));
-         const highestNumber = Math.max(0, ...existingNumbers);
-         dataToSave.reportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, '0')}`;
-         
-         await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
-         toast({ title: "Relatório de solda criado!" });
-       }
-       setIsInspectionFormOpen(false); await fetchAllData();
-     } catch (error) { console.error("Error saving welding inspection:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
+      const dataToSave: any = {
+        ...values,
+        inspectionDate: Timestamp.fromDate(values.inspectionDate),
+        photos: values.photos || [],
+        customerInspector: values.customerInspector || null,
+        jointIdentification: values.jointIdentification || "",
+        weldingProcess: values.weldingProcess || "",
+        jointType: values.jointType || "",
+        weldingPosition: values.weldingPosition || "",
+        baseMaterial: values.baseMaterial || "",
+        fillerMaterial: values.fillerMaterial || "",
+        materialThickness: values.materialThickness || "",
+        welderSinete: values.welderSinete || "",
+        welderQualification: values.welderQualification || "",
+        wpsCode: values.wpsCode || "",
+        dimensionalTools: values.dimensionalTools || "",
+        acceptanceCriteria: values.acceptanceCriteria || "",
+        surfaceCondition: values.surfaceCondition || "",
+        observedDefects: values.observedDefects || "",
+        technician: values.technician || "",
+        standard: values.standard || "",
+        equipment: values.equipment || "",
+        reportUrl: values.reportUrl || "",
+        releaseResponsible: values.releaseResponsible || "",
+      };
+      delete (dataToSave as any).id;
+      delete (dataToSave as any).reportNumber;
+  
+      if (selectedInspection) {
+        const docRef = doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id);
+        await setDoc(docRef, dataToSave, { merge: true });
+        toast({ title: "Relatório de solda atualizado!" });
+      } else {
+        const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
+        const existingNumbers = reportsSnapshot.docs
+          .map(d => parseInt((d.data().reportNumber || "EDN-0").replace(/[^0-9]/g, ""), 10))
+          .filter(n => !isNaN(n) && Number.isFinite(n));
+        const highestNumber = Math.max(0, ...existingNumbers);
+        dataToSave.reportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, "0")}`;
+  
+        await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
+        toast({ title: "Relatório de solda criado!" });
+      }
+      setIsInspectionFormOpen(false);
+      await fetchAllData();
+    } catch (error) {
+      console.error("Error saving welding inspection:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+    }
   };
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
     try {
@@ -706,24 +705,40 @@ export default function QualityPage() {
      } catch (error) { console.error("Error saving painting report:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
   };
 
-  const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null) => {
+  const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(inspection); setDialogType('material');
-    if (inspection) { materialInspectionForm.reset(inspection); } 
-    else { materialInspectionForm.reset({ reportNumber: '', receiptDate: new Date(), inspectionResult: "Aprovado", orderId: undefined, itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined, photos: [] }); }
+    if (inspection) { 
+        materialInspectionForm.reset(inspection); 
+    } else { 
+        materialInspectionForm.reset({ 
+            reportNumber: '', receiptDate: new Date(), inspectionResult: "Aprovado", 
+            orderId: order?.id || undefined, 
+            itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', 
+            materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined, photos: [] 
+        }); 
+    }
     setIsInspectionFormOpen(true);
   };
-  const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
+  const handleOpenDimensionalForm = (report: DimensionalReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report); setDialogType('dimensional');
-    if (report) { dimensionalReportForm.reset(report); } 
-    else { dimensionalReportForm.reset({ reportNumber: '', inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', quantityInspected: undefined, measurements: [], photos: [], partIdentifier: '', customerInspector: '' }); }
+    if (report) { 
+        dimensionalReportForm.reset(report); 
+    } else { 
+        dimensionalReportForm.reset({ 
+            reportNumber: '', inspectionDate: new Date(), 
+            orderId: order?.id || undefined, 
+            itemId: undefined, inspectedBy: undefined, notes: '', quantityInspected: undefined, 
+            measurements: [], photos: [], partIdentifier: '', customerInspector: '' 
+        }); 
+    }
     setIsInspectionFormOpen(true);
   };
 
-  const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
+  const handleOpenWeldingForm = (report: WeldingInspection | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report); setDialogType('welding');
     const defaultNewValues = { 
         reportNumber: '',
-        orderId: undefined,
+        orderId: order?.id || undefined,
         itemId: undefined,
         inspectionDate: new Date(), 
         inspectionType: "Visual" as const, 
@@ -763,7 +778,7 @@ export default function QualityPage() {
     }
     setIsInspectionFormOpen(true);
   };
-  const handleOpenPaintingForm = (report: PaintingReport | null = null) => {
+  const handleOpenPaintingForm = (report: PaintingReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report); setDialogType('painting');
     const defaultValues = {
         reportNumber: '',
@@ -772,7 +787,7 @@ export default function QualityPage() {
         paintType: "",
         inspectedBy: undefined,
         dryFilmThickness: undefined,
-        orderId: undefined,
+        orderId: order?.id || undefined,
         itemId: undefined,
         colorRal: "",
         surfacePreparation: "",
@@ -990,9 +1005,8 @@ export default function QualityPage() {
         for(let i = 1; i <= pageCount; i++) {
             docPdf.setPage(i);
             
-            // Add signatures
             const signatureY = pageHeight - 35;
-            if (i === pageCount) { // only on last page
+            if (i === pageCount) { 
                 docPdf.setFontSize(10).setFont(undefined, 'normal');
                 
                 const enterpriseInspectorX = 15;
@@ -1008,7 +1022,6 @@ export default function QualityPage() {
                 }
             }
 
-            // Add footer
             docPdf.setFontSize(8).setFont(undefined, 'normal');
             docPdf.text(footerText, 15, pageHeight - 10);
             docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
@@ -1110,9 +1123,8 @@ export default function QualityPage() {
         for(let i = 1; i <= pageCount; i++) {
             docPdf.setPage(i);
             
-             // Add signatures
             const signatureY = pageHeight - 35;
-            if (i === pageCount) { // only on last page
+            if (i === pageCount) { 
                 docPdf.setFontSize(10).setFont(undefined, 'normal');
                 
                 const enterpriseInspectorX = 15;
@@ -1151,7 +1163,6 @@ export default function QualityPage() {
     }
   }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm]);
   
-  const watchedWeldingInspectionType = weldingInspectionForm.watch('inspectionType');
 
   return (
     <>
@@ -1216,105 +1227,59 @@ export default function QualityPage() {
             </TabsContent>
             
             <TabsContent value="inspections">
-              <Card className="mb-4">
-                  <CardContent className="p-4">
-                      <div className="relative">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                          <Input
-                              placeholder="Buscar por Nº do Pedido, Nº do Relatório ou Item..."
-                              value={inspectionSearchQuery}
-                              onChange={(e) => setInspectionSearchQuery(e.target.value)}
-                              className="pl-9 w-full md:w-1/3"
-                          />
-                      </div>
-                  </CardContent>
+              <Card>
+                <CardHeader>
+                    <CardTitle>Inspeções por Pedido</CardTitle>
+                    <CardDescription>
+                        Visualize e gerencie todos os relatórios de qualidade agrupados por pedido.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="mb-4">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Buscar por OS, Cliente ou Projeto..."
+                                value={inspectionSearchQuery}
+                                onChange={(e) => setInspectionSearchQuery(e.target.value)}
+                                className="pl-9 w-full md:w-1/3"
+                            />
+                        </div>
+                    </div>
+                    {isLoading ? (
+                        <Skeleton className="h-64 w-full" />
+                    ) : (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>OS</TableHead>
+                                    <TableHead>Cliente</TableHead>
+                                    <TableHead>Projeto</TableHead>
+                                    <TableHead className="text-center">Relatórios</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredOrders.length > 0 ? (
+                                    filteredOrders.map(order => (
+                                        <TableRow key={order.id} className="cursor-pointer" onClick={() => handleOpenInspectionsDetail(order)}>
+                                            <TableCell className="font-medium">{order.number}</TableCell>
+                                            <TableCell>{order.customerName}</TableCell>
+                                            <TableCell>{order.projectName}</TableCell>
+                                            <TableCell className="text-center">
+                                                <Badge variant="secondary">{getReportCountForOrder(order.id)}</Badge>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                ) : (
+                                    <TableRow>
+                                        <TableCell colSpan={4} className="h-24 text-center">Nenhum pedido encontrado.</TableCell>
+                                    </TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    )}
+                </CardContent>
               </Card>
-              <Accordion type="multiple" className="w-full space-y-4">
-                  <AccordionItem value="material-inspection">
-                      <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><PackageSearch className="h-5 w-5 text-primary" />Inspeção de Matéria-Prima</div></AccordionTrigger>
-                      <AccordionContent className="pt-2">
-                          <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenMaterialForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
-                              <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{filteredMaterialInspections.length > 0 ? filteredMaterialInspections.map(insp => (
-                                          <TableRow key={insp.id}>
-                                          <TableCell className="font-mono">{insp.reportNumber || 'N/A'}</TableCell>
-                                          <TableCell>{format(insp.receiptDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
-                                          <TableCell><Badge variant={getStatusVariant(insp.inspectionResult)}>{insp.inspectionResult}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
-                                          <TableCell className="text-right">
-                                              <Button variant="ghost" size="icon" onClick={() => handleMaterialInspectionPDF(insp)}><FileDown className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" onClick={() => handleOpenMaterialForm(insp)}><Pencil className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'material')}><Trash2 className="h-4 w-4" /></Button>
-                                          </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de inspeção de matéria-prima.</TableCell></TableRow>}
-                                      </TableBody></Table>}
-                              </CardContent></Card>
-                      </AccordionContent>
-                  </AccordionItem>
-                  <AccordionItem value="dimensional-report">
-                      <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><Wrench className="h-5 w-5 text-primary" />Relatório Dimensional</div></AccordionTrigger>
-                      <AccordionContent className="pt-2">
-                          <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenDimensionalForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
-                              <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{filteredDimensionalReports.length > 0 ? filteredDimensionalReports.map(rep => (
-                                          <TableRow key={rep.id}>
-                                          <TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell>
-                                          <TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
-                                          <TableCell><Badge variant={getStatusVariant(rep.overallResult)}>{rep.overallResult}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
-                                          <TableCell className="text-right">
-                                              <Button variant="ghost" size="icon" onClick={() => handleDimensionalReportPDF(rep)}><FileDown className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" onClick={() => handleOpenDimensionalForm(rep)}><Pencil className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'dimensional')}><Trash2 className="h-4 w-4" /></Button>
-                                          </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório dimensional.</TableCell></TableRow>}
-                                      </TableBody></Table>}
-                              </CardContent></Card>
-                      </AccordionContent>
-                  </AccordionItem>
-                   <AccordionItem value="welding-inspection">
-                      <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Inspeções de Solda</div></AccordionTrigger>
-                      <AccordionContent className="pt-2">
-                          <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Nova Inspeção</Button></CardHeader>
-                              <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{filteredWeldingInspections.length > 0 ? filteredWeldingInspections.map(insp => (
-                                          <TableRow key={insp.id}><TableCell className="font-mono">{insp.reportNumber || 'N/A'}</TableCell><TableCell>{format(insp.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
-                                          <TableCell><Badge variant="outline">{insp.inspectionType}</Badge></TableCell>
-                                          <TableCell><Badge variant={getStatusVariant(insp.result)}>{insp.result}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
-                                          <TableCell className="text-right">
-                                              <Button variant="ghost" size="icon" onClick={() => handleWeldingInspectionPDF(insp)}><FileDown className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" onClick={() => handleOpenWeldingForm(insp)}><Pencil className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'welding')}><Trash2 className="h-4 w-4" /></Button>
-                                          </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={8} className="h-24 text-center">Nenhuma inspeção de solda registrada.</TableCell></TableRow>}
-                                      </TableBody></Table>}
-                              </CardContent></Card>
-                      </AccordionContent>
-                   </AccordionItem>
-                   <AccordionItem value="painting-inspection">
-                      <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Controle de Pintura</div></AccordionTrigger>
-                       <AccordionContent className="pt-2">
-                          <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenPaintingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
-                              <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo de Tinta</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                      <TableBody>{filteredPaintingReports.length > 0 ? filteredPaintingReports.map(rep => (
-                                          <TableRow key={rep.id}><TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
-                                          <TableCell>{rep.paintType}</TableCell>
-                                          <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
-                                          <TableCell className="text-right">
-                                              <Button variant="ghost" size="icon" onClick={() => handleOpenPaintingForm(rep)}><Pencil className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'painting')}><Trash2 className="h-4 w-4" /></Button>
-                                          </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={8} className="h-24 text-center">Nenhum relatório de pintura registrado.</TableCell></TableRow>}
-                                      </TableBody></Table>}
-                              </CardContent></Card>
-                      </AccordionContent>
-                   </AccordionItem>
-                   <AccordionItem value="procedures"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-primary" />Procedimentos Técnicos</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Procedimentos Técnicos" description="Gestão de documentos (WPS, PIT, etc.)." icon={BookOpen} /></AccordionContent></AccordionItem>
-                   <AccordionItem value="lessons-learned"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><BrainCircuit className="h-5 w-5 text-primary" />Lições Aprendidas</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Lições Aprendidas" description="Base de conhecimento para melhoria contínua." icon={BrainCircuit} /></AccordionContent></AccordionItem>
-                   <AccordionItem value="engineering-tickets"><AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><Phone className="h-5 w-5 text-primary" />Chamados para Engenharia</div></AccordionTrigger><AccordionContent><PlaceholderCard title="Chamados para Engenharia" description="Controle de solicitações e respostas." icon={Phone} /></AccordionContent></AccordionItem>
-              </Accordion>
             </TabsContent>
         </Tabs>
       </div>
@@ -1352,6 +1317,105 @@ export default function QualityPage() {
             <DialogFooter><Button type="button" variant="outline" onClick={() => setIsCalibrationFormOpen(false)}>Cancelar</Button><Button type="submit">{selectedCalibration ? 'Salvar Alterações' : 'Adicionar'}</Button></DialogFooter>
           </form></Form></DialogContent></Dialog>
       <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      
+      <Dialog open={isInspectionsDetailOpen} onOpenChange={setIsInspectionsDetailOpen}>
+        <DialogContent className="max-w-6xl h-[95vh] flex flex-col">
+            <DialogHeader>
+                <DialogTitle>Relatórios de Qualidade do Pedido: {selectedOrderForInspections?.number}</DialogTitle>
+                <DialogDescription>
+                    Cliente: {selectedOrderForInspections?.customerName} | Projeto: {selectedOrderForInspections?.projectName}
+                </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 min-h-0">
+            <ScrollArea className="h-full pr-4">
+            <Accordion type="multiple" className="w-full space-y-4">
+                <AccordionItem value="material-inspection">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><PackageSearch className="h-5 w-5 text-primary" />Inspeção de Matéria-Prima</div></AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenMaterialForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
+                            <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                    <TableBody>{inspectionsForSelectedOrder.material.length > 0 ? inspectionsForSelectedOrder.material.map(insp => (
+                                        <TableRow key={insp.id}>
+                                        <TableCell className="font-mono">{insp.reportNumber || 'N/A'}</TableCell>
+                                        <TableCell>{format(insp.receiptDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.itemName}</TableCell>
+                                        <TableCell><Badge variant={getStatusVariant(insp.inspectionResult)}>{insp.inspectionResult}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
+                                        <TableCell className="text-right">
+                                            <Button variant="ghost" size="icon" onClick={() => handleMaterialInspectionPDF(insp)}><FileDown className="h-4 w-4" /></Button>
+                                            <Button variant="ghost" size="icon" onClick={() => handleOpenMaterialForm(insp)}><Pencil className="h-4 w-4" /></Button>
+                                            <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'material')}><Trash2 className="h-4 w-4" /></Button>
+                                        </TableCell></TableRow>
+                                    )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório de inspeção de matéria-prima para este pedido.</TableCell></TableRow>}
+                                    </TableBody></Table>}
+                            </CardContent></Card>
+                    </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="dimensional-report">
+                      <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><Wrench className="h-5 w-5 text-primary" />Relatório Dimensional</div></AccordionTrigger>
+                      <AccordionContent className="pt-2">
+                          <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenDimensionalForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
+                              <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                  <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                      <TableBody>{inspectionsForSelectedOrder.dimensional.length > 0 ? inspectionsForSelectedOrder.dimensional.map(rep => (
+                                          <TableRow key={rep.id}>
+                                          <TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell>
+                                          <TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.itemName}</TableCell>
+                                          <TableCell><Badge variant={getStatusVariant(rep.overallResult)}>{rep.overallResult}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
+                                          <TableCell className="text-right">
+                                              <Button variant="ghost" size="icon" onClick={() => handleDimensionalReportPDF(rep)}><FileDown className="h-4 w-4" /></Button>
+                                              <Button variant="ghost" size="icon" onClick={() => handleOpenDimensionalForm(rep)}><Pencil className="h-4 w-4" /></Button>
+                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'dimensional')}><Trash2 className="h-4 w-4" /></Button>
+                                          </TableCell></TableRow>
+                                      )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório dimensional para este pedido.</TableCell></TableRow>}
+                                      </TableBody></Table>}
+                              </CardContent></Card>
+                      </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="welding-inspection">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Inspeções de Solda</div></AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Nova Inspeção</Button></CardHeader>
+                            <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                    <TableBody>{inspectionsForSelectedOrder.welding.length > 0 ? inspectionsForSelectedOrder.welding.map(insp => (
+                                        <TableRow key={insp.id}><TableCell className="font-mono">{insp.reportNumber || 'N/A'}</TableCell><TableCell>{format(insp.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.itemName}</TableCell>
+                                        <TableCell><Badge variant="outline">{insp.inspectionType}</Badge></TableCell>
+                                        <TableCell><Badge variant={getStatusVariant(insp.result)}>{insp.result}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
+                                        <TableCell className="text-right">
+                                            <Button variant="ghost" size="icon" onClick={() => handleWeldingInspectionPDF(insp)}><FileDown className="h-4 w-4" /></Button>
+                                            <Button variant="ghost" size="icon" onClick={() => handleOpenWeldingForm(insp)}><Pencil className="h-4 w-4" /></Button>
+                                            <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'welding')}><Trash2 className="h-4 w-4" /></Button>
+                                        </TableCell></TableRow>
+                                    )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhuma inspeção de solda para este pedido.</TableCell></TableRow>}
+                                    </TableBody></Table>}
+                            </CardContent></Card>
+                    </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="painting-inspection">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Controle de Pintura</div></AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenPaintingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
+                            <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Tipo de Tinta</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                    <TableBody>{inspectionsForSelectedOrder.painting.length > 0 ? inspectionsForSelectedOrder.painting.map(rep => (
+                                        <TableRow key={rep.id}><TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.itemName}</TableCell>
+                                        <TableCell>{rep.paintType}</TableCell>
+                                        <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
+                                        <TableCell className="text-right">
+                                            <Button variant="ghost" size="icon" onClick={() => handleOpenPaintingForm(rep)}><Pencil className="h-4 w-4" /></Button>
+                                            <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'painting')}><Trash2 className="h-4 w-4" /></Button>
+                                        </TableCell></TableRow>
+                                    )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de pintura para este pedido.</TableCell></TableRow>}
+                                    </TableBody></Table>}
+                            </CardContent></Card>
+                    </AccordionContent>
+                </AccordionItem>
+            </Accordion>
+            </ScrollArea>
+            </div>
+        </DialogContent>
+      </Dialog>
+
 
       <Dialog open={isInspectionFormOpen} onOpenChange={setIsInspectionFormOpen}>
         <DialogContent className="max-w-5xl h-[90vh] flex flex-col">
@@ -1868,3 +1932,6 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
+
+
