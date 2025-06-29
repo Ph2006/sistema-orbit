@@ -898,7 +898,6 @@ export default function QualityPage() {
   const onLiquidPenetrantSubmit = async (values: z.infer<typeof liquidPenetrantSchema>) => {
     try {
       const dataToSave = {
-        // Required fields from schema
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         orderId: values.orderId,
         itemId: values.itemId,
@@ -908,7 +907,6 @@ export default function QualityPage() {
         finalResult: values.finalResult,
         sensitivityTest: values.sensitivityTest,
         
-        // Optional fields with fallback to null or default
         inspectorQualification: values.inspectorQualification || null,
         baseMaterial: values.baseMaterial || null,
         heatTreatment: values.heatTreatment || null,
@@ -1194,46 +1192,49 @@ export default function QualityPage() {
   const handleOpenUltrasoundForm = (report: UltrasoundReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report);
     setDialogType('ultrasound');
+    const defaultValues = {
+        orderId: order?.id || undefined,
+        inspectionDate: new Date(),
+        finalResult: "Conforme" as const,
+        photos: [],
+        results: [],
+        qualificationLevel: "",
+        baseMaterial: "",
+        heatTreatment: "",
+        weldTypeAndThickness: "",
+        examinedAreaDescription: "",
+        quantityInspected: undefined,
+        testLocation: "",
+        executionStandard: "",
+        acceptanceCriteria: "",
+        examinationType: undefined,
+        testExtent: "",
+        equipment: "",
+        equipmentSerial: "",
+        equipmentCalibration: "",
+        headType: "",
+        frequency: undefined,
+        incidentAngle: undefined,
+        couplant: "",
+        referenceBlock: "",
+        pulseMode: "",
+        range: undefined,
+        gain: undefined,
+        distanceCorrection: "",
+        scanRate: undefined,
+        minResolution: undefined,
+        rejectionCriteria: "",
+        finalNotes: "",
+    };
+
     if (report) {
         ultrasoundReportForm.reset({
+            ...defaultValues,
             ...report,
             inspectionDate: new Date(report.inspectionDate),
         });
     } else {
-        ultrasoundReportForm.reset({
-            orderId: order?.id || undefined,
-            inspectionDate: new Date(),
-            finalResult: "Conforme",
-            photos: [],
-            results: [],
-            qualificationLevel: "",
-            baseMaterial: "",
-            heatTreatment: "",
-            weldTypeAndThickness: "",
-            examinedAreaDescription: "",
-            quantityInspected: undefined,
-            testLocation: "",
-            executionStandard: "",
-            acceptanceCriteria: "",
-            examinationType: undefined,
-            testExtent: "",
-            equipment: "",
-            equipmentSerial: "",
-            equipmentCalibration: "",
-            headType: "",
-            frequency: undefined,
-            incidentAngle: undefined,
-            couplant: "",
-            referenceBlock: "",
-            pulseMode: "",
-            range: undefined,
-            gain: undefined,
-            distanceCorrection: "",
-            scanRate: undefined,
-            minResolution: undefined,
-            rejectionCriteria: "",
-            finalNotes: "",
-        });
+        ultrasoundReportForm.reset(defaultValues);
     }
     setIsInspectionFormOpen(true);
   };
@@ -3008,6 +3009,43 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                      <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Oficina" /></FormControl><FormMessage /></FormItem> )} />
                 </CardContent>
             </Card>
+            
+            <Card>
+                <CardHeader><CardTitle className="text-base">3. Normas e Critérios Aplicados</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="executionStandard" render={({ field }) => ( <FormItem><FormLabel>Norma de Execução</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME V Art. 4" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII Div. 1" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="examinationType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Exame</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Detecção de Descontinuidades">Detecção de Descontinuidades</SelectItem><SelectItem value="Medição de Espessura">Medição de Espessura</SelectItem><SelectItem value="TOFD">TOFD</SelectItem><SelectItem value="Phased Array">Phased Array</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="testExtent" render={({ field }) => ( <FormItem><FormLabel>Extensão do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 100%, junta J-01" /></FormControl><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader><CardTitle className="text-base">4. Equipamentos e Acessórios</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento (Marca/Modelo)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="equipmentSerial" render={({ field }) => ( <FormItem><FormLabel>Nº de Série</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="equipmentCalibration" render={({ field }) => ( <FormItem><FormLabel>Calibração do Equipamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Certificado + Validade" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="headType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Cabeçote</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Reto, Angular, etc." /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="frequency" render={({ field }) => ( <FormItem><FormLabel>Frequência (MHz)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="incidentAngle" render={({ field }) => ( <FormItem><FormLabel>Ângulo de Incidência (°)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="0, 45, 60, etc." /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="couplant" render={({ field }) => ( <FormItem><FormLabel>Acoplante</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Gel, óleo, etc." /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="referenceBlock" render={({ field }) => ( <FormItem><FormLabel>Bloco Padrão de Referência</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="V1, V2, IIW, etc." /></FormControl><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader><CardTitle className="text-base">5. Parâmetros do Ensaio</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="pulseMode" render={({ field }) => ( <FormItem><FormLabel>Modo de Pulso</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Pulso-Eco, etc." /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="range" render={({ field }) => ( <FormItem><FormLabel>Alcance (mm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="gain" render={({ field }) => ( <FormItem><FormLabel>Ganho (dB)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="distanceCorrection" render={({ field }) => ( <FormItem><FormLabel>Correção de Distância</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="scanRate" render={({ field }) => ( <FormItem><FormLabel>Taxa de Varredura (mm/s)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="minResolution" render={({ field }) => ( <FormItem><FormLabel>Resolução Mínima (mm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                </CardContent>
+            </Card>
+            
             <Card><CardHeader><CardTitle className="text-base">6. Resultados Detalhados</CardTitle></CardHeader>
                 <CardContent>
                     {fieldArrayProps.fields.length > 0 && (
@@ -3057,3 +3095,4 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
     
 
     
+
