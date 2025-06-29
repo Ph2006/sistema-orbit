@@ -361,7 +361,7 @@ type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id: string, orderNumber: string, itemName: string };
 type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string, orderNumber: string, itemName: string, overallResult?: string };
 type WeldingInspection = z.infer<typeof weldingInspectionSchema> & { id: string, orderNumber: string, itemName: string };
-type PaintingReport = z.infer<typeof paintingReportSchema> & { id: string, orderNumber: string, itemName: string };
+type PaintingReport = z.infer<typeof paintingReportSchema> & { id: string, orderNumber: string, itemName: string, result: string };
 type LiquidPenetrantReport = z.infer<typeof liquidPenetrantSchema> & { id: string, orderNumber: string, itemName: string };
 type UltrasoundReport = z.infer<typeof ultrasoundReportSchema> & { id: string, orderNumber: string, itemName: string };
 type UltrasoundResult = z.infer<typeof ultrasoundResultSchema>;
@@ -567,6 +567,7 @@ export default function QualityPage() {
       remover: "",
       consumableValidity: null,
       consumableLot: "",
+      sensitivityTest: false,
       acceptanceCriteria: "",
       finalNotes: "",
       procedure: {
@@ -595,10 +596,37 @@ export default function QualityPage() {
   const ultrasoundReportForm = useForm<z.infer<typeof ultrasoundReportSchema>>({
     resolver: zodResolver(ultrasoundReportSchema),
     defaultValues: {
-      inspectionDate: new Date(),
-      finalResult: "Conforme",
-      photos: [],
-      results: [],
+        inspectionDate: new Date(),
+        finalResult: "Conforme",
+        photos: [],
+        results: [],
+        qualificationLevel: "",
+        baseMaterial: "",
+        heatTreatment: "",
+        weldTypeAndThickness: "",
+        examinedAreaDescription: "",
+        quantityInspected: undefined,
+        testLocation: "",
+        executionStandard: "",
+        acceptanceCriteria: "",
+        examinationType: undefined,
+        testExtent: "",
+        equipment: "",
+        equipmentSerial: "",
+        equipmentCalibration: "",
+        headType: "",
+        frequency: undefined,
+        incidentAngle: undefined,
+        couplant: "",
+        referenceBlock: "",
+        pulseMode: "",
+        range: undefined,
+        gain: undefined,
+        distanceCorrection: "",
+        scanRate: undefined,
+        minResolution: undefined,
+        rejectionCriteria: "",
+        finalNotes: "",
     },
   });
   const { fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult } = useFieldArray({
@@ -1962,7 +1990,7 @@ export default function QualityPage() {
         let y = 15;
 
         // Header
-        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) {} }
         docPdf.setFontSize(14).setFont(undefined, 'bold');
         docPdf.text(`Relatório de Ensaio por Ultrassom (UT)`, pageWidth / 2, y + 5, { align: 'center' });
         docPdf.setFontSize(12).setFont(undefined, 'normal');
@@ -2019,7 +2047,7 @@ export default function QualityPage() {
             ['Frequência (MHz)', report.frequency],
             ['Ângulo (°)', report.incidentAngle],
             ['Acoplante', report.couplant],
-            ['Bloco Padrão', report.referenceBlock],
+            ['Bloco Padrão de Referência', report.referenceBlock],
         ]);
 
         addSection('5. Parâmetros do Ensaio', [
@@ -2032,8 +2060,7 @@ export default function QualityPage() {
         ]);
 
         if (report.results && report.results.length > 0) {
-            docPdf.addPage();
-            y = 20;
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('6. Resultados Detalhados', 15, y);
             y += 7;
             autoTable(docPdf, {
@@ -2053,6 +2080,23 @@ export default function QualityPage() {
             ['Critério de Rejeição', report.rejectionCriteria],
             ['Observações Finais', report.finalNotes],
         ]);
+
+        if (report.photos && report.photos.length > 0) {
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('8. Anexos Fotográficos', 15, y);
+            y += 7;
+            const photoWidth = (pageWidth - 45) / 2;
+            const photoHeight = photoWidth * (3/4);
+            let x = 15;
+            for (const photoDataUri of report.photos) {
+                if (y + photoHeight > pageHeight - 45) { docPdf.addPage(); y = 20; x = 15; }
+                try { docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight); } 
+                catch(e) { docPdf.text("Erro ao carregar imagem", x, y + 10); }
+                x = (x === 15) ? (15 + photoWidth + 15) : 15;
+                if (x === 15) y += photoHeight + 5;
+            }
+        }
 
         const pageCount = docPdf.internal.getNumberOfPages();
         for(let i = 1; i <= pageCount; i++) {
@@ -3250,6 +3294,29 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
         setEditResultIndex(null);
     };
 
+    const watchedPhotos = form.watch("photos", []);
+
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const removePhoto = (index: number) => {
+        const currentPhotos = form.getValues("photos") || [];
+        const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+        form.setValue("photos", updatedPhotos, { shouldValidate: true });
+    };
+
     return (
         <div className="space-y-4">
             <Card>
@@ -3342,104 +3409,190 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                             <div><Label>Extensão (mm)</Label><Input type="number" value={newResult.extension || ''} onChange={(e) => setNewResult({...newResult, extension: parseFloat(e.target.value)})} /></div>
                             <div><Label>Amplitude (% / dB)</Label><Input value={newResult.amplitude || ''} onChange={(e) => setNewResult({...newResult, amplitude: e.target.value})} /></div>
                         </div>
-                        <div className="flex justify-end gap-2">
-                            {editResultIndex !== null && <Button type="button" variant="outline" onClick={() => { setEditResultIndex(null); setNewResult({ jointCode: '', evaluationResult: 'Conforme' }); }}>Cancelar Edição</Button>}
-                            <Button type="button" onClick={editResultIndex !== null ? handleUpdateResult : handleAddResult}>
-                                <PlusCircle className="mr-2 h-4 w-4" />{editResultIndex !== null ? 'Atualizar' : 'Adicionar'}
-                            </Button>
-                        </div>
+                        <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => { setNewResult({ jointCode: '', evaluationResult: 'Conforme' }); setEditResultIndex(null); }}>Cancelar</Button><Button size="sm" onClick={editResultIndex !== null ? handleUpdateResult : handleAddResult}>{editResultIndex !== null ? 'Atualizar Resultado' : 'Adicionar Resultado'}</Button></div>
                     </div>
                 </CardContent>
             </Card>
-
+            
             <Card>
                 <CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="rejectionCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Rejeição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Norma ou tabela utilizada" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="finalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Finais</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                <CardContent>
+                    <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o resultado"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="rejectionCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Rejeição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Especifique o critério de rejeição" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="finalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Finais</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Quaisquer notas adicionais sobre o ensaio" /></FormControl><FormMessage /></FormItem> )} />
                 </CardContent>
             </Card>
-        </div>
-      );
-}
 
-function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
-    const watchedOrderId = form.watch("orderId");
-    const availableItems = useMemo(() => {
-        if (!watchedOrderId) return [];
-        return orders.find(o => o.id === watchedOrderId)?.items || [];
-    }, [watchedOrderId, orders]);
-    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
-
-    const projectPhases = ["Recebimento", "Engenharia", "Corte", "Montagem", "Solda", "Usinagem", "Pintura", "Expedição"];
-    const impacts = { reprocess: 'Reprocesso', delay: 'Atraso', cost: 'Custo Adicional', rework: 'Retrabalho', materialLoss: 'Perda de Material' };
-
-    return (
-        <div className="space-y-4">
             <Card>
-                <CardHeader><CardTitle className="text-base">1. Identificação</CardTitle></CardHeader>
-                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={form.control} name="emissionDate" render={({ field }) => ( <FormItem><FormLabel>Data de Emissão</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido / OS</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido (opcional)" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item (opcional)" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="department" render={({ field }) => ( <FormItem><FormLabel>Departamento Envolvido</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Engenharia, Produção" /></FormControl><FormMessage /></FormItem> )} />
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader><CardTitle className="text-base">2. Contexto</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <FormField control={form.control} name="projectPhase" render={() => (
-                        <FormItem><FormLabel>Fase do Projeto</FormLabel><div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        {projectPhases.map(phase => (<FormField key={phase} control={form.control} name="projectPhase" render={({ field }) => (
-                            <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                                <FormControl><Checkbox checked={field.value?.includes(phase)} onCheckedChange={checked => {
-                                    return checked ? field.onChange([...(field.value || []), phase]) : field.onChange(field.value?.filter(v => v !== phase));
-                                }}/></FormControl><FormLabel className="font-normal">{phase}</FormLabel>
-                            </FormItem>)} />))}</div><FormMessage />
-                        </FormItem>)} />
-                     <FormField control={form.control} name="occurrenceDate" render={({ field }) => ( <FormItem><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="eventDescription" render={({ field }) => ( <FormItem><FormLabel>Descrição do Evento</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Descreva o que aconteceu de forma clara e objetiva" /></FormControl><FormMessage /></FormItem> )} />
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <FormField control={form.control} name="rootCause" render={({ field }) => ( <FormItem><FormLabel>Causa Raiz</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Falha de comunicação, erro de leitura" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="analysisTool" render={({ field }) => ( <FormItem><FormLabel>Ferramenta de Análise Utilizada</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 5 Porquês, Diagrama de Ishikawa" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormItem><FormLabel>Impacto Gerado</FormLabel><div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                        {Object.entries(impacts).map(([key, label]) => (<FormField key={key} control={form.control} name={`impact.${key}`} render={({ field }) => (
-                            <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl><FormLabel className="font-normal">{label}</FormLabel>
-                            </FormItem>)} />))}</div><FormMessage />
+                <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
+                <CardContent>
+                     <FormItem>
+                        <FormLabel>Registro Fotográfico</FormLabel>
+                        <FormControl><Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} /></FormControl>
+                        <FormDescription>Selecione uma ou mais imagens para anexar ao relatório. Imagens grandes podem demorar para salvar.</FormDescription>
+                        {watchedPhotos && watchedPhotos.length > 0 && (
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                                {watchedPhotos.map((photo, index) => (
+                                    <div key={index} className="relative">
+                                        <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                                        <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                            <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <FormMessage />
                     </FormItem>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader><CardTitle className="text-base">4. Ações Corretivas e Preventivas</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                     <FormField control={form.control} name="correctiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Corretiva Imediata</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="O que foi feito para corrigir o problema pontualmente?" /></FormControl><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="preventiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Preventiva Definida</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="O que será feito para evitar que se repita?" /></FormControl><FormMessage /></FormItem> )} />
-                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <FormField control={form.control} name="actionResponsible" render={({ field }) => ( <FormItem><FormLabel>Responsável pela Ação</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                        <FormField control={form.control} name="actionDeadline" render={({ field }) => ( <FormItem><FormLabel>Prazo de Execução</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-                        <FormField control={form.control} name="actionStatus" render={({ field }) => ( <FormItem><FormLabel>Status da Ação</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Pendente">Pendente</SelectItem><SelectItem value="Em andamento">Em andamento</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-                     </div>
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader><CardTitle className="text-base">5. Aprendizado Consolidado</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <FormField control={form.control} name="lessonSummary" render={({ field }) => ( <FormItem><FormLabel>Resumo da Lição Aprendida</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Ex: Sempre verificar a revisão do desenho antes do corte." /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="procedureChanges" render={({ field }) => ( <FormItem><FormLabel>Alterações Documentais</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Revisão do PIT-001, novo formulário FOR-002" /></FormControl><FormMessage /></FormItem> )} />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <FormField control={form.control} name="procedureChangeNeeded" render={({ field }) => (<FormItem className="flex flex-row items-center space-x-2 space-y-0 rounded-md border p-4"><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl><div className="space-y-1 leading-none"><FormLabel>Necessário alterar procedimento?</FormLabel></div></FormItem>)}/>
-                        <FormField control={form.control} name="includeInTraining" render={({ field }) => (<FormItem className="flex flex-row items-center space-x-2 space-y-0 rounded-md border p-4"><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl><div className="space-y-1 leading-none"><FormLabel>Incluir no plano de treinamento?</FormLabel></div></FormItem>)}/>
-                    </div>
                 </CardContent>
             </Card>
         </div>
     );
 }
 
-    
+function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+    const watchedOrderId = form.watch("orderId");
+    const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
+    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    return (
+        <div className="space-y-4">
+            <Card>
+                <CardHeader><CardTitle className="text-base">1. Identificação</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="emissionDate" render={({ field }) => ( <FormItem><FormLabel>Data da Emissão</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="department" render={({ field }) => ( <FormItem><FormLabel>Departamento Envolvido</FormLabel><FormControl><Input {...field} placeholder="Ex: Engenharia, Produção" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Código do item</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                    
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">2. Contexto</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="projectPhase" render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Fase do Projeto</FormLabel>
+                            <div className="flex flex-wrap gap-2">
+                                {["Planejamento", "Execução", "Testes", "Entrega", "Pós-Entrega"].map((phase) => (
+                                    <FormField
+                                        key={phase}
+                                        control={form.control}
+                                        name="projectPhase"
+                                        render={({ field }) => {
+                                            return (
+                                                <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                                                    <FormControl>
+                                                        <Checkbox
+                                                            checked={field.value?.includes(phase)}
+                                                            onCheckedChange={(checked) => {
+                                                                if (checked) {
+                                                                    field.onChange([...(field.value || []), phase]);
+                                                                } else {
+                                                                    field.onChange(field.value?.filter((v: string) => v !== phase));
+                                                                }
+                                                            }}
+                                        />
+                                                    </FormControl>
+                                                    <FormLabel className="font-normal">
+                                                        {phase}
+                                                    </FormLabel>
+                                                </FormItem>
+                                            );
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                            <FormMessage />
+                        </FormItem>
+                    )}/>
+                  <FormField control={form.control} name="occurrenceDate" render={({ field }) => ( <FormItem><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                   <FormField control={form.control} name="eventDescription" render={({ field }) => ( <FormItem><FormLabel>Descrição do Evento</FormLabel><FormControl><Textarea placeholder="Descreva o evento ocorrido" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                     <FormField control={form.control} name="rootCause" render={({ field }) => ( <FormItem><FormLabel>Causa Raiz Identificada</FormLabel><FormControl><Input {...field} placeholder="Qual foi a causa raiz do problema?" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="analysisTool" render={({ field }) => ( <FormItem><FormLabel>Ferramenta de Análise</FormLabel><FormControl><Input {...field} placeholder="5 Porquês, Diagrama de Ishikawa, etc." value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="impact" render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Impacto Gerado</FormLabel>
+                            <div className="flex flex-wrap gap-2">
+                                {Object.entries({reprocess: "Reprocesso", delay: "Atraso", cost: "Custo", rework: "Retrabalho", materialLoss: "Perda de Material"}).map(([key, label]) => (
+                                    <FormField key={key} control={form.control} name={`impact.${key}`} render={({ field }) => (
+                                        <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                                            <FormControl>
+                                                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                                            </FormControl>
+                                            <FormLabel className="font-normal">{label}</FormLabel>
+                                        </FormItem>
+                                    )}/>
+                                ))}
+                            </div>
+                            <FormMessage />
+                        </FormItem>
+                    )}/>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">4. Ações Corretivas e Preventivas</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                     <FormField control={form.control} name="correctiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Corretiva Imediata</FormLabel><FormControl><Textarea placeholder="O que foi feito para corrigir o problema?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="preventiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Preventiva Definida</FormLabel><FormControl><Textarea placeholder="O que será feito para evitar que o problema ocorra novamente?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormField control={form.control} name="actionResponsible" render={({ field }) => ( <FormItem><FormLabel>Responsável pela Ação</FormLabel><FormControl><Input {...field} placeholder="Quem é responsável por implementar a ação?" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                        <FormField control={form.control} name="actionDeadline" render={({ field }) => ( <FormItem><FormLabel>Prazo de Execução</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                    </div>
+                    <FormField control={form.control} name="actionStatus" render={({ field }) => ( <FormItem><FormLabel>Status da Ação</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Pendente">Pendente</SelectItem><SelectItem value="Em andamento">Em andamento</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">5. Aprendizado Consolidado</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="lessonSummary" render={({ field }) => ( <FormItem><FormLabel>Resumo da Lição Aprendida</FormLabel><FormControl><Textarea placeholder="Qual é a principal lição aprendida com este evento?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="procedureChangeNeeded" render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                                <FormLabel>Alterar Procedimento?</FormLabel>
+                                <FormDescription>É necessário alterar algum procedimento interno?</FormDescription>
+                            </div>
+                            <FormControl>
+                                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                            </FormControl>
+                        </FormItem>
+                    )}/>
+                    <FormField control={form.control} name="procedureChanges" render={({ field }) => ( <FormItem><FormLabel>Alterações Documentais</FormLabel><FormControl><Textarea placeholder="Quais procedimentos precisam ser alterados?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
+                    <FormField control={form.control} name="includeInTraining" render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                                <FormLabel>Incluir no Treinamento?</FormLabel>
+                                <FormDescription>Esta lição deve ser incluída no treinamento da equipe?</FormDescription>
+                            </div>
+                            <FormControl>
+                                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                            </FormControl>
+                        </FormItem>
+                    )}/>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">6. Evidências e Aprovações</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="evidence" render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Evidências</FormLabel>
+                            <FormDescription>Links para documentos, fotos ou outros arquivos relevantes.</FormDescription>
+                            <FormControl><Textarea placeholder="Cole os links para as evidências aqui" {...field} value={field.value ?? ''}/></FormControl><FormMessage />
+                        </FormItem>
+                    )}/>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <FormField control={form.control} name="filledBy" render={({ field }) => ( <FormItem><FormLabel>Preenchido por</FormLabel><FormControl><Input {...field} placeholder="Nome de quem preencheu o relatório" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                        <FormField control={form.control} name="verifiedBy" render={({ field }) => ( <FormItem><FormLabel>Verificado por</FormLabel><FormControl><Input {...field} placeholder="Nome de quem verificou o relatório" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                        <FormField control={form.control} name="approvedBy" render={({ field }) => ( <FormItem><FormLabel>Aprovado por</FormLabel><FormControl><Input {...field} placeholder="Nome de quem aprovou o relatório" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                    </div>
+                    <FormField control={form.control} name="closeDate" render={({ field }) => ( <FormItem><FormLabel>Data de Encerramento</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
