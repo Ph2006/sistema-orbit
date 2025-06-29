@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
-import { zodResolver } from "@radix-ui/resolvers/zod";
+import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, setDoc, getDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -169,10 +169,10 @@ const paintingReportSchema = z.object({
         referenceNorm: z.string().optional(),
         systemDescription: z.string().optional(),
         totalLayers: z.coerce.number().optional(),
-        primer: paintLayerSchema,
-        intermediate: paintLayerSchema,
-        finish: paintLayerSchema,
-    }),
+        primer: paintLayerSchema.optional(),
+        intermediate: paintLayerSchema.optional(),
+        finish: paintLayerSchema.optional(),
+    }).optional(),
     surfacePrep: z.object({
         substrate: z.string().optional(),
         method: z.string().optional(),
@@ -180,7 +180,7 @@ const paintingReportSchema = z.object({
         roughness: z.coerce.number().optional(),
         roughnessInstrument: z.string().optional(),
         conductivity: z.coerce.number().optional(),
-    }),
+    }).optional(),
     environmentalConditions: z.array(z.object({
         layer: z.string(),
         ambientTemp: z.coerce.number().optional(),
@@ -198,22 +198,23 @@ const paintingReportSchema = z.object({
         totalMeasured: z.coerce.number().optional(),
         isCompliant: z.boolean().optional(),
         notes: z.string().optional(),
-    }),
+    }).optional(),
     additionalTests: z.object({
         adhesion: z.string().optional(),
         hardness: z.string().optional(),
         glossColor: z.string().optional(),
         chemicalResistance: z.string().optional(),
-    }),
+    }).optional(),
     conclusion: z.object({
         finalResult: z.enum(["Conforme", "Não Conforme"]),
         deviations: z.string().optional(),
         generalNotes: z.string().optional(),
         inspector: z.string().optional(),
         inspectionDate: z.date().optional().nullable(),
-    }),
+    }).optional(),
     photos: z.array(z.string()).optional(),
 });
+
 
 
 const liquidPenetrantSchema = z.object({
@@ -2572,7 +2573,7 @@ export default function QualityPage() {
                                  <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} />
                             )}
                              {dialogType === 'painting' && (
-                                 <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
+                                <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
                             )}
                              {dialogType === 'liquidPenetrant' && (
                                  <LiquidPenetrantForm form={liquidPenetrantForm} orders={orders} teamMembers={teamMembers} />
@@ -2972,10 +2973,10 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
                 <FormField control={form.control} name="jointIdentification" render={({ field }) => ( <FormItem><FormLabel>Identificação da Junta</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: J1, J2..." /></FormControl><FormMessage /></FormItem> )}/>
                 <FormField control={form.control} name="weldingProcess" render={({ field }) => ( <FormItem><FormLabel>Processo de soldagem</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: SMAW, MIG/MAG" /></FormControl><FormMessage /></FormItem> )}/>
                 <FormField control={form.control} name="jointType" render={({ field }) => ( <FormItem><FormLabel>Tipo de junta</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Topo, Canto" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={form.control} name="weldingPosition" render={({ field }) => ( <FormItem><FormLabel>Posição de soldagem</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 1G, 2F" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={form.control} name="fillerMaterial" render={({ field }) => ( <FormItem><FormLabel>Material de adição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: E7018" /></FormControl><FormMessage /></FormItem> )}/>
-                <FormField control={form.control} name="materialThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (mm)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 12.7" /></FormControl><FormMessage /></FormItem> )}/>
+                <FormField control={form.control} name="weldingPosition" render={({ field }) => ( <FormItem><FormLabel>Posição de soldagem</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 1G, 2F" /></FormControl><FormMessage /></FormItem> )} />
+                <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )} />
+                <FormField control={form.control} name="fillerMaterial" render={({ field }) => ( <FormItem><FormLabel>Material de adição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: E7018" /></FormControl><FormMessage /></FormItem> )} />
+                <FormField control={form.control} name="materialThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (mm)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 12.7" /></FormControl><FormMessage /></FormItem> )} />
             </div>
         </CardContent>
       </Card>
@@ -3141,7 +3142,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField control={form.control} name="penetrant" render={({ field }) => ( <FormItem><FormLabel>Penetrante</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="developer" render={({ field }) => ( <FormItem><FormLabel>Revelador</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="remover" render={({ field }) => ( <FormItem><FormLabel>Removedor</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="remover" render={({ field }) => ( <FormItem><FormLabel>Removedor</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="consumableValidity" render={({ field }) => ( <FormItem><FormLabel>Validade dos Consumíveis</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="consumableLot" render={({ field }) => ( <FormItem><FormLabel>Lote / Nº Certificação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="sensitivityTest" render={({ field }) => (<FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm col-span-full"><div className="space-y-0.5"><FormLabel>Verificação de Desempenho</FormLabel><FormDescription>O teste de sensibilidade do penetrante foi realizado?</FormDescription></div><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>)}/>
@@ -3250,7 +3251,6 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
     };
 
     return (
-      <>
         <div className="space-y-4">
             <Card>
                 <CardHeader><CardTitle className="text-base">1. Dados do Relatório</CardTitle></CardHeader>
@@ -3361,8 +3361,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                 </CardContent>
             </Card>
         </div>
-      </>
-    )
+      );
 }
 
 function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
@@ -3442,19 +3441,5 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
         </div>
     );
 }
-    
 
     
-
-    
-
-    
-
-
-
-    
-
-    
-
-    
-
