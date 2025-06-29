@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown } from "lucide-react";
 import { useAuth } from "../layout";
 
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,13 @@ export default function ProductsPage() {
 
   const [isCopyPopoverOpen, setIsCopyPopoverOpen] = useState(false);
   const [copyFromSearch, setCopyFromSearch] = useState("");
+
+  const [isEditStageDialogOpen, setIsEditStageDialogOpen] = useState(false);
+  const [stageToEdit, setStageToEdit] = useState<{ oldName: string; index: number } | null>(null);
+  const [newStageNameForEdit, setNewStageNameForEdit] = useState("");
+  
+  const [isDeleteStageDialogOpen, setIsDeleteStageDialogOpen] = useState(false);
+  const [stageToDeleteConfirmation, setStageToDeleteConfirmation] = useState<string | null>(null);
 
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
@@ -117,19 +124,6 @@ export default function ProductsPage() {
       toast({ variant: "destructive", title: "Erro ao adicionar etapa" });
     }
   }, [newStageName, stagesDocRef, fetchStages, toast]);
-
-  const handleDeleteStage = useCallback(async (stageToDelete: string) => {
-    try {
-      await updateDoc(stagesDocRef, {
-        stages: arrayRemove(stageToDelete)
-      });
-      toast({ title: "Etapa removida!" });
-      await fetchStages();
-    } catch (error) {
-      console.error("Error deleting stage:", error);
-      toast({ variant: "destructive", title: "Erro ao remover etapa" });
-    }
-  }, [stagesDocRef, fetchStages, toast]);
 
   const fetchProducts = useCallback(async () => {
     setIsLoading(true);
@@ -368,6 +362,115 @@ export default function ProductsPage() {
     setIsCopyPopoverOpen(false);
   };
 
+  const handleMoveStage = async (index: number, direction: 'up' | 'down') => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === manufacturingStages.length - 1) return;
+
+    const newStages = [...manufacturingStages];
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    const [movedItem] = newStages.splice(index, 1);
+    newStages.splice(newIndex, 0, movedItem);
+
+    try {
+        await updateDoc(stagesDocRef, { stages: newStages });
+        toast({ title: "Ordem das etapas atualizada!" });
+        await fetchStages(); 
+    } catch (error) {
+        console.error("Error moving stage:", error);
+        toast({ variant: "destructive", title: "Erro ao mover etapa" });
+    }
+  };
+
+  const handleEditStageClick = (stageName: string, index: number) => {
+    setStageToEdit({ oldName: stageName, index });
+    setNewStageNameForEdit(stageName);
+    setIsEditStageDialogOpen(true);
+  };
+
+  const handleConfirmEditStage = async () => {
+    if (!stageToEdit || !newStageNameForEdit.trim()) return;
+
+    const oldName = stageToEdit.oldName;
+    const newName = newStageNameForEdit.trim();
+
+    if (oldName === newName) {
+        setIsEditStageDialogOpen(false);
+        return;
+    }
+    if (manufacturingStages.some((stage, index) => stage.toLowerCase() === newName.toLowerCase() && index !== stageToEdit.index)) {
+        toast({ variant: "destructive", title: "Nome duplicado", description: "Esta etapa já existe." });
+        return;
+    }
+
+    try {
+        const batch = writeBatch(db);
+        const updatedStages = [...manufacturingStages];
+        updatedStages[stageToEdit.index] = newName;
+        batch.update(stagesDocRef, { stages: updatedStages });
+
+        const productsToUpdate = products.filter(p =>
+            p.productionPlanTemplate?.some(stage => stage.stageName === oldName)
+        );
+
+        for (const product of productsToUpdate) {
+            const productRef = doc(db, "companies", "mecald", "products", product.id);
+            const updatedPlan = product.productionPlanTemplate!.map(stage =>
+                stage.stageName === oldName ? { ...stage, stageName: newName } : stage
+            );
+            batch.update(productRef, { productionPlanTemplate: updatedPlan });
+        }
+
+        await batch.commit();
+
+        toast({ title: "Etapa atualizada com sucesso!" });
+        setIsEditStageDialogOpen(false);
+        setStageToEdit(null);
+        setNewStageNameForEdit("");
+        await fetchStages();
+        await fetchProducts();
+
+    } catch (error) {
+        console.error("Error editing stage:", error);
+        toast({ variant: "destructive", title: "Erro ao editar etapa" });
+    }
+  };
+  
+  const handleDeleteStageClick = (stageName: string) => {
+      setStageToDeleteConfirmation(stageName);
+      setIsDeleteStageDialogOpen(true);
+  };
+
+  const handleConfirmDeleteStage = async () => {
+    if (!stageToDeleteConfirmation) return;
+    
+    try {
+        const batch = writeBatch(db);
+        batch.update(stagesDocRef, { stages: arrayRemove(stageToDeleteConfirmation) });
+
+        const productsToUpdate = products.filter(p =>
+            p.productionPlanTemplate?.some(stage => stage.stageName === stageToDeleteConfirmation)
+        );
+
+        for (const product of productsToUpdate) {
+            const productRef = doc(db, "companies", "mecald", "products", product.id);
+            const updatedPlan = product.productionPlanTemplate!.filter(
+                stage => stage.stageName !== stageToDeleteConfirmation
+            );
+            batch.update(productRef, { productionPlanTemplate: updatedPlan });
+        }
+
+        await batch.commit();
+        toast({ title: "Etapa removida com sucesso!" });
+        setIsDeleteStageDialogOpen(false);
+        setStageToDeleteConfirmation(null);
+        await fetchStages();
+        await fetchProducts();
+    } catch (error) {
+        console.error("Error deleting stage:", error);
+        toast({ variant: "destructive", title: "Erro ao remover etapa" });
+    }
+  };
+
 
   return (
     <>
@@ -487,13 +590,23 @@ export default function ProductsPage() {
                                 <h3 className="text-sm font-medium text-muted-foreground mb-4">ETAPAS CADASTRADAS</h3>
                                 {manufacturingStages.length > 0 ? (
                                     <div className="space-y-2">
-                                    {manufacturingStages.map((stage) => (
+                                    {manufacturingStages.map((stage, index) => (
                                         <div key={stage} className="flex items-center justify-between rounded-md border p-3">
                                             <p className="font-medium">{stage}</p>
-                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteStage(stage)}>
-                                                <Trash2 className="h-4 w-4" />
-                                                <span className="sr-only">Excluir etapa {stage}</span>
-                                            </Button>
+                                            <div className="flex items-center gap-1">
+                                                <Button variant="ghost" size="icon" onClick={() => handleMoveStage(index, 'up')} disabled={index === 0}>
+                                                    <ArrowUp className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon" onClick={() => handleMoveStage(index, 'down')} disabled={index === manufacturingStages.length - 1}>
+                                                    <ArrowDown className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon" onClick={() => handleEditStageClick(stage, index)}>
+                                                    <Pencil className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteStageClick(stage)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
                                         </div>
                                     ))}
                                     </div>
@@ -683,6 +796,47 @@ export default function ProductsPage() {
             <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
                 Sim, excluir produto
             </AlertDialogAction>
+            </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={isEditStageDialogOpen} onOpenChange={setIsEditStageDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>Editar Etapa de Fabricação</DialogTitle>
+                <DialogDescription>
+                    Alterar o nome aqui atualizará a etapa em todos os produtos que a utilizam.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+                <Label htmlFor="edit-stage-name">Novo Nome da Etapa</Label>
+                <Input 
+                    id="edit-stage-name"
+                    value={newStageNameForEdit}
+                    onChange={(e) => setNewStageNameForEdit(e.target.value)}
+                    className="mt-2"
+                />
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEditStageDialogOpen(false)}>Cancelar</Button>
+                <Button onClick={handleConfirmEditStage}>Salvar Alterações</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      <AlertDialog open={isDeleteStageDialogOpen} onOpenChange={setIsDeleteStageDialogOpen}>
+        <AlertDialogContent>
+            <AlertDialogHeader>
+                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                <AlertDialogDescription>
+                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation}</span> da lista e de todos os produtos que a utilizam. Esta ação não pode ser desfeita.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfirmDeleteStage} className="bg-destructive hover:bg-destructive/90">
+                    Sim, excluir etapa
+                </AlertDialogAction>
             </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
