@@ -156,6 +156,23 @@ const weldingInspectionSchema = z.object({
   photos: z.array(z.string()).optional(),
 });
 
+const paintingReportSchema = z.object({
+  id: z.string().optional(),
+  reportNumber: z.string().optional(),
+  orderId: z.string({ required_error: "Selecione um pedido." }),
+  itemId: z.string({ required_error: "Selecione um item." }),
+  inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
+  paintType: z.string().min(1, "O tipo de tinta é obrigatório."),
+  colorRal: z.string().optional(),
+  surfacePreparation: z.string().optional(),
+  dryFilmThickness: z.coerce.number().optional(),
+  instrumentUsed: z.string().optional(),
+  adhesionTestResult: z.enum(["Aprovado", "Reprovado"]).optional(),
+  result: z.enum(["Aprovado", "Reprovado"]),
+  inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
+  notes: z.string().optional(),
+});
+
 
 // --- TYPES ---
 type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string };
@@ -499,10 +516,11 @@ export default function QualityPage() {
     try {
       const order = orders.find(o => o.id === values.orderId);
       if (!order) throw new Error("Pedido selecionado não encontrado.");
-      const dataToSave = {
+      const dataToSave: any = {
         date: Timestamp.fromDate(values.date), orderId: values.orderId, itemId: values.item.id, itemDescription: values.item.description,
         customerId: order.customerId, customerName: order.customerName, description: values.description, type: values.type, status: values.status,
       };
+
       if (selectedReport) {
         await updateDoc(doc(db, "companies", "mecald", "qualityReports", selectedReport.id), dataToSave);
         toast({ title: "Relatório atualizado com sucesso!" });
@@ -619,7 +637,7 @@ export default function QualityPage() {
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
        // Prepare the data for saving, ensuring correct types and no undefined values.
-       const dataToSave = { 
+       const dataToSave: any = { 
            ...values,
            inspectionDate: Timestamp.fromDate(values.inspectionDate), 
            photos: values.photos || [], 
