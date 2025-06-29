@@ -64,6 +64,7 @@ const calibrationSchema = z.object({
   result: z.enum(["Aprovado", "Reprovado", "Aprovado com Ajuste"]),
   responsible: z.string().optional(),
   norm: z.string().optional(),
+  certificateNumber: z.string().optional(),
   certificateUrl: z.string().url("Insira uma URL válida.").or(z.literal('')).optional(),
   notes: z.string().optional(),
 });
@@ -285,7 +286,7 @@ export default function QualityPage() {
     resolver: zodResolver(calibrationSchema),
     defaultValues: {
       internalCode: "", equipmentName: "", modelSerial: "", manufacturer: "", location: "", category: "",
-      lastCalibrationDate: new Date(), calibrationIntervalMonths: 12, result: "Aprovado", responsible: "", norm: "", certificateUrl: "", notes: "",
+      lastCalibrationDate: new Date(), calibrationIntervalMonths: 12, result: "Aprovado", responsible: "", norm: "", certificateNumber: "", certificateUrl: "", notes: "",
     }
   });
 
@@ -425,7 +426,7 @@ export default function QualityPage() {
           id: doc.id, ...data, receiptDate: data.receiptDate.toDate(),
           orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado',
         } as RawMaterialInspection;
-      }).sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0));
+      }).sort((a, b) => (parseInt((a.reportNumber || '0').replace(/[^0-9]/g, '')) || 0) - (parseInt((b.reportNumber || '0').replace(/[^0-9]/g, '')) || 0));
       setMaterialInspections(matInspectionsList);
             
       const dimReportsList = dimensionalReportsSnapshot.docs.map(doc => {
@@ -437,7 +438,7 @@ export default function QualityPage() {
           id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(),
           orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', overallResult
         } as DimensionalReport;
-      }).sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0));
+      }).sort((a, b) => (parseInt((a.reportNumber || '0').replace(/[^0-9]/g, '')) || 0) - (parseInt((b.reportNumber || '0').replace(/[^0-9]/g, '')) || 0));
       setDimensionalReports(dimReportsList);
 
       const weldInspectionsList = weldingInspectionsSnapshot.docs.map(doc => {
@@ -561,7 +562,7 @@ export default function QualityPage() {
     setSelectedCalibration(null);
     calibrationForm.reset({
       internalCode: "", equipmentName: "", modelSerial: "", manufacturer: "", location: "", category: "",
-      lastCalibrationDate: new Date(), calibrationIntervalMonths: 12, result: "Aprovado", responsible: "", norm: "", certificateUrl: "", notes: "",
+      lastCalibrationDate: new Date(), calibrationIntervalMonths: 12, result: "Aprovado", responsible: "", norm: "", certificateNumber: "", certificateUrl: "", notes: "",
     }); setIsCalibrationFormOpen(true);
   };
   const handleEditCalibrationClick = (calibration: Calibration) => { setSelectedCalibration(calibration); calibrationForm.reset(calibration); setIsCalibrationFormOpen(true); };
@@ -1123,13 +1124,14 @@ export default function QualityPage() {
                 docPdf.setFontSize(9).setFont(undefined, 'normal').text(splitNotes, 15, finalY);
                 finalY += (splitNotes.length * 5);
             }
-
+            
+            docPdf.addPage();
+            let photoY = 20;
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Fotos da Inspeção', 15, photoY);
+            photoY += 7;
+            
             if (report.photos && report.photos.length > 0) {
-                docPdf.addPage();
-                let photoY = 20;
-                docPdf.setFontSize(12).setFont(undefined, 'bold');
-                docPdf.text('Fotos da Inspeção', 15, photoY);
-                photoY += 7;
                 const photoWidth = (pageWidth - 45) / 2;
                 const photoHeight = photoWidth * (3/4);
                 let x = 15;
@@ -1345,7 +1347,10 @@ export default function QualityPage() {
               <FormField control={calibrationForm.control} name="calibrationIntervalMonths" render={({ field }) => ( <FormItem><FormLabel>Intervalo (meses)</FormLabel><FormControl><Input type="number" placeholder="12" {...field} /></FormControl><FormMessage /></FormItem> )}/>
             </div>
              <FormField control={calibrationForm.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado da Última Cal.</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com Ajuste">Aprovado com Ajuste</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-            <FormField control={calibrationForm.control} name="certificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField control={calibrationForm.control} name="certificateNumber" render={({ field }) => ( <FormItem><FormLabel>Nº do Certificado</FormLabel><FormControl><Input placeholder="Número do certificado" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                <FormField control={calibrationForm.control} name="certificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+            </div>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setIsCalibrationFormOpen(false)}>Cancelar</Button><Button type="submit">{selectedCalibration ? 'Salvar Alterações' : 'Adicionar'}</Button></DialogFooter>
           </form></Form></DialogContent></Dialog>
       <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
@@ -2023,5 +2028,6 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
 
 
     
+
 
 
