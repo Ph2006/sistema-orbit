@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, Scale, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -563,6 +563,7 @@ export default function OrdersPage() {
                 deliveryDate: values.deliveryDate ? new Date(values.deliveryDate) : undefined,
                 customer: values.customer,
                 projectName: values.projectName,
+                internalOS: values.internalOS,
                 status: values.status,
                 driveLink: values.driveLink,
                 documents: values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
@@ -686,26 +687,13 @@ export default function OrdersPage() {
     };
 
     const dashboardStats = useMemo(() => {
-        const currentYear = new Date().getFullYear();
-        const ordersThisYear = orders.filter(order => order.createdAt.getFullYear() === currentYear);
+        const totalOrders = orders.length;
+        const completedOrders = orders.filter(order => order.status === 'Concluído').length;
+        const inProgressOrders = orders.filter(order => ['Em Produção', 'Aguardando Produção'].includes(order.status)).length;
+        const delayedOrders = orders.filter(order => order.status === 'Atrasado').length;
 
-        const totalYearWeight = ordersThisYear.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
-        const inProductionWeight = ordersThisYear
-            .filter(order => order.status === 'Em Produção')
-            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
-        const completedWeight = ordersThisYear
-            .filter(order => order.status === 'Concluído')
-            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
-        const delayedWeight = ordersThisYear
-            .filter(order => order.status === 'Atrasado')
-            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
-
-        return { totalYearWeight, inProductionWeight, completedWeight, delayedWeight };
+        return { totalOrders, completedOrders, inProgressOrders, delayedOrders };
     }, [orders]);
-
-    const formatWeight = (weight: number) => {
-        return `${weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
-    };
 
     const handleItemSelection = (itemId: string) => {
         setSelectedItems(prev => {
@@ -1229,28 +1217,28 @@ export default function OrdersPage() {
 
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                     <StatCard
-                        title="Peso Total (Ano)"
-                        value={formatWeight(dashboardStats.totalYearWeight)}
-                        icon={Scale}
-                        description={`Total de todos os pedidos em ${new Date().getFullYear()}`}
+                        title="Total de Pedidos"
+                        value={dashboardStats.totalOrders.toString()}
+                        icon={Package}
+                        description="Número total de pedidos no sistema"
                     />
                     <StatCard
-                        title="Peso em Produção"
-                        value={formatWeight(dashboardStats.inProductionWeight)}
-                        icon={PlayCircle}
-                        description="Soma do peso de pedidos 'Em Produção'"
-                    />
-                    <StatCard
-                        title="Peso Concluído"
-                        value={formatWeight(dashboardStats.completedWeight)}
+                        title="Pedidos Concluídos"
+                        value={dashboardStats.completedOrders.toString()}
                         icon={CheckCircle}
-                        description="Soma do peso de pedidos 'Concluído'"
+                        description="Pedidos com status 'Concluído'"
                     />
                     <StatCard
-                        title="Peso Atrasado"
-                        value={formatWeight(dashboardStats.delayedWeight)}
+                        title="Em Andamento"
+                        value={dashboardStats.inProgressOrders.toString()}
+                        icon={PlayCircle}
+                        description="Pedidos aguardando ou em produção"
+                    />
+                    <StatCard
+                        title="Pedidos Atrasados"
+                        value={dashboardStats.delayedOrders.toString()}
                         icon={AlertTriangle}
-                        description="Soma do peso de pedidos 'Atrasado'"
+                        description="Pedidos com data de entrega vencida"
                     />
                 </div>
 
