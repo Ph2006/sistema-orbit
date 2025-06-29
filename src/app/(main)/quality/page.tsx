@@ -35,6 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 
 
 // --- SCHEMAS ---
@@ -119,8 +120,6 @@ const weldingInspectionSchema = z.object({
   itemId: z.string({ required_error: "Selecione um item." }),
   inspectionDate: z.date({ required_error: "A data é obrigatória." }),
   inspectionType: z.enum(["Visual", "LP - Líquido Penetrante", "UT - Ultrassom"]),
-  
-  // Section 1: General Info
   jointIdentification: z.string().optional(),
   weldingProcess: z.string().optional(),
   jointType: z.string().optional(),
@@ -128,51 +127,73 @@ const weldingInspectionSchema = z.object({
   baseMaterial: z.string().optional(),
   fillerMaterial: z.string().optional(),
   materialThickness: z.string().optional(),
-
-  // Section 2: Welder Data
   welderSinete: z.string().optional(),
   welderQualification: z.string().optional(),
   wpsCode: z.string().optional(),
-  
-  // Section 3: Dimensional Test
   dimensionalTools: z.string().optional(),
-  
-  // Section 4: Visual Test & General
   acceptanceCriteria: z.string().optional(),
   surfaceCondition: z.string().optional(),
   observedDefects: z.string().optional(),
   result: z.enum(["Aprovado", "Reprovado", "Conforme", "Não Conforme"]),
-  
-  // Fields for other tests (LP/UT)
   technician: z.string().optional(),
   standard: z.string().optional(),
   equipment: z.string().optional(),
   reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
-  
-  // Section 5: Responsibles
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   customerInspector: z.string().optional(),
   releaseResponsible: z.string().optional(),
-
   notes: z.string().optional(),
   photos: z.array(z.string()).optional(),
 });
 
-const paintingReportSchema = z.object({
+const liquidPenetrantSchema = z.object({
   id: z.string().optional(),
   reportNumber: z.string().optional(),
+  inspectionDate: z.date({ required_error: "A data de emissão é obrigatória." }),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
-  inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
-  paintType: z.string().min(1, "O tipo de tinta é obrigatório."),
-  colorRal: z.string().optional(),
-  surfacePreparation: z.string().optional(),
-  dryFilmThickness: z.coerce.number().optional(),
-  instrumentUsed: z.string().optional(),
-  adhesionTestResult: z.enum(["Aprovado", "Reprovado"]).optional(),
-  result: z.enum(["Aprovado", "Reprovado"]),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
-  notes: z.string().optional(),
+  inspectorQualification: z.string().optional(),
+  baseMaterial: z.string().optional(),
+  heatTreatment: z.string().optional(),
+  examinedAreas: z.string().optional(),
+  quantityInspected: z.coerce.number().optional(),
+  testLocation: z.string().optional(),
+  appliedStandard: z.string().optional(),
+  technique: z.enum(["visível", "fluorescente"]),
+  method: z.enum(["removível com solvente", "lavável com água", "pós-emulsificável"]),
+  ambientTemperature: z.coerce.number().optional(),
+  partTemperature: z.coerce.number().optional(),
+  penetrant: z.string().optional(),
+  developer: z.string().optional(),
+  remover: z.string().optional(),
+  consumableValidity: z.date().optional().nullable(),
+  consumableLot: z.string().optional(),
+  sensitivityTest: z.boolean().default(false),
+  procedure: z.object({
+    preCleaning: z.boolean().default(false),
+    penetrantApplication: z.boolean().default(false),
+    penetrationTime: z.coerce.number().optional(),
+    excessRemoval: z.boolean().default(false),
+    developerApplication: z.boolean().default(false),
+    developmentTime: z.coerce.number().optional(),
+    totalProcessTime: z.coerce.number().optional(),
+    lightingMode: z.string().optional(),
+    lightIntensity: z.string().optional(),
+    inspectionType: z.enum(["geral", "localizada", "completa", "parcial"]),
+    isSurfaceAccessible: z.boolean().default(true),
+  }),
+  results: z.object({
+    defectType: z.string().optional(),
+    defectLocation: z.string().optional(),
+    defectDimensions: z.string().optional(),
+    isAreaFree: z.boolean().default(true),
+    sketch: z.string().optional(),
+  }),
+  finalResult: z.enum(["Conforme", "Não Conforme"]),
+  acceptanceCriteria: z.string().optional(),
+  finalNotes: z.string().optional(),
+  photos: z.array(z.string()).optional(),
 });
 
 
@@ -184,6 +205,7 @@ type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id:
 type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string, orderNumber: string, itemName: string, overallResult?: string };
 type WeldingInspection = z.infer<typeof weldingInspectionSchema> & { id: string, orderNumber: string, itemName: string };
 type PaintingReport = z.infer<typeof paintingReportSchema> & { id: string, orderNumber: string, itemName: string };
+type LiquidPenetrantReport = z.infer<typeof liquidPenetrantSchema> & { id: string, orderNumber: string, itemName: string };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
@@ -261,9 +283,10 @@ export default function QualityPage() {
   const [dimensionalReports, setDimensionalReports] = useState<DimensionalReport[]>([]);
   const [weldingInspections, setWeldingInspections] = useState<WeldingInspection[]>([]);
   const [paintingReports, setPaintingReports] = useState<PaintingReport[]>([]);
+  const [liquidPenetrantReports, setLiquidPenetrantReports] = useState<LiquidPenetrantReport[]>([]);
 
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
-  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | null>(null);
+  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | null>(null);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
@@ -363,6 +386,24 @@ export default function QualityPage() {
       }
   });
 
+  const liquidPenetrantForm = useForm<z.infer<typeof liquidPenetrantSchema>>({
+    resolver: zodResolver(liquidPenetrantSchema),
+    defaultValues: {
+      inspectionDate: new Date(),
+      technique: "visível",
+      method: "removível com solvente",
+      finalResult: "Conforme",
+      procedure: {
+        inspectionType: "completa",
+        isSurfaceAccessible: true,
+      },
+      results: {
+        isAreaFree: true,
+      },
+      photos: [],
+    },
+  });
+
 
   // --- DATA FETCHING ---
   const fetchAllData = async () => {
@@ -371,7 +412,8 @@ export default function QualityPage() {
     try {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
-        materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot
+        materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
+        liquidPenetrantReportsSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -381,6 +423,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "dimensionalReports")),
         getDocs(collection(db, "companies", "mecald", "weldingInspections")),
         getDocs(collection(db, "companies", "mecald", "paintingReports")),
+        getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -456,6 +499,22 @@ export default function QualityPage() {
           return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as PaintingReport;
       }).sort((a,b) => b.inspectionDate.getTime() - a.inspectionDate.getTime());
       setPaintingReports(paintReportsList);
+      
+      const lpReportsList = liquidPenetrantReportsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        const order = ordersList.find(o => o.id === data.orderId);
+        const item = order?.items.find(i => i.id === data.itemId);
+        return {
+          id: doc.id,
+          ...data,
+          inspectionDate: data.inspectionDate.toDate(),
+          consumableValidity: data.consumableValidity?.toDate() || null,
+          orderNumber: order?.number || "N/A",
+          itemName: item?.description || "Item não encontrado",
+        } as LiquidPenetrantReport;
+      }).sort((a,b) => (parseInt((b.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)));
+      setLiquidPenetrantReports(lpReportsList);
+
 
     } catch (error) {
       console.error("Error fetching quality data:", error);
@@ -488,12 +547,13 @@ export default function QualityPage() {
         const dimCount = dimensionalReports.filter(i => i.orderId === orderId).length;
         const weldCount = weldingInspections.filter(i => i.orderId === orderId).length;
         const paintCount = paintingReports.filter(i => i.orderId === orderId).length;
-        return matCount + dimCount + weldCount + paintCount;
+        const lpCount = liquidPenetrantReports.filter(i => i.orderId === orderId).length;
+        return matCount + dimCount + weldCount + paintCount + lpCount;
     };
 
     const inspectionsForSelectedOrder = useMemo(() => {
         if (!selectedOrderForInspections) {
-            return { material: [], dimensional: [], welding: [], painting: [] };
+            return { material: [], dimensional: [], welding: [], painting: [], liquidPenetrant: [] };
         }
         const orderId = selectedOrderForInspections.id;
         return {
@@ -501,8 +561,9 @@ export default function QualityPage() {
             dimensional: dimensionalReports.filter(i => i.orderId === orderId),
             welding: weldingInspections.filter(i => i.orderId === orderId),
             painting: paintingReports.filter(i => i.orderId === orderId),
+            liquidPenetrant: liquidPenetrantReports.filter(i => i.orderId === orderId),
         };
-    }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports]);
+    }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports, liquidPenetrantReports]);
 
 
   // --- RNC HANDLERS ---
@@ -647,11 +708,12 @@ export default function QualityPage() {
             : doc(collection(db, "companies", "mecald", "weldingInspections"));
 
         if (!selectedInspection) {
-            const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
-            const existingNumbers = reportsSnapshot.docs
-                .map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10))
-                .filter(n => !isNaN(n) && Number.isFinite(n));
-            const highestNumber = Math.max(0, ...existingNumbers);
+            const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
+            const lpReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports"));
+            const weldNumbers = weldReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+            const lpNumbers = lpReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+            const allNumbers = [...weldNumbers, ...lpNumbers];
+            const highestNumber = Math.max(0, ...allNumbers);
             dataToSave.reportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         }
     
@@ -685,6 +747,40 @@ export default function QualityPage() {
        }
        setIsInspectionFormOpen(false); await fetchAllData();
      } catch (error) { console.error("Error saving painting report:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
+  };
+  const onLiquidPenetrantSubmit = async (values: z.infer<typeof liquidPenetrantSchema>) => {
+    try {
+      const dataToSave = {
+        ...values,
+        inspectionDate: Timestamp.fromDate(values.inspectionDate),
+        consumableValidity: values.consumableValidity ? Timestamp.fromDate(values.consumableValidity) : null,
+      };
+
+      if (selectedInspection) {
+        await updateDoc(doc(db, "companies", "mecald", "liquidPenetrantReports", selectedInspection.id), dataToSave);
+        toast({ title: "Relatório de LP atualizado!" });
+      } else {
+        const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
+        const lpReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports"));
+        const weldNumbers = weldReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+        const lpNumbers = lpReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+        const allNumbers = [...weldNumbers, ...lpNumbers];
+        const highestNumber = Math.max(0, ...allNumbers);
+        const newReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
+        
+        await addDoc(collection(db, "companies", "mecald", "liquidPenetrantReports"), {
+          ...dataToSave,
+          reportNumber: newReportNumber,
+        });
+        toast({ title: "Relatório de LP criado!" });
+      }
+
+      setIsInspectionFormOpen(false);
+      await fetchAllData();
+    } catch (error) {
+      console.error("Error saving liquid penetrant report:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar relatório de LP" });
+    }
   };
 
   const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
@@ -781,6 +877,36 @@ export default function QualityPage() {
     else { paintingReportForm.reset(defaultValues); }
     setIsInspectionFormOpen(true);
   };
+  const handleOpenLiquidPenetrantForm = (report: LiquidPenetrantReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
+    setSelectedInspection(report);
+    setDialogType('liquidPenetrant');
+    if (report) {
+      liquidPenetrantForm.reset({
+        ...report,
+        inspectionDate: new Date(report.inspectionDate),
+        consumableValidity: report.consumableValidity ? new Date(report.consumableValidity) : null,
+      });
+    } else {
+      liquidPenetrantForm.reset({
+        orderId: order?.id || undefined,
+        itemId: undefined,
+        inspectionDate: new Date(),
+        technique: "visível",
+        method: "removível com solvente",
+        finalResult: "Conforme",
+        procedure: {
+          inspectionType: "completa",
+          isSurfaceAccessible: true,
+        },
+        results: {
+          isAreaFree: true,
+        },
+        photos: [],
+      });
+    }
+    setIsInspectionFormOpen(true);
+  };
+
   const handleDeleteInspectionClick = (inspection: any, type: string) => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
   const handleConfirmDeleteInspection = async () => {
     if (!inspectionToDelete) return;
@@ -790,6 +916,7 @@ export default function QualityPage() {
         case 'dimensional': collectionName = 'dimensionalReports'; break;
         case 'welding': collectionName = 'weldingInspections'; break;
         case 'painting': collectionName = 'paintingReports'; break;
+        case 'liquidPenetrant': collectionName = 'liquidPenetrantReports'; break;
     }
     if (!collectionName) return;
     try {
@@ -804,6 +931,7 @@ export default function QualityPage() {
         case 'dimensional': dimensionalReportForm.handleSubmit(onDimensionalReportSubmit)(data); break;
         case 'welding': weldingInspectionForm.handleSubmit(onWeldingInspectionSubmit)(data); break;
         case 'painting': paintingReportForm.handleSubmit(onPaintingReportSubmit)(data); break;
+        case 'liquidPenetrant': liquidPenetrantForm.handleSubmit(onLiquidPenetrantSubmit)(data); break;
     }
   };
 
@@ -1185,6 +1313,147 @@ export default function QualityPage() {
             toast({ variant: "destructive", title: "Erro ao gerar PDF." });
         }
     };
+    
+    const handleLiquidPenetrantPDF = async (report: LiquidPenetrantReport) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === report.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+
+        // Header
+        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo?.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+        docPdf.setFontSize(14).setFont(undefined, 'bold');
+        docPdf.text(`Relatório de Ensaio de Líquido Penetrante (LP)`, pageWidth / 2, y + 5, { align: 'center' });
+        docPdf.setFontSize(12).setFont(undefined, 'normal');
+        docPdf.text(`Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 12, { align: 'center' });
+        y += 25;
+        
+        const addSection = (title: string, data: (string | number | null | undefined)[][]) => {
+            if (y > pageHeight - 40 && docPdf.internal.getNumberOfPages() > 0) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(11).setFont(undefined, 'bold');
+            docPdf.text(title, 15, y);
+            y += 2;
+            autoTable(docPdf, {
+                startY: y,
+                theme: 'grid',
+                body: data.map(row => row.map(cell => cell ?? 'N/A')),
+                styles: { fontSize: 8, cellPadding: 1.5, lineWidth: 0.1, lineColor: [200, 200, 200] },
+                columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 5;
+        }
+
+        addSection('1. Dados do Relatório', [
+            ['Número do Relatório', report.reportNumber],
+            ['Data de Emissão', format(report.inspectionDate, 'dd/MM/yyyy')],
+            ['Nº Pedido / OS', orderInfo?.number],
+            ['Projeto / Cliente', orderInfo?.customerName],
+            ['Inspetor Responsável', report.inspectedBy],
+            ['Qualificação Inspetor', report.inspectorQualification],
+        ]);
+        
+        addSection('2. Identificação do Corpo de Prova', [
+          ['Código do Item', itemInfo?.code],
+          ['Nome da Peça', itemInfo?.description],
+          ['Material Base', report.baseMaterial],
+          ['Tratamento Térmico', report.heatTreatment],
+          ['Áreas Examinadas', report.examinedAreas],
+          ['Quantidade de Peças', report.quantityInspected],
+          ['Local do Ensaio', report.testLocation],
+        ]);
+        
+        addSection('3. Parâmetros do Ensaio', [
+            ['Norma Aplicada', report.appliedStandard],
+            ['Técnica Utilizada', report.technique],
+            ['Método de Ensaio', report.method],
+            ['Temperatura Ambiente (°C)', report.ambientTemperature],
+            ['Temperatura da Peça (°C)', report.partTemperature],
+        ]);
+        
+        addSection('4. Equipamentos e Consumíveis', [
+            ['Penetrante', report.penetrant],
+            ['Revelador', report.developer],
+            ['Removedor', report.remover],
+            ['Validade Consumíveis', report.consumableValidity ? format(report.consumableValidity, 'dd/MM/yyyy') : 'N/A'],
+            ['Lote / Certificação', report.consumableLot],
+            ['Teste de Sensibilidade', report.sensitivityTest ? 'Sim' : 'Não'],
+        ]);
+        
+        addSection('5. Procedimento de Execução', [
+          ['Limpeza Prévia', report.procedure.preCleaning ? 'Executado' : 'Não Executado'],
+          ['Aplicação do Penetrante', report.procedure.penetrantApplication ? 'Executado' : 'Não Executado'],
+          ['Tempo de Penetração (min)', report.procedure.penetrationTime],
+          ['Remoção do Excesso', report.procedure.excessRemoval ? 'Executado' : 'Não Executado'],
+          ['Aplicação do Revelador', report.procedure.developerApplication ? 'Executado' : 'Não Executado'],
+          ['Tempo de Revelação (min)', report.procedure.developmentTime],
+          ['Tempo Total do Processo', report.procedure.totalProcessTime],
+          ['Modo de Iluminação', report.procedure.lightingMode],
+          ['Intensidade da Luz', report.procedure.lightIntensity],
+          ['Tipo de Inspeção', report.procedure.inspectionType],
+          ['Superfície Acessível 100%?', report.procedure.isSurfaceAccessible ? 'Sim' : 'Não'],
+        ]);
+        
+        addSection('6. Resultados', [
+            ['Tipo de Defeito', report.results.defectType],
+            ['Localização', report.results.defectLocation],
+            ['Dimensões Estimadas', report.results.defectDimensions],
+            ['Área Livre de Indicações?', report.results.isAreaFree ? 'Sim' : 'Não'],
+            ['Croqui', report.results.sketch],
+        ]);
+        
+        addSection('7. Conclusão', [
+            ['Resultado Final', report.finalResult],
+            ['Critério de Aceitação', report.acceptanceCriteria],
+            ['Observações Finais', report.finalNotes],
+        ]);
+
+        if (report.photos && report.photos.length > 0) {
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('8. Anexos Fotográficos', 15, y);
+            y += 7;
+            const photoWidth = (pageWidth - 45) / 2;
+            const photoHeight = photoWidth * (3/4);
+            let x = 15;
+            for (const photoDataUri of report.photos) {
+                if (y + photoHeight > pageHeight - 45) { docPdf.addPage(); y = 20; x = 15; }
+                try { docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight); } 
+                catch(e) { docPdf.text("Erro ao carregar imagem", x, y + 10); }
+                x = (x === 15) ? (15 + photoWidth + 15) : 15;
+                if (x === 15) y += photoHeight + 5;
+            }
+        }
+
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            const signatureY = pageHeight - 35;
+            if (i === pageCount) { 
+                docPdf.setFontSize(10).setFont(undefined, 'normal');
+                const enterpriseInspectorX = 15;
+                docPdf.line(enterpriseInspectorX, signatureY, enterpriseInspectorX + 85, signatureY);
+                docPdf.text(report.inspectedBy, enterpriseInspectorX, signatureY + 5);
+                docPdf.text('Responsável Técnico', enterpriseInspectorX, signatureY + 10);
+            }
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text('LP-MEC-202501.REV0', 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`Relatorio_LP_${report.reportNumber || report.id}.pdf`);
+    } catch (error) {
+        console.error("Error exporting PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+    }
+  };
 
 
   const currentForm = useMemo(() => {
@@ -1193,9 +1462,10 @@ export default function QualityPage() {
         case 'dimensional': return dimensionalReportForm;
         case 'welding': return weldingInspectionForm;
         case 'painting': return paintingReportForm;
+        case 'liquidPenetrant': return liquidPenetrantForm;
         default: return null;
     }
-  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm]);
+  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm]);
   
 
   return (
@@ -1428,6 +1698,32 @@ export default function QualityPage() {
                             </CardContent></Card>
                     </AccordionContent>
                 </AccordionItem>
+                <AccordionItem value="liquid-penetrant">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><Beaker className="h-5 w-5 text-primary" />Ensaio de Líquido Penetrante (LP)</div></AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                      <Card>
+                        <CardHeader className="flex-row justify-between items-center">
+                          <CardTitle className="text-base">Histórico de Relatórios de LP</CardTitle>
+                          <Button size="sm" onClick={() => handleOpenLiquidPenetrantForm()}><PlusCircle className="mr-2 h-4 w-4" />Novo Relatório de LP</Button>
+                        </CardHeader>
+                        <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                            <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                <TableBody>{inspectionsForSelectedOrder.liquidPenetrant.length > 0 ? inspectionsForSelectedOrder.liquidPenetrant.map(insp => (
+                                    <TableRow key={insp.id}>
+                                    <TableCell className="font-mono">{insp.reportNumber || 'N/A'}</TableCell>
+                                    <TableCell>{format(insp.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.itemName}</TableCell>
+                                    <TableCell><Badge variant={getStatusVariant(insp.finalResult)}>{insp.finalResult}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
+                                    <TableCell className="text-right">
+                                        <Button variant="ghost" size="icon" onClick={() => handleLiquidPenetrantPDF(insp)}><FileDown className="h-4 w-4" /></Button>
+                                        <Button variant="ghost" size="icon" onClick={() => handleOpenLiquidPenetrantForm(insp)}><Pencil className="h-4 w-4" /></Button>
+                                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'liquidPenetrant')}><Trash2 className="h-4 w-4" /></Button>
+                                    </TableCell></TableRow>
+                                )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório de líquido penetrante para este pedido.</TableCell></TableRow>}
+                                </TableBody></Table>}
+                        </CardContent>
+                      </Card>
+                    </AccordionContent>
+                </AccordionItem>
                 <AccordionItem value="painting-inspection">
                     <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Controle de Pintura</div></AccordionTrigger>
                     <AccordionContent className="pt-2">
@@ -1492,6 +1788,7 @@ export default function QualityPage() {
                 {dialogType === 'dimensional' && (selectedInspection ? 'Editar Relatório Dimensional' : 'Novo Relatório Dimensional')}
                 {dialogType === 'welding' && (selectedInspection ? 'Editar Ensaio Visual de Solda' : 'Novo Ensaio Visual de Solda')}
                 {dialogType === 'painting' && (selectedInspection ? 'Editar Relatório de Pintura' : 'Novo Relatório de Pintura')}
+                {dialogType === 'liquidPenetrant' && (selectedInspection ? 'Editar Relatório de LP' : 'Novo Relatório de LP')}
             </DialogTitle>
             <DialogDescription>Preencha os campos para registrar a inspeção.</DialogDescription>
         </DialogHeader>
@@ -1511,6 +1808,9 @@ export default function QualityPage() {
                             )}
                              {dialogType === 'painting' && (
                                  <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
+                            )}
+                             {dialogType === 'liquidPenetrant' && (
+                                 <LiquidPenetrantForm form={liquidPenetrantForm} orders={orders} teamMembers={teamMembers} />
                             )}
                         </div>
                     </ScrollArea>
@@ -2023,11 +2323,131 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
     </>);
 }
 
+function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+  const watchedOrderId = form.watch("orderId");
+  const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
+  useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+  const watchedPhotos = form.watch("photos", []);
 
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files) return;
+      Array.from(files).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+              if (event.target?.result) {
+                  const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                  form.setValue("photos", updatedPhotos, { shouldValidate: true });
+              }
+          };
+          reader.readAsDataURL(file);
+      });
+  };
 
+  const removePhoto = (index: number) => {
+      const currentPhotos = form.getValues("photos") || [];
+      const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+      form.setValue("photos", updatedPhotos, { shouldValidate: true });
+  };
+  
+  const normOptions = ["ABNT NBR 16140", "ASTM E1417/E1417M", "ISO 3452-1", "ASME Section V – Article 6", "AWS D1.1", "Norma do cliente"];
 
-
-    
-
-
+  return (<>
+    <Card><CardHeader><CardTitle className="text-base">1. Dados do Relatório</CardTitle></CardHeader>
+      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem><FormLabel>Data da emissão</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Nº do pedido / OS</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="inspectorQualification" render={({ field }) => ( <FormItem><FormLabel>Qualificação do inspetor</FormLabel><FormControl><Input {...field} placeholder="Ex: Nível II ABENDI" /></FormControl><FormMessage /></FormItem> )}/>
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle className="text-base">2. Identificação do Corpo de Prova</CardTitle></CardHeader>
+      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Código do item</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} placeholder="Ex: ASTM A516 Gr.70" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="heatTreatment" render={({ field }) => ( <FormItem><FormLabel>Tratamento térmico</FormLabel><FormControl><Input {...field} placeholder="Sim/Não/Tipo" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="examinedAreas" render={({ field }) => ( <FormItem><FormLabel>Áreas examinadas</FormLabel><FormControl><Input {...field} placeholder="Ex: soldas J1 a J4" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de peças</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do ensaio</FormLabel><FormControl><Input {...field} placeholder="Ex: fábrica, campo" /></FormControl><FormMessage /></FormItem> )}/>
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle className="text-base">3. Parâmetros do Ensaio</CardTitle></CardHeader>
+      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField control={form.control} name="appliedStandard" render={({ field }) => ( <FormItem><FormLabel>Norma Aplicada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma norma" /></SelectTrigger></FormControl><SelectContent>{normOptions.map(norm => <SelectItem key={norm} value={norm}>{norm}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="technique" render={({ field }) => ( <FormItem><FormLabel>Técnica Utilizada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="visível">Visível (cor contrastante)</SelectItem><SelectItem value="fluorescente">Fluorescente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="method" render={({ field }) => ( <FormItem><FormLabel>Método de Ensaio</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="removível com solvente">Removível com solvente</SelectItem><SelectItem value="lavável com água">Lavável com água</SelectItem><SelectItem value="pós-emulsificável">Pós-emulsificável</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="ambientTemperature" render={({ field }) => ( <FormItem><FormLabel>Temperatura Ambiente (°C)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="partTemperature" render={({ field }) => ( <FormItem><FormLabel>Temperatura da Peça (°C)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle className="text-base">4. Equipamentos e Consumíveis</CardTitle></CardHeader>
+      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField control={form.control} name="penetrant" render={({ field }) => ( <FormItem><FormLabel>Penetrante</FormLabel><FormControl><Input {...field} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="developer" render={({ field }) => ( <FormItem><FormLabel>Revelador</FormLabel><FormControl><Input {...field} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="remover" render={({ field }) => ( <FormItem><FormLabel>Removedor</FormLabel><FormControl><Input {...field} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="consumableValidity" render={({ field }) => ( <FormItem><FormLabel>Validade dos Consumíveis</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="consumableLot" render={({ field }) => ( <FormItem><FormLabel>Lote / Nº Certificação</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="sensitivityTest" render={({ field }) => (<FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm col-span-full"><div className="space-y-0.5"><FormLabel>Verificação de Desempenho</FormLabel><FormDescription>O teste de sensibilidade do penetrante foi realizado?</FormDescription></div><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>)}/>
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle className="text-base">5. Procedimento de Execução</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-6">
+            {Object.entries({preCleaning: "Limpeza Prévia", penetrantApplication: "Aplicação do Penetrante", excessRemoval: "Remoção do Excesso", developerApplication: "Aplicação do Revelador"}).map(([key, label]) => (
+                <FormField key={key} control={form.control} name={`procedure.${key}`} render={({ field }) => (<FormItem className="flex flex-row items-center space-x-3 space-y-0"><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl><div className="space-y-1 leading-none"><FormLabel>{label}</FormLabel></div></FormItem>)}/>
+            ))}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <FormField control={form.control} name="procedure.penetrationTime" render={({ field }) => ( <FormItem><FormLabel>Tempo de Penetração (min)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+          <FormField control={form.control} name="procedure.developmentTime" render={({ field }) => ( <FormItem><FormLabel>Tempo de Revelação (min)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+          <FormField control={form.control} name="procedure.totalProcessTime" render={({ field }) => ( <FormItem><FormLabel>Tempo Total do Processo</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+          <FormField control={form.control} name="procedure.lightingMode" render={({ field }) => ( <FormItem><FormLabel>Modo de Iluminação</FormLabel><FormControl><Input {...field} placeholder="Luz visível ou UV" /></FormControl><FormMessage /></FormItem> )}/>
+          <FormField control={form.control} name="procedure.lightIntensity" render={({ field }) => ( <FormItem><FormLabel>Intensidade da Luz</FormLabel><FormControl><Input {...field} placeholder="lux ou μW/cm²" /></FormControl><FormMessage /></FormItem> )}/>
+          <FormField control={form.control} name="procedure.inspectionType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Inspeção</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="geral">Geral</SelectItem><SelectItem value="localizada">Localizada</SelectItem><SelectItem value="completa">Completa</SelectItem><SelectItem value="parcial">Parcial</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        </div>
+        <FormField control={form.control} name="procedure.isSurfaceAccessible" render={({ field }) => (<FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm"><div className="space-y-0.5"><FormLabel>Superfície acessível 100%?</FormLabel></div><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>)}/>
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle className="text-base">6. Resultados</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormField control={form.control} name="results.defectType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Defeito</FormLabel><FormControl><Input {...field} placeholder="Trinca, poro, etc." /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="results.defectLocation" render={({ field }) => ( <FormItem><FormLabel>Localização</FormLabel><FormControl><Input {...field} placeholder="Desenho ou coordenadas" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="results.defectDimensions" render={({ field }) => ( <FormItem><FormLabel>Dimensões Estimadas</FormLabel><FormControl><Input {...field} placeholder="Comprimento, largura" /></FormControl><FormMessage /></FormItem> )}/>
+          </div>
+          <FormField control={form.control} name="results.isAreaFree" render={({ field }) => (<FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm"><div className="space-y-0.5"><FormLabel>Área avaliada livre de indicações?</FormLabel></div><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl></FormItem>)}/>
+          <FormField control={form.control} name="results.sketch" render={({ field }) => ( <FormItem><FormLabel>Croqui da Área Ensaida</FormLabel><FormControl><Textarea {...field} placeholder="Descrição ou link para imagem do croqui" /></FormControl><FormMessage /></FormItem> )}/>
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação Aplicado</FormLabel><FormControl><Input {...field} placeholder="Ex: ASME VIII, AWS D1.1" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="finalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Finais</FormLabel><FormControl><Textarea {...field} placeholder="Ações corretivas, recomendações" /></FormControl><FormMessage /></FormItem> )}/>
+      </CardContent>
+    </Card>
+    <Card><CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
+      <CardContent>
+          <FormItem>
+              <FormLabel>Registro Fotográfico</FormLabel>
+              <FormControl><Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} /></FormControl>
+              <FormDescription>Selecione imagens das indicações ou da área inspecionada.</FormDescription>
+              {watchedPhotos && watchedPhotos.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                      {watchedPhotos.map((photo, index) => (
+                          <div key={index} className="relative">
+                              <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                              <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                  <Trash2 className="h-3 w-3" />
+                              </Button>
+                          </div>
+                      ))}
+                  </div>
+              )}
+              <FormMessage />
+          </FormItem>
+      </CardContent>
+    </Card>
+  </>);
+}
 
