@@ -112,6 +112,7 @@ const dimensionalReportSchema = z.object({
 
 const weldingInspectionSchema = z.object({
   id: z.string().optional(),
+  reportNumber: z.string().optional(),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
   inspectionType: z.enum(["Visual", "LP - Líquido Penetrante", "UT - Ultrassom"]),
@@ -126,6 +127,7 @@ const weldingInspectionSchema = z.object({
   equipment: z.string().optional(), // For UT
   reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
   notes: z.string().optional(),
+  photos: z.array(z.string()).optional(),
 });
 
 const paintingReportSchema = z.object({
@@ -293,6 +295,7 @@ export default function QualityPage() {
           equipment: '',
           reportUrl: '',
           notes: '',
+          photos: [],
       }
   });
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
@@ -408,7 +411,7 @@ export default function QualityPage() {
           const item = order?.items.find(i => i.id === data.itemId);
           return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as WeldingInspection;
       });
-      setWeldingInspections(weldInspectionsList.sort((a,b) => b.inspectionDate.getTime() - a.inspectionDate.getTime()));
+      setWeldingInspections(weldInspectionsList.sort((a,b) => (parseInt((b.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10))));
 
       const paintReportsList = paintingReportsSnapshot.docs.map(doc => {
           const data = doc.data();
@@ -461,7 +464,8 @@ export default function QualityPage() {
       return weldingInspections.filter(
           (insp) =>
               insp.orderNumber.toLowerCase().includes(query) ||
-              insp.itemName.toLowerCase().includes(query)
+              insp.itemName.toLowerCase().includes(query) ||
+              insp.reportNumber?.toLowerCase().includes(query)
       );
   }, [weldingInspections, inspectionSearchQuery]);
 
@@ -594,11 +598,17 @@ export default function QualityPage() {
   };
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
-       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate) };
+       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), photos: values.photos || [] };
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório de solda atualizado!" });
        } else {
+         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
+         const existingNumbers = reportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10));
+         const highestNumber = Math.max(0, ...existingNumbers.filter(n => !isNaN(n)));
+         const newReportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, '0')}`;
+         (dataToSave as any).reportNumber = newReportNumber;
+
          await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
          toast({ title: "Relatório de solda criado!" });
        }
@@ -635,6 +645,7 @@ export default function QualityPage() {
         equipment: '',
         reportUrl: '',
         notes: '',
+        photos: [],
     };
     if (report) { 
         weldingInspectionForm.reset({
@@ -837,8 +848,7 @@ export default function QualityPage() {
         if (report.photos && report.photos.length > 0) {
             y = finalY + 10;
             if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
-            docPdf.setFontSize(12).setFont(undefined, 'bold');
-            docPdf.text('Fotos da Inspeção', 15, y);
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Fotos da Inspeção', 15, y);
             y += 7;
 
             const photoWidth = (pageWidth - 45) / 2;
@@ -900,6 +910,105 @@ export default function QualityPage() {
         
         docPdf.save(`RelatorioDimensional_${report.reportNumber || report.id}.pdf`);
 
+    } catch (error) {
+        console.error("Error exporting PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+    }
+  };
+
+  const handleWeldingInspectionPDF = async (report: WeldingInspection) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === report.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+        
+        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(`Relatório de Inspeção de Solda Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
+        y += 25;
+        
+        const details = [
+            ['Pedido', `${orderInfo?.number || 'N/A'}`, 'Data da Inspeção', format(report.inspectionDate, 'dd/MM/yyyy')],
+            ['Cliente', `${orderInfo?.customerName || 'N/A'}`, 'Inspetor', report.inspectedBy],
+            ['Item', `${itemInfo?.description || 'N/A'}`, 'Tipo de Inspeção', report.inspectionType],
+            ['Resultado Final', { content: report.result, styles: { fontStyle: 'bold' } }, '', '']
+        ];
+
+        if(report.inspectionType === 'Visual') {
+            details.push(['Sinete do Soldador', report.welder || 'N/A', 'Processo de Solda', report.process || 'N/A' ]);
+        } else { // LP or UT
+            details.push(['Técnico Responsável', report.technician || 'N/A', 'Norma Aplicada', report.standard || 'N/A']);
+            if (report.inspectionType === 'UT - Ultrassom') {
+                 details.push(['Equipamento', report.equipment || 'N/A', '', '']);
+            }
+        }
+        if (report.reportUrl) {
+            details.push(['Link do Laudo', { content: 'Ver link', styles: { textColor: [0,0,255], fontStyle: 'italic' } }, '', '']);
+        }
+
+
+        autoTable(docPdf, { startY: y, theme: 'plain', styles: { fontSize: 9 }, body: details as any });
+        y = (docPdf as any).lastAutoTable.finalY;
+
+        if (report.notes) {
+            y += 10;
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Observações', 15, y);
+            y += 6;
+            const splitNotes = docPdf.splitTextToSize(report.notes, pageWidth - 30);
+            docPdf.setFontSize(9).setFont(undefined, 'normal').text(splitNotes, 15, y);
+            y += (splitNotes.length * 4);
+        }
+
+        if (report.photos && report.photos.length > 0) {
+            y += 10;
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Fotos da Inspeção', 15, y);
+            y += 7;
+
+            const photoWidth = (pageWidth - 45) / 2;
+            const photoHeight = photoWidth * (3/4);
+            let x = 15;
+
+            for (const photoDataUri of report.photos) {
+                if (y + photoHeight > pageHeight - 45) {
+                    docPdf.addPage();
+                    y = 20;
+                    x = 15;
+                }
+                try {
+                    docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
+                } catch(e) { docPdf.text("Erro ao carregar imagem", x, y + 10); }
+                x = (x === 15) ? (15 + photoWidth + 15) : 15;
+                if (x === 15) y += photoHeight + 5;
+            }
+        }
+
+        let footerText = 'DOC-MEC-000';
+        switch(report.inspectionType) {
+            case 'Visual': footerText = 'EVS-MEC-202501.REV0'; break;
+            case 'LP - Líquido Penetrante': footerText = 'LP-MEC-202501.REV0'; break;
+            case 'UT - Ultrassom': footerText = 'US-MEC-202501.REV0'; break;
+        }
+
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(footerText, 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`Relatorio_Solda_${report.reportNumber || report.id}.pdf`);
     } catch (error) {
         console.error("Error exporting PDF:", error);
         toast({ variant: "destructive", title: "Erro ao gerar PDF." });
@@ -1043,16 +1152,17 @@ export default function QualityPage() {
                       <AccordionContent className="pt-2">
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Nova Inspeção</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                       <TableBody>{filteredWeldingInspections.length > 0 ? filteredWeldingInspections.map(insp => (
-                                          <TableRow key={insp.id}><TableCell>{format(insp.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
+                                          <TableRow key={insp.id}><TableCell className="font-mono">{insp.reportNumber || 'N/A'}</TableCell><TableCell>{format(insp.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
                                           <TableCell><Badge variant="outline">{insp.inspectionType}</Badge></TableCell>
                                           <TableCell><Badge variant={getStatusVariant(insp.result)}>{insp.result}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
+                                              <Button variant="ghost" size="icon" onClick={() => handleWeldingInspectionPDF(insp)}><FileDown className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" onClick={() => handleOpenWeldingForm(insp)}><Pencil className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'welding')}><Trash2 className="h-4 w-4" /></Button>
                                           </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhuma inspeção de solda registrada.</TableCell></TableRow>}
+                                      )) : <TableRow><TableCell colSpan={8} className="h-24 text-center">Nenhuma inspeção de solda registrada.</TableCell></TableRow>}
                                       </TableBody></Table>}
                               </CardContent></Card>
                       </AccordionContent>
@@ -1088,9 +1198,10 @@ export default function QualityPage() {
         <Form {...rncForm}><form onSubmit={rncForm.handleSubmit(onRncSubmit)} className="space-y-4 pt-4">
           <FormField control={rncForm.control} name="date" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
           <FormField control={rncForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="item" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={value => { const selectedItem = availableRncItems.find(i => i.id === value); if (selectedItem) field.onChange(selectedItem); }} value={field.value?.id || ""}><FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+          <FormField control={rncForm.control} name="item" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={value => { const selectedItem = availableRncItems.find(i => i.id === value); if (selectedItem) field.onChange(selectedItem); }} value={field.value?.id || ""}>{/* @ts-ignore */}
+              <FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
           <FormField control={rncForm.control} name="type" render={({ field }) => ( <FormItem><FormLabel>Tipo de Não Conformidade</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Interna">Interna</SelectItem><SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-          <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} /></FormControl><FormMessage /></FormItem> )}/>
+          <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
           <FormField control={rncForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Aberta">Aberta</SelectItem><SelectItem value="Em Análise">Em Análise</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
           <DialogFooter><Button type="submit">Salvar</Button></DialogFooter>
       </form></Form></DialogContent></Dialog>
@@ -1099,20 +1210,20 @@ export default function QualityPage() {
       <Dialog open={isCalibrationFormOpen} onOpenChange={setIsCalibrationFormOpen}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>{selectedCalibration ? "Editar Calibração" : "Adicionar Equipamento para Calibração"}</DialogTitle><DialogDescription>Preencha os dados do equipamento e seu plano de calibração.</DialogDescription></DialogHeader>
           <Form {...calibrationForm}><form onSubmit={calibrationForm.handleSubmit(onCalibrationSubmit)} className="space-y-4 pt-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField control={calibrationForm.control} name="equipmentName" render={({ field }) => ( <FormItem><FormLabel>Nome do Equipamento</FormLabel><FormControl><Input placeholder="Ex: Paquímetro Digital Mitutoyo" {...field} /></FormControl><FormMessage /></FormItem> )}/>
-              <FormField control={calibrationForm.control} name="internalCode" render={({ field }) => ( <FormItem><FormLabel>Código Interno</FormLabel><FormControl><Input placeholder="Ex: PAQ-001" {...field} disabled={!!selectedCalibration} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="equipmentName" render={({ field }) => ( <FormItem><FormLabel>Nome do Equipamento</FormLabel><FormControl><Input placeholder="Ex: Paquímetro Digital Mitutoyo" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="internalCode" render={({ field }) => ( <FormItem><FormLabel>Código Interno</FormLabel><FormControl><Input placeholder="Ex: PAQ-001" {...field} value={field.value ?? ''} disabled={!!selectedCalibration} /></FormControl><FormMessage /></FormItem> )}/>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <FormField control={calibrationForm.control} name="location" render={({ field }) => ( <FormItem><FormLabel>Localização</FormLabel><FormControl><Input placeholder="Ex: Metrologia" {...field} /></FormControl><FormMessage /></FormItem> )}/>
-              <FormField control={calibrationForm.control} name="manufacturer" render={({ field }) => ( <FormItem><FormLabel>Fabricante</FormLabel><FormControl><Input placeholder="Ex: Mitutoyo" {...field} /></FormControl><FormMessage /></FormItem> )}/>
-              <FormField control={calibrationForm.control} name="modelSerial" render={({ field }) => ( <FormItem><FormLabel>Modelo/Série</FormLabel><FormControl><Input placeholder="Ex: 500-196-30B" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="location" render={({ field }) => ( <FormItem><FormLabel>Localização</FormLabel><FormControl><Input placeholder="Ex: Metrologia" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="manufacturer" render={({ field }) => ( <FormItem><FormLabel>Fabricante</FormLabel><FormControl><Input placeholder="Ex: Mitutoyo" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+              <FormField control={calibrationForm.control} name="modelSerial" render={({ field }) => ( <FormItem><FormLabel>Modelo/Série</FormLabel><FormControl><Input placeholder="Ex: 500-196-30B" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField control={calibrationForm.control} name="lastCalibrationDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Última Calibração</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
               <FormField control={calibrationForm.control} name="calibrationIntervalMonths" render={({ field }) => ( <FormItem><FormLabel>Intervalo (meses)</FormLabel><FormControl><Input type="number" placeholder="12" {...field} /></FormControl><FormMessage /></FormItem> )}/>
             </div>
              <FormField control={calibrationForm.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado da Última Cal.</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com Ajuste">Aprovado com Ajuste</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-            <FormField control={calibrationForm.control} name="certificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={calibrationForm.control} name="certificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
             <DialogFooter><Button type="button" variant="outline" onClick={() => setIsCalibrationFormOpen(false)}>Cancelar</Button><Button type="submit">{selectedCalibration ? 'Salvar Alterações' : 'Adicionar'}</Button></DialogFooter>
           </form></Form></DialogContent></Dialog>
       <AlertDialog open={isCalibrationDeleting} onOpenChange={setIsCalibrationDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Isso excluirá permanentemente o registro de calibração para <span className="font-bold">{calibrationToDelete?.equipmentName}</span>.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmCalibrationDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
@@ -1196,10 +1307,10 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
         <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="receiptDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data de Recebimento</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="supplierName" render={({ field }) => ( <FormItem><FormLabel>Fornecedor</FormLabel><FormControl><Input {...field} placeholder="Nome do fornecedor do material" /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="supplierName" render={({ field }) => ( <FormItem><FormLabel>Fornecedor</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome do fornecedor do material" /></FormControl><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="quantityReceived" render={({ field }) => ( <FormItem><FormLabel>Quantidade Recebida</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Qtd. conforme NF" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="materialStandard" render={({ field }) => ( <FormItem><FormLabel>Norma do Material</FormLabel><FormControl><Input {...field} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="materialCertificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="materialStandard" render={({ field }) => ( <FormItem><FormLabel>Norma do Material</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="materialCertificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" {...field} value={field.value ?? ''} placeholder="https://" /></FormControl><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="inspectionResult" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com ressalva">Aprovado com ressalva</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormItem>
@@ -1224,7 +1335,7 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
             )}
             <FormMessage />
         </FormItem>
-        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
 
@@ -1487,7 +1598,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             <FormMessage />
         </FormItem>
 
-        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
 
@@ -1497,6 +1608,30 @@ function WeldingInspectionForm({ form, orders, teamMembers }: { form: any, order
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
     const inspectionType = form.watch("inspectionType");
 
+    const watchedPhotos = form.watch("photos", []);
+
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+        
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const removePhoto = (index: number) => {
+        const currentPhotos = form.getValues("photos") || [];
+        const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+        form.setValue("photos", updatedPhotos, { shouldValidate: true });
+    };
+
     return (<>
         <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
@@ -1504,21 +1639,41 @@ function WeldingInspectionForm({ form, orders, teamMembers }: { form: any, order
         <FormField control={form.control} name="inspectionType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Inspeção</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Visual">Visual</SelectItem><SelectItem value="LP - Líquido Penetrante">LP - Líquido Penetrante</SelectItem><SelectItem value="UT - Ultrassom">UT - Ultrassom</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         
         {inspectionType === 'Visual' && (<>
-            <FormField control={form.control} name="welder" render={({ field }) => ( <FormItem><FormLabel>Sinete do soldador</FormLabel><FormControl><Input {...field} placeholder="Sinete do soldador" /></FormControl><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="process" render={({ field }) => ( <FormItem><FormLabel>Processo de Solda</FormLabel><FormControl><Input {...field} placeholder="MIG/MAG/TIG/SMAW" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="welder" render={({ field }) => ( <FormItem><FormLabel>Sinete do soldador</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Sinete do soldador" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="process" render={({ field }) => ( <FormItem><FormLabel>Processo de Solda</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="MIG/MAG/TIG/SMAW" /></FormControl><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         </>)}
 
         {(inspectionType === 'LP - Líquido Penetrante' || inspectionType === 'UT - Ultrassom') && (<>
-            <FormField control={form.control} name="technician" render={({ field }) => ( <FormItem><FormLabel>Técnico Responsável</FormLabel><FormControl><Input {...field} placeholder="Nome do técnico" /></FormControl><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="standard" render={({ field }) => ( <FormItem><FormLabel>Norma Aplicada</FormLabel><FormControl><Input {...field} placeholder="Ex: ASTM E165" /></FormControl><FormMessage /></FormItem> )}/>
-            {inspectionType === 'UT - Ultrassom' && <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento</FormLabel><FormControl><Input {...field} placeholder="Nome do equipamento de UT" /></FormControl><FormMessage /></FormItem> )}/>}
-            <FormField control={form.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Laudo</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="technician" render={({ field }) => ( <FormItem><FormLabel>Técnico Responsável</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome do técnico" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="standard" render={({ field }) => ( <FormItem><FormLabel>Norma Aplicada</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM E165" /></FormControl><FormMessage /></FormItem> )}/>
+            {inspectionType === 'UT - Ultrassom' && <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome do equipamento de UT" /></FormControl><FormMessage /></FormItem> )}/>}
+            <FormField control={form.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Laudo</FormLabel><FormControl><Input type="url" {...field} value={field.value ?? ''} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         </>)}
         
         <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+        <FormItem>
+            <FormLabel>Fotos da Inspeção</FormLabel>
+            <FormControl>
+                <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
+            </FormControl>
+            <FormDescription>Selecione imagens para anexar ao relatório.</FormDescription>
+            {watchedPhotos && watchedPhotos.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                    {watchedPhotos.map((photo, index) => (
+                        <div key={index} className="relative">
+                            <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                            <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                <Trash2 className="h-3 w-3" />
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            )}
+            <FormMessage />
+        </FormItem>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
 
@@ -1531,13 +1686,13 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="paintType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Tinta</FormLabel><FormControl><Input {...field} placeholder="Ex: Primer Epóxi, Esmalte PU" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="colorRal" render={({ field }) => ( <FormItem><FormLabel>Cor (RAL)</FormLabel><FormControl><Input {...field} placeholder="Ex: RAL 7035" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="surfacePreparation" render={({ field }) => ( <FormItem><FormLabel>Preparação da Superfície</FormLabel><FormControl><Input {...field} placeholder="Ex: Jateamento SA 2 1/2" /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="paintType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Tinta</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Primer Epóxi, Esmalte PU" /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="colorRal" render={({ field }) => ( <FormItem><FormLabel>Cor (RAL)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: RAL 7035" /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="surfacePreparation" render={({ field }) => ( <FormItem><FormLabel>Preparação da Superfície</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Jateamento SA 2 1/2" /></FormControl><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="dryFilmThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (μm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 120" /></FormControl><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="adhesionTestResult" render={({ field }) => ( <FormItem><FormLabel>Teste de Aderência</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Resultado do teste"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado Geral</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
