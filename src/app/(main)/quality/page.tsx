@@ -190,6 +190,9 @@ const liquidPenetrantSchema = z.object({
   procedure: z.object({
     preCleaning: z.boolean().default(false),
     penetrantApplication: z.boolean().default(false),
+    penetrationTime: z.coerce.number().optional(),
+    excessRemoval: z.boolean().default(false),
+    developerApplication: z.boolean().default(false),
     developmentTime: z.coerce.number().optional(),
     totalProcessTime: z.coerce.number().optional(),
     lightingMode: z.string().optional(),
@@ -476,6 +479,10 @@ export default function QualityPage() {
       method: "removível com solvente",
       finalResult: "Conforme",
       procedure: {
+        preCleaning: false,
+        penetrantApplication: false,
+        excessRemoval: false,
+        developerApplication: false,
         inspectionType: "completa",
         isSurfaceAccessible: true,
       },
@@ -494,6 +501,10 @@ export default function QualityPage() {
       photos: [],
       results: [],
     },
+  });
+  const { fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult, update: updateUltrasoundResult } = useFieldArray({
+      control: ultrasoundReportForm.control,
+      name: "results"
   });
 
 
@@ -1046,6 +1057,10 @@ export default function QualityPage() {
         method: "removível com solvente",
         finalResult: "Conforme",
         procedure: {
+          preCleaning: false,
+          penetrantApplication: false,
+          excessRemoval: false,
+          developerApplication: false,
           inspectionType: "completa",
           isSurfaceAccessible: true,
         },
@@ -1198,7 +1213,7 @@ export default function QualityPage() {
 
         const docPdf = new jsPDF();
         const pageWidth = docPdf.internal.pageSize.width;
-        const pageHeight = docPdf.internal.pageSize.height;
+        const pageHeight = docPdf.internal.pageSize;
         let y = 15;
         
         if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
@@ -1564,6 +1579,8 @@ export default function QualityPage() {
           ['Limpeza Prévia', report.procedure.preCleaning ? 'Executado' : 'Não Executado'],
           ['Aplicação do Penetrante', report.procedure.penetrantApplication ? 'Executado' : 'Não Executado'],
           ['Tempo de Penetração (min)', report.procedure.penetrationTime],
+          ['Remoção do Excesso', report.procedure.excessRemoval ? 'Executado' : 'Não Executado'],
+          ['Aplicação do Revelador', report.procedure.developerApplication ? 'Executado' : 'Não Executado'],
           ['Tempo de Revelação (min)', report.procedure.developmentTime],
           ['Tempo Total do Processo', report.procedure.totalProcessTime],
           ['Modo de Iluminação', report.procedure.lightingMode],
@@ -2147,7 +2164,7 @@ export default function QualityPage() {
                                  <LiquidPenetrantForm form={liquidPenetrantForm} orders={orders} teamMembers={teamMembers} />
                             )}
                             {dialogType === 'ultrasound' && (
-                                <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} />
+                                <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} fieldArrayProps={{ fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult }} />
                             )}
                         </div>
                     </ScrollArea>
@@ -2704,8 +2721,8 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A516 Gr.70" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="heatTreatment" render={({ field }) => ( <FormItem><FormLabel>Tratamento térmico</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Sim/Não/Tipo" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="examinedAreas" render={({ field }) => ( <FormItem><FormLabel>Áreas examinadas</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: soldas J1 a J4" /></FormControl><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de peças</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: fábrica, campo" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de peças</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: fábrica, campo" /></FormControl><FormMessage /></FormItem> )} />
       </CardContent>
     </Card>
     <Card><CardHeader><CardTitle className="text-base">3. Parâmetros do Ensaio</CardTitle></CardHeader>
@@ -2758,9 +2775,9 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
     </Card>
     <Card><CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação Aplicado</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII, AWS D1.1" /></FormControl><FormMessage /></FormItem> )}/>
-        <FormField control={form.control} name="finalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Finais</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Ações corretivas, recomendações" /></FormControl><FormMessage /></FormItem> )}/>
+        <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação Aplicado</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII, AWS D1.1" /></FormControl><FormMessage /></FormItem> )} />
+        <FormField control={form.control} name="finalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Finais</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Ações corretivas, recomendações, etc." /></FormControl><FormMessage /></FormItem> )}/>
       </CardContent>
     </Card>
     <Card><CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
@@ -2788,7 +2805,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
   </>);
 }
 
-function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[], toast: any }) {
+function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, fieldArrayProps }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[], toast: any, fieldArrayProps: any }) {
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => {
         if (!watchedOrderId) return [];
@@ -2799,6 +2816,31 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast }
         form.setValue('itemId', '');
     }, [watchedOrderId, form]);
     
+    const [newResult, setNewResult] = useState<Partial<UltrasoundResult>>({ jointCode: '', evaluationResult: 'Conforme' });
+    const [editResultIndex, setEditResultIndex] = useState<number | null>(null);
+
+    const handleAddResult = () => {
+        const result = ultrasoundResultSchema.safeParse({ id: Date.now().toString(), ...newResult });
+        if (!result.success) {
+            toast({ variant: 'destructive', title: 'Erro de Validação', description: result.error.errors[0].message });
+            return;
+        }
+        fieldArrayProps.append(result.data);
+        setNewResult({ jointCode: '', evaluationResult: 'Conforme' });
+    };
+
+    const handleUpdateResult = () => {
+        if (editResultIndex === null) return;
+        const result = ultrasoundResultSchema.safeParse({ ...fieldArrayProps.fields[editResultIndex], ...newResult });
+        if (!result.success) {
+            toast({ variant: 'destructive', title: 'Erro de Validação', description: result.error.errors[0].message });
+            return;
+        }
+        fieldArrayProps.update(editResultIndex, result.data);
+        setNewResult({ jointCode: '', evaluationResult: 'Conforme' });
+        setEditResultIndex(null);
+    };
+
     return(
         <div className="space-y-4">
              <Card><CardHeader><CardTitle className="text-base">1. Dados do Relatório</CardTitle></CardHeader>
@@ -2813,17 +2855,58 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast }
              <Card><CardHeader><CardTitle className="text-base">2. Identificação do Componente</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                      <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Código do item / desenho</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )}/>
-                     <FormField control={form.control} name="heatTreatment" render={({ field }) => ( <FormItem><FormLabel>Tratamento Térmico</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Normalizado" /></FormControl><FormMessage /></FormItem> )}/>
-                     <FormField control={form.control} name="weldTypeAndThickness" render={({ field }) => ( <FormItem><FormLabel>Tipo e Espessura da Solda</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Topo, 12.7mm" /></FormControl><FormMessage /></FormItem> )}/>
-                     <FormField control={form.control} name="examinedAreaDescription" render={({ field }) => ( <FormItem><FormLabel>Área Examinada</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Descreva a área ou anexe um desenho marcado" /></FormControl><FormMessage /></FormItem> )}/>
-                     <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
-                     <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Oficina" /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="heatTreatment" render={({ field }) => ( <FormItem><FormLabel>Tratamento Térmico</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Normalizado" /></FormControl><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="weldTypeAndThickness" render={({ field }) => ( <FormItem><FormLabel>Tipo e Espessura da Solda</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Topo, 12.7mm" /></FormControl><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="examinedAreaDescription" render={({ field }) => ( <FormItem><FormLabel>Área Examinada</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Descreva a área ou anexe um desenho marcado" /></FormControl><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Oficina" /></FormControl><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
+            <Card><CardHeader><CardTitle className="text-base">6. Resultados Detalhados</CardTitle></CardHeader>
+                <CardContent>
+                    {fieldArrayProps.fields.length > 0 && (
+                        <Table><TableHeader><TableRow><TableHead>Junta</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
+                        <TableBody>
+                        {fieldArrayProps.fields.map((field: any, index: number) => (
+                            <TableRow key={field.id}><TableCell>{field.jointCode}</TableCell><TableCell><Badge variant={getStatusVariant(field.evaluationResult)}>{field.evaluationResult}</Badge></TableCell>
+                            <TableCell className="text-right">
+                                <Button type="button" variant="ghost" size="icon" onClick={() => { setEditResultIndex(index); setNewResult(fieldArrayProps.fields[index]); }}><Pencil className="h-4 w-4" /></Button>
+                                <Button type="button" variant="ghost" size="icon" onClick={() => fieldArrayProps.remove(index)}><Trash2 className="h-4 w-4 text-destructive"/></Button>
+                            </TableCell>
+                            </TableRow>
+                        ))}
+                        </TableBody></Table>
+                    )}
+                    <div className="mt-4 p-4 border rounded-md space-y-4">
+                        <h4 className="font-medium">{editResultIndex !== null ? 'Editar Resultado' : 'Adicionar Novo Resultado'}</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><Label>Código da Junta/Área</Label><Input value={newResult.jointCode || ''} onChange={(e) => setNewResult({...newResult, jointCode: e.target.value})} /></div>
+                            <div><Label>Resultado</Label><Select value={newResult.evaluationResult} onValueChange={(val) => setNewResult({...newResult, evaluationResult: val as any})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select></div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><Label>Tipo de Indicação</Label><Input value={newResult.defectType || ''} onChange={(e) => setNewResult({...newResult, defectType: e.target.value})} /></div>
+                            <div><Label>Localização</Label><Input value={newResult.location || ''} onChange={(e) => setNewResult({...newResult, location: e.target.value})} /></div>
+                        </div>
+                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div><Label>Profundidade (mm)</Label><Input type="number" value={newResult.depth || ''} onChange={(e) => setNewResult({...newResult, depth: parseFloat(e.target.value)})} /></div>
+                            <div><Label>Extensão (mm)</Label><Input type="number" value={newResult.extension || ''} onChange={(e) => setNewResult({...newResult, extension: parseFloat(e.target.value)})} /></div>
+                            <div><Label>Amplitude (% / dB)</Label><Input value={newResult.amplitude || ''} onChange={(e) => setNewResult({...newResult, amplitude: e.target.value})} /></div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            {editResultIndex !== null && <Button type="button" variant="outline" onClick={() => { setEditResultIndex(null); setNewResult({ jointCode: '', evaluationResult: 'Conforme' }); }}>Cancelar Edição</Button>}
+                            <Button type="button" onClick={editResultIndex !== null ? handleUpdateResult : handleAddResult}>
+                                <PlusCircle className="mr-2 h-4 w-4" />{editResultIndex !== null ? 'Atualizar' : 'Adicionar'}
+                            </Button>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
         </div>
     )
 }
+    
+
     
 
     
