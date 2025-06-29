@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -349,7 +350,7 @@ export default function QualityPage() {
           orderId: undefined,
           itemId: undefined,
           inspectionDate: new Date(),
-          result: "Aprovado",
+          result: "Aprovado" as const,
           paintType: "",
           inspectedBy: undefined,
           dryFilmThickness: undefined,
@@ -1015,122 +1016,163 @@ export default function QualityPage() {
     }
   };
 
-  const handleWeldingInspectionPDF = async (report: WeldingInspection) => {
-    toast({ title: "Gerando PDF..." });
-    try {
-        const companyRef = doc(db, "companies", "mecald", "settings", "company");
-        const companySnap = await getDoc(companyRef);
-        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
-        const orderInfo = orders.find(o => o.id === report.orderId);
-        const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
+    const handleWeldingInspectionPDF = async (report: WeldingInspection) => {
+        toast({ title: "Gerando PDF..." });
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const companySnap = await getDoc(companyRef);
+            const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+            const orderInfo = orders.find(o => o.id === report.orderId);
+            const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
 
-        const docPdf = new jsPDF();
-        const pageWidth = docPdf.internal.pageSize.width;
-        const pageHeight = docPdf.internal.pageSize.height;
-        let y = 15;
-        
-        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
-        docPdf.setFontSize(16).setFont(undefined, 'bold');
-        docPdf.text(`Relatório de Ensaio Visual de Solda Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
-        y += 25;
-        
-        const details = [
-            ['Pedido', `${orderInfo?.number || 'N/A'}`, 'Data da Inspeção', format(report.inspectionDate, 'dd/MM/yyyy')],
-            ['Cliente', `${orderInfo?.customerName || 'N/A'}`, 'Inspetor (Empresa)', report.inspectedBy],
-            ['Item', `${itemInfo?.description || 'N/A'}`, 'Inspetor (Cliente)', report.customerInspector || 'N/A'],
-            ['Resultado Final', { content: report.result, styles: { fontStyle: 'bold' } }, 'Tipo de Inspeção', report.inspectionType]
-        ];
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let y = 15;
 
-        if(report.inspectionType === 'Visual') {
-            details.push(['Sinete do Soldador', report.welderSinete || 'N/A', 'Processo de Solda', report.weldingProcess || 'N/A' ]);
-        } else { // LP or UT
-            details.push(['Técnico Responsável', report.technician || 'N/A', 'Norma Aplicada', report.standard || 'N/A']);
-            if (report.inspectionType === 'UT - Ultrassom') {
-                 details.push(['Equipamento', report.equipment || 'N/A', '', '']);
+            // Header
+            if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text(`Relatório de Ensaio Visual de Solda`, 50, y + 5);
+            docPdf.setFontSize(14).setFont(undefined, 'normal');
+            docPdf.text(`Nº ${report.reportNumber || 'N/A'}`, 50, y + 12);
+            y += 25;
+
+            // General Info using a plain table for a 2-column layout
+            autoTable(docPdf, {
+                startY: y,
+                theme: 'plain',
+                styles: { fontSize: 9, cellPadding: 1 },
+                body: [
+                    ['Pedido:', `${orderInfo?.number || 'N/A'}`, 'Data da Inspeção:', format(report.inspectionDate, 'dd/MM/yyyy')],
+                    ['Cliente:', `${orderInfo?.customerName || 'N/A'}`, 'Inspetor (Empresa):', report.inspectedBy],
+                    ['Item:', `${itemInfo?.description || 'N/A'}`, 'Inspetor (Cliente):', report.customerInspector || 'N/A'],
+                    ['Tipo de Inspeção:', report.inspectionType, 'Resultado Final:', { content: report.result, styles: { fontStyle: 'bold' } }]
+                ] as any,
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 5;
+
+            const addSection = (title: string, data: (string | number | null | undefined)[][]) => {
+                if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+                docPdf.setFontSize(11).setFont(undefined, 'bold');
+                docPdf.text(title, 15, y);
+                y += 2;
+                autoTable(docPdf, {
+                    startY: y,
+                    theme: 'grid',
+                    body: data,
+                    styles: { fontSize: 9, cellPadding: 2 },
+                    columnStyles: { 
+                        0: { fontStyle: 'bold', cellWidth: 50 },
+                        1: { cellWidth: 'auto' }
+                    }
+                });
+                y = (docPdf as any).lastAutoTable.finalY + 5;
             }
-        }
-        if (report.reportUrl) {
-            details.push(['Link do Laudo', { content: 'Ver link', styles: { textColor: [0,0,255], fontStyle: 'italic' } }, '', '']);
-        }
 
+            addSection('1. Dados Gerais da Peça e da Soldagem', [
+                ['Identificação da Junta', report.jointIdentification],
+                ['Processo de Soldagem', report.weldingProcess],
+                ['Tipo de Junta', report.jointType],
+                ['Posição de Soldagem', report.weldingPosition],
+                ['Material Base', report.baseMaterial],
+                ['Material de Adição', report.fillerMaterial],
+                ['Espessura (mm)', report.materialThickness],
+            ].map(([key, value]) => [key, value || 'N/A']));
 
-        autoTable(docPdf, { startY: y, theme: 'plain', styles: { fontSize: 9 }, body: details as any });
-        y = (docPdf as any).lastAutoTable.finalY;
+            addSection('2. Dados do Soldador', [
+                ['Sinete do Soldador', report.welderSinete],
+                ['Qualificação', report.welderQualification],
+                ['Código da WPS', report.wpsCode],
+            ].map(([key, value]) => [key, value || 'N/A']));
 
-        if (report.notes) {
-            y += 10;
-            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
-            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Observações', 15, y);
-            y += 6;
-            const splitNotes = docPdf.splitTextToSize(report.notes, pageWidth - 30);
-            docPdf.setFontSize(9).setFont(undefined, 'normal').text(splitNotes, 15, y);
-            y += (splitNotes.length * 4);
-        }
+            addSection('3. Dados do Ensaio Dimensional', [
+                ['Ferramentas Utilizadas', report.dimensionalTools],
+                ['Critério de Aceitação', report.acceptanceCriteria],
+            ].map(([key, value]) => [key, value || 'N/A']));
 
-        if (report.photos && report.photos.length > 0) {
-            y += 10;
-            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
-            docPdf.setFontSize(12).setFont(undefined, 'bold');
-            docPdf.text('Fotos da Inspeção', 15, y);
-            y += 7;
+            addSection('4. Dados do Ensaio Visual', [
+                ['Condições da Superfície', report.surfaceCondition],
+                ['Defeitos Observados', report.observedDefects],
+            ].map(([key, value]) => [key, value || 'N/A']));
 
-            const photoWidth = (pageWidth - 45) / 2;
-            const photoHeight = photoWidth * (3/4);
-            let x = 15;
+            if (report.inspectionType !== 'Visual') {
+                addSection(`Dados do Ensaio de ${report.inspectionType}`, [
+                    ['Técnico Responsável', report.technician],
+                    ['Norma Aplicada', report.standard],
+                    ...(report.inspectionType === 'UT - Ultrassom' ? [['Equipamento', report.equipment]] : []),
+                    ...(report.reportUrl ? [['Link do Laudo Externo', report.reportUrl]] : []),
+                ].map(([key, value]) => [key, value || 'N/A']));
+            }
 
-            for (const photoDataUri of report.photos) {
-                if (y + photoHeight > pageHeight - 45) {
-                    docPdf.addPage();
-                    y = 20;
-                    x = 15;
+            let finalY = y;
+            if (report.photos && report.photos.length > 0) {
+                finalY += 5;
+                if (finalY > pageHeight - 60) { docPdf.addPage(); finalY = 20; }
+                docPdf.setFontSize(12).setFont(undefined, 'bold');
+                docPdf.text('Fotos da Inspeção', 15, finalY);
+                finalY += 7;
+                const photoWidth = (pageWidth - 45) / 2;
+                const photoHeight = photoWidth * (3/4);
+                let x = 15;
+                for (const photoDataUri of report.photos) {
+                    if (finalY + photoHeight > pageHeight - 45) {
+                        docPdf.addPage();
+                        finalY = 20;
+                        x = 15;
+                    }
+                    try { docPdf.addImage(photoDataUri, 'JPEG', x, finalY, photoWidth, photoHeight); } 
+                    catch(e) { docPdf.text("Erro ao carregar imagem", x, finalY + 10); }
+                    x = (x === 15) ? (15 + photoWidth + 15) : 15;
+                    if (x === 15) finalY += photoHeight + 5;
                 }
-                try {
-                    docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
-                } catch(e) { docPdf.text("Erro ao carregar imagem", x, y + 10); }
-                x = (x === 15) ? (15 + photoWidth + 15) : 15;
-                if (x === 15) y += photoHeight + 5;
             }
-        }
 
-        let footerText = 'DOC-MEC-000';
-        switch(report.inspectionType) {
-            case 'Visual': footerText = 'EVS-MEC-202501.REV0'; break;
-            case 'LP - Líquido Penetrante': footerText = 'LP-MEC-202501.REV0'; break;
-            case 'UT - Ultrassom': footerText = 'US-MEC-202501.REV0'; break;
-        }
+            if (report.notes) {
+                finalY += 10;
+                if (finalY > pageHeight - 60) { docPdf.addPage(); finalY = 20; }
+                docPdf.setFontSize(12).setFont(undefined, 'bold').text('Observações', 15, finalY);
+                finalY += 6;
+                const splitNotes = docPdf.splitTextToSize(report.notes, pageWidth - 30);
+                docPdf.setFontSize(9).setFont(undefined, 'normal').text(splitNotes, 15, finalY);
+            }
 
-        const pageCount = docPdf.internal.getNumberOfPages();
-        for(let i = 1; i <= pageCount; i++) {
-            docPdf.setPage(i);
+            let footerText = 'DOC-MEC-000';
+            switch(report.inspectionType) {
+                case 'Visual': footerText = 'EVS-MEC-202501.REV0'; break;
+                case 'LP - Líquido Penetrante': footerText = 'LP-MEC-202501.REV0'; break;
+                case 'UT - Ultrassom': footerText = 'US-MEC-202501.REV0'; break;
+            }
+
+            const pageCount = docPdf.internal.getNumberOfPages();
+            for(let i = 1; i <= pageCount; i++) {
+                docPdf.setPage(i);
+                const signatureY = pageHeight - 35;
+                if (i === pageCount) { 
+                    docPdf.setFontSize(10).setFont(undefined, 'normal');
+                    const enterpriseInspectorX = 15;
+                    docPdf.line(enterpriseInspectorX, signatureY, enterpriseInspectorX + 85, signatureY);
+                    docPdf.text(report.inspectedBy, enterpriseInspectorX, signatureY + 5);
+                    docPdf.text('Inspetor Responsável (Empresa)', enterpriseInspectorX, signatureY + 10);
+
+                    if (report.customerInspector) {
+                        const customerInspectorX = pageWidth - 15 - 85;
+                        docPdf.line(customerInspectorX, signatureY, customerInspectorX + 85, signatureY);
+                        docPdf.text(report.customerInspector, customerInspectorX, signatureY + 5);
+                        docPdf.text('Inspetor Responsável (Cliente)', customerInspectorX, signatureY + 10);
+                    }
+                }
+                docPdf.setFontSize(8).setFont(undefined, 'normal');
+                docPdf.text(footerText, 15, pageHeight - 10);
+                docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+            }
             
-            const signatureY = pageHeight - 35;
-            if (i === pageCount) { 
-                docPdf.setFontSize(10).setFont(undefined, 'normal');
-                
-                const enterpriseInspectorX = 15;
-                docPdf.line(enterpriseInspectorX, signatureY, enterpriseInspectorX + 85, signatureY);
-                docPdf.text(report.inspectedBy, enterpriseInspectorX, signatureY + 5);
-                docPdf.text('Inspetor Responsável (Empresa)', enterpriseInspectorX, signatureY + 10);
-
-                if (report.customerInspector) {
-                    const customerInspectorX = pageWidth - 15 - 85;
-                    docPdf.line(customerInspectorX, signatureY, customerInspectorX + 85, signatureY);
-                    docPdf.text(report.customerInspector, customerInspectorX, signatureY + 5);
-                    docPdf.text('Inspetor Responsável (Cliente)', customerInspectorX, signatureY + 10);
-                }
-            }
-
-            docPdf.setFontSize(8).setFont(undefined, 'normal');
-            docPdf.text(footerText, 15, pageHeight - 10);
-            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+            docPdf.save(`Relatorio_Solda_${report.reportNumber || report.id}.pdf`);
+        } catch (error) {
+            console.error("Error exporting PDF:", error);
+            toast({ variant: "destructive", title: "Erro ao gerar PDF." });
         }
-        
-        docPdf.save(`Relatorio_Solda_${report.reportNumber || report.id}.pdf`);
-    } catch (error) {
-        console.error("Error exporting PDF:", error);
-        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
-    }
-  };
+    };
 
 
   const currentForm = useMemo(() => {
@@ -1352,7 +1394,7 @@ export default function QualityPage() {
                       </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="welding-inspection">
-                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Ensaios Visuais de Solda</div></AccordionTrigger>
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Ensaio Visual de Solda</div></AccordionTrigger>
                     <AccordionContent className="pt-2">
                         <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Ensaios Visuais</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Ensaio Visual</Button></CardHeader>
                             <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
@@ -1948,3 +1990,4 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
 
 
     
+
