@@ -70,6 +70,7 @@ const calibrationSchema = z.object({
 
 const rawMaterialInspectionSchema = z.object({
   id: z.string().optional(),
+  reportNumber: z.string().optional(),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
   materialLot: z.string().optional(),
@@ -81,6 +82,7 @@ const rawMaterialInspectionSchema = z.object({
   inspectionResult: z.enum(["Aprovado", "Reprovado", "Aprovado com ressalva"]),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   notes: z.string().optional(),
+  photos: z.array(z.string()).optional(),
 });
 
 const dimensionalMeasurementSchema = z.object({
@@ -261,7 +263,7 @@ export default function QualityPage() {
     resolver: zodResolver(rawMaterialInspectionSchema),
     defaultValues: {
       receiptDate: new Date(), inspectionResult: "Aprovado",
-      orderId: undefined, itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined,
+      orderId: undefined, itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined, photos: [],
     },
   });
 
@@ -370,7 +372,7 @@ export default function QualityPage() {
           orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado',
         } as RawMaterialInspection;
       });
-      setMaterialInspections(matInspectionsList.sort((a, b) => b.receiptDate.getTime() - a.receiptDate.getTime()));
+      setMaterialInspections(matInspectionsList.sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0)));
             
       const dimReportsList = dimensionalReportsSnapshot.docs.map(doc => {
         const data = doc.data();
@@ -421,7 +423,8 @@ export default function QualityPage() {
       return materialInspections.filter(
           (insp) =>
               insp.orderNumber.toLowerCase().includes(query) ||
-              insp.itemName.toLowerCase().includes(query)
+              insp.itemName.toLowerCase().includes(query) ||
+              insp.reportNumber?.toLowerCase().includes(query)
       );
   }, [materialInspections, inspectionSearchQuery]);
 
@@ -529,7 +532,7 @@ export default function QualityPage() {
   // --- INSPECTION HANDLERS ---
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
-      const dataToSave = { 
+      const dataToSave: any = { 
         ...values, 
         receiptDate: Timestamp.fromDate(values.receiptDate),
         quantityReceived: values.quantityReceived ?? null,
@@ -538,6 +541,12 @@ export default function QualityPage() {
         await setDoc(doc(db, "companies", "mecald", "rawMaterialInspections", selectedInspection.id), dataToSave);
         toast({ title: "Relatório atualizado!" });
       } else {
+        const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "rawMaterialInspections"));
+        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10));
+        const highestNumber = Math.max(0, ...existingNumbers);
+        const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
+        dataToSave.reportNumber = newReportNumber;
+
         await addDoc(collection(db, "companies", "mecald", "rawMaterialInspections"), dataToSave);
         toast({ title: "Relatório de inspeção de material criado!" });
       }
@@ -584,7 +593,7 @@ export default function QualityPage() {
   const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null) => {
     setSelectedInspection(inspection); setDialogType('material');
     if (inspection) { materialInspectionForm.reset(inspection); } 
-    else { materialInspectionForm.reset({ receiptDate: new Date(), inspectionResult: "Aprovado", orderId: undefined, itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined }); }
+    else { materialInspectionForm.reset({ receiptDate: new Date(), inspectionResult: "Aprovado", orderId: undefined, itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined, photos: [] }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
@@ -631,6 +640,85 @@ export default function QualityPage() {
     }
   };
 
+  const handleMaterialInspectionPDF = async (report: RawMaterialInspection) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === report.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+        
+        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(`Relatório de Inspeção de Matéria-Prima Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
+        y += 25;
+
+        autoTable(docPdf, {
+            startY: y,
+            theme: 'plain',
+            styles: { fontSize: 9 },
+            body: [
+                ['Pedido', `${orderInfo?.number || 'N/A'}`, 'Data de Recebimento', format(report.receiptDate, 'dd/MM/yyyy')],
+                ['Cliente', `${orderInfo?.customerName || 'N/A'}`, 'Fornecedor', report.supplierName || 'N/A'],
+                ['Item', `${itemInfo?.description || 'N/A'} (Cód: ${itemInfo?.code || 'N/A'})`, 'Lote/Corrida', report.materialLot || 'N/A'],
+                ['Norma do Material', report.materialStandard || 'N/A', 'Inspetor', report.inspectedBy],
+                ['Resultado Final', { content: report.inspectionResult, styles: { fontStyle: 'bold' } }, 'Certificado de Material', { content: 'Ver link', styles: { textColor: [0,0,255], fontStyle: 'italic' } }]
+            ],
+            didParseCell: (data) => {
+                if (data.cell.raw === 'Ver link' && report.materialCertificateUrl) {
+                    // This is a placeholder; jspdf-autotable doesn't directly support links in cells this way.
+                    // Links would need to be added manually after the table is drawn.
+                }
+            }
+        });
+        y = (docPdf as any).lastAutoTable.finalY;
+
+        if (report.photos && report.photos.length > 0) {
+            y += 10;
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Fotos da Inspeção', 15, y);
+            y += 7;
+
+            const photoWidth = (pageWidth - 45) / 2;
+            const photoHeight = photoWidth * (3/4);
+            let x = 15;
+
+            for (const photoDataUri of report.photos) {
+                if (y + photoHeight > pageHeight - 45) {
+                    docPdf.addPage();
+                    y = 20;
+                    x = 15;
+                }
+                try {
+                    docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
+                } catch(e) { docPdf.text("Erro ao carregar imagem", x, y + 10); }
+                x = (x === 15) ? (15 + photoWidth + 15) : 15;
+                if (x === 15) y += photoHeight + 5;
+            }
+        }
+
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text('INS-MP-MEC-202501.REV0', 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`Relatorio_Material_${report.reportNumber || report.id}.pdf`);
+    } catch (error) {
+        console.error("Error exporting PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+    }
+  };
+
   const handleDimensionalReportPDF = async (report: DimensionalReport) => {
     toast({ title: "Gerando PDF..." });
     try {
@@ -654,13 +742,12 @@ export default function QualityPage() {
         docPdf.text(`Pedido: ${orderInfo?.number || 'N/A'}`, 15, y);
         docPdf.text(`Cliente: ${orderInfo?.customerName || 'N/A'}`, 15, y + 5);
         docPdf.text(`Item: ${report.itemName} (Cód: ${itemInfo?.code || 'N/A'})`, 15, y + 10);
-        docPdf.text(`Peça(s) Inspecionada(s): ${report.partIdentifier || 'N/A'}`, 15, y + 15);
         
         docPdf.text(`Data: ${format(report.inspectionDate, 'dd/MM/yyyy')}`, pageWidth - 15, y, { align: 'right' });
         docPdf.text(`Inspetor: ${report.inspectedBy}`, pageWidth - 15, y + 5, { align: 'right' });
         docPdf.text(`Resultado Geral: ${report.overallResult}`, pageWidth - 15, y + 10, { align: 'right' });
         if (report.quantityInspected) {
-          docPdf.text(`Quantidade Inspecionada: ${report.quantityInspected}`, pageWidth - 15, y + 15, { align: 'right' });
+          docPdf.text(`Quantidade Inspecionada: ${report.quantityInspected}`, 15, y + 15);
         }
         y += 25;
 
@@ -861,15 +948,18 @@ export default function QualityPage() {
                       <AccordionContent className="pt-2">
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenMaterialForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                       <TableBody>{filteredMaterialInspections.length > 0 ? filteredMaterialInspections.map(insp => (
-                                          <TableRow key={insp.id}><TableCell>{format(insp.receiptDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
+                                          <TableRow key={insp.id}>
+                                          <TableCell className="font-mono">{insp.reportNumber || 'N/A'}</TableCell>
+                                          <TableCell>{format(insp.receiptDate, 'dd/MM/yy')}</TableCell><TableCell>{insp.orderNumber}</TableCell><TableCell>{insp.itemName}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(insp.inspectionResult)}>{insp.inspectionResult}</Badge></TableCell><TableCell>{insp.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
+                                              <Button variant="ghost" size="icon" onClick={() => handleMaterialInspectionPDF(insp)}><FileDown className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" onClick={() => handleOpenMaterialForm(insp)}><Pencil className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'material')}><Trash2 className="h-4 w-4" /></Button>
                                           </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório de inspeção de matéria-prima.</TableCell></TableRow>}
+                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de inspeção de matéria-prima.</TableCell></TableRow>}
                                       </TableBody></Table>}
                               </CardContent></Card>
                       </AccordionContent>
@@ -1025,6 +1115,30 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
 
+    const watchedPhotos = form.watch("photos", []);
+
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+        
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    };
+
+    const removePhoto = (index: number) => {
+        const currentPhotos = form.getValues("photos") || [];
+        const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+        form.setValue("photos", updatedPhotos, { shouldValidate: true });
+    };
+
     return (<>
         <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
@@ -1035,6 +1149,25 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
         <FormField control={form.control} name="materialCertificateUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Certificado</FormLabel><FormControl><Input type="url" {...field} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="inspectionResult" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem><SelectItem value="Aprovado com ressalva">Aprovado com ressalva</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
         <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
+        <FormItem>
+            <FormLabel>Registro Fotográfico</FormLabel>
+            <FormControl>
+                <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
+            </FormControl>
+            {watchedPhotos && watchedPhotos.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                    {watchedPhotos.map((photo: string, index: number) => (
+                        <div key={index} className="relative">
+                            <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                            <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                <Trash2 className="h-3 w-3" />
+                            </Button>
+                        </div>
+                    ))}
+                </div>
+            )}
+            <FormMessage />
+        </FormItem>
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
@@ -1063,8 +1196,6 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         const files = e.target.files;
         if (!files) return;
 
-        const currentPhotos = form.getValues("photos") || [];
-        
         Array.from(files).forEach(file => {
             const reader = new FileReader();
             reader.onload = (event) => {
@@ -1354,6 +1485,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
+
 
 
 
