@@ -132,6 +132,7 @@ const weldingInspectionSchema = z.object({
 
 const paintingReportSchema = z.object({
   id: z.string().optional(),
+  reportNumber: z.string().optional(),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
   inspectionDate: z.date({ required_error: "A data é obrigatória." }),
@@ -282,6 +283,7 @@ export default function QualityPage() {
   const weldingInspectionForm = useForm<z.infer<typeof weldingInspectionSchema>>({
       resolver: zodResolver(weldingInspectionSchema),
       defaultValues: {
+          reportNumber: '',
           orderId: undefined,
           itemId: undefined,
           inspectionDate: new Date(),
@@ -298,23 +300,11 @@ export default function QualityPage() {
           photos: [],
       }
   });
-   const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
-    try {
-       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), dryFilmThickness: values.dryFilmThickness ?? null, };
-       if (selectedInspection) {
-         await setDoc(doc(db, "companies", "mecald", "paintingReports", selectedInspection.id), dataToSave, { merge: true });
-         toast({ title: "Relatório de pintura atualizado!" });
-       } else {
-         await addDoc(collection(db, "companies", "mecald", "paintingReports"), dataToSave);
-         toast({ title: "Relatório de pintura criado!" });
-       }
-       setIsInspectionFormOpen(false); await fetchAllData();
-     } catch (error) { console.error("Error saving painting report:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
-  };
 
   const paintingReportForm = useForm<z.infer<typeof paintingReportSchema>>({
       resolver: zodResolver(paintingReportSchema),
       defaultValues: {
+          reportNumber: '',
           orderId: undefined,
           itemId: undefined,
           inspectionDate: new Date(),
@@ -443,7 +433,7 @@ export default function QualityPage() {
           (insp) =>
               insp.orderNumber.toLowerCase().includes(query) ||
               insp.itemName.toLowerCase().includes(query) ||
-              insp.reportNumber?.toLowerCase().includes(query)
+              (insp.reportNumber?.toLowerCase() ?? '').includes(query)
       );
   }, [materialInspections, inspectionSearchQuery]);
 
@@ -454,7 +444,7 @@ export default function QualityPage() {
           (rep) =>
               rep.orderNumber.toLowerCase().includes(query) ||
               rep.itemName.toLowerCase().includes(query) ||
-              rep.reportNumber?.toLowerCase().includes(query)
+              (rep.reportNumber?.toLowerCase() ?? '').includes(query)
       );
   }, [dimensionalReports, inspectionSearchQuery]);
 
@@ -465,7 +455,7 @@ export default function QualityPage() {
           (insp) =>
               insp.orderNumber.toLowerCase().includes(query) ||
               insp.itemName.toLowerCase().includes(query) ||
-              insp.reportNumber?.toLowerCase().includes(query)
+              (insp.reportNumber?.toLowerCase() ?? '').includes(query)
       );
   }, [weldingInspections, inspectionSearchQuery]);
 
@@ -476,7 +466,7 @@ export default function QualityPage() {
           (rep) =>
               rep.orderNumber.toLowerCase().includes(query) ||
               rep.itemName.toLowerCase().includes(query) ||
-              rep.reportNumber?.toLowerCase().includes(query)
+              (rep.reportNumber?.toLowerCase() ?? '').includes(query)
       );
   }, [paintingReports, inspectionSearchQuery]);
 
@@ -563,7 +553,7 @@ export default function QualityPage() {
         toast({ title: "Relatório atualizado!" });
       } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "rawMaterialInspections"));
-        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10));
+        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10)).filter(n => !isNaN(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
         dataToSave.reportNumber = newReportNumber;
@@ -586,7 +576,7 @@ export default function QualityPage() {
          toast({ title: "Relatório atualizado!" });
        } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "dimensionalReports"));
-        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10));
+        const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10)).filter(n => !isNaN(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
         (dataToSave as any).reportNumber = newReportNumber;
@@ -605,8 +595,8 @@ export default function QualityPage() {
          toast({ title: "Relatório de solda atualizado!" });
        } else {
          const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
-         const existingNumbers = reportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10));
-         const highestNumber = Math.max(0, ...existingNumbers.filter(n => !isNaN(n)));
+         const existingNumbers = reportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)).filter(n => !isNaN(n));
+         const highestNumber = Math.max(0, ...existingNumbers);
          const newReportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, '0')}`;
          (dataToSave as any).reportNumber = newReportNumber;
 
@@ -616,11 +606,29 @@ export default function QualityPage() {
        setIsInspectionFormOpen(false); await fetchAllData();
      } catch (error) { console.error("Error saving welding inspection:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
   };
+   const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
+    try {
+       const dataToSave: any = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), dryFilmThickness: values.dryFilmThickness ?? null, };
+       if (selectedInspection) {
+         await setDoc(doc(db, "companies", "mecald", "paintingReports", selectedInspection.id), dataToSave, { merge: true });
+         toast({ title: "Relatório de pintura atualizado!" });
+       } else {
+         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "paintingReports"));
+         const existingNumbers = reportsSnapshot.docs.map(d => parseInt(d.data().reportNumber || '0', 10)).filter(n => !isNaN(n));
+         const highestNumber = Math.max(0, ...existingNumbers);
+         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
+         dataToSave.reportNumber = newReportNumber;
+         await addDoc(collection(db, "companies", "mecald", "paintingReports"), dataToSave);
+         toast({ title: "Relatório de pintura criado!" });
+       }
+       setIsInspectionFormOpen(false); await fetchAllData();
+     } catch (error) { console.error("Error saving painting report:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
+  };
 
   const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null) => {
     setSelectedInspection(inspection); setDialogType('material');
     if (inspection) { materialInspectionForm.reset(inspection); } 
-    else { materialInspectionForm.reset({ receiptDate: new Date(), inspectionResult: "Aprovado", orderId: undefined, itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined, photos: [] }); }
+    else { materialInspectionForm.reset({ reportNumber: '', receiptDate: new Date(), inspectionResult: "Aprovado", orderId: undefined, itemId: undefined, materialLot: '', supplierName: '', inspectedBy: undefined, notes: '', materialCertificateUrl: '', materialStandard: '', quantityReceived: undefined, photos: [] }); }
     setIsInspectionFormOpen(true);
   };
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null) => {
@@ -633,6 +641,7 @@ export default function QualityPage() {
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
     setSelectedInspection(report); setDialogType('welding');
     const defaultNewValues = { 
+        reportNumber: '',
         orderId: undefined,
         itemId: undefined,
         inspectionDate: new Date(), 
@@ -662,6 +671,7 @@ export default function QualityPage() {
   const handleOpenPaintingForm = (report: PaintingReport | null = null) => {
     setSelectedInspection(report); setDialogType('painting');
     const defaultValues = {
+        reportNumber: '',
         inspectionDate: new Date(),
         result: "Aprovado" as const,
         paintType: "",
@@ -1173,16 +1183,16 @@ export default function QualityPage() {
                        <AccordionContent className="pt-2">
                           <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenPaintingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
                               <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo de Tinta</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                  <Table><TableHeader><TableRow><TableHead>Nº Relatório</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Item</TableHead><TableHead>Tipo de Tinta</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                       <TableBody>{filteredPaintingReports.length > 0 ? filteredPaintingReports.map(rep => (
-                                          <TableRow key={rep.id}><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
+                                          <TableRow key={rep.id}><TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.orderNumber}</TableCell><TableCell>{rep.itemName}</TableCell>
                                           <TableCell>{rep.paintType}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
                                               <Button variant="ghost" size="icon" onClick={() => handleOpenPaintingForm(rep)}><Pencil className="h-4 w-4" /></Button>
                                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'painting')}><Trash2 className="h-4 w-4" /></Button>
                                           </TableCell></TableRow>
-                                      )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de pintura registrado.</TableCell></TableRow>}
+                                      )) : <TableRow><TableCell colSpan={8} className="h-24 text-center">Nenhum relatório de pintura registrado.</TableCell></TableRow>}
                                       </TableBody></Table>}
                               </CardContent></Card>
                       </AccordionContent>
@@ -1574,8 +1584,8 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         </CardContent></Card>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente (Nome)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente (Nome)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
         </div>
         
         <FormItem>
@@ -1697,5 +1707,3 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
 }
-
-    
