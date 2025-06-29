@@ -639,24 +639,23 @@ export default function QualityPage() {
             photos: values.photos || [],
             customerInspector: values.customerInspector || null,
         };
-        delete (dataToSave as any).id;
-        delete (dataToSave as any).reportNumber;
-    
-        if (selectedInspection) {
-            const docRef = doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id);
-            await setDoc(docRef, dataToSave, { merge: true });
-            toast({ title: "Relatório de solda atualizado!" });
-        } else {
+        
+        const docRef = selectedInspection
+            ? doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id)
+            : doc(collection(db, "companies", "mecald", "weldingInspections"));
+
+        if (!selectedInspection) {
             const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
             const existingNumbers = reportsSnapshot.docs
                 .map(d => parseInt((d.data().reportNumber || "EDN-0").replace(/[^0-9]/g, ""), 10))
                 .filter(n => !isNaN(n) && Number.isFinite(n));
             const highestNumber = Math.max(0, ...existingNumbers);
             dataToSave.reportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, "0")}`;
-    
-            await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
-            toast({ title: "Relatório de solda criado!" });
         }
+    
+        await setDoc(docRef, dataToSave, { merge: true });
+        
+        toast({ title: selectedInspection ? "Relatório de solda atualizado!" : "Relatório de solda criado!" });
         setIsInspectionFormOpen(false);
         await fetchAllData();
     } catch (error) {
@@ -1032,7 +1031,7 @@ export default function QualityPage() {
         
         if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
         docPdf.setFontSize(16).setFont(undefined, 'bold');
-        docPdf.text(`Relatório de Inspeção de Solda Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
+        docPdf.text(`Relatório de Ensaio Visual de Solda Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
         y += 25;
         
         const details = [
@@ -1353,9 +1352,9 @@ export default function QualityPage() {
                       </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="welding-inspection">
-                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Inspeções de Solda</div></AccordionTrigger>
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" />Ensaios Visuais de Solda</div></AccordionTrigger>
                     <AccordionContent className="pt-2">
-                        <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Inspeções</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Nova Inspeção</Button></CardHeader>
+                        <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Ensaios Visuais</CardTitle><Button size="sm" onClick={() => handleOpenWeldingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Ensaio Visual</Button></CardHeader>
                             <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
                                 <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                     <TableBody>{inspectionsForSelectedOrder.welding.length > 0 ? inspectionsForSelectedOrder.welding.map(insp => (
@@ -1367,7 +1366,7 @@ export default function QualityPage() {
                                             <Button variant="ghost" size="icon" onClick={() => handleOpenWeldingForm(insp)}><Pencil className="h-4 w-4" /></Button>
                                             <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(insp, 'welding')}><Trash2 className="h-4 w-4" /></Button>
                                         </TableCell></TableRow>
-                                    )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhuma inspeção de solda para este pedido.</TableCell></TableRow>}
+                                    )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum ensaio visual de solda para este pedido.</TableCell></TableRow>}
                                     </TableBody></Table>}
                             </CardContent></Card>
                     </AccordionContent>
@@ -1434,7 +1433,7 @@ export default function QualityPage() {
             <DialogTitle>
                 {dialogType === 'material' && (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material')}
                 {dialogType === 'dimensional' && (selectedInspection ? 'Editar Relatório Dimensional' : 'Novo Relatório Dimensional')}
-                {dialogType === 'welding' && (selectedInspection ? 'Editar Inspeção de Solda' : 'Nova Inspeção de Solda')}
+                {dialogType === 'welding' && (selectedInspection ? 'Editar Ensaio Visual de Solda' : 'Novo Ensaio Visual de Solda')}
                 {dialogType === 'painting' && (selectedInspection ? 'Editar Relatório de Pintura' : 'Novo Relatório de Pintura')}
             </DialogTitle>
             <DialogDescription>Preencha os campos para registrar a inspeção.</DialogDescription>
