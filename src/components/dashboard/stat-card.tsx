@@ -19,9 +19,9 @@ export function StatCard({ title, value, icon: Icon, description, progress }: St
       </CardHeader>
       <CardContent>
         <div className="text-3xl font-bold text-primary">{value}</div>
-        <p className="text-xs text-muted-foreground pt-1">{description}</p>
+        <p className="text-sm font-medium text-muted-foreground pt-1">{description}</p>
         {progress !== undefined && (
-          <Progress value={progress} className="mt-4 h-2" />
+          <Progress value={progress} className="mt-2 h-2" />
         )}
       </CardContent>
     </Card>
