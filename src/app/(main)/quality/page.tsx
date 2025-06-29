@@ -478,6 +478,23 @@ export default function QualityPage() {
       technique: "visível",
       method: "removível com solvente",
       finalResult: "Conforme",
+      photos: [],
+      inspectorQualification: "",
+      baseMaterial: "",
+      heatTreatment: "",
+      examinedAreas: "",
+      quantityInspected: undefined,
+      testLocation: "",
+      appliedStandard: "",
+      ambientTemperature: undefined,
+      partTemperature: undefined,
+      penetrant: "",
+      developer: "",
+      remover: "",
+      consumableValidity: null,
+      consumableLot: "",
+      acceptanceCriteria: "",
+      finalNotes: "",
       procedure: {
         preCleaning: false,
         penetrantApplication: false,
@@ -485,11 +502,19 @@ export default function QualityPage() {
         developerApplication: false,
         inspectionType: "completa",
         isSurfaceAccessible: true,
+        penetrationTime: undefined,
+        developmentTime: undefined,
+        totalProcessTime: undefined,
+        lightingMode: "",
+        lightIntensity: "",
       },
       results: {
         isAreaFree: true,
+        defectType: "",
+        defectLocation: "",
+        defectDimensions: "",
+        sketch: "",
       },
-      photos: [],
     },
   });
 
@@ -502,7 +527,7 @@ export default function QualityPage() {
       results: [],
     },
   });
-  const { fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult, update: updateUltrasoundResult } = useFieldArray({
+  const { fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult } = useFieldArray({
       control: ultrasoundReportForm.control,
       name: "results"
   });
@@ -872,10 +897,51 @@ export default function QualityPage() {
   };
   const onLiquidPenetrantSubmit = async (values: z.infer<typeof liquidPenetrantSchema>) => {
     try {
-      const dataToSave: any = {
-        ...values,
+      const dataToSave = {
+        // Required fields from schema
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
+        orderId: values.orderId,
+        itemId: values.itemId,
+        inspectedBy: values.inspectedBy,
+        technique: values.technique,
+        method: values.method,
+        finalResult: values.finalResult,
+        sensitivityTest: values.sensitivityTest,
+        
+        // Optional fields with fallback to null or default
+        inspectorQualification: values.inspectorQualification || null,
+        baseMaterial: values.baseMaterial || null,
+        heatTreatment: values.heatTreatment || null,
+        examinedAreas: values.examinedAreas || null,
+        quantityInspected: values.quantityInspected ?? null,
+        testLocation: values.testLocation || null,
+        appliedStandard: values.appliedStandard || null,
+        ambientTemperature: values.ambientTemperature ?? null,
+        partTemperature: values.partTemperature ?? null,
+        penetrant: values.penetrant || null,
+        developer: values.developer || null,
+        remover: values.remover || null,
         consumableValidity: values.consumableValidity ? Timestamp.fromDate(values.consumableValidity) : null,
+        consumableLot: values.consumableLot || null,
+        acceptanceCriteria: values.acceptanceCriteria || null,
+        finalNotes: values.finalNotes || null,
+        photos: values.photos || [],
+
+        procedure: {
+            ...values.procedure,
+            penetrationTime: values.procedure.penetrationTime ?? null,
+            developmentTime: values.procedure.developmentTime ?? null,
+            totalProcessTime: values.procedure.totalProcessTime ?? null,
+            lightingMode: values.procedure.lightingMode || null,
+            lightIntensity: values.procedure.lightIntensity || null,
+        },
+        results: {
+            ...values.results,
+            defectType: values.results.defectType || null,
+            defectLocation: values.results.defectLocation || null,
+            defectDimensions: values.results.defectDimensions || null,
+            sketch: values.results.sketch || null,
+        },
       };
 
       if (selectedInspection) {
@@ -909,11 +975,38 @@ export default function QualityPage() {
 
   const onUltrasoundReportSubmit = async (values: z.infer<typeof ultrasoundReportSchema>) => {
     try {
-      const dataToSave: any = {
+      const dataToSave = {
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         results: values.results || [],
         photos: values.photos || [],
+        qualificationLevel: values.qualificationLevel || null,
+        baseMaterial: values.baseMaterial || null,
+        heatTreatment: values.heatTreatment || null,
+        weldTypeAndThickness: values.weldTypeAndThickness || null,
+        examinedAreaDescription: values.examinedAreaDescription || null,
+        quantityInspected: values.quantityInspected ?? null,
+        testLocation: values.testLocation || null,
+        executionStandard: values.executionStandard || null,
+        acceptanceCriteria: values.acceptanceCriteria || null,
+        examinationType: values.examinationType || null,
+        testExtent: values.testExtent || null,
+        equipment: values.equipment || null,
+        equipmentSerial: values.equipmentSerial || null,
+        equipmentCalibration: values.equipmentCalibration || null,
+        headType: values.headType || null,
+        frequency: values.frequency ?? null,
+        incidentAngle: values.incidentAngle ?? null,
+        couplant: values.couplant || null,
+        referenceBlock: values.referenceBlock || null,
+        pulseMode: values.pulseMode || null,
+        range: values.range ?? null,
+        gain: values.gain ?? null,
+        distanceCorrection: values.distanceCorrection || null,
+        scanRate: values.scanRate ?? null,
+        minResolution: values.minResolution ?? null,
+        rejectionCriteria: values.rejectionCriteria || null,
+        finalNotes: values.finalNotes || null,
       };
 
       if (selectedInspection) {
@@ -1056,6 +1149,23 @@ export default function QualityPage() {
         technique: "visível",
         method: "removível com solvente",
         finalResult: "Conforme",
+        photos: [],
+        inspectorQualification: "",
+        baseMaterial: "",
+        heatTreatment: "",
+        examinedAreas: "",
+        quantityInspected: undefined,
+        testLocation: "",
+        appliedStandard: "",
+        ambientTemperature: undefined,
+        partTemperature: undefined,
+        penetrant: "",
+        developer: "",
+        remover: "",
+        consumableValidity: null,
+        consumableLot: "",
+        acceptanceCriteria: "",
+        finalNotes: "",
         procedure: {
           preCleaning: false,
           penetrantApplication: false,
@@ -1063,11 +1173,19 @@ export default function QualityPage() {
           developerApplication: false,
           inspectionType: "completa",
           isSurfaceAccessible: true,
+          penetrationTime: undefined,
+          developmentTime: undefined,
+          totalProcessTime: undefined,
+          lightingMode: "",
+          lightIntensity: "",
         },
         results: {
           isAreaFree: true,
+          defectType: "",
+          defectLocation: "",
+          defectDimensions: "",
+          sketch: "",
         },
-        photos: [],
       });
     }
     setIsInspectionFormOpen(true);
@@ -1088,6 +1206,33 @@ export default function QualityPage() {
             finalResult: "Conforme",
             photos: [],
             results: [],
+            qualificationLevel: "",
+            baseMaterial: "",
+            heatTreatment: "",
+            weldTypeAndThickness: "",
+            examinedAreaDescription: "",
+            quantityInspected: undefined,
+            testLocation: "",
+            executionStandard: "",
+            acceptanceCriteria: "",
+            examinationType: undefined,
+            testExtent: "",
+            equipment: "",
+            equipmentSerial: "",
+            equipmentCalibration: "",
+            headType: "",
+            frequency: undefined,
+            incidentAngle: undefined,
+            couplant: "",
+            referenceBlock: "",
+            pulseMode: "",
+            range: undefined,
+            gain: undefined,
+            distanceCorrection: "",
+            scanRate: undefined,
+            minResolution: undefined,
+            rejectionCriteria: "",
+            finalNotes: "",
         });
     }
     setIsInspectionFormOpen(true);
@@ -1213,7 +1358,7 @@ export default function QualityPage() {
 
         const docPdf = new jsPDF();
         const pageWidth = docPdf.internal.pageSize.width;
-        const pageHeight = docPdf.internal.pageSize;
+        const pageHeight = docPdf.internal.pageSize.height;
         let y = 15;
         
         if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
@@ -1700,14 +1845,14 @@ export default function QualityPage() {
             ['Local do Ensaio', report.testLocation],
         ]);
 
-        addSection('3. Normas e Critérios', [
+        addSection('3. Normas e Critérios Aplicados', [
             ['Norma de Execução', report.executionStandard],
             ['Critério de Aceitação', report.acceptanceCriteria],
             ['Tipo de Exame', report.examinationType],
             ['Extensão do Ensaio', report.testExtent],
         ]);
 
-        addSection('4. Equipamentos e Acessórios', [
+        addSection('4. Equipamentos e Acessórios Utilizados', [
             ['Equipamento (Marca/Modelo)', report.equipment],
             ['Nº de Série', report.equipmentSerial],
             ['Calibração (Cert.+Val.)', report.equipmentCalibration],
