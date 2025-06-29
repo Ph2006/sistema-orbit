@@ -688,11 +688,27 @@ export default function OrdersPage() {
 
     const dashboardStats = useMemo(() => {
         const totalOrders = orders.length;
-        const completedOrders = orders.filter(order => order.status === 'Concluído').length;
-        const inProgressOrders = orders.filter(order => ['Em Produção', 'Aguardando Produção'].includes(order.status)).length;
+        const totalWeight = orders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        
+        const completedOrdersList = orders.filter(order => order.status === 'Concluído');
+        const completedOrders = completedOrdersList.length;
+        const completedWeight = completedOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+
+        const inProgressOrdersList = orders.filter(order => ['Em Produção', 'Aguardando Produção'].includes(order.status));
+        const inProgressOrders = inProgressOrdersList.length;
+        const inProgressWeight = inProgressOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+
         const delayedOrders = orders.filter(order => order.status === 'Atrasado').length;
 
-        return { totalOrders, completedOrders, inProgressOrders, delayedOrders };
+        return { 
+            totalOrders, 
+            totalWeight,
+            completedOrders, 
+            completedWeight,
+            inProgressOrders, 
+            inProgressWeight,
+            delayedOrders 
+        };
     }, [orders]);
 
     const handleItemSelection = (itemId: string) => {
@@ -1220,19 +1236,19 @@ export default function OrdersPage() {
                         title="Total de Pedidos"
                         value={dashboardStats.totalOrders.toString()}
                         icon={Package}
-                        description="Número total de pedidos no sistema"
+                        description={`${(dashboardStats.totalWeight / 1000).toFixed(2)} t no total`}
                     />
                     <StatCard
                         title="Pedidos Concluídos"
                         value={dashboardStats.completedOrders.toString()}
                         icon={CheckCircle}
-                        description="Pedidos com status 'Concluído'"
+                        description={`${(dashboardStats.completedWeight / 1000).toFixed(2)} t concluídas`}
                     />
                     <StatCard
                         title="Em Andamento"
                         value={dashboardStats.inProgressOrders.toString()}
                         icon={PlayCircle}
-                        description="Pedidos aguardando ou em produção"
+                        description={`${(dashboardStats.inProgressWeight / 1000).toFixed(2)} t em produção`}
                     />
                     <StatCard
                         title="Pedidos Atrasados"
