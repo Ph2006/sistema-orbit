@@ -85,9 +85,11 @@ const customerInfoSchema = z.object({
 const orderSchema = z.object({
   id: z.string(),
   customer: customerInfoSchema,
+  quotationNumber: z.string().optional(),
   internalOS: z.string().optional(),
   projectName: z.string().optional(),
   status: orderStatusEnum,
+  deliveryDate: z.date().nullable().optional(),
   items: z.array(orderItemSchema),
   driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
   documents: z.object({
@@ -538,6 +540,8 @@ export default function OrdersPage() {
                 customerName: values.customer.name,
                 internalOS: values.internalOS,
                 projectName: values.projectName,
+                quotationNumber: values.quotationNumber,
+                deliveryDate: values.deliveryDate ? Timestamp.fromDate(new Date(values.deliveryDate)) : null,
                 status: values.status,
                 driveLink: values.driveLink,
                 documents: values.documents,
@@ -1373,6 +1377,34 @@ export default function OrdersPage() {
                                                                 </FormItem>
                                                             )}
                                                         />
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                                                        <FormField control={form.control} name="quotationNumber" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Nº Pedido (Compra)</FormLabel>
+                                                                <FormControl><Input placeholder="Nº do Pedido de Compra do Cliente" {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField control={form.control} name="deliveryDate" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Data de Entrega</FormLabel>
+                                                                <Popover>
+                                                                    <PopoverTrigger asChild>
+                                                                        <FormControl>
+                                                                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                            </Button>
+                                                                        </FormControl>
+                                                                    </PopoverTrigger>
+                                                                    <PopoverContent className="w-auto p-0">
+                                                                        <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                    </PopoverContent>
+                                                                </Popover>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
                                                     </div>
                                                     <div className="space-y-4 mt-6">
                                                         <FormField control={form.control} name="driveLink" render={({ field }) => (
