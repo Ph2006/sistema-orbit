@@ -1236,19 +1236,19 @@ export default function OrdersPage() {
                         title="Total de Pedidos"
                         value={dashboardStats.totalOrders.toString()}
                         icon={Package}
-                        description={`${(dashboardStats.totalWeight / 1000).toFixed(2)} t no total`}
+                        description={`${dashboardStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg no total`}
                     />
                     <StatCard
                         title="Pedidos Concluídos"
                         value={dashboardStats.completedOrders.toString()}
                         icon={CheckCircle}
-                        description={`${(dashboardStats.completedWeight / 1000).toFixed(2)} t concluídas`}
+                        description={`${dashboardStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg concluídas`}
                     />
                     <StatCard
                         title="Em Andamento"
                         value={dashboardStats.inProgressOrders.toString()}
                         icon={PlayCircle}
-                        description={`${(dashboardStats.inProgressWeight / 1000).toFixed(2)} t em produção`}
+                        description={`${dashboardStats.inProgressWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg em produção`}
                     />
                     <StatCard
                         title="Pedidos Atrasados"

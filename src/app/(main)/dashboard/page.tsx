@@ -185,7 +185,7 @@ export default function DashboardPage() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <StatCard
               title="Produção (Peso)"
-              value={`${(data.totalProducedWeight / 1000).toFixed(2)} / ${(data.totalToProduceWeight / 1000).toFixed(2)} t`}
+              value={`${data.totalProducedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ${data.totalToProduceWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`}
               icon={Scale}
               description="Peso total produzido vs. a produzir"
               progress={(data.totalToProduceWeight > 0 ? (data.totalProducedWeight / data.totalToProduceWeight) * 100 : 0)}

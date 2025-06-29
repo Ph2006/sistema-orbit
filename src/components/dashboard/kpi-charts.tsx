@@ -24,7 +24,7 @@ export function MonthlyProductionChart({ data }: MonthlyProductionChartProps) {
     <Card className="h-full hover:shadow-lg transition-shadow duration-300">
       <CardHeader>
         <CardTitle className="font-headline">Produção Mensal (Peso Entregue)</CardTitle>
-        <CardDescription>Peso total de itens entregues nos últimos meses.</CardDescription>
+        <CardDescription>Peso total de itens entregues (em kg) nos últimos meses.</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="h-[300px] w-full">
@@ -38,7 +38,7 @@ export function MonthlyProductionChart({ data }: MonthlyProductionChartProps) {
                 />
                  <YAxis 
                     stroke="hsl(var(--primary))" 
-                    tickFormatter={(value) => `${value / 1000}t`}
+                    tickFormatter={(value) => value.toLocaleString('pt-BR')}
                 />
                 <Tooltip
                     cursor={false}
