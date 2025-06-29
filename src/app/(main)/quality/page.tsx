@@ -115,18 +115,39 @@ const weldingInspectionSchema = z.object({
   reportNumber: z.string().optional(),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   itemId: z.string({ required_error: "Selecione um item." }),
-  inspectionType: z.enum(["Visual", "LP - Líquido Penetrante", "UT - Ultrassom"]),
   inspectionDate: z.date({ required_error: "A data é obrigatória." }),
+  inspectionType: z.enum(["Visual", "LP - Líquido Penetrante", "UT - Ultrassom"]),
+  
+  // Section 1 & 2: Welding Data
+  jointIdentification: z.string().optional(),
+  weldingProcess: z.string().optional(),
+  jointType: z.string().optional(),
+  weldingPosition: z.string().optional(),
+  baseMaterial: z.string().optional(),
+  fillerMaterial: z.string().optional(),
+  materialThickness: z.string().optional(),
+  welderSinete: z.string().optional(),
+  welderQualification: z.string().optional(),
+  wpsCode: z.string().optional(),
+
+  // Section 3 & 4: Visual & Dimensional Inspection
+  dimensionalTools: z.string().optional(),
+  acceptanceCriteria: z.string().optional(),
+  surfaceCondition: z.string().optional(),
+  observedDefects: z.string().optional(),
+  result: z.enum(["Aprovado", "Reprovado", "Conforme", "Não Conforme"]),
+  
+  // Fields for other tests (LP/UT)
+  technician: z.string().optional(),
+  standard: z.string().optional(),
+  equipment: z.string().optional(),
+  reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
+  
+  // Section 5: Responsibles
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   customerInspector: z.string().optional(),
-  result: z.enum(["Aprovado", "Reprovado", "Conforme", "Não Conforme"]),
-  welder: z.string().optional(),
-  process: z.string().optional(), // For Visual
-  acceptanceCriteria: z.string().optional(), // For Visual
-  technician: z.string().optional(), // For LP/UT
-  standard: z.string().optional(), // For LP/UT
-  equipment: z.string().optional(), // For UT
-  reportUrl: z.string().url("URL inválida.").or(z.literal("")).optional(),
+  releaseResponsible: z.string().optional(),
+
   notes: z.string().optional(),
   photos: z.array(z.string()).optional(),
 });
@@ -284,23 +305,35 @@ export default function QualityPage() {
   const weldingInspectionForm = useForm<z.infer<typeof weldingInspectionSchema>>({
       resolver: zodResolver(weldingInspectionSchema),
       defaultValues: {
-          reportNumber: '',
-          orderId: undefined,
-          itemId: undefined,
-          inspectionDate: new Date(),
-          inspectionType: "Visual",
-          result: "Conforme",
-          inspectedBy: undefined,
-          customerInspector: '',
-          welder: '',
-          process: '',
-          acceptanceCriteria: '',
-          technician: '',
-          standard: '',
-          equipment: '',
-          reportUrl: '',
-          notes: '',
-          photos: [],
+        reportNumber: "",
+        orderId: undefined,
+        itemId: undefined,
+        inspectionDate: new Date(),
+        inspectionType: "Visual",
+        result: "Conforme",
+        inspectedBy: undefined,
+        customerInspector: "",
+        welderSinete: "",
+        weldingProcess: "",
+        acceptanceCriteria: "",
+        technician: "",
+        standard: "",
+        equipment: "",
+        reportUrl: "",
+        notes: "",
+        photos: [],
+        baseMaterial: "",
+        fillerMaterial: "",
+        jointIdentification: "",
+        jointType: "",
+        materialThickness: "",
+        observedDefects: "",
+        releaseResponsible: "",
+        surfaceCondition: "",
+        welderQualification: "",
+        weldingPosition: "",
+        wpsCode: "",
+        dimensionalTools: "",
       }
   });
 
@@ -383,8 +416,8 @@ export default function QualityPage() {
           id: doc.id, ...data, receiptDate: data.receiptDate.toDate(),
           orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado',
         } as RawMaterialInspection;
-      });
-      setMaterialInspections(matInspectionsList.sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0)));
+      }).sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0));
+      setMaterialInspections(matInspectionsList);
             
       const dimReportsList = dimensionalReportsSnapshot.docs.map(doc => {
         const data = doc.data();
@@ -395,24 +428,24 @@ export default function QualityPage() {
           id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(),
           orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', overallResult
         } as DimensionalReport;
-      });
-      setDimensionalReports(dimReportsList.sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0)));
+      }).sort((a, b) => (parseInt(b.reportNumber || "0") || 0) - (parseInt(a.reportNumber || "0") || 0));
+      setDimensionalReports(dimReportsList);
 
       const weldInspectionsList = weldingInspectionsSnapshot.docs.map(doc => {
           const data = doc.data();
           const order = ordersList.find(o => o.id === data.orderId);
           const item = order?.items.find(i => i.id === data.itemId);
           return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as WeldingInspection;
-      });
-      setWeldingInspections(weldInspectionsList.sort((a,b) => (parseInt((b.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10))));
+      }).sort((a,b) => (parseInt((b.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)));
+      setWeldingInspections(weldInspectionsList);
 
       const paintReportsList = paintingReportsSnapshot.docs.map(doc => {
           const data = doc.data();
           const order = ordersList.find(o => o.id === data.orderId);
           const item = order?.items.find(i => i.id === data.itemId);
           return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as PaintingReport;
-      });
-      setPaintingReports(paintReportsList.sort((a,b) => b.inspectionDate.getTime() - a.inspectionDate.getTime()));
+      }).sort((a,b) => b.inspectionDate.getTime() - a.inspectionDate.getTime());
+      setPaintingReports(paintReportsList);
 
     } catch (error) {
       console.error("Error fetching quality data:", error);
@@ -546,8 +579,9 @@ export default function QualityPage() {
   // --- INSPECTION HANDLERS ---
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
+      const { reportNumber, ...restOfValues } = values;
       const dataToSave: any = { 
-        ...values, 
+        ...restOfValues, 
         receiptDate: Timestamp.fromDate(values.receiptDate),
         quantityReceived: values.quantityReceived ?? null,
       };
@@ -571,8 +605,9 @@ export default function QualityPage() {
   };
   const onDimensionalReportSubmit = async (values: z.infer<typeof dimensionalReportSchema>) => {
     try {
+       const { reportNumber, ...restOfValues } = values;
        const dataToSave = { 
-        ...values, 
+        ...restOfValues, 
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         customerInspector: values.customerInspector || null,
       };
@@ -586,9 +621,9 @@ export default function QualityPage() {
             .filter(n => !isNaN(n) && Number.isFinite(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
-        (dataToSave as any).reportNumber = newReportNumber;
+        const finalData = { ...dataToSave, reportNumber: newReportNumber };
 
-         await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), dataToSave);
+         await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), finalData);
          toast({ title: "Relatório dimensional criado!" });
        }
        setIsInspectionFormOpen(false); await fetchAllData();
@@ -596,9 +631,16 @@ export default function QualityPage() {
   };
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
-       const dataToSave = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), photos: values.photos || [], customerInspector: values.customerInspector || null };
+       const { reportNumber, ...dataToSave } = { 
+           ...values, 
+           inspectionDate: Timestamp.fromDate(values.inspectionDate), 
+           photos: values.photos || [], 
+           customerInspector: values.customerInspector || null,
+       };
+
        if (selectedInspection) {
-         await setDoc(doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id), dataToSave, { merge: true });
+         const docRef = doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id);
+         await setDoc(docRef, dataToSave, { merge: true });
          toast({ title: "Relatório de solda atualizado!" });
        } else {
          const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
@@ -607,9 +649,9 @@ export default function QualityPage() {
             .filter(n => !isNaN(n) && Number.isFinite(n));
          const highestNumber = Math.max(0, ...existingNumbers);
          const newReportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, '0')}`;
-         (dataToSave as any).reportNumber = newReportNumber;
-
-         await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
+         
+         const finalData = { ...dataToSave, reportNumber: newReportNumber };
+         await addDoc(collection(db, "companies", "mecald", "weldingInspections"), finalData);
          toast({ title: "Relatório de solda criado!" });
        }
        setIsInspectionFormOpen(false); await fetchAllData();
@@ -617,7 +659,8 @@ export default function QualityPage() {
   };
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
     try {
-       const dataToSave: any = { ...values, inspectionDate: Timestamp.fromDate(values.inspectionDate), dryFilmThickness: values.dryFilmThickness ?? null, };
+       const { reportNumber, ...restOfValues } = values;
+       const dataToSave: any = { ...restOfValues, inspectionDate: Timestamp.fromDate(values.inspectionDate), dryFilmThickness: values.dryFilmThickness ?? null, };
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "paintingReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório de pintura atualizado!" });
@@ -660,15 +703,27 @@ export default function QualityPage() {
         result: "Conforme" as const, 
         inspectedBy: undefined,
         customerInspector: '',
-        welder: '',
-        process: '',
-        acceptanceCriteria: '',
-        technician: '',
-        standard: '',
-        equipment: '',
-        reportUrl: '',
-        notes: '',
+        welderSinete: "",
+        weldingProcess: "",
+        acceptanceCriteria: "",
+        technician: "",
+        standard: "",
+        equipment: "",
+        reportUrl: "",
+        notes: "",
         photos: [],
+        baseMaterial: "",
+        fillerMaterial: "",
+        jointIdentification: "",
+        jointType: "",
+        materialThickness: "",
+        observedDefects: "",
+        releaseResponsible: "",
+        surfaceCondition: "",
+        welderQualification: "",
+        weldingPosition: "",
+        wpsCode: "",
+        dimensionalTools: "",
     };
     if (report) { 
         weldingInspectionForm.reset({
@@ -967,7 +1022,7 @@ export default function QualityPage() {
         ];
 
         if(report.inspectionType === 'Visual') {
-            details.push(['Sinete do Soldador', report.welder || 'N/A', 'Processo de Solda', report.process || 'N/A' ]);
+            details.push(['Sinete do Soldador', report.welderSinete || 'N/A', 'Processo de Solda', report.weldingProcess || 'N/A' ]);
         } else { // LP or UT
             details.push(['Técnico Responsável', report.technician || 'N/A', 'Norma Aplicada', report.standard || 'N/A']);
             if (report.inspectionType === 'UT - Ultrassom') {
@@ -1676,50 +1731,101 @@ function WeldingInspectionForm({ form, orders, teamMembers }: { form: any, order
     };
 
     return (<>
-        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="inspectionType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Inspeção</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Visual">Visual</SelectItem><SelectItem value="LP - Líquido Penetrante">LP - Líquido Penetrante</SelectItem><SelectItem value="UT - Ultrassom">UT - Ultrassom</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-        
-        {inspectionType === 'Visual' && (<>
-            <FormField control={form.control} name="welder" render={({ field }) => ( <FormItem><FormLabel>Sinete do soldador</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Sinete do soldador" /></FormControl><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="process" render={({ field }) => ( <FormItem><FormLabel>Processo de Solda</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="MIG/MAG/TIG/SMAW" /></FormControl><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-        </>)}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Dados Gerais</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+          </div>
+          <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+          <FormField control={form.control} name="inspectionType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Inspeção</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Visual">Visual</SelectItem><SelectItem value="LP - Líquido Penetrante">LP - Líquido Penetrante</SelectItem><SelectItem value="UT - Ultrassom">UT - Ultrassom</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        </CardContent>
+      </Card>
+      
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Dados da Peça e Soldagem</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <FormField control={form.control} name="jointIdentification" render={({ field }) => ( <FormItem><FormLabel>Identificação da Junta</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: J1, J2..." /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="weldingProcess" render={({ field }) => ( <FormItem><FormLabel>Processo de Soldagem</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: SMAW, MIG/MAG" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="jointType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Junta</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Topo, Canto" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="weldingPosition" render={({ field }) => ( <FormItem><FormLabel>Posição de Soldagem</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 1G, 2F" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material Base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="fillerMaterial" render={({ field }) => ( <FormItem><FormLabel>Material de Adição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: E7018" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="materialThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (mm)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 12.7" /></FormControl><FormMessage /></FormItem> )}/>
+        </CardContent>
+      </Card>
 
-        {(inspectionType === 'LP - Líquido Penetrante' || inspectionType === 'UT - Ultrassom') && (<>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Dados do Soldador</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+           <FormField control={form.control} name="welderSinete" render={({ field }) => ( <FormItem><FormLabel>Sinete do Soldador</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+           <FormField control={form.control} name="welderQualification" render={({ field }) => ( <FormItem><FormLabel>Qualificação (RQPS)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+           <FormField control={form.control} name="wpsCode" render={({ field }) => ( <FormItem><FormLabel>Código da WPS</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+        </CardContent>
+      </Card>
+
+       <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Dados do Ensaio</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: AWS D1.1, Tabela 6.1" /></FormControl><FormMessage /></FormItem> )}/>
+          {inspectionType === 'Visual' && (<>
+            <FormField control={form.control} name="surfaceCondition" render={({ field }) => ( <FormItem><FormLabel>Condições da Superfície</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Limpa, isenta de respingos" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField control={form.control} name="observedDefects" render={({ field }) => ( <FormItem><FormLabel>Defeitos Observados</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Porosidade, mordedura" /></FormControl><FormMessage /></FormItem> )}/>
+          </>)}
+           {(inspectionType === 'LP - Líquido Penetrante' || inspectionType === 'UT - Ultrassom') && (<>
             <FormField control={form.control} name="technician" render={({ field }) => ( <FormItem><FormLabel>Técnico Responsável</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome do técnico" /></FormControl><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="standard" render={({ field }) => ( <FormItem><FormLabel>Norma Aplicada</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM E165" /></FormControl><FormMessage /></FormItem> )}/>
             {inspectionType === 'UT - Ultrassom' && <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome do equipamento de UT" /></FormControl><FormMessage /></FormItem> )}/>}
-            <FormField control={form.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Laudo</FormLabel><FormControl><Input type="url" {...field} value={field.value ?? ''} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
-            <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
-        </>)}
+            <FormField control={form.control} name="reportUrl" render={({ field }) => ( <FormItem><FormLabel>Link do Laudo Externo</FormLabel><FormControl><Input type="url" {...field} value={field.value ?? ''} placeholder="https://" /></FormControl><FormMessage /></FormItem> )}/>
+          </>)}
+          <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado Geral</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
+        </CardContent>
+      </Card>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável (Empresa)</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-            <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente (Nome)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
-        </div>
-        <FormItem>
-            <FormLabel>Fotos da Inspeção</FormLabel>
-            <FormControl>
-                <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
-            </FormControl>
-            <FormDescription>Selecione imagens para anexar ao relatório.</FormDescription>
-            {watchedPhotos && watchedPhotos.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
-                    {watchedPhotos.map((photo, index) => (
-                        <div key={index} className="relative">
-                            <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
-                            <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
-                                <Trash2 className="h-3 w-3" />
-                            </Button>
-                        </div>
-                    ))}
-                </div>
-            )}
-            <FormMessage />
-        </FormItem>
-        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Responsáveis</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
+            <FormField control={form.control} name="releaseResponsible" render={({ field }) => ( <FormItem><FormLabel>Responsável Liberação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Observações e Evidências</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <FormItem>
+              <FormLabel>Registro Fotográfico</FormLabel>
+              <FormControl><Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} /></FormControl>
+              <FormDescription>Selecione imagens para anexar ao relatório.</FormDescription>
+              {watchedPhotos && watchedPhotos.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                      {watchedPhotos.map((photo, index) => (
+                          <div key={index} className="relative">
+                              <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                              <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                  <Trash2 className="h-3 w-3" />
+                              </Button>
+                          </div>
+                      ))}
+                  </div>
+              )}
+              <FormMessage />
+          </FormItem>
+          <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações Adicionais</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+        </CardContent>
+      </Card>
     </>);
 }
 
