@@ -247,7 +247,7 @@ export default function QualityPage() {
   // --- FORMS ---
   const rncForm = useForm<z.infer<typeof nonConformanceSchema>>({
     resolver: zodResolver(nonConformanceSchema),
-    defaultValues: { date: new Date(), status: "Aberta", type: "Interna" },
+    defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: undefined },
   });
 
   const calibrationForm = useForm<z.infer<typeof calibrationSchema>>({
@@ -280,7 +280,19 @@ export default function QualityPage() {
   const weldingInspectionForm = useForm<z.infer<typeof weldingInspectionSchema>>({
       resolver: zodResolver(weldingInspectionSchema),
       defaultValues: {
-          inspectionDate: new Date(), inspectionType: "Visual", result: "Conforme", inspectedBy: undefined
+          orderId: undefined,
+          itemId: undefined,
+          inspectionDate: new Date(),
+          inspectionType: "Visual",
+          result: "Conforme",
+          inspectedBy: undefined,
+          welder: '',
+          process: '',
+          technician: '',
+          standard: '',
+          equipment: '',
+          reportUrl: '',
+          notes: '',
       }
   });
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
@@ -300,7 +312,18 @@ export default function QualityPage() {
   const paintingReportForm = useForm<z.infer<typeof paintingReportSchema>>({
       resolver: zodResolver(paintingReportSchema),
       defaultValues: {
-          inspectionDate: new Date(), result: "Aprovado", paintType: "", inspectedBy: undefined, dryFilmThickness: undefined,
+          orderId: undefined,
+          itemId: undefined,
+          inspectionDate: new Date(),
+          result: "Aprovado",
+          paintType: "",
+          inspectedBy: undefined,
+          dryFilmThickness: undefined,
+          colorRal: "",
+          surfacePreparation: "",
+          instrumentUsed: "",
+          adhesionTestResult: undefined,
+          notes: "",
       }
   });
 
@@ -476,7 +499,7 @@ export default function QualityPage() {
       toast({ variant: "destructive", title: "Erro ao salvar relatório" });
     }
   };
-  const handleAddRncClick = () => { setSelectedReport(null); rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna" }); setIsRncFormOpen(true); };
+  const handleAddRncClick = () => { setSelectedReport(null); rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: undefined }); setIsRncFormOpen(true); };
   const handleEditRncClick = (report: NonConformance) => { setSelectedReport(report); rncForm.reset({ ...report, item: { id: report.item.id, description: report.item.description } }); setIsRncFormOpen(true); };
   const handleDeleteRncClick = (report: NonConformance) => { setReportToDelete(report); setIsRncDeleting(true); };
   const handleConfirmRncDelete = async () => {
@@ -595,16 +618,53 @@ export default function QualityPage() {
     else { dimensionalReportForm.reset({ reportNumber: '', inspectionDate: new Date(), orderId: undefined, itemId: undefined, inspectedBy: undefined, notes: '', quantityInspected: undefined, measurements: [], photos: [], partIdentifier: '', customerInspector: '' }); }
     setIsInspectionFormOpen(true);
   };
+
   const handleOpenWeldingForm = (report: WeldingInspection | null = null) => {
     setSelectedInspection(report); setDialogType('welding');
-    if (report) { weldingInspectionForm.reset(report); } 
-    else { weldingInspectionForm.reset({ inspectionDate: new Date(), inspectionType: "Visual", result: "Conforme", inspectedBy: undefined }); }
+    const defaultNewValues = { 
+        orderId: undefined,
+        itemId: undefined,
+        inspectionDate: new Date(), 
+        inspectionType: "Visual" as const, 
+        result: "Conforme" as const, 
+        inspectedBy: undefined,
+        welder: '',
+        process: '',
+        technician: '',
+        standard: '',
+        equipment: '',
+        reportUrl: '',
+        notes: '',
+    };
+    if (report) { 
+        weldingInspectionForm.reset({
+            ...defaultNewValues,
+            ...report,
+            inspectionDate: report.inspectionDate ? new Date(report.inspectionDate) : new Date(),
+        }); 
+    } else { 
+        weldingInspectionForm.reset(defaultNewValues); 
+    }
     setIsInspectionFormOpen(true);
   };
   const handleOpenPaintingForm = (report: PaintingReport | null = null) => {
     setSelectedInspection(report); setDialogType('painting');
-    if (report) { paintingReportForm.reset(report); } 
-    else { paintingReportForm.reset({ inspectionDate: new Date(), result: "Aprovado", paintType: "", inspectedBy: undefined, dryFilmThickness: undefined }); }
+    const defaultValues = {
+        inspectionDate: new Date(),
+        result: "Aprovado" as const,
+        paintType: "",
+        inspectedBy: undefined,
+        dryFilmThickness: undefined,
+        orderId: undefined,
+        itemId: undefined,
+        colorRal: "",
+        surfacePreparation: "",
+        instrumentUsed: "",
+        adhesionTestResult: undefined,
+        notes: "",
+    };
+    if (report) { paintingReportForm.reset({ ...defaultValues, ...report, inspectionDate: new Date(report.inspectionDate) }); }
+    else { paintingReportForm.reset(defaultValues); }
     setIsInspectionFormOpen(true);
   };
   const handleDeleteInspectionClick = (inspection: any, type: string) => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
