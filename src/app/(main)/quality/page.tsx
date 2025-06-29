@@ -2558,7 +2558,7 @@ export default function QualityPage() {
                         />
                     </AccordionContent>
                 </AccordionItem>
-                <AccordionItem value="lessons-learned">
+                 <AccordionItem value="lessons-learned">
                     <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
                         <div className="flex items-center gap-2">
                             <BrainCircuit className="h-5 w-5 text-primary" />
@@ -3479,6 +3479,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    const analysisToolOptions = ["5 Porquês", "Diagrama de Ishikawa", "Análise de Causa Raiz (RCA)", "FTA (Análise de Árvore de Falhas)", "FMEA (Análise de Modos e Efeitos de Falha)", "Outro"];
     return (
         <div className="space-y-4">
             <Card>
@@ -3538,7 +3539,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                      <FormField control={form.control} name="rootCause" render={({ field }) => ( <FormItem><FormLabel>Causa Raiz Identificada</FormLabel><FormControl><Input {...field} placeholder="Qual foi a causa raiz do problema?" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
-                     <FormField control={form.control} name="analysisTool" render={({ field }) => ( <FormItem><FormLabel>Ferramenta de Análise</FormLabel><FormControl><Input {...field} placeholder="5 Porquês, Diagrama de Ishikawa, etc." value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="analysisTool" render={({ field }) => ( <FormItem><FormLabel>Ferramenta de Análise Utilizada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma ferramenta" /></SelectTrigger></FormControl><SelectContent>{analysisToolOptions.map(tool => (<SelectItem key={tool} value={tool}>{tool}</SelectItem>))}</SelectContent></Select><FormMessage /></FormItem> )}/>
                     <FormField control={form.control} name="impact" render={({ field }) => (
                         <FormItem>
                             <FormLabel>Impacto Gerado</FormLabel>
@@ -3607,7 +3608,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                         <FormItem>
                             <FormLabel>Evidências</FormLabel>
                             <FormDescription>Links para documentos, fotos ou outros arquivos relevantes.</FormDescription>
-                            <FormControl><Textarea placeholder="Cole os links para as evidências aqui" {...field} value={field.value ?? ''}/></FormControl><FormMessage />
+                            <FormControl><Textarea placeholder="Cole os links para as evidências aqui" {...field} value={Array.isArray(field.value) ? field.value.join('\n') : ''} onChange={(e) => field.onChange(e.target.value.split('\n'))}/></FormControl><FormMessage />
                         </FormItem>
                     )}/>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
