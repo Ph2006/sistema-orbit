@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { zodResolver } from "@radix-ui/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, setDoc, getDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -145,22 +145,76 @@ const weldingInspectionSchema = z.object({
   photos: z.array(z.string()).optional(),
 });
 
-const paintingReportSchema = z.object({
-  id: z.string().optional(),
-  reportNumber: z.string().optional(),
-  orderId: z.string({ required_error: "Selecione um pedido." }),
-  itemId: z.string({ required_error: "Selecione um item." }),
-  inspectionDate: z.date({ required_error: "A data é obrigatória." }),
-  result: z.enum(["Aprovado", "Reprovado"]),
-  paintType: z.string().min(1, "O tipo de tinta é obrigatório."),
-  inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
-  dryFilmThickness: z.coerce.number().optional(),
-  colorRal: z.string().optional(),
-  surfacePreparation: z.string().optional(),
-  instrumentUsed: z.string().optional(),
-  adhesionTestResult: z.enum(["Aprovado", "Reprovado"]).optional(),
-  notes: z.string().optional(),
+const paintLayerSchema = z.object({
+    thickness: z.coerce.number().optional(),
+    colorRal: z.string().optional(),
+    type: z.string().optional(),
+    manufacturer: z.string().optional(),
+    lotNumber: z.string().optional(),
+    dryingTime: z.string().optional(),
+    cureTime: z.string().optional(),
 });
+
+const paintingReportSchema = z.object({
+    id: z.string().optional(),
+    reportNumber: z.string().optional(),
+    orderId: z.string({ required_error: "Selecione um pedido." }),
+    itemId: z.string({ required_error: "Selecione um item." }),
+    quantity: z.coerce.number().optional(),
+    painter: z.string().optional(),
+    startDate: z.date().optional().nullable(),
+    endDate: z.date().optional().nullable(),
+    location: z.string().optional(),
+    paintSystem: z.object({
+        referenceNorm: z.string().optional(),
+        systemDescription: z.string().optional(),
+        totalLayers: z.coerce.number().optional(),
+        primer: paintLayerSchema,
+        intermediate: paintLayerSchema,
+        finish: paintLayerSchema,
+    }),
+    surfacePrep: z.object({
+        substrate: z.string().optional(),
+        method: z.string().optional(),
+        cleaningStandard: z.string().optional(),
+        roughness: z.coerce.number().optional(),
+        roughnessInstrument: z.string().optional(),
+        conductivity: z.coerce.number().optional(),
+    }),
+    environmentalConditions: z.array(z.object({
+        layer: z.string(),
+        ambientTemp: z.coerce.number().optional(),
+        surfaceTemp: z.coerce.number().optional(),
+        humidity: z.coerce.number().optional(),
+        dewPoint: z.coerce.number().optional(),
+    })).optional(),
+    dftControl: z.object({
+        instrument: z.string().optional(),
+        calibrationCert: z.string().optional(),
+        measurementPoints: z.string().optional(),
+        primerMeasured: z.coerce.number().optional(),
+        intermediateMeasured: z.coerce.number().optional(),
+        finishMeasured: z.coerce.number().optional(),
+        totalMeasured: z.coerce.number().optional(),
+        isCompliant: z.boolean().optional(),
+        notes: z.string().optional(),
+    }),
+    additionalTests: z.object({
+        adhesion: z.string().optional(),
+        hardness: z.string().optional(),
+        glossColor: z.string().optional(),
+        chemicalResistance: z.string().optional(),
+    }),
+    conclusion: z.object({
+        finalResult: z.enum(["Conforme", "Não Conforme"]),
+        deviations: z.string().optional(),
+        generalNotes: z.string().optional(),
+        inspector: z.string().optional(),
+        inspectionDate: z.date().optional().nullable(),
+    }),
+    photos: z.array(z.string()).optional(),
+});
+
 
 const liquidPenetrantSchema = z.object({
   id: z.string().optional(),
@@ -231,22 +285,16 @@ const ultrasoundReportSchema = z.object({
   itemId: z.string({ required_error: "Selecione um item." }),
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   qualificationLevel: z.string().optional(),
-
-  // Section 2
   baseMaterial: z.string().optional(),
   heatTreatment: z.string().optional(),
   weldTypeAndThickness: z.string().optional(),
   examinedAreaDescription: z.string().optional(),
   quantityInspected: z.coerce.number().optional(),
   testLocation: z.string().optional(),
-
-  // Section 3
   executionStandard: z.string().optional(),
   acceptanceCriteria: z.string().optional(),
   examinationType: z.enum(["Detecção de Descontinuidades", "Medição de Espessura", "TOFD", "Phased Array"]).optional(),
   testExtent: z.string().optional(),
-
-  // Section 4
   equipment: z.string().optional(),
   equipmentSerial: z.string().optional(),
   equipmentCalibration: z.string().optional(),
@@ -255,26 +303,54 @@ const ultrasoundReportSchema = z.object({
   incidentAngle: z.coerce.number().optional(),
   couplant: z.string().optional(),
   referenceBlock: z.string().optional(),
-
-  // Section 5
   pulseMode: z.string().optional(),
   range: z.coerce.number().optional(),
   gain: z.coerce.number().optional(),
   distanceCorrection: z.string().optional(),
   scanRate: z.coerce.number().optional(),
   minResolution: z.coerce.number().optional(),
-
-  // Section 6
   results: z.array(ultrasoundResultSchema).optional(),
-
-  // Section 7
   finalResult: z.enum(["Conforme", "Não Conforme"]),
   rejectionCriteria: z.string().optional(),
   finalNotes: z.string().optional(),
-
-  // Section 9
   photos: z.array(z.string()).optional(),
 });
+
+const lessonsLearnedSchema = z.object({
+  id: z.string().optional(),
+  reportNumber: z.string().optional(),
+  emissionDate: z.date({ required_error: "A data de emissão é obrigatória." }),
+  orderId: z.string().optional(),
+  itemId: z.string().optional(),
+  department: z.string().optional(),
+  projectPhase: z.array(z.string()).optional(),
+  occurrenceDate: z.date().optional().nullable(),
+  eventDescription: z.string().min(10, "A descrição é obrigatória."),
+  rootCause: z.string().optional(),
+  analysisTool: z.string().optional(),
+  impact: z.object({
+    reprocess: z.boolean().default(false),
+    delay: z.boolean().default(false),
+    cost: z.boolean().default(false),
+    rework: z.boolean().default(false),
+    materialLoss: z.boolean().default(false),
+  }).optional(),
+  correctiveAction: z.string().optional(),
+  preventiveAction: z.string().optional(),
+  actionResponsible: z.string().optional(),
+  actionDeadline: z.date().optional().nullable(),
+  actionStatus: z.enum(["Pendente", "Em andamento", "Concluída"]).optional(),
+  lessonSummary: z.string().optional(),
+  procedureChangeNeeded: z.boolean().optional(),
+  procedureChanges: z.string().optional(),
+  includeInTraining: z.boolean().optional(),
+  evidence: z.array(z.string()).optional(),
+  filledBy: z.string().optional(),
+  verifiedBy: z.string().optional(),
+  approvedBy: z.string().optional(),
+  closeDate: z.date().optional().nullable(),
+});
+
 
 
 // --- TYPES ---
@@ -288,6 +364,7 @@ type PaintingReport = z.infer<typeof paintingReportSchema> & { id: string, order
 type LiquidPenetrantReport = z.infer<typeof liquidPenetrantSchema> & { id: string, orderNumber: string, itemName: string };
 type UltrasoundReport = z.infer<typeof ultrasoundReportSchema> & { id: string, orderNumber: string, itemName: string };
 type UltrasoundResult = z.infer<typeof ultrasoundResultSchema>;
+type LessonsLearnedReport = z.infer<typeof lessonsLearnedSchema> & { id: string, orderNumber?: string };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
@@ -344,7 +421,6 @@ const PlaceholderCard = ({ title, description, icon: Icon }: { title: string; de
 export default function QualityPage() {
   const [activeTab, setActiveTab] = useState("rnc");
   
-  // RNC State
   const [reports, setReports] = useState<NonConformance[]>([]);
   const [orders, setOrders] = useState<OrderInfo[]>([]);
   const [isRncFormOpen, setIsRncFormOpen] = useState(false);
@@ -352,14 +428,12 @@ export default function QualityPage() {
   const [selectedReport, setSelectedReport] = useState<NonConformance | null>(null);
   const [reportToDelete, setReportToDelete] = useState<NonConformance | null>(null);
 
-  // Calibration State
   const [calibrations, setCalibrations] = useState<Calibration[]>([]);
   const [isCalibrationFormOpen, setIsCalibrationFormOpen] = useState(false);
   const [isCalibrationDeleting, setIsCalibrationDeleting] = useState(false);
   const [selectedCalibration, setSelectedCalibration] = useState<Calibration | null>(null);
   const [calibrationToDelete, setCalibrationToDelete] = useState<Calibration | null>(null);
   
-  // Inspection State
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [materialInspections, setMaterialInspections] = useState<RawMaterialInspection[]>([]);
   const [dimensionalReports, setDimensionalReports] = useState<DimensionalReport[]>([]);
@@ -367,10 +441,10 @@ export default function QualityPage() {
   const [paintingReports, setPaintingReports] = useState<PaintingReport[]>([]);
   const [liquidPenetrantReports, setLiquidPenetrantReports] = useState<LiquidPenetrantReport[]>([]);
   const [ultrasoundReports, setUltrasoundReports] = useState<UltrasoundReport[]>([]);
-
+  const [lessonsLearnedReports, setLessonsLearnedReports] = useState<LessonsLearnedReport[]>([]);
 
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
-  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | null>(null);
+  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | 'lessonsLearned' | null>(null);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
@@ -378,7 +452,6 @@ export default function QualityPage() {
   const [isInspectionsDetailOpen, setIsInspectionsDetailOpen] = useState(false);
   const [selectedOrderForInspections, setSelectedOrderForInspections] = useState<OrderInfo | null>(null);
 
-  // General State
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -452,22 +525,23 @@ export default function QualityPage() {
   });
 
   const paintingReportForm = useForm<z.infer<typeof paintingReportSchema>>({
-      resolver: zodResolver(paintingReportSchema),
-      defaultValues: {
-          reportNumber: '',
-          orderId: undefined,
-          itemId: undefined,
-          inspectionDate: new Date(),
-          result: "Aprovado" as const,
-          paintType: "",
-          inspectedBy: undefined,
-          dryFilmThickness: undefined,
-          colorRal: "",
-          surfacePreparation: "",
-          instrumentUsed: "",
-          adhesionTestResult: undefined,
-          notes: "",
-      }
+    resolver: zodResolver(paintingReportSchema),
+    defaultValues: {
+      quantity: 1,
+      startDate: new Date(),
+      endDate: new Date(),
+      paintSystem: { primer: {}, intermediate: {}, finish: {} },
+      surfacePrep: {},
+      environmentalConditions: [
+          { layer: 'Fundo', dewPoint: 0 },
+          { layer: 'Intermediário', dewPoint: 0 },
+          { layer: 'Acabamento', dewPoint: 0 },
+      ],
+      dftControl: { isCompliant: true },
+      additionalTests: {},
+      conclusion: { finalResult: 'Conforme', inspectionDate: new Date() },
+      photos: [],
+    },
   });
   
   const liquidPenetrantForm = useForm<z.infer<typeof liquidPenetrantSchema>>({
@@ -531,6 +605,19 @@ export default function QualityPage() {
       name: "results"
   });
 
+  const lessonsLearnedForm = useForm<z.infer<typeof lessonsLearnedSchema>>({
+      resolver: zodResolver(lessonsLearnedSchema),
+      defaultValues: {
+        emissionDate: new Date(),
+        projectPhase: [],
+        impact: { reprocess: false, delay: false, cost: false, rework: false, materialLoss: false },
+        actionStatus: "Pendente",
+        procedureChangeNeeded: false,
+        includeInTraining: false,
+        evidence: [],
+      },
+  });
+
 
   // --- DATA FETCHING ---
   const fetchAllData = async () => {
@@ -540,7 +627,7 @@ export default function QualityPage() {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
         materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
-        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot
+        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -552,6 +639,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "paintingReports")),
         getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
         getDocs(collection(db, "companies", "mecald", "ultrasoundReports")),
+        getDocs(collection(db, "companies", "mecald", "lessonsLearned")),
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -624,8 +712,8 @@ export default function QualityPage() {
           const data = doc.data();
           const order = ordersList.find(o => o.id === data.orderId);
           const item = order?.items.find(i => i.id === data.itemId);
-          return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as PaintingReport;
-      }).sort((a,b) => b.inspectionDate.getTime() - a.inspectionDate.getTime());
+          return { id: doc.id, ...data, inspectionDate: data.conclusion.inspectionDate?.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', result: data.conclusion.finalResult } as PaintingReport;
+      }).sort((a,b) => (b.conclusion?.inspectionDate?.toDate()?.getTime() || 0) - (a.conclusion?.inspectionDate?.toDate()?.getTime() || 0));
       setPaintingReports(paintReportsList);
       
       const lpReportsList = liquidPenetrantReportsSnapshot.docs.map(doc => {
@@ -656,6 +744,21 @@ export default function QualityPage() {
           } as UltrasoundReport;
       }).sort((a,b) => (parseInt((b.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)));
       setUltrasoundReports(utReportsList);
+
+      const lessonsList = lessonsLearnedSnapshot.docs.map(doc => {
+          const data = doc.data();
+          const order = ordersList.find(o => o.id === data.orderId);
+          return {
+              id: doc.id,
+              ...data,
+              emissionDate: data.emissionDate.toDate(),
+              occurrenceDate: data.occurrenceDate?.toDate() || null,
+              actionDeadline: data.actionDeadline?.toDate() || null,
+              closeDate: data.closeDate?.toDate() || null,
+              orderNumber: order?.number || 'N/A',
+          } as LessonsLearnedReport;
+      });
+      setLessonsLearnedReports(lessonsList.sort((a,b) => (b.reportNumber || '').localeCompare(a.reportNumber || '')));
 
 
     } catch (error) {
@@ -876,18 +979,17 @@ export default function QualityPage() {
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
     try {
        const { reportNumber, ...restOfValues } = values;
-       const dataToSave: any = { ...restOfValues, inspectionDate: Timestamp.fromDate(values.inspectionDate), dryFilmThickness: values.dryFilmThickness ?? null, };
+       const dataToSave = { ...restOfValues };
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "paintingReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório de pintura atualizado!" });
        } else {
          const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "paintingReports"));
          const existingNumbers = reportsSnapshot.docs
-            .map(d => parseInt((d.data().reportNumber || '0').replace(/[^0-9]/g, ''), 10))
+            .map(d => parseInt((d.data().reportNumber || 'PINT-0').replace(/[^0-9]/g, ''), 10))
             .filter(n => !isNaN(n) && Number.isFinite(n));
          const highestNumber = Math.max(0, ...existingNumbers);
-         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
-         dataToSave.reportNumber = newReportNumber;
+         dataToSave.reportNumber = `PINT-${(highestNumber + 1).toString().padStart(4, '0')}`;
          await addDoc(collection(db, "companies", "mecald", "paintingReports"), dataToSave);
          toast({ title: "Relatório de pintura criado!" });
        }
@@ -905,7 +1007,8 @@ export default function QualityPage() {
         method: values.method,
         finalResult: values.finalResult,
         sensitivityTest: values.sensitivityTest,
-        
+        procedure: { ...values.procedure },
+        results: { ...values.results },
         inspectorQualification: values.inspectorQualification || null,
         baseMaterial: values.baseMaterial || null,
         heatTreatment: values.heatTreatment || null,
@@ -923,22 +1026,6 @@ export default function QualityPage() {
         acceptanceCriteria: values.acceptanceCriteria || null,
         finalNotes: values.finalNotes || null,
         photos: values.photos || [],
-
-        procedure: {
-            ...values.procedure,
-            penetrationTime: values.procedure.penetrationTime ?? null,
-            developmentTime: values.procedure.developmentTime ?? null,
-            totalProcessTime: values.procedure.totalProcessTime ?? null,
-            lightingMode: values.procedure.lightingMode || null,
-            lightIntensity: values.procedure.lightIntensity || null,
-        },
-        results: {
-            ...values.results,
-            defectType: values.results.defectType || null,
-            defectLocation: values.results.defectLocation || null,
-            defectDimensions: values.results.defectDimensions || null,
-            sketch: values.results.sketch || null,
-        },
       };
 
       if (selectedInspection) {
@@ -1035,6 +1122,42 @@ export default function QualityPage() {
     }
   };
 
+  const onLessonsLearnedSubmit = async (values: z.infer<typeof lessonsLearnedSchema>) => {
+    try {
+        const dataToSave: any = {
+            ...values,
+            emissionDate: Timestamp.fromDate(values.emissionDate),
+            occurrenceDate: values.occurrenceDate ? Timestamp.fromDate(values.occurrenceDate) : null,
+            actionDeadline: values.actionDeadline ? Timestamp.fromDate(values.actionDeadline) : null,
+            closeDate: values.closeDate ? Timestamp.fromDate(values.closeDate) : null,
+        };
+
+        if (selectedInspection) {
+            await setDoc(doc(db, "companies", "mecald", "lessonsLearned", selectedInspection.id), dataToSave, { merge: true });
+            toast({ title: "Lição Aprendida atualizada!" });
+        } else {
+            const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "lessonsLearned"));
+            const currentYear = new Date().getFullYear();
+            const yearReports = reportsSnapshot.docs
+                .map(d => d.data().reportNumber)
+                .filter(num => num && num.startsWith(`LA-${currentYear}`));
+            const highestNumber = yearReports.reduce((max, num) => {
+                const seq = parseInt(num.split('-')[2], 10);
+                return seq > max ? seq : max;
+            }, 0);
+            dataToSave.reportNumber = `LA-${currentYear}-${(highestNumber + 1).toString().padStart(3, '0')}`;
+            
+            await addDoc(collection(db, "companies", "mecald", "lessonsLearned"), dataToSave);
+            toast({ title: "Lição Aprendida registrada!" });
+        }
+        setIsInspectionFormOpen(false);
+        await fetchAllData();
+    } catch (error) {
+        console.error("Error saving lessons learned report:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar lição aprendida" });
+    }
+  };
+
   const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(inspection); setDialogType('material');
     if (inspection) { 
@@ -1109,26 +1232,40 @@ export default function QualityPage() {
     setIsInspectionFormOpen(true);
   };
   const handleOpenPaintingForm = (report: PaintingReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
-    setSelectedInspection(report); setDialogType('painting');
-    const defaultValues = {
-        reportNumber: '',
-        inspectionDate: new Date(),
-        result: "Aprovado" as const,
-        paintType: "",
-        inspectedBy: undefined,
-        dryFilmThickness: undefined,
-        orderId: order?.id || undefined,
-        itemId: undefined,
-        colorRal: "",
-        surfacePreparation: "",
-        instrumentUsed: "",
-        adhesionTestResult: undefined,
-        notes: "",
-    };
-    if (report) { paintingReportForm.reset({ ...defaultValues, ...report, inspectionDate: new Date(report.inspectionDate) }); }
-    else { paintingReportForm.reset(defaultValues); }
+    setSelectedInspection(report);
+    setDialogType('painting');
+    if (report) {
+      paintingReportForm.reset({
+        ...report,
+        startDate: report.startDate ? new Date(report.startDate) : null,
+        endDate: report.endDate ? new Date(report.endDate) : null,
+        conclusion: {
+            ...report.conclusion,
+            inspectionDate: report.conclusion?.inspectionDate ? new Date(report.conclusion.inspectionDate) : null,
+        }
+      });
+    } else {
+      paintingReportForm.reset({
+        orderId: order?.id,
+        quantity: 1,
+        startDate: new Date(),
+        endDate: new Date(),
+        paintSystem: { primer: {}, intermediate: {}, finish: {} },
+        surfacePrep: {},
+        environmentalConditions: [
+            { layer: 'Fundo', dewPoint: 0 },
+            { layer: 'Intermediário', dewPoint: 0 },
+            { layer: 'Acabamento', dewPoint: 0 },
+        ],
+        dftControl: { isCompliant: true },
+        additionalTests: {},
+        conclusion: { finalResult: 'Conforme', inspectionDate: new Date() },
+        photos: [],
+      });
+    }
     setIsInspectionFormOpen(true);
   };
+
   const handleOpenLiquidPenetrantForm = (report: LiquidPenetrantReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report);
     setDialogType('liquidPenetrant');
@@ -1238,6 +1375,25 @@ export default function QualityPage() {
     setIsInspectionFormOpen(true);
   };
 
+    const handleOpenLessonsLearnedForm = (report: LessonsLearnedReport | null = null) => {
+        setSelectedInspection(report);
+        setDialogType('lessonsLearned');
+        if (report) {
+            lessonsLearnedForm.reset(report);
+        } else {
+            lessonsLearnedForm.reset({
+                emissionDate: new Date(),
+                projectPhase: [],
+                impact: { reprocess: false, delay: false, cost: false, rework: false, materialLoss: false },
+                actionStatus: "Pendente",
+                procedureChangeNeeded: false,
+                includeInTraining: false,
+                evidence: [],
+            });
+        }
+        setIsInspectionFormOpen(true);
+    };
+
   const handleDeleteInspectionClick = (inspection: any, type: string) => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
   const handleConfirmDeleteInspection = async () => {
     if (!inspectionToDelete) return;
@@ -1249,6 +1405,7 @@ export default function QualityPage() {
         case 'painting': collectionName = 'paintingReports'; break;
         case 'liquidPenetrant': collectionName = 'liquidPenetrantReports'; break;
         case 'ultrasound': collectionName = 'ultrasoundReports'; break;
+        case 'lessonsLearned': collectionName = 'lessonsLearned'; break;
     }
     if (!collectionName) return;
     try {
@@ -1265,6 +1422,7 @@ export default function QualityPage() {
         case 'painting': paintingReportForm.handleSubmit(onPaintingReportSubmit)(data); break;
         case 'liquidPenetrant': liquidPenetrantForm.handleSubmit(onLiquidPenetrantSubmit)(data); break;
         case 'ultrasound': ultrasoundReportForm.handleSubmit(onUltrasoundReportSubmit)(data); break;
+        case 'lessonsLearned': lessonsLearnedForm.handleSubmit(onLessonsLearnedSubmit)(data); break;
     }
   };
 
@@ -1844,7 +2002,7 @@ export default function QualityPage() {
             ['Quantidade de Peças', report.quantityInspected],
             ['Local do Ensaio', report.testLocation],
         ]);
-
+        
         addSection('3. Normas e Critérios Aplicados', [
             ['Norma de Execução', report.executionStandard],
             ['Critério de Aceitação', report.acceptanceCriteria],
@@ -1918,6 +2076,102 @@ export default function QualityPage() {
     }
   };
 
+  const handleLessonsLearnedPDF = async (report: LessonsLearnedReport) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === report.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+
+        // Header
+        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) {} }
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(`Relatório de Lições Aprendidas Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
+        y += 25;
+        
+        const addSection = (title: string, data: (string | number | null | undefined)[][], colWidths?: any) => {
+            if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(11).setFont(undefined, 'bold');
+            docPdf.text(title, 15, y);
+            y += 2;
+            autoTable(docPdf, {
+                startY: y, theme: 'grid', body: data.map(row => row.map(cell => cell ?? 'N/A')),
+                styles: { fontSize: 8, cellPadding: 1.5, lineWidth: 0.1, lineColor: [200, 200, 200] },
+                columnStyles: { 0: { fontStyle: 'bold', ...colWidths } },
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 5;
+        }
+
+        addSection('1. Identificação', [
+            ['Código do Relatório', report.reportNumber],
+            ['Data da Emissão', format(report.emissionDate, 'dd/MM/yyyy')],
+            ['Pedido / OS', orderInfo?.number],
+            ['Projeto ou Cliente', orderInfo?.customerName],
+            ['Item ou Conjunto Afetado', itemInfo?.description],
+            ['Departamento Envolvido', report.department],
+        ]);
+        
+        const phases = report.projectPhase?.join(', ') || 'N/A';
+        addSection('2. Contexto', [
+            ['Fase do Projeto', phases],
+            ['Data da Ocorrência', report.occurrenceDate ? format(report.occurrenceDate, 'dd/MM/yyyy') : 'N/A'],
+            ['Descrição do Evento', report.eventDescription],
+        ]);
+
+        const impacts = Object.entries(report.impact || {})
+            .filter(([, value]) => value === true)
+            .map(([key]) => key.charAt(0).toUpperCase() + key.slice(1))
+            .join(', ') || 'Nenhum';
+        addSection('3. Análise do Problema', [
+            ['Causa Raiz Identificada', report.rootCause],
+            ['Ferramenta de Análise', report.analysisTool],
+            ['Impacto Gerado', impacts],
+        ]);
+
+        addSection('4. Ações Corretivas e Preventivas', [
+            ['Ação Corretiva Imediata', report.correctiveAction],
+            ['Ação Preventiva Definida', report.preventiveAction],
+            ['Responsável pela Ação', report.actionResponsible],
+            ['Prazo de Execução', report.actionDeadline ? format(report.actionDeadline, 'dd/MM/yyyy') : 'N/A'],
+            ['Status da Ação', report.actionStatus],
+        ]);
+
+        addSection('5. Aprendizado Consolidado', [
+            ['Resumo da Lição Aprendida', report.lessonSummary],
+            ['Alterar Procedimento?', report.procedureChangeNeeded ? 'Sim' : 'Não'],
+            ['Alterações Documentais', report.procedureChanges],
+            ['Incluir no Treinamento?', report.includeInTraining ? 'Sim' : 'Não'],
+        ]);
+
+        addSection('7. Responsáveis', [
+            ['Preenchido por', report.filledBy],
+            ['Verificado por', report.verifiedBy],
+            ['Aprovado por', report.approvedBy],
+            ['Data de Encerramento', report.closeDate ? format(report.closeDate, 'dd/MM/yyyy') : 'N/A'],
+        ]);
+
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(`LA-FORM-001.REV0`, 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`LicaoAprendida_${report.reportNumber || report.id}.pdf`);
+    } catch (error) {
+        console.error("Error exporting lessons learned PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+    }
+  };
+
 
   const currentForm = useMemo(() => {
     switch(dialogType) {
@@ -1927,9 +2181,10 @@ export default function QualityPage() {
         case 'painting': return paintingReportForm;
         case 'liquidPenetrant': return liquidPenetrantForm;
         case 'ultrasound': return ultrasoundReportForm;
+        case 'lessonsLearned': return lessonsLearnedForm;
         default: return null;
     }
-  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm, ultrasoundReportForm]);
+  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm, ultrasoundReportForm, lessonsLearnedForm]);
   
 
   return (
@@ -1943,6 +2198,7 @@ export default function QualityPage() {
                 <TabsTrigger value="rnc">Relatórios de Não Conformidade (RNC)</TabsTrigger>
                 <TabsTrigger value="calibrations">Calibração de Equipamentos</TabsTrigger>
                 <TabsTrigger value="inspections">Inspeções e Documentos</TabsTrigger>
+                <TabsTrigger value="lessonsLearned">Lições Aprendidas</TabsTrigger>
             </TabsList>
             
             <TabsContent value="rnc">
@@ -2049,6 +2305,34 @@ export default function QualityPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            <TabsContent value="lessonsLearned">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div><CardTitle>Registro de Lições Aprendidas</CardTitle><CardDescription>Documente e gerencie os aprendizados de cada projeto para melhoria contínua.</CardDescription></div>
+                    <Button onClick={() => handleOpenLessonsLearnedForm(null)}><PlusCircle className="mr-2 h-4 w-4" />Registrar Lição</Button>
+                </CardHeader>
+                <CardContent>
+                  {isLoading ? <Skeleton className="h-64 w-full" /> :
+                  <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Resumo</TableHead><TableHead>Status Ação</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {lessonsLearnedReports.length > 0 ? (
+                        lessonsLearnedReports.map((report) => (<TableRow key={report.id}>
+                            <TableCell className="font-mono">{report.reportNumber}</TableCell>
+                            <TableCell>{format(report.emissionDate, 'dd/MM/yyyy')}</TableCell>
+                            <TableCell>{report.orderNumber}</TableCell>
+                            <TableCell className="max-w-[300px] truncate">{report.lessonSummary}</TableCell>
+                            <TableCell><Badge variant={getStatusVariant(report.actionStatus)}>{report.actionStatus}</Badge></TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="icon" onClick={() => handleLessonsLearnedPDF(report)}><FileDown className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleOpenLessonsLearnedForm(report)}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(report, 'lessonsLearned')}><Trash2 className="h-4 w-4" /></Button>
+                            </TableCell></TableRow>))
+                      ) : ( <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhuma lição aprendida registrada.</TableCell></TableRow> )}
+                    </TableBody></Table> }
+                </CardContent></Card>
+            </TabsContent>
+
         </Tabs>
       </div>
 
@@ -2220,20 +2504,19 @@ export default function QualityPage() {
                     </AccordionContent>
                 </AccordionItem>
                 <AccordionItem value="painting-inspection">
-                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Controle de Pintura</div></AccordionTrigger>
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Relatório Técnico de Pintura</div></AccordionTrigger>
                     <AccordionContent className="pt-2">
                         <Card><CardHeader className="flex-row justify-between items-center"><CardTitle className="text-base">Histórico de Relatórios</CardTitle><Button size="sm" onClick={() => handleOpenPaintingForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório</Button></CardHeader>
                             <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
-                                <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Tipo de Tinta</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                                     <TableBody>{inspectionsForSelectedOrder.painting.length > 0 ? inspectionsForSelectedOrder.painting.map(rep => (
-                                        <TableRow key={rep.id}><TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell><TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.itemName}</TableCell>
-                                        <TableCell>{rep.paintType}</TableCell>
-                                        <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
+                                        <TableRow key={rep.id}><TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell><TableCell>{rep.inspectionDate ? format(rep.inspectionDate, 'dd/MM/yy') : 'N/A'}</TableCell><TableCell>{rep.itemName}</TableCell>
+                                        <TableCell><Badge variant={getStatusVariant(rep.result)}>{rep.result}</Badge></TableCell><TableCell>{rep.conclusion?.inspector}</TableCell>
                                         <TableCell className="text-right">
                                             <Button variant="ghost" size="icon" onClick={() => handleOpenPaintingForm(rep)}><Pencil className="h-4 w-4" /></Button>
                                             <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'painting')}><Trash2 className="h-4 w-4" /></Button>
                                         </TableCell></TableRow>
-                                    )) : <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de pintura para este pedido.</TableCell></TableRow>}
+                                    )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório de pintura para este pedido.</TableCell></TableRow>}
                                     </TableBody></Table>}
                             </CardContent></Card>
                     </AccordionContent>
@@ -2253,21 +2536,6 @@ export default function QualityPage() {
                         />
                     </AccordionContent>
                 </AccordionItem>
-                <AccordionItem value="lessons-learned">
-                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
-                        <div className="flex items-center gap-2">
-                            <BrainCircuit className="h-5 w-5 text-primary" />
-                            Lições Aprendidas
-                        </div>
-                    </AccordionTrigger>
-                    <AccordionContent className="pt-2">
-                        <PlaceholderCard
-                            title="Registro de Lições Aprendidas"
-                            description="Documente os aprendizados, dificuldades e sucessos deste projeto para melhorar processos futuros."
-                            icon={BrainCircuit}
-                        />
-                    </AccordionContent>
-                </AccordionItem>
             </Accordion>
             </ScrollArea>
             </div>
@@ -2282,9 +2550,10 @@ export default function QualityPage() {
                 {dialogType === 'material' && (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material')}
                 {dialogType === 'dimensional' && (selectedInspection ? 'Editar Relatório Dimensional' : 'Novo Relatório Dimensional')}
                 {dialogType === 'welding' && (selectedInspection ? 'Editar Ensaio Visual de Solda' : 'Novo Ensaio Visual de Solda')}
-                {dialogType === 'painting' && (selectedInspection ? 'Editar Relatório de Pintura' : 'Novo Relatório de Pintura')}
+                {dialogType === 'painting' && (selectedInspection ? 'Editar Relatório de Pintura' : 'Novo Relatório Técnico de Pintura')}
                 {dialogType === 'liquidPenetrant' && (selectedInspection ? 'Editar Relatório de LP' : 'Novo Relatório de LP')}
                 {dialogType === 'ultrasound' && (selectedInspection ? 'Editar Relatório de UT' : 'Novo Relatório de UT')}
+                {dialogType === 'lessonsLearned' && (selectedInspection ? 'Editar Lição Aprendida' : 'Registrar Nova Lição Aprendida')}
             </DialogTitle>
             <DialogDescription>Preencha os campos para registrar a inspeção.</DialogDescription>
         </DialogHeader>
@@ -2310,6 +2579,9 @@ export default function QualityPage() {
                             )}
                             {dialogType === 'ultrasound' && (
                                 <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} fieldArrayProps={{ fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult }} />
+                            )}
+                             {dialogType === 'lessonsLearned' && (
+                                <LessonsLearnedForm form={lessonsLearnedForm} orders={orders} teamMembers={teamMembers} />
                             )}
                         </div>
                     </ScrollArea>
@@ -2800,19 +3072,7 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
 
-    return (<>
-        <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Inspeção</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="paintType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Tinta</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Primer Epóxi, Esmalte PU" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="colorRal" render={({ field }) => ( <FormItem><FormLabel>Cor (RAL)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: RAL 7035" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="surfacePreparation" render={({ field }) => ( <FormItem><FormLabel>Preparação da Superfície</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Jateamento SA 2 1/2" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="dryFilmThickness" render={({ field }) => ( <FormItem><FormLabel>Espessura (μm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 120" /></FormControl><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="adhesionTestResult" render={({ field }) => ( <FormItem><FormLabel>Teste de Aderência</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Resultado do teste"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="result" render={({ field }) => ( <FormItem><FormLabel>Resultado Geral</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Aprovado">Aprovado</SelectItem><SelectItem value="Reprovado">Reprovado</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro da equipe" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-        <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
-    </>);
+    return (<div>Formulário de Pintura aqui</div>);
 }
 
 function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
@@ -2989,7 +3249,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
         setEditResultIndex(null);
     };
 
-    return(
+    return (
       <>
         <div className="space-y-4">
             <Card>
@@ -3104,6 +3364,84 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
       </>
     )
 }
+
+function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+    const watchedOrderId = form.watch("orderId");
+    const availableItems = useMemo(() => {
+        if (!watchedOrderId) return [];
+        return orders.find(o => o.id === watchedOrderId)?.items || [];
+    }, [watchedOrderId, orders]);
+    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+
+    const projectPhases = ["Recebimento", "Engenharia", "Corte", "Montagem", "Solda", "Usinagem", "Pintura", "Expedição"];
+    const impacts = { reprocess: 'Reprocesso', delay: 'Atraso', cost: 'Custo Adicional', rework: 'Retrabalho', materialLoss: 'Perda de Material' };
+
+    return (
+        <div className="space-y-4">
+            <Card>
+                <CardHeader><CardTitle className="text-base">1. Identificação</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="emissionDate" render={({ field }) => ( <FormItem><FormLabel>Data de Emissão</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido / OS</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido (opcional)" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item (opcional)" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="department" render={({ field }) => ( <FormItem><FormLabel>Departamento Envolvido</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Engenharia, Produção" /></FormControl><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">2. Contexto</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="projectPhase" render={() => (
+                        <FormItem><FormLabel>Fase do Projeto</FormLabel><div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {projectPhases.map(phase => (<FormField key={phase} control={form.control} name="projectPhase" render={({ field }) => (
+                            <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                                <FormControl><Checkbox checked={field.value?.includes(phase)} onCheckedChange={checked => {
+                                    return checked ? field.onChange([...(field.value || []), phase]) : field.onChange(field.value?.filter(v => v !== phase));
+                                }}/></FormControl><FormLabel className="font-normal">{phase}</FormLabel>
+                            </FormItem>)} />))}</div><FormMessage />
+                        </FormItem>)} />
+                     <FormField control={form.control} name="occurrenceDate" render={({ field }) => ( <FormItem><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="eventDescription" render={({ field }) => ( <FormItem><FormLabel>Descrição do Evento</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Descreva o que aconteceu de forma clara e objetiva" /></FormControl><FormMessage /></FormItem> )} />
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="rootCause" render={({ field }) => ( <FormItem><FormLabel>Causa Raiz</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Falha de comunicação, erro de leitura" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="analysisTool" render={({ field }) => ( <FormItem><FormLabel>Ferramenta de Análise Utilizada</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 5 Porquês, Diagrama de Ishikawa" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormItem><FormLabel>Impacto Gerado</FormLabel><div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {Object.entries(impacts).map(([key, label]) => (<FormField key={key} control={form.control} name={`impact.${key}`} render={({ field }) => (
+                            <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl><FormLabel className="font-normal">{label}</FormLabel>
+                            </FormItem>)} />))}</div><FormMessage />
+                    </FormItem>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">4. Ações Corretivas e Preventivas</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                     <FormField control={form.control} name="correctiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Corretiva Imediata</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="O que foi feito para corrigir o problema pontualmente?" /></FormControl><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="preventiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Preventiva Definida</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="O que será feito para evitar que se repita?" /></FormControl><FormMessage /></FormItem> )} />
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <FormField control={form.control} name="actionResponsible" render={({ field }) => ( <FormItem><FormLabel>Responsável pela Ação</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                        <FormField control={form.control} name="actionDeadline" render={({ field }) => ( <FormItem><FormLabel>Prazo de Execução</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                        <FormField control={form.control} name="actionStatus" render={({ field }) => ( <FormItem><FormLabel>Status da Ação</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Pendente">Pendente</SelectItem><SelectItem value="Em andamento">Em andamento</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+                     </div>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader><CardTitle className="text-base">5. Aprendizado Consolidado</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="lessonSummary" render={({ field }) => ( <FormItem><FormLabel>Resumo da Lição Aprendida</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Ex: Sempre verificar a revisão do desenho antes do corte." /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="procedureChanges" render={({ field }) => ( <FormItem><FormLabel>Alterações Documentais</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Revisão do PIT-001, novo formulário FOR-002" /></FormControl><FormMessage /></FormItem> )} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormField control={form.control} name="procedureChangeNeeded" render={({ field }) => (<FormItem className="flex flex-row items-center space-x-2 space-y-0 rounded-md border p-4"><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl><div className="space-y-1 leading-none"><FormLabel>Necessário alterar procedimento?</FormLabel></div></FormItem>)}/>
+                        <FormField control={form.control} name="includeInTraining" render={({ field }) => (<FormItem className="flex flex-row items-center space-x-2 space-y-0 rounded-md border p-4"><FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl><div className="space-y-1 leading-none"><FormLabel>Incluir no plano de treinamento?</FormLabel></div></FormItem>)}/>
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
     
 
     
@@ -3119,3 +3457,4 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
     
 
     
+
