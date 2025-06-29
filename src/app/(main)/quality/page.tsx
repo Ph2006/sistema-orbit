@@ -633,54 +633,35 @@ export default function QualityPage() {
   };
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
-      const dataToSave: any = {
-        ...values,
-        inspectionDate: Timestamp.fromDate(values.inspectionDate),
-        photos: values.photos || [],
-        customerInspector: values.customerInspector || null,
-        jointIdentification: values.jointIdentification || "",
-        weldingProcess: values.weldingProcess || "",
-        jointType: values.jointType || "",
-        weldingPosition: values.weldingPosition || "",
-        baseMaterial: values.baseMaterial || "",
-        fillerMaterial: values.fillerMaterial || "",
-        materialThickness: values.materialThickness || "",
-        welderSinete: values.welderSinete || "",
-        welderQualification: values.welderQualification || "",
-        wpsCode: values.wpsCode || "",
-        dimensionalTools: values.dimensionalTools || "",
-        acceptanceCriteria: values.acceptanceCriteria || "",
-        surfaceCondition: values.surfaceCondition || "",
-        observedDefects: values.observedDefects || "",
-        technician: values.technician || "",
-        standard: values.standard || "",
-        equipment: values.equipment || "",
-        reportUrl: values.reportUrl || "",
-        releaseResponsible: values.releaseResponsible || "",
-      };
-      delete (dataToSave as any).id;
-      delete (dataToSave as any).reportNumber;
-  
-      if (selectedInspection) {
-        const docRef = doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id);
-        await setDoc(docRef, dataToSave, { merge: true });
-        toast({ title: "Relatório de solda atualizado!" });
-      } else {
-        const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
-        const existingNumbers = reportsSnapshot.docs
-          .map(d => parseInt((d.data().reportNumber || "EDN-0").replace(/[^0-9]/g, ""), 10))
-          .filter(n => !isNaN(n) && Number.isFinite(n));
-        const highestNumber = Math.max(0, ...existingNumbers);
-        dataToSave.reportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, "0")}`;
-  
-        await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
-        toast({ title: "Relatório de solda criado!" });
-      }
-      setIsInspectionFormOpen(false);
-      await fetchAllData();
+        const dataToSave: any = {
+            ...values,
+            inspectionDate: Timestamp.fromDate(values.inspectionDate),
+            photos: values.photos || [],
+            customerInspector: values.customerInspector || null,
+        };
+        delete (dataToSave as any).id;
+        delete (dataToSave as any).reportNumber;
+    
+        if (selectedInspection) {
+            const docRef = doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id);
+            await setDoc(docRef, dataToSave, { merge: true });
+            toast({ title: "Relatório de solda atualizado!" });
+        } else {
+            const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
+            const existingNumbers = reportsSnapshot.docs
+                .map(d => parseInt((d.data().reportNumber || "EDN-0").replace(/[^0-9]/g, ""), 10))
+                .filter(n => !isNaN(n) && Number.isFinite(n));
+            const highestNumber = Math.max(0, ...existingNumbers);
+            dataToSave.reportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, "0")}`;
+    
+            await addDoc(collection(db, "companies", "mecald", "weldingInspections"), dataToSave);
+            toast({ title: "Relatório de solda criado!" });
+        }
+        setIsInspectionFormOpen(false);
+        await fetchAllData();
     } catch (error) {
-      console.error("Error saving welding inspection:", error);
-      toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+        console.error("Error saving welding inspection:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar relatório" });
     }
   };
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
@@ -1410,6 +1391,36 @@ export default function QualityPage() {
                             </CardContent></Card>
                     </AccordionContent>
                 </AccordionItem>
+                <AccordionItem value="procedures">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
+                        <div className="flex items-center gap-2">
+                            <BookOpen className="h-5 w-5 text-primary" />
+                            Procedimentos Aplicáveis
+                        </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <PlaceholderCard 
+                            title="Gestão de Procedimentos"
+                            description="Visualize e anexe os procedimentos de solda, pintura e inspeção aplicáveis a este pedido."
+                            icon={BookOpen} 
+                        />
+                    </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="lessons-learned">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
+                        <div className="flex items-center gap-2">
+                            <BrainCircuit className="h-5 w-5 text-primary" />
+                            Lições Aprendidas
+                        </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <PlaceholderCard
+                            title="Registro de Lições Aprendidas"
+                            description="Documente os aprendizados, dificuldades e sucessos deste projeto para melhorar processos futuros."
+                            icon={BrainCircuit}
+                        />
+                    </AccordionContent>
+                </AccordionItem>
             </Accordion>
             </ScrollArea>
             </div>
@@ -1935,3 +1946,6 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
 
 
 
+
+
+    
