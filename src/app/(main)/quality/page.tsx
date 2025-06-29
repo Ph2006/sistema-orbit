@@ -445,7 +445,7 @@ export default function QualityPage() {
           const order = ordersList.find(o => o.id === data.orderId);
           const item = order?.items.find(i => i.id === data.itemId);
           return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as WeldingInspection;
-      }).sort((a,b) => (parseInt((b.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'EDN-0').replace(/[^0-9]/g, ''), 10)));
+      }).sort((a,b) => (parseInt((b.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)));
       setWeldingInspections(weldInspectionsList);
 
       const paintReportsList = paintingReportsSnapshot.docs.map(doc => {
@@ -648,10 +648,10 @@ export default function QualityPage() {
         if (!selectedInspection) {
             const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
             const existingNumbers = reportsSnapshot.docs
-                .map(d => parseInt((d.data().reportNumber || "EDN-0").replace(/[^0-9]/g, ""), 10))
+                .map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10))
                 .filter(n => !isNaN(n) && Number.isFinite(n));
             const highestNumber = Math.max(0, ...existingNumbers);
-            dataToSave.reportNumber = `EDN-${(highestNumber + 1).toString().padStart(4, "0")}`;
+            dataToSave.reportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         }
     
         await setDoc(docRef, dataToSave, { merge: true });
@@ -1031,9 +1031,9 @@ export default function QualityPage() {
             let y = 15;
 
             // Header
-            if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+            if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo?.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
             docPdf.setFontSize(16).setFont(undefined, 'bold');
-            docPdf.text(`Relatório de Ensaio Visual de Solda`, 50, y + 5);
+            docPdf.text(`Ensaio Visual de Solda`, 50, y + 5);
             docPdf.setFontSize(14).setFont(undefined, 'normal');
             docPdf.text(`Nº ${report.reportNumber || 'N/A'}`, 50, y + 12);
             y += 25;
@@ -1061,10 +1061,13 @@ export default function QualityPage() {
                     startY: y,
                     theme: 'grid',
                     body: data,
-                    styles: { fontSize: 9, cellPadding: 2 },
+                    styles: { fontSize: 9, cellPadding: 2, lineWidth: 0.1, lineColor: [200, 200, 200] },
                     columnStyles: { 
                         0: { fontStyle: 'bold', cellWidth: 50 },
                         1: { cellWidth: 'auto' }
+                    },
+                    bodyStyles: {
+                        cellPadding: { top: 2, right: 2, bottom: 2, left: 2 }
                     }
                 });
                 y = (docPdf as any).lastAutoTable.finalY + 5;
@@ -1085,9 +1088,15 @@ export default function QualityPage() {
                 ['Qualificação', report.welderQualification],
                 ['Código da WPS', report.wpsCode],
             ].map(([key, value]) => [key, value || 'N/A']));
-
+            
+            const selectedToolName = report.dimensionalTools;
+            const tool = calibrations.find(c => c.equipmentName === selectedToolName);
+            const toolDisplay = tool
+                ? `${tool.equipmentName} (Cód: ${tool.internalCode})\nCertificado: ${tool.certificateUrl || 'N/A'}`
+                : selectedToolName || 'N/A';
+                
             addSection('3. Dados do Ensaio Dimensional', [
-                ['Ferramentas Utilizadas', report.dimensionalTools],
+                ['Ferramentas Utilizadas', toolDisplay],
                 ['Critério de Aceitação', report.acceptanceCriteria],
             ].map(([key, value]) => [key, value || 'N/A']));
 
@@ -1104,38 +1113,39 @@ export default function QualityPage() {
                     ...(report.reportUrl ? [['Link do Laudo Externo', report.reportUrl]] : []),
                 ].map(([key, value]) => [key, value || 'N/A']));
             }
-
+            
             let finalY = y;
-            if (report.photos && report.photos.length > 0) {
-                finalY += 5;
-                if (finalY > pageHeight - 60) { docPdf.addPage(); finalY = 20; }
-                docPdf.setFontSize(12).setFont(undefined, 'bold');
-                docPdf.text('Fotos da Inspeção', 15, finalY);
-                finalY += 7;
-                const photoWidth = (pageWidth - 45) / 2;
-                const photoHeight = photoWidth * (3/4);
-                let x = 15;
-                for (const photoDataUri of report.photos) {
-                    if (finalY + photoHeight > pageHeight - 45) {
-                        docPdf.addPage();
-                        finalY = 20;
-                        x = 15;
-                    }
-                    try { docPdf.addImage(photoDataUri, 'JPEG', x, finalY, photoWidth, photoHeight); } 
-                    catch(e) { docPdf.text("Erro ao carregar imagem", x, finalY + 10); }
-                    x = (x === 15) ? (15 + photoWidth + 15) : 15;
-                    if (x === 15) finalY += photoHeight + 5;
-                }
-            }
-
             if (report.notes) {
-                finalY += 10;
                 if (finalY > pageHeight - 60) { docPdf.addPage(); finalY = 20; }
                 docPdf.setFontSize(12).setFont(undefined, 'bold').text('Observações', 15, finalY);
                 finalY += 6;
                 const splitNotes = docPdf.splitTextToSize(report.notes, pageWidth - 30);
                 docPdf.setFontSize(9).setFont(undefined, 'normal').text(splitNotes, 15, finalY);
+                finalY += (splitNotes.length * 5);
             }
+
+            if (report.photos && report.photos.length > 0) {
+                docPdf.addPage();
+                let photoY = 20;
+                docPdf.setFontSize(12).setFont(undefined, 'bold');
+                docPdf.text('Fotos da Inspeção', 15, photoY);
+                photoY += 7;
+                const photoWidth = (pageWidth - 45) / 2;
+                const photoHeight = photoWidth * (3/4);
+                let x = 15;
+                for (const photoDataUri of report.photos) {
+                    if (photoY + photoHeight > pageHeight - 45) {
+                        docPdf.addPage();
+                        photoY = 20;
+                        x = 15;
+                    }
+                    try { docPdf.addImage(photoDataUri, 'JPEG', x, photoY, photoWidth, photoHeight); } 
+                    catch(e) { docPdf.text("Erro ao carregar imagem", x, photoY + 10); }
+                    x = (x === 15) ? (15 + photoWidth + 15) : 15;
+                    if (x === 15) photoY += photoHeight + 5;
+                }
+            }
+
 
             let footerText = 'DOC-MEC-000';
             switch(report.inspectionType) {
@@ -1492,7 +1502,7 @@ export default function QualityPage() {
                                 <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement, update: updateMeasurement }} calibrations={calibrations} toast={toast} />
                             )}
                              {dialogType === 'welding' && (
-                                 <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} />
+                                 <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} />
                             )}
                              {dialogType === 'painting' && (
                                  <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
@@ -1843,7 +1853,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     </>);
 }
 
-function WeldingInspectionForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[] }) {
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
@@ -1909,8 +1919,31 @@ function WeldingInspectionForm({ form, orders, teamMembers }: { form: any, order
       <Card>
           <CardHeader><CardTitle className="text-base">3. Dados do Ensaio Dimensional</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField control={form.control} name="dimensionalTools" render={({ field }) => ( <FormItem><FormLabel>Ferramentas utilizadas</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Medidor de garganta" /></FormControl><FormMessage /></FormItem> )}/>
-              <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de aceitação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: AWS D1.1, Tabela 6.1" /></FormControl><FormMessage /></FormItem> )}/>
+            <FormField
+                control={form.control}
+                name="dimensionalTools"
+                render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Ferramentas utilizadas</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value ?? ''}>
+                            <FormControl>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Selecione uma ferramenta calibrada" />
+                                </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                {calibrations.map((cal) => (
+                                    <SelectItem key={cal.id} value={cal.equipmentName}>
+                                        {cal.equipmentName} ({cal.internalCode})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <FormMessage />
+                    </FormItem>
+                )}
+            />
+            <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de aceitação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: AWS D1.1, Tabela 6.1" /></FormControl><FormMessage /></FormItem> )}/>
           </CardContent>
       </Card>
 
@@ -1990,4 +2023,5 @@ function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: 
 
 
     
+
 
