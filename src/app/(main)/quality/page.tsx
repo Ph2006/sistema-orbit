@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -190,7 +190,6 @@ const liquidPenetrantSchema = z.object({
   procedure: z.object({
     preCleaning: z.boolean().default(false),
     penetrantApplication: z.boolean().default(false),
-    penetrationTime: z.coerce.number().optional(),
     developmentTime: z.coerce.number().optional(),
     totalProcessTime: z.coerce.number().optional(),
     lightingMode: z.string().optional(),
@@ -211,6 +210,70 @@ const liquidPenetrantSchema = z.object({
   photos: z.array(z.string()).optional(),
 });
 
+const ultrasoundResultSchema = z.object({
+    id: z.string(),
+    jointCode: z.string().min(1, "Código da junta é obrigatório."),
+    defectType: z.string().optional(),
+    location: z.string().optional(),
+    depth: z.coerce.number().optional(),
+    extension: z.coerce.number().optional(),
+    amplitude: z.string().optional(),
+    evaluationResult: z.enum(["Conforme", "Não Conforme"]),
+});
+
+const ultrasoundReportSchema = z.object({
+  id: z.string().optional(),
+  reportNumber: z.string().optional(),
+  inspectionDate: z.date({ required_error: "A data de emissão é obrigatória." }),
+  orderId: z.string({ required_error: "Selecione um pedido." }),
+  itemId: z.string({ required_error: "Selecione um item." }),
+  inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
+  qualificationLevel: z.string().optional(),
+
+  // Section 2
+  baseMaterial: z.string().optional(),
+  heatTreatment: z.string().optional(),
+  weldTypeAndThickness: z.string().optional(),
+  examinedAreaDescription: z.string().optional(),
+  quantityInspected: z.coerce.number().optional(),
+  testLocation: z.string().optional(),
+
+  // Section 3
+  executionStandard: z.string().optional(),
+  acceptanceCriteria: z.string().optional(),
+  examinationType: z.enum(["Detecção de Descontinuidades", "Medição de Espessura", "TOFD", "Phased Array"]).optional(),
+  testExtent: z.string().optional(),
+
+  // Section 4
+  equipment: z.string().optional(),
+  equipmentSerial: z.string().optional(),
+  equipmentCalibration: z.string().optional(),
+  headType: z.string().optional(),
+  frequency: z.coerce.number().optional(),
+  incidentAngle: z.coerce.number().optional(),
+  couplant: z.string().optional(),
+  referenceBlock: z.string().optional(),
+
+  // Section 5
+  pulseMode: z.string().optional(),
+  range: z.coerce.number().optional(),
+  gain: z.coerce.number().optional(),
+  distanceCorrection: z.string().optional(),
+  scanRate: z.coerce.number().optional(),
+  minResolution: z.coerce.number().optional(),
+
+  // Section 6
+  results: z.array(ultrasoundResultSchema).optional(),
+
+  // Section 7
+  finalResult: z.enum(["Conforme", "Não Conforme"]),
+  rejectionCriteria: z.string().optional(),
+  finalNotes: z.string().optional(),
+
+  // Section 9
+  photos: z.array(z.string()).optional(),
+});
+
 
 // --- TYPES ---
 type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string };
@@ -221,6 +284,8 @@ type DimensionalReport = z.infer<typeof dimensionalReportSchema> & { id: string,
 type WeldingInspection = z.infer<typeof weldingInspectionSchema> & { id: string, orderNumber: string, itemName: string };
 type PaintingReport = z.infer<typeof paintingReportSchema> & { id: string, orderNumber: string, itemName: string };
 type LiquidPenetrantReport = z.infer<typeof liquidPenetrantSchema> & { id: string, orderNumber: string, itemName: string };
+type UltrasoundReport = z.infer<typeof ultrasoundReportSchema> & { id: string, orderNumber: string, itemName: string };
+type UltrasoundResult = z.infer<typeof ultrasoundResultSchema>;
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
@@ -299,9 +364,11 @@ export default function QualityPage() {
   const [weldingInspections, setWeldingInspections] = useState<WeldingInspection[]>([]);
   const [paintingReports, setPaintingReports] = useState<PaintingReport[]>([]);
   const [liquidPenetrantReports, setLiquidPenetrantReports] = useState<LiquidPenetrantReport[]>([]);
+  const [ultrasoundReports, setUltrasoundReports] = useState<UltrasoundReport[]>([]);
+
 
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
-  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | null>(null);
+  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | null>(null);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
@@ -419,6 +486,16 @@ export default function QualityPage() {
     },
   });
 
+  const ultrasoundReportForm = useForm<z.infer<typeof ultrasoundReportSchema>>({
+    resolver: zodResolver(ultrasoundReportSchema),
+    defaultValues: {
+      inspectionDate: new Date(),
+      finalResult: "Conforme",
+      photos: [],
+      results: [],
+    },
+  });
+
 
   // --- DATA FETCHING ---
   const fetchAllData = async () => {
@@ -428,7 +505,7 @@ export default function QualityPage() {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
         materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
-        liquidPenetrantReportsSnapshot
+        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -439,6 +516,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "weldingInspections")),
         getDocs(collection(db, "companies", "mecald", "paintingReports")),
         getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
+        getDocs(collection(db, "companies", "mecald", "ultrasoundReports")),
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -530,6 +608,20 @@ export default function QualityPage() {
       }).sort((a,b) => (parseInt((b.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)));
       setLiquidPenetrantReports(lpReportsList);
 
+      const utReportsList = ultrasoundReportsSnapshot.docs.map(doc => {
+          const data = doc.data();
+          const order = ordersList.find(o => o.id === data.orderId);
+          const item = order?.items.find(i => i.id === data.itemId);
+          return {
+              id: doc.id,
+              ...data,
+              inspectionDate: data.inspectionDate.toDate(),
+              orderNumber: order?.number || "N/A",
+              itemName: item?.description || "Item não encontrado",
+          } as UltrasoundReport;
+      }).sort((a,b) => (parseInt((b.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)));
+      setUltrasoundReports(utReportsList);
+
 
     } catch (error) {
       console.error("Error fetching quality data:", error);
@@ -563,12 +655,13 @@ export default function QualityPage() {
         const weldCount = weldingInspections.filter(i => i.orderId === orderId).length;
         const paintCount = paintingReports.filter(i => i.orderId === orderId).length;
         const lpCount = liquidPenetrantReports.filter(i => i.orderId === orderId).length;
-        return matCount + dimCount + weldCount + paintCount + lpCount;
+        const utCount = ultrasoundReports.filter(i => i.orderId === orderId).length;
+        return matCount + dimCount + weldCount + paintCount + lpCount + utCount;
     };
 
     const inspectionsForSelectedOrder = useMemo(() => {
         if (!selectedOrderForInspections) {
-            return { material: [], dimensional: [], welding: [], painting: [], liquidPenetrant: [] };
+            return { material: [], dimensional: [], welding: [], painting: [], liquidPenetrant: [], ultrasound: [] };
         }
         const orderId = selectedOrderForInspections.id;
         return {
@@ -577,8 +670,9 @@ export default function QualityPage() {
             welding: weldingInspections.filter(i => i.orderId === orderId),
             painting: paintingReports.filter(i => i.orderId === orderId),
             liquidPenetrant: liquidPenetrantReports.filter(i => i.orderId === orderId),
+            ultrasound: ultrasoundReports.filter(i => i.orderId === orderId),
         };
-    }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports, liquidPenetrantReports]);
+    }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports, liquidPenetrantReports, ultrasoundReports]);
 
 
   // --- RNC HANDLERS ---
@@ -725,9 +819,11 @@ export default function QualityPage() {
         if (!selectedInspection) {
             const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
             const lpReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports"));
+            const utReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "ultrasoundReports"));
             const weldNumbers = weldReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
             const lpNumbers = lpReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
-            const allNumbers = [...weldNumbers, ...lpNumbers];
+            const utNumbers = utReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+            const allNumbers = [...weldNumbers, ...lpNumbers, ...utNumbers];
             const highestNumber = Math.max(0, ...allNumbers);
             dataToSave.reportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         }
@@ -765,7 +861,7 @@ export default function QualityPage() {
   };
   const onLiquidPenetrantSubmit = async (values: z.infer<typeof liquidPenetrantSchema>) => {
     try {
-      const dataToSave = {
+      const dataToSave: any = {
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         consumableValidity: values.consumableValidity ? Timestamp.fromDate(values.consumableValidity) : null,
@@ -777,9 +873,11 @@ export default function QualityPage() {
       } else {
         const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
         const lpReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports"));
+        const utReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "ultrasoundReports"));
         const weldNumbers = weldReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
         const lpNumbers = lpReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
-        const allNumbers = [...weldNumbers, ...lpNumbers];
+        const utNumbers = utReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+        const allNumbers = [...weldNumbers, ...lpNumbers, ...utNumbers];
         const highestNumber = Math.max(0, ...allNumbers);
         const newReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         
@@ -795,6 +893,44 @@ export default function QualityPage() {
     } catch (error) {
       console.error("Error saving liquid penetrant report:", error);
       toast({ variant: "destructive", title: "Erro ao salvar relatório de LP" });
+    }
+  };
+
+  const onUltrasoundReportSubmit = async (values: z.infer<typeof ultrasoundReportSchema>) => {
+    try {
+      const dataToSave: any = {
+        ...values,
+        inspectionDate: Timestamp.fromDate(values.inspectionDate),
+        results: values.results || [],
+        photos: values.photos || [],
+      };
+
+      if (selectedInspection) {
+        await updateDoc(doc(db, "companies", "mecald", "ultrasoundReports", selectedInspection.id), dataToSave);
+        toast({ title: "Relatório de Ultrassom atualizado!" });
+      } else {
+        const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
+        const lpReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports"));
+        const utReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "ultrasoundReports"));
+        const weldNumbers = weldReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+        const lpNumbers = lpReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+        const utNumbers = utReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
+        const allNumbers = [...weldNumbers, ...lpNumbers, ...utNumbers];
+        const highestNumber = Math.max(0, ...allNumbers);
+        const newReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
+        
+        await addDoc(collection(db, "companies", "mecald", "ultrasoundReports"), {
+          ...dataToSave,
+          reportNumber: newReportNumber,
+        });
+        toast({ title: "Relatório de Ultrassom criado!" });
+      }
+
+      setIsInspectionFormOpen(false);
+      await fetchAllData();
+    } catch (error) {
+      console.error("Error saving ultrasound report:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar relatório de Ultrassom" });
     }
   };
 
@@ -922,6 +1058,26 @@ export default function QualityPage() {
     setIsInspectionFormOpen(true);
   };
 
+  const handleOpenUltrasoundForm = (report: UltrasoundReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
+    setSelectedInspection(report);
+    setDialogType('ultrasound');
+    if (report) {
+        ultrasoundReportForm.reset({
+            ...report,
+            inspectionDate: new Date(report.inspectionDate),
+        });
+    } else {
+        ultrasoundReportForm.reset({
+            orderId: order?.id || undefined,
+            inspectionDate: new Date(),
+            finalResult: "Conforme",
+            photos: [],
+            results: [],
+        });
+    }
+    setIsInspectionFormOpen(true);
+  };
+
   const handleDeleteInspectionClick = (inspection: any, type: string) => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
   const handleConfirmDeleteInspection = async () => {
     if (!inspectionToDelete) return;
@@ -932,6 +1088,7 @@ export default function QualityPage() {
         case 'welding': collectionName = 'weldingInspections'; break;
         case 'painting': collectionName = 'paintingReports'; break;
         case 'liquidPenetrant': collectionName = 'liquidPenetrantReports'; break;
+        case 'ultrasound': collectionName = 'ultrasoundReports'; break;
     }
     if (!collectionName) return;
     try {
@@ -947,6 +1104,7 @@ export default function QualityPage() {
         case 'welding': weldingInspectionForm.handleSubmit(onWeldingInspectionSubmit)(data); break;
         case 'painting': paintingReportForm.handleSubmit(onPaintingReportSubmit)(data); break;
         case 'liquidPenetrant': liquidPenetrantForm.handleSubmit(onLiquidPenetrantSubmit)(data); break;
+        case 'ultrasound': ultrasoundReportForm.handleSubmit(onUltrasoundReportSubmit)(data); break;
     }
   };
 
@@ -1468,6 +1626,136 @@ export default function QualityPage() {
     }
   };
 
+  const handleUltrasoundReportPDF = async (report: UltrasoundReport) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === report.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+
+        // Header
+        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+        docPdf.setFontSize(14).setFont(undefined, 'bold');
+        docPdf.text(`Relatório de Ensaio por Ultrassom (UT)`, pageWidth / 2, y + 5, { align: 'center' });
+        docPdf.setFontSize(12).setFont(undefined, 'normal');
+        docPdf.text(`Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 12, { align: 'center' });
+        y += 25;
+
+        const addSection = (title: string, data: (string | number | null | undefined)[][]) => {
+            if (y > pageHeight - 40 && docPdf.internal.getNumberOfPages() > 0) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(11).setFont(undefined, 'bold');
+            docPdf.text(title, 15, y);
+            y += 2;
+            autoTable(docPdf, {
+                startY: y,
+                theme: 'grid',
+                body: data.map(row => row.map(cell => cell ?? 'N/A')),
+                styles: { fontSize: 8, cellPadding: 1.5, lineWidth: 0.1, lineColor: [200, 200, 200] },
+                columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 5;
+        };
+
+        addSection('1. Dados do Relatório', [
+            ['Nº do Relatório', report.reportNumber],
+            ['Data de Emissão', format(report.inspectionDate, 'dd/MM/yyyy')],
+            ['Pedido / OS', orderInfo?.number],
+            ['Projeto / Cliente', orderInfo?.customerName],
+            ['Código do Desenho', itemInfo?.code],
+            ['Inspetor Responsável', report.inspectedBy],
+            ['Nível de Qualificação', report.qualificationLevel],
+        ]);
+
+        addSection('2. Identificação do Componente', [
+            ['Nome da Peça', itemInfo?.description],
+            ['Material Base', report.baseMaterial],
+            ['Tratamento Térmico', report.heatTreatment],
+            ['Tipo e Espessura da Solda', report.weldTypeAndThickness],
+            ['Área Examinada', report.examinedAreaDescription],
+            ['Quantidade de Peças', report.quantityInspected],
+            ['Local do Ensaio', report.testLocation],
+        ]);
+
+        addSection('3. Normas e Critérios', [
+            ['Norma de Execução', report.executionStandard],
+            ['Critério de Aceitação', report.acceptanceCriteria],
+            ['Tipo de Exame', report.examinationType],
+            ['Extensão do Ensaio', report.testExtent],
+        ]);
+
+        addSection('4. Equipamentos e Acessórios', [
+            ['Equipamento (Marca/Modelo)', report.equipment],
+            ['Nº de Série', report.equipmentSerial],
+            ['Calibração (Cert.+Val.)', report.equipmentCalibration],
+            ['Tipo de Cabeçote', report.headType],
+            ['Frequência (MHz)', report.frequency],
+            ['Ângulo (°)', report.incidentAngle],
+            ['Acoplante', report.couplant],
+            ['Bloco Padrão', report.referenceBlock],
+        ]);
+
+        addSection('5. Parâmetros do Ensaio', [
+            ['Modo de Pulso', report.pulseMode],
+            ['Alcance (mm)', report.range],
+            ['Ganho (dB)', report.gain],
+            ['Correção de Distância', report.distanceCorrection],
+            ['Taxa de Varredura (mm/s)', report.scanRate],
+            ['Resolução Mínima (mm)', report.minResolution],
+        ]);
+
+        if (report.results && report.results.length > 0) {
+            docPdf.addPage();
+            y = 20;
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('6. Resultados Detalhados', 15, y);
+            y += 7;
+            autoTable(docPdf, {
+                startY: y,
+                head: [['Junta', 'Tipo de Indicação', 'Localização', 'Prof. (mm)', 'Extensão (mm)', 'Amplitude', 'Resultado']],
+                body: report.results.map(r => [
+                    r.jointCode, r.defectType, r.location, r.depth, r.extension, r.amplitude, r.evaluationResult
+                ]),
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [40, 40, 40] },
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 5;
+        }
+
+        addSection('7. Conclusão', [
+            ['Resultado Final', report.finalResult],
+            ['Critério de Rejeição', report.rejectionCriteria],
+            ['Observações Finais', report.finalNotes],
+        ]);
+
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            const signatureY = pageHeight - 35;
+            if (i === pageCount) { 
+                docPdf.setFontSize(10).setFont(undefined, 'normal');
+                const enterpriseInspectorX = 15;
+                docPdf.line(enterpriseInspectorX, signatureY, enterpriseInspectorX + 85, signatureY);
+                docPdf.text(report.inspectedBy, enterpriseInspectorX, signatureY + 5);
+                docPdf.text('Inspetor Responsável', enterpriseInspectorX, signatureY + 10);
+            }
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text('UT-MEC-202501.REV0', 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+
+        docPdf.save(`Relatorio_UT_${report.reportNumber || report.id}.pdf`);
+    } catch (error) {
+        console.error("Error exporting UT PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+    }
+  };
+
 
   const currentForm = useMemo(() => {
     switch(dialogType) {
@@ -1476,9 +1764,10 @@ export default function QualityPage() {
         case 'welding': return weldingInspectionForm;
         case 'painting': return paintingReportForm;
         case 'liquidPenetrant': return liquidPenetrantForm;
+        case 'ultrasound': return ultrasoundReportForm;
         default: return null;
     }
-  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm]);
+  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm, ultrasoundReportForm]);
   
 
   return (
@@ -1737,6 +2026,37 @@ export default function QualityPage() {
                       </Card>
                     </AccordionContent>
                 </AccordionItem>
+                <AccordionItem value="ultrasound-inspection">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><FilePen className="h-5 w-5 text-primary" />Ensaio por Ultrassom (UT)</div></AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <Card>
+                            <CardHeader className="flex-row justify-between items-center">
+                                <CardTitle className="text-base">Histórico de Relatórios de UT</CardTitle>
+                                <Button size="sm" onClick={() => handleOpenUltrasoundForm()}><PlusCircle className="mr-2 h-4 w-4"/>Novo Relatório de UT</Button>
+                            </CardHeader>
+                            <CardContent>{isLoading ? <Skeleton className="h-40 w-full"/> : 
+                                <Table><TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Item</TableHead><TableHead>Resultado</TableHead><TableHead>Inspetor</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                    <TableBody>{inspectionsForSelectedOrder.ultrasound.length > 0 ? inspectionsForSelectedOrder.ultrasound.map(rep => (
+                                        <TableRow key={rep.id}>
+                                            <TableCell className="font-mono">{rep.reportNumber || 'N/A'}</TableCell>
+                                            <TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell>
+                                            <TableCell>{rep.itemName}</TableCell>
+                                            <TableCell><Badge variant={getStatusVariant(rep.finalResult)}>{rep.finalResult}</Badge></TableCell>
+                                            <TableCell>{rep.inspectedBy}</TableCell>
+                                            <TableCell className="text-right">
+                                                <Button variant="ghost" size="icon" onClick={() => handleUltrasoundReportPDF(rep)}><FileDown className="h-4 w-4" /></Button>
+                                                <Button variant="ghost" size="icon" onClick={() => handleOpenUltrasoundForm(rep)}><Pencil className="h-4 w-4" /></Button>
+                                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'ultrasound')}><Trash2 className="h-4 w-4" /></Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório de ultrassom para este pedido.</TableCell></TableRow>}
+                                    </TableBody>
+                                </Table>
+                            }
+                            </CardContent>
+                        </Card>
+                    </AccordionContent>
+                </AccordionItem>
                 <AccordionItem value="painting-inspection">
                     <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary" />Controle de Pintura</div></AccordionTrigger>
                     <AccordionContent className="pt-2">
@@ -1802,6 +2122,7 @@ export default function QualityPage() {
                 {dialogType === 'welding' && (selectedInspection ? 'Editar Ensaio Visual de Solda' : 'Novo Ensaio Visual de Solda')}
                 {dialogType === 'painting' && (selectedInspection ? 'Editar Relatório de Pintura' : 'Novo Relatório de Pintura')}
                 {dialogType === 'liquidPenetrant' && (selectedInspection ? 'Editar Relatório de LP' : 'Novo Relatório de LP')}
+                {dialogType === 'ultrasound' && (selectedInspection ? 'Editar Relatório de UT' : 'Novo Relatório de UT')}
             </DialogTitle>
             <DialogDescription>Preencha os campos para registrar a inspeção.</DialogDescription>
         </DialogHeader>
@@ -1824,6 +2145,9 @@ export default function QualityPage() {
                             )}
                              {dialogType === 'liquidPenetrant' && (
                                  <LiquidPenetrantForm form={liquidPenetrantForm} orders={orders} teamMembers={teamMembers} />
+                            )}
+                            {dialogType === 'ultrasound' && (
+                                <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} />
                             )}
                         </div>
                     </ScrollArea>
@@ -2464,7 +2788,43 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
   </>);
 }
 
+function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[], toast: any }) {
+    const watchedOrderId = form.watch("orderId");
+    const availableItems = useMemo(() => {
+        if (!watchedOrderId) return [];
+        return orders.find(o => o.id === watchedOrderId)?.items || [];
+    }, [watchedOrderId, orders]);
+    
+    useEffect(() => {
+        form.setValue('itemId', '');
+    }, [watchedOrderId, form]);
+    
+    return(
+        <div className="space-y-4">
+             <Card><CardHeader><CardTitle className="text-base">1. Dados do Relatório</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem><FormLabel>Data da emissão</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Nº do pedido / OS</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="qualificationLevel" render={({ field }) => ( <FormItem><FormLabel>Nível de qualificação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Nível II - SNQC" /></FormControl><FormMessage /></FormItem> )}/>
+                </CardContent>
+            </Card>
 
+             <Card><CardHeader><CardTitle className="text-base">2. Identificação do Componente</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Código do item / desenho</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                     <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="heatTreatment" render={({ field }) => ( <FormItem><FormLabel>Tratamento Térmico</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Normalizado" /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="weldTypeAndThickness" render={({ field }) => ( <FormItem><FormLabel>Tipo e Espessura da Solda</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Topo, 12.7mm" /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="examinedAreaDescription" render={({ field }) => ( <FormItem><FormLabel>Área Examinada</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Descreva a área ou anexe um desenho marcado" /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
+                     <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Oficina" /></FormControl><FormMessage /></FormItem> )}/>
+                </CardContent>
+            </Card>
+        </div>
+    )
+}
+    
 
     
 
