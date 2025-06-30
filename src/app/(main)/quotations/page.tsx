@@ -416,23 +416,18 @@ export default function QuotationsPage() {
         const itemToDuplicate = watchedItems[index];
         if (!itemToDuplicate) return;
         
-        // Criar uma cópia do item com novo ID e descrição indicando que é uma duplicata
+        // Criar uma cópia do item com novo ID, mantendo a descrição original
         const duplicatedItem = {
             ...itemToDuplicate,
             id: undefined, // Remover ID para criar novo item
-            description: `${itemToDuplicate.description} (Cópia)`,
         };
         
-        // Adicionar o item duplicado logo após o item original
-        const currentItems = [...watchedItems];
-        currentItems.splice(index + 1, 0, duplicatedItem);
-        
-        // Atualizar o formulário com os novos itens
-        form.setValue('items', currentItems);
+        // Adicionar o item duplicado no final da lista
+        append(duplicatedItem);
         
         toast({
             title: "Item duplicado!",
-            description: `"${itemToDuplicate.description}" foi duplicado com sucesso.`,
+            description: `"${itemToDuplicate.description}" foi duplicado e adicionado ao final da lista.`,
         });
     };
     
