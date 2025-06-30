@@ -1,10 +1,11 @@
 [build]
   publish = "out"
-  command = "npm run build"
+  command = "npm ci --no-optional && npm run build"
 
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
   NEXT_TELEMETRY_DISABLED = "1"
+  NPM_FLAGS = "--production=false"
 
 [[redirects]]
   from = "/*"
@@ -12,10 +13,4 @@
   status = 200
 
 [context.production.environment]
-  NODE_ENV = "production"
-
-[context.deploy-preview.environment]
-  NODE_ENV = "development"
-
-[context.branch-deploy.environment]
-  NODE_ENV = "development" 
+  NODE_ENV = "production" 
