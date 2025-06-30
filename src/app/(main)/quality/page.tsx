@@ -107,7 +107,7 @@ const dimensionalReportSchema = z.object({
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   customerInspector: z.string().optional(),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
-  quantityInspected: z.coerce.number().min(1, "A quantidade inspecionada é obrigatória.").optional(),
+  quantityInspected: z.coerce.number().min(1).optional(),
   photos: z.array(z.string()).optional(),
   notes: z.string().optional(),
   measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
@@ -1054,10 +1054,23 @@ export default function QualityPage() {
   const onDimensionalReportSubmit = async (values: z.infer<typeof dimensionalReportSchema>) => {
     try {
        const { reportNumber, ...restOfValues } = values;
+       
+       // Limpar campos undefined/null antes de salvar
+       const cleanData = (obj: any): any => {
+         const cleaned: any = {};
+         Object.keys(obj).forEach(key => {
+           if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+             cleaned[key] = obj[key];
+           }
+         });
+         return cleaned;
+       };
+       
        const dataToSave = { 
-        ...restOfValues, 
+        ...cleanData(restOfValues), 
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         customerInspector: values.customerInspector || null,
+        quantityInspected: values.quantityInspected || null,
       };
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
@@ -1311,7 +1324,11 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { 
-        dimensionalReportForm.reset(report); 
+        dimensionalReportForm.reset({
+            ...report,
+            inspectionDate: report.inspectionDate ? new Date(report.inspectionDate) : new Date(),
+            quantityInspected: report.quantityInspected || undefined,
+        }); 
     } else { 
         dimensionalReportForm.reset({ 
             reportNumber: '', inspectionDate: new Date(), 
