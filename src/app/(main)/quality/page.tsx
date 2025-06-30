@@ -1053,34 +1053,29 @@ export default function QualityPage() {
   };
   const onDimensionalReportSubmit = async (values: z.infer<typeof dimensionalReportSchema>) => {
     try {
+       console.log("=== SALVANDO RELATÓRIO DIMENSIONAL ===");
+       console.log("Dados recebidos:", values);
+       console.log("Fotos recebidas:", values.photos?.length || 0);
+       
        const { reportNumber, ...restOfValues } = values;
        
-       // Limpar campos undefined/null antes de salvar
-       const cleanData = (obj: any): any => {
-         const cleaned: any = {};
-         Object.keys(obj).forEach(key => {
-           const value = obj[key];
-           if (value !== undefined && value !== null) {
-             // Tratar arrays especialmente (como fotos e medições)
-             if (Array.isArray(value)) {
-               cleaned[key] = value;
-             } else if (value !== '') {
-               cleaned[key] = value;
-             }
-           }
-         });
-         return cleaned;
-       };
-       
+       // Preparar dados para salvar sem remover campos importantes
        const dataToSave = { 
-        ...cleanData(restOfValues), 
+        ...restOfValues,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         customerInspector: values.customerInspector || null,
         quantityInspected: values.quantityInspected || null,
+        // Garantir que fotos sejam sempre um array
+        photos: values.photos || [],
+        // Garantir que medições sejam sempre um array  
+        measurements: values.measurements || []
       };
       
-      console.log("Dados para salvar relatório dimensional:", dataToSave);
-      console.log("Fotos incluídas:", dataToSave.photos?.length || 0);
+      console.log("Dados finais para salvar:", dataToSave);
+      console.log("Fotos finais incluídas:", dataToSave.photos?.length || 0);
+      if (dataToSave.photos?.length > 0) {
+        console.log("Primeira foto (100 caracteres):", dataToSave.photos[0]?.substring(0, 100));
+      }
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório atualizado!" });
@@ -1920,9 +1915,15 @@ export default function QualityPage() {
 
         let finalY = (docPdf as any).lastAutoTable.finalY;
 
-        // Seção de Fotos
+        // Seção de Fotos com logs detalhados
+        console.log("=== SEÇÃO DE FOTOS NO PDF ===");
+        console.log("report.photos exists:", !!report.photos);
+        console.log("report.photos is array:", Array.isArray(report.photos));
+        console.log("report.photos length:", report.photos?.length || 0);
+        console.log("report.photos raw data:", report.photos);
+        
         if (report.photos && Array.isArray(report.photos) && report.photos.length > 0) {
-            console.log("Adicionando fotos ao PDF. Total:", report.photos.length);
+            console.log("✓ Fotos encontradas! Adicionando ao PDF. Total:", report.photos.length);
             
             y = finalY + 10;
             if (y > pageHeight - 60) { 
@@ -1941,7 +1942,12 @@ export default function QualityPage() {
 
             for (let i = 0; i < report.photos.length; i++) {
                 const photoDataUri = report.photos[i];
-                console.log(`Processando foto ${i + 1}:`, photoDataUri ? "dados encontrados" : "sem dados");
+                console.log(`--- Processando foto ${i + 1} de ${report.photos.length} ---`);
+                console.log(`Tipo: ${typeof photoDataUri}`);
+                console.log(`Tem dados: ${!!photoDataUri}`);
+                console.log(`É string: ${typeof photoDataUri === 'string'}`);
+                console.log(`Início: ${photoDataUri?.substring(0, 50)}`);
+                console.log(`É data URI: ${photoDataUri?.startsWith('data:image/')}`);
                 
                 // Verificar se precisa de nova página
                 if (y + photoHeight > pageHeight - 25) {
@@ -1952,20 +1958,27 @@ export default function QualityPage() {
                 }
                 
                 try {
-                    if (photoDataUri && typeof photoDataUri === 'string') {
+                    if (photoDataUri && typeof photoDataUri === 'string' && photoDataUri.startsWith('data:image/')) {
+                        console.log(`✓ Adicionando foto ${i + 1} ao PDF...`);
                         docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
                         
                         // Adicionar numeração da foto
                         docPdf.setFontSize(8).setFont(undefined, 'normal');
                         docPdf.text(`Foto ${i + 1}`, x + photoWidth/2, y + photoHeight + 5, { align: 'center' });
                         
-                        console.log(`Foto ${i + 1} adicionada com sucesso`);
+                        console.log(`✓ Foto ${i + 1} adicionada com sucesso!`);
                     } else {
-                        console.warn(`Foto ${i + 1} inválida ou vazia`);
-                        docPdf.setFontSize(10).text(`Foto ${i + 1}: Erro nos dados`, x, y + 10);
+                        console.warn(`❌ Foto ${i + 1} inválida:`, {
+                            exists: !!photoDataUri,
+                            type: typeof photoDataUri,
+                            isString: typeof photoDataUri === 'string',
+                            startsWithData: photoDataUri?.startsWith('data:image/'),
+                            preview: photoDataUri?.substring(0, 100)
+                        });
+                        docPdf.setFontSize(10).text(`Foto ${i + 1}: Dados inválidos`, x, y + 10);
                     }
                 } catch(e) {
-                    console.error(`Erro ao adicionar foto ${i + 1} ao PDF:`, e);
+                    console.error(`❌ Erro ao adicionar foto ${i + 1} ao PDF:`, e);
                     docPdf.setFontSize(10).text(`Foto ${i + 1}: Erro ao carregar`, x, y + 10);
                 }
 
@@ -1987,7 +2000,11 @@ export default function QualityPage() {
                 finalY = y;
             }
         } else {
-            console.log("Nenhuma foto encontrada no relatório para o PDF");
+            console.log("❌ Nenhuma foto encontrada no relatório para o PDF");
+            console.log("Motivos possíveis:");
+            console.log("- report.photos não existe:", !report.photos);
+            console.log("- report.photos não é array:", !Array.isArray(report.photos));
+            console.log("- report.photos está vazio:", report.photos?.length === 0);
         }
         
         const footerText = `DIM-MEC-2025-01.REV0`;
