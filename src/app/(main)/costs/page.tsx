@@ -226,7 +226,7 @@ export default function CostsPage() {
                 return {
                     id: d.id,
                     requisitionNumber: data.requisitionNumber || 'N/A',
-                    date: data.date.toDate(),
+                    date: data.date?.toDate ? data.date.toDate() : (data.date ? new Date(data.date) : new Date()),
                     status: data.status,
                     orderId: data.orderId,
                     items: (data.items || []).map((item: any, index: number): RequisitionItem => ({
@@ -239,7 +239,7 @@ export default function CostsPage() {
                         invoiceItemValue: item.invoiceItemValue || undefined,
                         certificateNumber: item.certificateNumber || "",
                         storageLocation: item.storageLocation || "",
-                        deliveryReceiptDate: item.deliveryReceiptDate?.toDate() || null,
+                        deliveryReceiptDate: item.deliveryReceiptDate?.toDate ? item.deliveryReceiptDate.toDate() : (item.deliveryReceiptDate ? new Date(item.deliveryReceiptDate) : null),
                         inspectionStatus: item.inspectionStatus || "Pendente",
                     })),
                 };
@@ -263,8 +263,8 @@ export default function CostsPage() {
               return { 
                 id: d.id,
                 ...data,
-                firstRegistrationDate: data.firstRegistrationDate?.toDate(),
-                lastUpdate: data.lastUpdate?.toDate(),
+                firstRegistrationDate: data.firstRegistrationDate?.toDate ? data.firstRegistrationDate.toDate() : (data.firstRegistrationDate ? new Date(data.firstRegistrationDate) : undefined),
+                lastUpdate: data.lastUpdate?.toDate ? data.lastUpdate.toDate() : (data.lastUpdate ? new Date(data.lastUpdate) : undefined),
               } as Supplier
             });
             setSuppliers(suppliersList);
@@ -300,9 +300,9 @@ export default function CostsPage() {
                     orderId: order.id,
                     internalOS: order.internalOS,
                     customerName: order.customerName,
-                    entryDate: entry.entryDate?.toDate(),
+                    entryDate: entry.entryDate?.toDate ? entry.entryDate.toDate() : (entry.entryDate ? new Date(entry.entryDate) : undefined),
                 }))
-            ).sort((a, b) => b.entryDate?.getTime() - a.entryDate?.getTime());
+            ).sort((a, b) => (b.entryDate?.getTime() || 0) - (a.entryDate?.getTime() || 0));
 
             setRecentCostEntries(allEntries);
 

@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -207,7 +206,7 @@ export default function MaterialsPage() {
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: cuttingPlanForm.control, name: "items" });
     const watchedCutPlanOrderId = cuttingPlanForm.watch("orderId");
 
-    const fetchData = useCallback(async () => {
+    const fetchRequisitions = useCallback(async () => {
         if (!user) return;
         setIsLoading(true);
         setIsLoadingData(true);
@@ -280,8 +279,8 @@ export default function MaterialsPage() {
     }, [user, toast]);
 
     useEffect(() => {
-        if (user && !authLoading) { fetchData(); }
-    }, [user, authLoading, fetchData]);
+        if (user && !authLoading) { fetchRequisitions(); }
+    }, [user, authLoading, fetchRequisitions]);
     
     // Corrected useEffect for customer linking
     useEffect(() => {
@@ -333,7 +332,7 @@ export default function MaterialsPage() {
                 await deleteDoc(doc(db, "companies", "mecald", "cuttingPlans", cuttingPlanToDelete.id));
                 toast({ title: "Plano de Corte excluído!", description: "O plano foi removido." });
             }
-            await fetchData();
+            await fetchRequisitions();
         } catch (error) {
             toast({ variant: "destructive", title: "Erro ao excluir", description: "Não foi possível remover o item." });
         } finally {
@@ -348,7 +347,10 @@ export default function MaterialsPage() {
             const newHistoryEntry = { timestamp: new Date(), user: user?.email || "Sistema", action: selectedRequisition ? "Edição" : "Criação", details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` };
             const finalHistory = [...(data.history || []), newHistoryEntry];
             
-            const dataToSave: any = { ...data, history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), date: Timestamp.fromDate(data.date), 
+            const dataToSave: any = { 
+                ...data, 
+                history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), 
+                date: Timestamp.fromDate(data.date), 
                 items: data.items.map(item => ({ 
                     ...item, 
                     deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, 
@@ -356,8 +358,16 @@ export default function MaterialsPage() {
                 })) 
             };
             
-            if (data.approval) { dataToSave.approval = { ...data.approval, approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null } } 
-            else { dataToSave.approval = null; }
+            // Limpar campos undefined para evitar erro no Firestore
+            if (data.generalNotes === undefined || data.generalNotes === null || data.generalNotes === '') {
+                delete dataToSave.generalNotes;
+            }
+            
+            if (data.approval) { 
+                dataToSave.approval = { ...data.approval, approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null } 
+            } else { 
+                dataToSave.approval = null; 
+            }
 
             if (selectedRequisition) {
                 await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave);
@@ -369,7 +379,7 @@ export default function MaterialsPage() {
             }
             toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
             setIsRequisitionFormOpen(false);
-            await fetchData();
+            await fetchRequisitions();
         } catch (error) {
             console.error("Error saving requisition:", error);
             toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar a requisição." });
@@ -389,7 +399,7 @@ export default function MaterialsPage() {
             }
             toast({ title: selectedCuttingPlan ? "Plano atualizado!" : "Plano de Corte criado!" });
             setIsCuttingPlanFormOpen(false);
-            await fetchData();
+            await fetchRequisitions();
         } catch (error) {
             console.error("Error saving cutting plan:", error);
             toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar o plano de corte." });
