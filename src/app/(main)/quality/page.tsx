@@ -3778,19 +3778,66 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
 
     const watchedPhotos = form.watch("photos", []);
 
-    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.7): Promise<string> => {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                // Calcular dimensões mantendo proporção
+                let { width, height } = img;
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height = (height * maxWidth) / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxWidth) {
+                        width = (width * maxWidth) / height;
+                        height = maxWidth;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                
+                // Desenhar e comprimir
+                ctx?.drawImage(img, 0, 0, width, height);
+                const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                resolve(compressedDataUrl);
+            };
+            
+            img.src = URL.createObjectURL(file);
+        });
+    };
+
+    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files) return;
 
-        Array.from(files).forEach(file => {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                if (event.target?.result) {
-                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
-                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
-                }
-            };
-            reader.readAsDataURL(file);
+        const currentPhotos = form.getValues("photos") || [];
+        
+        // Limitar a 4 fotos para evitar exceder limite do Firestore
+        if (currentPhotos.length + files.length > 4) {
+            toast({
+                variant: "destructive",
+                title: "Limite de fotos excedido",
+                description: "Máximo de 4 fotos por relatório para evitar problemas de tamanho.",
+            });
+            return;
+        }
+
+        const compressedPhotos = await Promise.all(
+            Array.from(files).map(file => compressImage(file, 800, 0.6))
+        );
+
+        const updatedPhotos = [...currentPhotos, ...compressedPhotos];
+        form.setValue("photos", updatedPhotos, { shouldValidate: true });
+        
+        toast({
+            title: "Fotos adicionadas",
+            description: `${files.length} foto(s) comprimida(s) e adicionada(s) ao relatório.`,
         });
     };
 
@@ -4001,7 +4048,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             <FormControl>
                 <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
             </FormControl>
-            <FormDescription>Selecione uma ou mais imagens para anexar ao relatório. Imagens grandes podem demorar para salvar.</FormDescription>
+            <FormDescription>Selecione até 4 imagens (serão comprimidas automaticamente para otimizar o tamanho).</FormDescription>
             {watchedPhotos && watchedPhotos.length > 0 && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
                     {watchedPhotos.map((photo, index) => (
