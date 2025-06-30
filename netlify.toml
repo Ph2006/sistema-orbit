@@ -1,10 +1,11 @@
 [build]
   publish = "out"
-  command = "npm install && npm run build"
+  command = "npm install --legacy-peer-deps && npm list typescript && npm run build"
 
 [build.environment]
   NODE_VERSION = "20.17.0"
   NEXT_TELEMETRY_DISABLED = "1"
+  NPM_CONFIG_PRODUCTION = "false"
 
 [[redirects]]
   from = "/*"
