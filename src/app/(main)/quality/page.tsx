@@ -2643,6 +2643,138 @@ export default function QualityPage() {
     }
   };
 
+  // Função para gerar relatório consolidado dos chamados do pedido
+  const handleOrderTicketsReport = async (order: OrderInfo) => {
+    try {
+        const orderTickets = engineeringTickets.filter(ticket => ticket.orderId === order.id);
+        
+        if (orderTickets.length === 0) {
+            toast({ variant: "destructive", title: "Nenhum chamado", description: "Não há chamados para este pedido." });
+            return;
+        }
+
+        toast({ title: "Gerando Relatório de Chamados..." });
+
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        
+        const docPdf = new jsPDF({ orientation: "landscape" });
+        const pageHeight = docPdf.internal.pageSize.height;
+        const pageWidth = docPdf.internal.pageSize.width;
+        let y = 20;
+        
+        // Header
+        if (companyData.logo?.preview) {
+            try { 
+                docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 40, 20); 
+            } catch(e) {}
+        }
+        
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(companyData.nomeFantasia || 'Sua Empresa', pageWidth - 15, y + 10, { align: 'right' });
+        
+        y += 40;
+        docPdf.setFontSize(18).setFont(undefined, 'bold').text(`Relatório de Chamados - Pedido ${order.number}`, pageWidth / 2, y, { align: 'center' });
+        docPdf.setFontSize(12).setFont(undefined, 'normal').text(`Cliente: ${order.customerName}`, pageWidth / 2, y + 10, { align: 'center' });
+        docPdf.text(`Data do Relatório: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, pageWidth / 2, y + 20, { align: 'center' });
+        
+        y += 35;
+        
+        // Função para calcular dias
+        const calculateDays = (ticket: EngineeringTicket) => {
+            const now = new Date();
+            const openedDate = ticket.openedAt;
+            
+            if (ticket.status === 'Resolvido' && ticket.resolvedAt) {
+                return Math.ceil((ticket.resolvedAt.getTime() - openedDate.getTime()) / (1000 * 60 * 60 * 24));
+            } else {
+                return Math.ceil((now.getTime() - openedDate.getTime()) / (1000 * 60 * 60 * 24));
+            }
+        };
+        
+        // Resumo dos chamados
+        const resolvedTickets = orderTickets.filter(t => t.status === 'Resolvido');
+        const avgResolutionTime = resolvedTickets.length > 0 
+            ? Math.round(resolvedTickets.reduce((acc, t) => acc + calculateDays(t), 0) / resolvedTickets.length)
+            : 0;
+
+        const summaryData = [
+            ['Métrica', 'Valor'],
+            ['Total de Chamados', orderTickets.length.toString()],
+            ['Chamados Abertos', orderTickets.filter(t => t.status !== 'Resolvido').length.toString()],
+            ['Chamados Resolvidos', resolvedTickets.length.toString()],
+            ['Tempo Médio de Resolução (dias)', avgResolutionTime > 0 ? avgResolutionTime.toString() : 'N/A']
+        ];
+        
+        autoTable(docPdf, {
+            startY: y,
+            head: [summaryData[0]],
+            body: summaryData.slice(1),
+            styles: { fontSize: 10, cellPadding: 4 },
+            headStyles: { fillColor: [37, 99, 235], fontSize: 11, textColor: 255 },
+            columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 40 } },
+            margin: { left: 15, right: 15 },
+        });
+        y = (docPdf as any).lastAutoTable.finalY + 20;
+        
+        // Detalhes dos chamados
+        const ticketsData = [
+            ['Nº Chamado', 'Item', 'Categoria', 'Status', 'Abertura', 'Resolução', 'Dias']
+        ];
+        
+        orderTickets.forEach(ticket => {
+            const days = calculateDays(ticket);
+            const daysLabel = ticket.status === 'Resolvido' 
+                ? `${days} (fechado)` 
+                : `${days} (aberto)`;
+            
+            ticketsData.push([
+                ticket.ticketNumber || 'N/A',
+                ticket.itemName || 'N/A',
+                ticket.category || 'N/A',
+                ticket.status || 'N/A',
+                format(ticket.openedAt, 'dd/MM/yy'),
+                ticket.resolvedAt ? format(ticket.resolvedAt, 'dd/MM/yy') : '-',
+                daysLabel
+            ]);
+        });
+        
+        autoTable(docPdf, {
+            startY: y,
+            head: [ticketsData[0]],
+            body: ticketsData.slice(1),
+            styles: { fontSize: 9, cellPadding: 3 },
+            headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
+            columnStyles: {
+                0: { cellWidth: 25 },
+                1: { cellWidth: 'auto' },
+                2: { cellWidth: 30 },
+                3: { cellWidth: 25 },
+                4: { cellWidth: 20 },
+                5: { cellWidth: 20 },
+                6: { cellWidth: 25 }
+            },
+            margin: { left: 15, right: 15 },
+        });
+        
+        // Footer
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(`REL-CHAMADOS-001.REV0`, 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`Relatorio_Chamados_${order.number}.pdf`);
+        toast({ title: "Relatório gerado!", description: "O relatório dos chamados foi baixado com sucesso." });
+    } catch (error) {
+        console.error("Error generating tickets report:", error);
+        toast({ variant: "destructive", title: "Erro", description: "Não foi possível gerar o relatório." });
+    }
+  };
+
 
   const currentForm = useMemo(() => {
     switch(dialogType) {
@@ -3080,9 +3212,16 @@ export default function QualityPage() {
                         <Card>
                             <CardHeader className="flex-row justify-between items-center">
                                 <CardTitle className="text-base">Histórico de Chamados</CardTitle>
-                                <Button size="sm" onClick={() => handleAddEngineeringTicketClick(selectedOrderForInspections)}>
-                                    <PlusCircle className="mr-2 h-4 w-4" />Novo Chamado
-                                </Button>
+                                <div className="flex gap-2">
+                                    {selectedOrderForInspections && (
+                                        <Button size="sm" variant="outline" onClick={() => handleOrderTicketsReport(selectedOrderForInspections)}>
+                                            <FileDown className="mr-2 h-4 w-4" />Relatório do Pedido
+                                        </Button>
+                                    )}
+                                    <Button size="sm" onClick={() => handleAddEngineeringTicketClick(selectedOrderForInspections)}>
+                                        <PlusCircle className="mr-2 h-4 w-4" />Novo Chamado
+                                    </Button>
+                                </div>
                             </CardHeader>
                             <CardContent>
                                 {isLoading ? (

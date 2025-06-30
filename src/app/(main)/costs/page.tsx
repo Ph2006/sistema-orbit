@@ -386,14 +386,33 @@ export default function CostsPage() {
     
     const onSupplierSubmit = async (values: z.infer<typeof supplierSchema>) => {
         try {
+            console.log("Dados do formulário:", values);
+            
+            // Limpar dados vazios para evitar problemas de validação
+            const cleanValues = Object.fromEntries(
+                Object.entries(values).filter(([key, value]) => {
+                    if (value === null || value === undefined || value === '') return false;
+                    if (typeof value === 'object' && value !== null) {
+                        const cleanedObject = Object.fromEntries(
+                            Object.entries(value).filter(([k, v]) => v !== null && v !== undefined && v !== '')
+                        );
+                        return Object.keys(cleanedObject).length > 0;
+                    }
+                    return true;
+                })
+            );
+
             const dataToSave: any = {
-                ...values,
-                razaoSocial: values.razaoSocial || values.nomeFantasia || '',
-                nomeFantasia: values.nomeFantasia || values.razaoSocial || '',
+                ...cleanValues,
+                razaoSocial: values.razaoSocial || values.nomeFantasia || 'Fornecedor',
+                nomeFantasia: values.nomeFantasia || values.razaoSocial || 'Fornecedor',
+                status: values.status || 'ativo',
                 lastUpdate: Timestamp.now(),
             };
     
             dataToSave.name = dataToSave.nomeFantasia;
+            
+            console.log("Dados limpos para salvar:", dataToSave);
             
             if (selectedSupplier) { // UPDATE
                 await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
@@ -417,10 +436,15 @@ export default function CostsPage() {
     
             setIsSupplierFormOpen(false);
             setSelectedSupplier(null);
+            supplierForm.reset(emptySupplierFormValues);
             await fetchSuppliers();
         } catch (error) {
-            console.error("Error saving supplier:", error);
-            toast({ variant: "destructive", title: "Erro ao salvar fornecedor" });
+            console.error("Erro detalhado ao salvar fornecedor:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao salvar fornecedor", 
+                description: `Detalhe: ${error instanceof Error ? error.message : 'Erro desconhecido'}` 
+            });
         }
     };
 
@@ -904,7 +928,7 @@ export default function CostsPage() {
                         <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do Responsável Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-2 gap-4">
                           <FormField control={supplierForm.control} name="telefone" render={({ field }) => (<FormItem><FormLabel>Telefone</FormLabel><FormControl><Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="primaryEmail" render={({ field }) => (<FormItem><FormLabel>E-mail Principal</FormLabel><FormControl><Input type="email" placeholder="contato@fornecedor.com" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="primaryEmail" render={({ field }) => (<FormItem><FormLabel>E-mail Principal</FormLabel><FormControl><Input placeholder="contato@fornecedor.com (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                         <FormField control={supplierForm.control} name="address.street" render={({ field }) => (<FormItem><FormLabel>Logradouro</FormLabel><FormControl><Input placeholder="Rua, Avenida..." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-3 gap-4">
@@ -947,11 +971,11 @@ export default function CostsPage() {
                       </TabsContent>
                       <TabsContent value="docs" className="space-y-4">
                         <FormDescription>Anexe os documentos do fornecedor. Salve os arquivos em um serviço de nuvem (como Google Drive) e cole o link compartilhável aqui.</FormDescription>
-                        <FormField control={supplierForm.control} name="documentation.contratoSocialUrl" render={({ field }) => (<FormItem><FormLabel>Link do Contrato Social</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.cartaoCnpjUrl" render={({ field }) => (<FormItem><FormLabel>Link do Cartão CNPJ</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.certidoesNegativasUrl" render={({ field }) => (<FormItem><FormLabel>Link das Certidões Negativas</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.isoCertificateUrl" render={({ field }) => (<FormItem><FormLabel>Link do Certificado ISO (se aplicável)</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.alvaraUrl" render={({ field }) => (<FormItem><FormLabel>Link do Alvará/Licença (se aplicável)</FormLabel><FormControl><Input type="url" placeholder="https://" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.contratoSocialUrl" render={({ field }) => (<FormItem><FormLabel>Link do Contrato Social</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.cartaoCnpjUrl" render={({ field }) => (<FormItem><FormLabel>Link do Cartão CNPJ</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.certidoesNegativasUrl" render={({ field }) => (<FormItem><FormLabel>Link das Certidões Negativas</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.isoCertificateUrl" render={({ field }) => (<FormItem><FormLabel>Link do Certificado ISO (se aplicável)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.alvaraUrl" render={({ field }) => (<FormItem><FormLabel>Link do Alvará/Licença (se aplicável)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                       </TabsContent>
                     </ScrollArea>
                   </Tabs>
