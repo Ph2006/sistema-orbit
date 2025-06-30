@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -388,22 +387,38 @@ export default function CostsPage() {
         try {
             console.log("Dados do formulário:", values);
             
-            // Limpar dados vazios para evitar problemas de validação
-            const cleanValues = Object.fromEntries(
-                Object.entries(values).filter(([key, value]) => {
-                    if (value === null || value === undefined || value === '') return false;
-                    if (typeof value === 'object' && value !== null) {
-                        const cleanedObject = Object.fromEntries(
-                            Object.entries(value).filter(([k, v]) => v !== null && v !== undefined && v !== '')
-                        );
-                        return Object.keys(cleanedObject).length > 0;
+            // Função recursiva para limpar dados vazios, null e undefined
+            const cleanDataRecursively = (obj: any): any => {
+                if (obj === null || obj === undefined || obj === '') {
+                    return undefined;
+                }
+                
+                if (Array.isArray(obj)) {
+                    const cleanedArray = obj.map(cleanDataRecursively).filter(item => item !== undefined);
+                    return cleanedArray.length > 0 ? cleanedArray : undefined;
+                }
+                
+                if (typeof obj === 'object' && obj !== null) {
+                    const cleanedObject: any = {};
+                    
+                    for (const [key, value] of Object.entries(obj)) {
+                        const cleanedValue = cleanDataRecursively(value);
+                        if (cleanedValue !== undefined) {
+                            cleanedObject[key] = cleanedValue;
+                        }
                     }
-                    return true;
-                })
-            );
+                    
+                    return Object.keys(cleanedObject).length > 0 ? cleanedObject : undefined;
+                }
+                
+                return obj;
+            };
 
+            // Limpar todos os dados recursivamente
+            const cleanedValues = cleanDataRecursively(values);
+            
             const dataToSave: any = {
-                ...cleanValues,
+                ...cleanedValues,
                 razaoSocial: values.razaoSocial || values.nomeFantasia || 'Fornecedor',
                 nomeFantasia: values.nomeFantasia || values.razaoSocial || 'Fornecedor',
                 status: values.status || 'ativo',
@@ -412,10 +427,13 @@ export default function CostsPage() {
     
             dataToSave.name = dataToSave.nomeFantasia;
             
-            console.log("Dados limpos para salvar:", dataToSave);
+            // Verificação final para garantir que não há undefined
+            const finalData = cleanDataRecursively(dataToSave);
+            
+            console.log("Dados finais para salvar:", finalData);
             
             if (selectedSupplier) { // UPDATE
-                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
+                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), finalData, { merge: true });
                 toast({ title: "Fornecedor atualizado com sucesso!" });
             } else { // CREATE
                 const batch = writeBatch(db);
@@ -426,10 +444,10 @@ export default function CostsPage() {
                     return !isNaN(codeNum) && codeNum > max ? codeNum : max;
                 }, 0);
     
-                dataToSave.id = newSupplierRef.id;
-                dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
-                dataToSave.firstRegistrationDate = Timestamp.now();
-                batch.set(newSupplierRef, dataToSave);
+                finalData.id = newSupplierRef.id;
+                finalData.supplierCode = (highestCode + 1).toString().padStart(5, '0');
+                finalData.firstRegistrationDate = Timestamp.now();
+                batch.set(newSupplierRef, finalData);
                 await batch.commit();
                 toast({ title: "Fornecedor criado com sucesso!" });
             }
