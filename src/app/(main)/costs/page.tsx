@@ -387,53 +387,77 @@ export default function CostsPage() {
         try {
             console.log("Dados do formulário:", values);
             
-            // Função recursiva para limpar dados vazios, null e undefined
-            const cleanDataRecursively = (obj: any): any => {
+            // Função simples para limpar campos undefined/null/vazios
+            const cleanObject = (obj: any): any => {
                 if (obj === null || obj === undefined || obj === '') {
-                    return undefined;
+                    return null;
                 }
                 
-                if (Array.isArray(obj)) {
-                    const cleanedArray = obj.map(cleanDataRecursively).filter(item => item !== undefined);
-                    return cleanedArray.length > 0 ? cleanedArray : undefined;
-                }
-                
-                if (typeof obj === 'object' && obj !== null) {
-                    const cleanedObject: any = {};
-                    
+                if (typeof obj === 'object' && !Array.isArray(obj)) {
+                    const cleaned: any = {};
                     for (const [key, value] of Object.entries(obj)) {
-                        const cleanedValue = cleanDataRecursively(value);
-                        if (cleanedValue !== undefined) {
-                            cleanedObject[key] = cleanedValue;
+                        if (value !== null && value !== undefined && value !== '') {
+                            if (typeof value === 'object' && !Array.isArray(value)) {
+                                const cleanedNested = cleanObject(value);
+                                if (cleanedNested && Object.keys(cleanedNested).length > 0) {
+                                    cleaned[key] = cleanedNested;
+                                }
+                            } else {
+                                cleaned[key] = value;
+                            }
                         }
                     }
-                    
-                    return Object.keys(cleanedObject).length > 0 ? cleanedObject : undefined;
+                    return Object.keys(cleaned).length > 0 ? cleaned : null;
                 }
                 
                 return obj;
             };
 
-            // Limpar todos os dados recursivamente
-            const cleanedValues = cleanDataRecursively(values);
-            
+            // Preparar dados básicos obrigatórios
             const dataToSave: any = {
-                ...cleanedValues,
                 razaoSocial: values.razaoSocial || values.nomeFantasia || 'Fornecedor',
                 nomeFantasia: values.nomeFantasia || values.razaoSocial || 'Fornecedor',
                 status: values.status || 'ativo',
                 lastUpdate: Timestamp.now(),
             };
+            
+            // Adicionar campos opcionais apenas se tiverem valor
+            if (values.supplierCode) dataToSave.supplierCode = values.supplierCode;
+            if (values.cnpj) dataToSave.cnpj = values.cnpj;
+            if (values.inscricaoEstadual) dataToSave.inscricaoEstadual = values.inscricaoEstadual;
+            if (values.inscricaoMunicipal) dataToSave.inscricaoMunicipal = values.inscricaoMunicipal;
+            if (values.segment) dataToSave.segment = values.segment;
+            if (values.telefone) dataToSave.telefone = values.telefone;
+            if (values.primaryEmail) dataToSave.primaryEmail = values.primaryEmail;
+            if (values.salesContactName) dataToSave.salesContactName = values.salesContactName;
+            
+            // Tratar objetos aninhados
+            if (values.address) {
+                const cleanAddress = cleanObject(values.address);
+                if (cleanAddress) dataToSave.address = cleanAddress;
+            }
+            
+            if (values.bankInfo) {
+                const cleanBankInfo = cleanObject(values.bankInfo);
+                if (cleanBankInfo) dataToSave.bankInfo = cleanBankInfo;
+            }
+            
+            if (values.commercialInfo) {
+                const cleanCommercialInfo = cleanObject(values.commercialInfo);
+                if (cleanCommercialInfo) dataToSave.commercialInfo = cleanCommercialInfo;
+            }
+            
+            if (values.documentation) {
+                const cleanDocumentation = cleanObject(values.documentation);
+                if (cleanDocumentation) dataToSave.documentation = cleanDocumentation;
+            }
     
             dataToSave.name = dataToSave.nomeFantasia;
             
-            // Verificação final para garantir que não há undefined
-            const finalData = cleanDataRecursively(dataToSave);
-            
-            console.log("Dados finais para salvar:", finalData);
+            console.log("Dados finais para salvar:", dataToSave);
             
             if (selectedSupplier) { // UPDATE
-                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), finalData, { merge: true });
+                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
                 toast({ title: "Fornecedor atualizado com sucesso!" });
             } else { // CREATE
                 const batch = writeBatch(db);
@@ -444,10 +468,10 @@ export default function CostsPage() {
                     return !isNaN(codeNum) && codeNum > max ? codeNum : max;
                 }, 0);
     
-                finalData.id = newSupplierRef.id;
-                finalData.supplierCode = (highestCode + 1).toString().padStart(5, '0');
-                finalData.firstRegistrationDate = Timestamp.now();
-                batch.set(newSupplierRef, finalData);
+                dataToSave.id = newSupplierRef.id;
+                dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
+                dataToSave.firstRegistrationDate = Timestamp.now();
+                batch.set(newSupplierRef, dataToSave);
                 await batch.commit();
                 toast({ title: "Fornecedor criado com sucesso!" });
             }
