@@ -2513,6 +2513,136 @@ export default function QualityPage() {
     }
   };
 
+  const handleEngineeringTicketPDF = async (ticket: EngineeringTicket) => {
+    toast({ title: "Gerando PDF do Chamado..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === ticket.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === ticket.itemId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+
+        // Header
+        if (companyData.logo?.preview) { 
+            try { 
+                docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); 
+            } catch(e) {} 
+        }
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(`Chamado para Engenharia Nº ${ticket.ticketNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
+        y += 25;
+        
+        const addSection = (title: string, data: (string | number | null | undefined)[][], colWidths?: any) => {
+            if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(11).setFont(undefined, 'bold');
+            docPdf.text(title, 15, y);
+            y += 2;
+            autoTable(docPdf, {
+                startY: y, 
+                theme: 'grid', 
+                body: data.map(row => row.map(cell => cell ?? 'N/A')),
+                styles: { fontSize: 8, cellPadding: 1.5, lineWidth: 0.1, lineColor: [200, 200, 200] },
+                columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50, ...colWidths } },
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 5;
+        }
+
+        // Seção 1: Identificação do Chamado
+        addSection('1. Identificação do Chamado', [
+            ['Código do Chamado', ticket.ticketNumber],
+            ['Data de Abertura', format(ticket.openedAt, 'dd/MM/yyyy HH:mm')],
+            ['Pedido / OS', orderInfo?.number],
+            ['Cliente', orderInfo?.customerName],
+            ['Item Relacionado', itemInfo?.description],
+            ['Código do Item', itemInfo?.code || 'N/A'],
+        ]);
+
+        // Seção 2: Solicitação
+        addSection('2. Detalhes da Solicitação', [
+            ['Departamento Solicitante', ticket.requestingDepartment],
+            ['Responsável pela Abertura', ticket.openedBy],
+            ['Categoria do Problema', ticket.category],
+            ['Prioridade', ticket.priority],
+            ['Status Atual', ticket.status],
+            ['Responsável Engenharia', ticket.assignedTo || 'Não atribuído'],
+        ]);
+
+        // Seção 3: Descrição do Problema
+        if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+        docPdf.setFontSize(11).setFont(undefined, 'bold');
+        docPdf.text('3. Descrição Detalhada do Problema', 15, y);
+        y += 8;
+        
+        const descriptionLines = docPdf.splitTextToSize(ticket.description || 'N/A', pageWidth - 30);
+        docPdf.setFontSize(9).setFont(undefined, 'normal');
+        descriptionLines.forEach((line: string) => {
+            if (y > pageHeight - 20) { docPdf.addPage(); y = 20; }
+            docPdf.text(line, 15, y);
+            y += 5;
+        });
+        y += 5;
+
+        // Seção 4: Histórico de Comentários
+        if (ticket.comments && ticket.comments.length > 0) {
+            if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(11).setFont(undefined, 'bold');
+            docPdf.text('4. Histórico de Comentários e Ações', 15, y);
+            y += 8;
+
+            ticket.comments.forEach((comment, index) => {
+                if (y > pageHeight - 30) { docPdf.addPage(); y = 20; }
+                
+                docPdf.setFontSize(9).setFont(undefined, 'bold');
+                docPdf.text(`${index + 1}. ${format(comment.timestamp, 'dd/MM/yyyy HH:mm')} - ${comment.author}`, 15, y);
+                y += 5;
+                
+                docPdf.setFontSize(8).setFont(undefined, 'normal');
+                docPdf.text(`Tipo: ${comment.type}`, 20, y);
+                y += 4;
+                
+                const commentLines = docPdf.splitTextToSize(comment.comment, pageWidth - 40);
+                commentLines.forEach((line: string) => {
+                    if (y > pageHeight - 15) { docPdf.addPage(); y = 20; }
+                    docPdf.text(line, 20, y);
+                    y += 4;
+                });
+                y += 3;
+            });
+        }
+
+        // Seção 5: Métricas e Status
+        const pausedDays = ticket.status === 'Resolvido' && ticket.resolvedAt 
+            ? differenceInDays(ticket.resolvedAt, ticket.openedAt)
+            : differenceInDays(new Date(), ticket.openedAt);
+
+        addSection('5. Métricas e Resolução', [
+            ['Tempo Total Parado', `${pausedDays} dias`],
+            ['Data de Resolução', ticket.resolvedAt ? format(ticket.resolvedAt, 'dd/MM/yyyy HH:mm') : 'Não resolvido'],
+            ['Cronograma Pausado', ticket.pauseSchedule ? 'Sim' : 'Não'],
+        ]);
+
+        // Footer com numeração
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(`CH-ENG-001.REV0`, 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`ChamadoEngenharia_${ticket.ticketNumber || ticket.id}.pdf`);
+        toast({ title: "PDF gerado com sucesso!", description: "O arquivo foi baixado." });
+    } catch (error) {
+        console.error("Error exporting engineering ticket PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF.", description: "Verifique os dados e tente novamente." });
+    }
+  };
+
 
   const currentForm = useMemo(() => {
     switch(dialogType) {
@@ -3012,6 +3142,10 @@ export default function QualityPage() {
                                                                     <DropdownMenuItem onClick={() => handleEditEngineeringTicketClick(ticket)}>
                                                                         <Pencil className="mr-2 h-4 w-4" />
                                                                         Editar
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuItem onClick={() => handleEngineeringTicketPDF(ticket)}>
+                                                                        <FileDown className="mr-2 h-4 w-4" />
+                                                                        Exportar PDF
                                                                     </DropdownMenuItem>
                                                                     <DropdownMenuSeparator />
                                                                     <DropdownMenuItem 
