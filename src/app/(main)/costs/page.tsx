@@ -79,13 +79,13 @@ const supplierSchema = z.object({
   supplierCode: z.string().optional(),
   razaoSocial: z.string().optional(),
   nomeFantasia: z.string().optional(),
-  cnpj: z.string().min(14, "CNPJ inválido.").max(18, "CNPJ inválido."),
+  cnpj: z.string().optional(),
   inscricaoEstadual: z.string().optional(),
   inscricaoMunicipal: z.string().optional(),
   segment: z.string().optional(),
   status: z.enum(["ativo", "inativo"]).optional().default("ativo"),
   telefone: z.string().optional(),
-  primaryEmail: z.string().email("E-mail inválido.").optional().or(z.literal('')),
+  primaryEmail: z.string().optional(),
   salesContactName: z.string().optional(),
   address: z.object({
     zipCode: z.string().optional(),
@@ -109,21 +109,21 @@ const supplierSchema = z.object({
     shippingIncluded: z.boolean().optional().default(false),
   }).optional(),
   documentation: z.object({
-    contratoSocialUrl: z.string().url().optional().or(z.literal('')),
-    cartaoCnpjUrl: z.string().url().optional().or(z.literal('')),
-    certidoesNegativasUrl: z.string().url().optional().or(z.literal('')),
-    isoCertificateUrl: z.string().url().optional().or(z.literal('')),
-    alvaraUrl: z.string().url().optional().or(z.literal('')),
+    contratoSocialUrl: z.string().optional(),
+    cartaoCnpjUrl: z.string().optional(),
+    certidoesNegativasUrl: z.string().optional(),
+    isoCertificateUrl: z.string().optional(),
+    alvaraUrl: z.string().optional(),
   }).optional(),
   firstRegistrationDate: z.date().optional(),
   lastUpdate: z.date().optional(),
 });
 
 const costEntrySchema = z.object({
-  orderId: z.string({ required_error: "Selecione uma Ordem de Serviço." }),
-  description: z.string().min(3, "A descrição é obrigatória."),
-  quantity: z.coerce.number().min(0.01, "A quantidade deve ser maior que zero."),
-  unitCost: z.coerce.number().min(0.01, "O custo unitário deve ser maior que zero."),
+  orderId: z.string().optional(),
+  description: z.string().optional(),
+  quantity: z.coerce.number().optional(),
+  unitCost: z.coerce.number().optional(),
 });
 
 type CostEntryData = z.infer<typeof costEntrySchema>;
