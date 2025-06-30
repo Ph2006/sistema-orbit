@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -7,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -412,6 +411,30 @@ export default function QuotationsPage() {
         setCurrentItem(emptyItem);
         setEditIndex(null);
     }
+
+    const handleDuplicateItem = (index: number) => {
+        const itemToDuplicate = watchedItems[index];
+        if (!itemToDuplicate) return;
+        
+        // Criar uma cópia do item com novo ID e descrição indicando que é uma duplicata
+        const duplicatedItem = {
+            ...itemToDuplicate,
+            id: undefined, // Remover ID para criar novo item
+            description: `${itemToDuplicate.description} (Cópia)`,
+        };
+        
+        // Adicionar o item duplicado logo após o item original
+        const currentItems = [...watchedItems];
+        currentItems.splice(index + 1, 0, duplicatedItem);
+        
+        // Atualizar o formulário com os novos itens
+        form.setValue('items', currentItems);
+        
+        toast({
+            title: "Item duplicado!",
+            description: `"${itemToDuplicate.description}" foi duplicado com sucesso.`,
+        });
+    };
     
     const handleAddClick = () => {
         setSelectedQuotation(null);
@@ -999,6 +1022,7 @@ export default function QuotationsPage() {
                                                                     <TableCell>{totalPriceWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
                                                                     <TableCell className="text-right">
                                                                         <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button>
+                                                                        <Button type="button" variant="ghost" size="icon" onClick={() => handleDuplicateItem(index)}><Copy className="h-4 w-4" /></Button>
                                                                         <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
                                                                     </TableCell>
                                                                 </TableRow>
