@@ -1059,8 +1059,14 @@ export default function QualityPage() {
        const cleanData = (obj: any): any => {
          const cleaned: any = {};
          Object.keys(obj).forEach(key => {
-           if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
-             cleaned[key] = obj[key];
+           const value = obj[key];
+           if (value !== undefined && value !== null) {
+             // Tratar arrays especialmente (como fotos e medições)
+             if (Array.isArray(value)) {
+               cleaned[key] = value;
+             } else if (value !== '') {
+               cleaned[key] = value;
+             }
            }
          });
          return cleaned;
@@ -1072,6 +1078,9 @@ export default function QualityPage() {
         customerInspector: values.customerInspector || null,
         quantityInspected: values.quantityInspected || null,
       };
+      
+      console.log("Dados para salvar relatório dimensional:", dataToSave);
+      console.log("Fotos incluídas:", dataToSave.photos?.length || 0);
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório atualizado!" });
@@ -1849,6 +1858,8 @@ export default function QualityPage() {
 
   const handleDimensionalReportPDF = async (report: DimensionalReport) => {
     toast({ title: "Gerando PDF..." });
+    console.log("Relatório dimensional para PDF:", report);
+    console.log("Fotos no relatório:", report.photos?.length || 0);
     try {
         const companyRef = doc(db, "companies", "mecald", "settings", "company");
         const companySnap = await getDoc(companyRef);
@@ -1909,10 +1920,18 @@ export default function QualityPage() {
 
         let finalY = (docPdf as any).lastAutoTable.finalY;
 
-        if (report.photos && report.photos.length > 0) {
+        // Seção de Fotos
+        if (report.photos && Array.isArray(report.photos) && report.photos.length > 0) {
+            console.log("Adicionando fotos ao PDF. Total:", report.photos.length);
+            
             y = finalY + 10;
-            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
-            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Registro Fotográfico', 15, y);
+            if (y > pageHeight - 60) { 
+                docPdf.addPage(); 
+                y = 20; 
+            }
+            
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Registro Fotográfico', 15, y);
             y += 10;
 
             const photoWidth = (pageWidth - 45) / 2; // 2 fotos por linha
@@ -1922,9 +1941,10 @@ export default function QualityPage() {
 
             for (let i = 0; i < report.photos.length; i++) {
                 const photoDataUri = report.photos[i];
+                console.log(`Processando foto ${i + 1}:`, photoDataUri ? "dados encontrados" : "sem dados");
                 
                 // Verificar se precisa de nova página
-                if (y + photoHeight > pageHeight - 20) {
+                if (y + photoHeight > pageHeight - 25) {
                     docPdf.addPage();
                     y = 20;
                     x = 15;
@@ -1932,15 +1952,21 @@ export default function QualityPage() {
                 }
                 
                 try {
-                    docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
-                    
-                    // Adicionar numeração da foto
-                    docPdf.setFontSize(8).setFont(undefined, 'normal');
-                    docPdf.text(`Foto ${i + 1}`, x + photoWidth/2, y + photoHeight + 5, { align: 'center' });
-                    
+                    if (photoDataUri && typeof photoDataUri === 'string') {
+                        docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
+                        
+                        // Adicionar numeração da foto
+                        docPdf.setFontSize(8).setFont(undefined, 'normal');
+                        docPdf.text(`Foto ${i + 1}`, x + photoWidth/2, y + photoHeight + 5, { align: 'center' });
+                        
+                        console.log(`Foto ${i + 1} adicionada com sucesso`);
+                    } else {
+                        console.warn(`Foto ${i + 1} inválida ou vazia`);
+                        docPdf.setFontSize(10).text(`Foto ${i + 1}: Erro nos dados`, x, y + 10);
+                    }
                 } catch(e) {
-                    console.error("Erro ao adicionar imagem ao PDF:", e);
-                    docPdf.setFontSize(10).text("Erro ao carregar imagem", x, y + 10);
+                    console.error(`Erro ao adicionar foto ${i + 1} ao PDF:`, e);
+                    docPdf.setFontSize(10).text(`Foto ${i + 1}: Erro ao carregar`, x, y + 10);
                 }
 
                 photoCount++;
@@ -1960,6 +1986,8 @@ export default function QualityPage() {
             } else {
                 finalY = y;
             }
+        } else {
+            console.log("Nenhuma foto encontrada no relatório para o PDF");
         }
         
         const footerText = `DIM-MEC-2025-01.REV0`;
