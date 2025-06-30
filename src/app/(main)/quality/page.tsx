@@ -1059,17 +1059,35 @@ export default function QualityPage() {
        
        const { reportNumber, ...restOfValues } = values;
        
-       // Preparar dados para salvar sem remover campos importantes
-       const dataToSave = { 
+       // Preparar dados para salvar removendo campos undefined (Firestore não aceita undefined)
+       const cleanDataForFirestore = (obj: any): any => {
+         const cleaned: any = {};
+         Object.keys(obj).forEach(key => {
+           const value = obj[key];
+           if (value !== undefined) {
+             if (Array.isArray(value)) {
+               cleaned[key] = value;
+             } else if (value !== null && value !== '') {
+               cleaned[key] = value;
+             } else if (value === null || value === '') {
+               cleaned[key] = null; // Firestore aceita null, mas não undefined
+             }
+           }
+         });
+         return cleaned;
+       };
+       
+       const dataToSave = cleanDataForFirestore({ 
         ...restOfValues,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         customerInspector: values.customerInspector || null,
         quantityInspected: values.quantityInspected || null,
+        notes: values.notes || null, // Garantir que notes seja null ao invés de undefined
         // Garantir que fotos sejam sempre um array
         photos: values.photos || [],
         // Garantir que medições sejam sempre um array  
         measurements: values.measurements || []
-      };
+      });
       
       console.log("Dados finais para salvar:", dataToSave);
       console.log("Fotos finais incluídas:", dataToSave.photos?.length || 0);
@@ -3843,36 +3861,89 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const watchedPhotos = form.watch("photos", []);
 
     const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.7): Promise<string> => {
-        return new Promise((resolve) => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const img = new Image();
-            
-            img.onload = () => {
-                // Calcular dimensões mantendo proporção
-                let { width, height } = img;
-                if (width > height) {
-                    if (width > maxWidth) {
-                        height = (height * maxWidth) / width;
-                        width = maxWidth;
-                    }
-                } else {
-                    if (height > maxWidth) {
-                        width = (width * maxWidth) / height;
-                        height = maxWidth;
-                    }
+        return new Promise((resolve, reject) => {
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                if (!ctx) {
+                    reject(new Error('Canvas context not available'));
+                    return;
                 }
                 
-                canvas.width = width;
-                canvas.height = height;
+                const img = new Image();
                 
-                // Desenhar e comprimir
-                ctx?.drawImage(img, 0, 0, width, height);
-                const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-                resolve(compressedDataUrl);
-            };
-            
-            img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    try {
+                        // Calcular dimensões mantendo proporção
+                        let { width, height } = img;
+                        if (width > height) {
+                            if (width > maxWidth) {
+                                height = (height * maxWidth) / width;
+                                width = maxWidth;
+                            }
+                        } else {
+                            if (height > maxWidth) {
+                                width = (width * maxWidth) / height;
+                                height = maxWidth;
+                            }
+                        }
+                        
+                        canvas.width = width;
+                        canvas.height = height;
+                        
+                        // Desenhar e comprimir
+                        ctx.drawImage(img, 0, 0, width, height);
+                        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                        resolve(compressedDataUrl);
+                    } catch (error) {
+                        console.error('Erro ao processar imagem:', error);
+                        reject(error);
+                    }
+                };
+                
+                img.onerror = () => {
+                    reject(new Error('Falha ao carregar imagem'));
+                };
+                
+                const url = URL.createObjectURL(file);
+                img.src = url;
+                
+                // Limpar URL object após uso para evitar memory leak
+                img.onload = () => {
+                    URL.revokeObjectURL(url);
+                    try {
+                        // Calcular dimensões mantendo proporção
+                        let { width, height } = img;
+                        if (width > height) {
+                            if (width > maxWidth) {
+                                height = (height * maxWidth) / width;
+                                width = maxWidth;
+                            }
+                        } else {
+                            if (height > maxWidth) {
+                                width = (width * maxWidth) / height;
+                                height = maxWidth;
+                            }
+                        }
+                        
+                        canvas.width = width;
+                        canvas.height = height;
+                        
+                        // Desenhar e comprimir
+                        ctx.drawImage(img, 0, 0, width, height);
+                        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                        resolve(compressedDataUrl);
+                    } catch (error) {
+                        console.error('Erro ao processar imagem:', error);
+                        reject(error);
+                    }
+                };
+                
+            } catch (error) {
+                console.error('Erro na função compressImage:', error);
+                reject(error);
+            }
         });
     };
 
@@ -3882,17 +3953,34 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
 
         const currentPhotos = form.getValues("photos") || [];
 
-        const compressedPhotos = await Promise.all(
-            Array.from(files).map(file => compressImage(file, 800, 0.6))
-        );
+        try {
+            const compressedPhotos = await Promise.all(
+                Array.from(files).map(async (file) => {
+                    try {
+                        return await compressImage(file, 800, 0.6);
+                    } catch (error) {
+                        console.error(`Erro ao comprimir ${file.name}:`, error);
+                        toast({
+                            variant: "destructive",
+                            title: "Erro ao processar foto",
+                            description: `Não foi possível processar ${file.name}. Tente novamente.`,
+                        });
+                        throw error;
+                    }
+                })
+            );
 
-        const updatedPhotos = [...currentPhotos, ...compressedPhotos];
-        form.setValue("photos", updatedPhotos, { shouldValidate: true });
-        
-        toast({
-            title: "Fotos adicionadas",
-            description: `${files.length} foto(s) comprimida(s) e adicionada(s) ao relatório.`,
-        });
+            const updatedPhotos = [...currentPhotos, ...compressedPhotos];
+            form.setValue("photos", updatedPhotos, { shouldValidate: true });
+            
+            toast({
+                title: "Fotos adicionadas",
+                description: `${files.length} foto(s) comprimida(s) e adicionada(s) ao relatório.`,
+            });
+        } catch (error) {
+            console.error('Erro no upload de fotos:', error);
+            // Toast de erro já foi mostrado na função de compressão individual
+        }
     };
 
     const removePhoto = (index: number) => {
