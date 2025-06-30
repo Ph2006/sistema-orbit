@@ -25,7 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, TicketCheck, Clock, MoreVertical, Play, Pause, Paperclip, Send, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 
 // --- SCHEMAS ---
@@ -352,6 +353,47 @@ const lessonsLearnedSchema = z.object({
   closeDate: z.date().optional().nullable(),
 });
 
+const engineeringTicketCommentSchema = z.object({
+  id: z.string().optional(),
+  author: z.string(),
+  comment: z.string().min(1, "O comentário é obrigatório."),
+  timestamp: z.date(),
+  type: z.enum(["Comentário", "Alteração de Status", "Anexo"]).default("Comentário"),
+});
+
+const engineeringTicketSchema = z.object({
+  id: z.string().optional(),
+  ticketNumber: z.string().optional(),
+  orderId: z.string({ required_error: "Selecione um pedido." }),
+  itemId: z.string({ required_error: "Selecione um item." }),
+  requestingDepartment: z.string({ required_error: "O departamento solicitante é obrigatório." }),
+  openedBy: z.string({ required_error: "O responsável pela abertura é obrigatório." }),
+  description: z.string().min(20, "A descrição deve ter pelo menos 20 caracteres."),
+  category: z.enum([
+    "Desenho incorreto",
+    "Material fora de medida", 
+    "Defeito de fabricação",
+    "Interpretação",
+    "Outros"
+  ], { required_error: "Selecione uma categoria." }),
+  priority: z.enum(["Alta", "Média", "Baixa"], { required_error: "Selecione a prioridade." }),
+  status: z.enum([
+    "Aberto",
+    "Em análise", 
+    "Aguardando resposta",
+    "Solução proposta",
+    "Resolvido"
+  ]).default("Aberto"),
+  assignedTo: z.string().optional(),
+  openedAt: z.date(),
+  resolvedAt: z.date().optional(),
+  attachments: z.array(z.string()).optional(),
+  comments: z.array(engineeringTicketCommentSchema).optional(),
+  pauseSchedule: z.boolean().default(true),
+  estimatedResolutionTime: z.coerce.number().optional(),
+  actualResolutionTime: z.coerce.number().optional(),
+});
+
 
 
 // --- TYPES ---
@@ -366,6 +408,8 @@ type LiquidPenetrantReport = z.infer<typeof liquidPenetrantSchema> & { id: strin
 type UltrasoundReport = z.infer<typeof ultrasoundReportSchema> & { id: string, orderNumber: string, itemName: string };
 type UltrasoundResult = z.infer<typeof ultrasoundResultSchema>;
 type LessonsLearnedReport = z.infer<typeof lessonsLearnedSchema> & { id: string, orderNumber?: string };
+type EngineeringTicket = z.infer<typeof engineeringTicketSchema> & { id: string, orderNumber?: string, itemName?: string, customerName?: string, pausedDays?: number };
+type EngineeringTicketComment = z.infer<typeof engineeringTicketCommentSchema> & { id: string };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
@@ -445,6 +489,7 @@ export default function QualityPage() {
   const [liquidPenetrantReports, setLiquidPenetrantReports] = useState<LiquidPenetrantReport[]>([]);
   const [ultrasoundReports, setUltrasoundReports] = useState<UltrasoundReport[]>([]);
   const [lessonsLearnedReports, setLessonsLearnedReports] = useState<LessonsLearnedReport[]>([]);
+  const [engineeringTickets, setEngineeringTickets] = useState<EngineeringTicket[]>([]);
 
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
   const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | 'lessonsLearned' | null>(null);
@@ -454,6 +499,15 @@ export default function QualityPage() {
   const [inspectionSearchQuery, setInspectionSearchQuery] = useState("");
   const [isInspectionsDetailOpen, setIsInspectionsDetailOpen] = useState(false);
   const [selectedOrderForInspections, setSelectedOrderForInspections] = useState<OrderInfo | null>(null);
+
+  // Engineering Tickets states
+  const [isEngineeringTicketFormOpen, setIsEngineeringTicketFormOpen] = useState(false);
+  const [isEngineeringTicketDeleting, setIsEngineeringTicketDeleting] = useState(false);
+  const [selectedEngineeringTicket, setSelectedEngineeringTicket] = useState<EngineeringTicket | null>(null);
+  const [engineeringTicketToDelete, setEngineeringTicketToDelete] = useState<EngineeringTicket | null>(null);
+  const [engineeringTicketSearchQuery, setEngineeringTicketSearchQuery] = useState("");
+  const [newComment, setNewComment] = useState("");
+  const [isAddingComment, setIsAddingComment] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
@@ -649,6 +703,25 @@ export default function QualityPage() {
       },
   });
 
+  const engineeringTicketForm = useForm<z.infer<typeof engineeringTicketSchema>>({
+    resolver: zodResolver(engineeringTicketSchema),
+    defaultValues: {
+      orderId: undefined,
+      itemId: undefined,
+      requestingDepartment: '',
+      openedBy: user?.email || '',
+      description: '',
+      category: undefined,
+      priority: undefined,
+      status: 'Aberto',
+      assignedTo: '',
+      openedAt: new Date(),
+      attachments: [],
+      comments: [],
+      pauseSchedule: true,
+    },
+  });
+
 
   // --- DATA FETCHING ---
   const fetchAllData = async () => {
@@ -658,7 +731,7 @@ export default function QualityPage() {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
         materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
-        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot
+        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot, engineeringTicketsSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -671,6 +744,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
         getDocs(collection(db, "companies", "mecald", "ultrasoundReports")),
         getDocs(collection(db, "companies", "mecald", "lessonsLearned")),
+        getDocs(collection(db, "companies", "mecald", "engineeringTickets")),
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -790,6 +864,35 @@ export default function QualityPage() {
           } as LessonsLearnedReport;
       });
       setLessonsLearnedReports(lessonsList.sort((a,b) => (b.reportNumber || '').localeCompare(a.reportNumber || '')));
+
+      const ticketsList = engineeringTicketsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        const order = ordersList.find(o => o.id === data.orderId);
+        const item = order?.items.find(i => i.id === data.itemId);
+        const pausedDays = data.status === 'Resolvido' && data.resolvedAt 
+            ? differenceInDays(data.resolvedAt.toDate(), data.openedAt.toDate())
+            : differenceInDays(new Date(), data.openedAt.toDate());
+        
+        return {
+            id: doc.id,
+            ...data,
+            openedAt: data.openedAt.toDate(),
+            resolvedAt: data.resolvedAt ? data.resolvedAt.toDate() : null,
+            orderNumber: order?.number,
+            itemName: item?.description,
+            customerName: order?.customerName,
+            pausedDays,
+            comments: (data.comments || []).map((c: any) => ({
+                  ...c,
+                  timestamp: c.timestamp.toDate(),
+              })),
+              orderNumber: order?.number || 'N/A',
+              itemName: item?.description || 'Item não encontrado',
+              customerName: order?.customerName || 'N/A',
+              pausedDays,
+          } as EngineeringTicket;
+      });
+      setEngineeringTickets(ticketsList.sort((a,b) => b.openedAt.getTime() - a.openedAt.getTime()));
 
 
     } catch (error) {
@@ -1428,6 +1531,193 @@ export default function QualityPage() {
         }
         setIsInspectionFormOpen(true);
     };
+
+  // --- ENGINEERING TICKETS FUNCTIONS ---
+  const onEngineeringTicketSubmit = async (values: z.infer<typeof engineeringTicketSchema>) => {
+    try {
+      const docData = {
+        ...values,
+        openedAt: Timestamp.fromDate(values.openedAt),
+        resolvedAt: values.resolvedAt ? Timestamp.fromDate(values.resolvedAt) : null,
+        comments: (values.comments || []).map(c => ({
+          ...c,
+          timestamp: Timestamp.fromDate(c.timestamp),
+        })),
+      };
+
+      if (selectedEngineeringTicket) {
+        await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedEngineeringTicket.id), docData);
+        toast({ title: "Chamado atualizado com sucesso!" });
+      } else {
+        const nextNumber = engineeringTickets.length > 0 
+          ? Math.max(...engineeringTickets.map(t => parseInt((t.ticketNumber || 'ENG-0').replace('ENG-', '')) || 0)) + 1 
+          : 1;
+        docData.ticketNumber = `ENG-${nextNumber.toString().padStart(3, '0')}`;
+        await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), docData);
+        toast({ title: "Chamado criado com sucesso!" });
+      }
+
+      await fetchAllData();
+      setIsEngineeringTicketFormOpen(false);
+      setSelectedEngineeringTicket(null);
+      engineeringTicketForm.reset();
+    } catch (error) {
+      console.error("Error saving engineering ticket:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar chamado" });
+    }
+  };
+
+  const handleAddEngineeringTicketClick = (order: OrderInfo | null = null) => {
+    setSelectedEngineeringTicket(null);
+    engineeringTicketForm.reset({
+      orderId: order?.id || undefined,
+      itemId: undefined,
+      requestingDepartment: '',
+      openedBy: user?.email || '',
+      description: '',
+      category: undefined,
+      priority: undefined,
+      status: 'Aberto',
+      assignedTo: '',
+      openedAt: new Date(),
+      attachments: [],
+      comments: [],
+      pauseSchedule: true,
+    });
+    setIsEngineeringTicketFormOpen(true);
+  };
+
+  const handleEditEngineeringTicketClick = (ticket: EngineeringTicket) => {
+    setSelectedEngineeringTicket(ticket);
+    engineeringTicketForm.reset({
+      ...ticket,
+      openedAt: ticket.openedAt,
+      resolvedAt: ticket.resolvedAt || undefined,
+    });
+    setIsEngineeringTicketFormOpen(true);
+  };
+
+  const handleDeleteEngineeringTicketClick = (ticket: EngineeringTicket) => {
+    setEngineeringTicketToDelete(ticket);
+    setIsEngineeringTicketDeleting(true);
+  };
+
+  const handleConfirmEngineeringTicketDelete = async () => {
+    if (!engineeringTicketToDelete) return;
+    try {
+      await deleteDoc(doc(db, "companies", "mecald", "engineeringTickets", engineeringTicketToDelete.id));
+      await fetchAllData();
+      toast({ title: "Chamado excluído com sucesso!" });
+    } catch (error) {
+      console.error("Error deleting engineering ticket:", error);
+      toast({ variant: "destructive", title: "Erro ao excluir chamado" });
+    } finally {
+      setIsEngineeringTicketDeleting(false);
+      setEngineeringTicketToDelete(null);
+    }
+  };
+
+  const handleAddComment = async (ticketId: string) => {
+    if (!newComment.trim()) return;
+    
+    setIsAddingComment(true);
+    try {
+      const comment = {
+        id: Date.now().toString(),
+        author: user?.email || 'Usuário',
+        comment: newComment,
+        timestamp: Timestamp.fromDate(new Date()),
+        type: 'Comentário' as const,
+      };
+
+      await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", ticketId), {
+        comments: arrayUnion(comment)
+      });
+
+      setNewComment('');
+      await fetchAllData();
+      toast({ title: "Comentário adicionado!" });
+    } catch (error) {
+      console.error("Error adding comment:", error);
+      toast({ variant: "destructive", title: "Erro ao adicionar comentário" });
+    } finally {
+      setIsAddingComment(false);
+    }
+  };
+
+  const handleUpdateTicketStatus = async (ticketId: string, newStatus: string) => {
+    try {
+      const updateData: any = { status: newStatus };
+      if (newStatus === 'Resolvido') {
+        updateData.resolvedAt = Timestamp.fromDate(new Date());
+      }
+
+      const statusComment = {
+        id: Date.now().toString(),
+        author: user?.email || 'Sistema',
+        comment: `Status alterado para: ${newStatus}`,
+        timestamp: Timestamp.fromDate(new Date()),
+        type: 'Alteração de Status' as const,
+      };
+
+      await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", ticketId), {
+        ...updateData,
+        comments: arrayUnion(statusComment)
+      });
+
+      await fetchAllData();
+      toast({ title: "Status atualizado!" });
+    } catch (error) {
+      console.error("Error updating status:", error);
+      toast({ variant: "destructive", title: "Erro ao atualizar status" });
+    }
+  };
+
+  // Engineering Tickets filtered data
+  const filteredEngineeringTickets = useMemo(() => {
+    if (!engineeringTicketSearchQuery) return engineeringTickets;
+    const query = engineeringTicketSearchQuery.toLowerCase();
+    return engineeringTickets.filter(ticket =>
+      (ticket.ticketNumber || '').toLowerCase().includes(query) ||
+      (ticket.orderNumber || '').toLowerCase().includes(query) ||
+      (ticket.itemName || '').toLowerCase().includes(query) ||
+      (ticket.customerName || '').toLowerCase().includes(query) ||
+      (ticket.description || '').toLowerCase().includes(query) ||
+      (ticket.category || '').toLowerCase().includes(query) ||
+      (ticket.status || '').toLowerCase().includes(query)
+    );
+  }, [engineeringTickets, engineeringTicketSearchQuery]);
+
+  // Engineering Tickets dashboard metrics
+  const engineeringMetrics = useMemo(() => {
+    const total = engineeringTickets.length;
+    const byStatus = engineeringTickets.reduce((acc, ticket) => {
+      acc[ticket.status] = (acc[ticket.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const byCategory = engineeringTickets.reduce((acc, ticket) => {
+      acc[ticket.category] = (acc[ticket.category] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const avgResolutionTime = engineeringTickets
+      .filter(t => t.status === 'Resolvido' && t.actualResolutionTime)
+      .reduce((sum, t) => sum + (t.actualResolutionTime || 0), 0) / 
+      engineeringTickets.filter(t => t.status === 'Resolvido').length || 0;
+
+    const topCategories = Object.entries(byCategory)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5);
+
+    return {
+      total,
+      byStatus,
+      byCategory,
+      avgResolutionTime,
+      topCategories,
+    };
+  }, [engineeringTickets]);
 
   const handleDeleteInspectionClick = (inspection: any, type: string) => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
   const handleConfirmDeleteInspection = async () => {
@@ -2355,6 +2645,8 @@ export default function QualityPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+
         </Tabs>
       </div>
 
@@ -2606,6 +2898,166 @@ export default function QualityPage() {
                         </Card>
                     </AccordionContent>
                 </AccordionItem>
+                
+                <AccordionItem value="engineering-tickets">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
+                        <div className="flex items-center gap-2">
+                            <TicketCheck className="h-5 w-5 text-primary" />
+                            Chamados para Engenharia
+                        </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        {/* Dashboard de Chamados */}
+                        <div className="grid gap-4 md:grid-cols-4 mb-6">
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Total</CardTitle>
+                                    <TicketCheck className="h-4 w-4 text-muted-foreground" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold">{engineeringMetrics.total}</div>
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Em Aberto</CardTitle>
+                                    <AlertCircle className="h-4 w-4 text-orange-500" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold text-orange-500">{engineeringMetrics.byStatus['Aberto'] || 0}</div>
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Em Análise</CardTitle>
+                                    <Clock className="h-4 w-4 text-blue-500" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold text-blue-500">{engineeringMetrics.byStatus['Em análise'] || 0}</div>
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Resolvidos</CardTitle>
+                                    <CheckCircle className="h-4 w-4 text-green-500" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold text-green-500">{engineeringMetrics.byStatus['Resolvido'] || 0}</div>
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        <Card>
+                            <CardHeader className="flex-row justify-between items-center">
+                                <CardTitle className="text-base">Histórico de Chamados</CardTitle>
+                                <Button size="sm" onClick={() => handleAddEngineeringTicketClick(selectedOrderForInspections)}>
+                                    <PlusCircle className="mr-2 h-4 w-4" />Novo Chamado
+                                </Button>
+                            </CardHeader>
+                            <CardContent>
+                                {isLoading ? (
+                                    <Skeleton className="h-40 w-full" />
+                                ) : (
+                                    <>
+                                        <div className="mb-4">
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                                                <Input 
+                                                    placeholder="Pesquisar chamados..." 
+                                                    value={engineeringTicketSearchQuery}
+                                                    onChange={(e) => setEngineeringTicketSearchQuery(e.target.value)}
+                                                    className="pl-10"
+                                                />
+                                            </div>
+                                        </div>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Código</TableHead>
+                                                    <TableHead>Item</TableHead>
+                                                    <TableHead>Categoria</TableHead>
+                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Abertura</TableHead>
+                                                    <TableHead className="text-right">Ações</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {filteredEngineeringTickets
+                                                    .filter(ticket => !selectedOrderForInspections || ticket.orderId === selectedOrderForInspections.id)
+                                                    .length > 0 ? filteredEngineeringTickets
+                                                    .filter(ticket => !selectedOrderForInspections || ticket.orderId === selectedOrderForInspections.id)
+                                                    .map(ticket => (
+                                                    <TableRow key={ticket.id}>
+                                                        <TableCell className="font-mono">{ticket.ticketNumber}</TableCell>
+                                                        <TableCell>
+                                                            <div className="text-sm">{ticket.itemName}</div>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <Badge variant="outline">{ticket.category}</Badge>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <Badge variant={getStatusVariant(ticket.status)}>
+                                                                {ticket.status}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell>{format(ticket.openedAt, 'dd/MM/yy')}</TableCell>
+                                                        <TableCell className="text-right">
+                                                            <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild>
+                                                                    <Button variant="ghost" size="icon">
+                                                                        <MoreVertical className="h-4 w-4" />
+                                                                    </Button>
+                                                                </DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end">
+                                                                    <DropdownMenuItem onClick={() => handleEditEngineeringTicketClick(ticket)}>
+                                                                        <Pencil className="mr-2 h-4 w-4" />
+                                                                        Editar
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem 
+                                                                        onClick={() => handleUpdateTicketStatus(ticket.id, 'Em análise')}
+                                                                        disabled={ticket.status === 'Em análise' || ticket.status === 'Resolvido'}
+                                                                    >
+                                                                        <Play className="mr-2 h-4 w-4" />
+                                                                        Iniciar Análise
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuItem 
+                                                                        onClick={() => handleUpdateTicketStatus(ticket.id, 'Resolvido')}
+                                                                        disabled={ticket.status === 'Resolvido'}
+                                                                    >
+                                                                        <CheckCircle className="mr-2 h-4 w-4" />
+                                                                        Marcar como Resolvido
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem 
+                                                                        onClick={() => handleDeleteEngineeringTicketClick(ticket)}
+                                                                        className="text-destructive"
+                                                                    >
+                                                                        <Trash2 className="mr-2 h-4 w-4" />
+                                                                        Excluir
+                                                                    </DropdownMenuItem>
+                                                                </DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )) : (
+                                                    <TableRow>
+                                                        <TableCell colSpan={6} className="h-24 text-center">
+                                                            {selectedOrderForInspections 
+                                                                ? `Nenhum chamado encontrado para o pedido ${selectedOrderForInspections.number}.`
+                                                                : 'Nenhum chamado encontrado.'
+                                                            }
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </AccordionContent>
+                </AccordionItem>
             </Accordion>
             </ScrollArea>
             </div>
@@ -2665,6 +3117,286 @@ export default function QualityPage() {
         </DialogContent>
       </Dialog>
       <AlertDialog open={isDeleteInspectionAlertOpen} onOpenChange={setIsDeleteInspectionAlertOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita e excluirá permanentemente o relatório de inspeção.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmDeleteInspection} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+
+      {/* Engineering Tickets Dialogs */}
+      <Dialog open={isEngineeringTicketFormOpen} onOpenChange={setIsEngineeringTicketFormOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selectedEngineeringTicket ? "Editar Chamado" : "Abrir Chamado para Engenharia"}</DialogTitle>
+            <DialogDescription>
+              Preencha os detalhes do problema para que a engenharia possa analisar e resolver.
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...engineeringTicketForm}>
+            <form onSubmit={engineeringTicketForm.handleSubmit(onEngineeringTicketSubmit)} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField control={engineeringTicketForm.control} name="orderId" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Pedido *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione um pedido" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {orders.map(o => (
+                          <SelectItem key={o.id} value={o.id}>
+                            Nº {o.number} - {o.customerName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                
+                <FormField control={engineeringTicketForm.control} name="itemId" render={({ field }) => {
+                  const watchedOrderId = engineeringTicketForm.watch("orderId");
+                  const availableItems = orders.find(o => o.id === watchedOrderId)?.items || [];
+                  
+                  return (
+                    <FormItem>
+                      <FormLabel>Item Relacionado *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger disabled={!watchedOrderId}>
+                            <SelectValue placeholder="Selecione um item" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {availableItems.map(i => (
+                            <SelectItem key={i.id} value={i.id}>
+                              {i.code ? `[${i.code}] ` : ''}{i.description}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }} />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField control={engineeringTicketForm.control} name="requestingDepartment" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Departamento Solicitante *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o departamento" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Produção">Produção</SelectItem>
+                        <SelectItem value="Qualidade">Qualidade</SelectItem>
+                        <SelectItem value="Vendas">Vendas</SelectItem>
+                        <SelectItem value="Compras">Compras</SelectItem>
+                        <SelectItem value="Logística">Logística</SelectItem>
+                        <SelectItem value="Engenharia">Engenharia</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={engineeringTicketForm.control} name="openedBy" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Responsável pela Abertura *</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Nome de quem está abrindo o chamado" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+
+              <FormField control={engineeringTicketForm.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Descrição Detalhada do Problema *</FormLabel>
+                  <FormControl>
+                    <Textarea 
+                      {...field} 
+                      placeholder="Descreva detalhadamente o problema encontrado, circunstâncias, impacto, etc."
+                      className="min-h-[120px]"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FormField control={engineeringTicketForm.control} name="category" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Categoria do Problema *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a categoria" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Desenho incorreto">Desenho incorreto</SelectItem>
+                        <SelectItem value="Material fora de medida">Material fora de medida</SelectItem>
+                        <SelectItem value="Defeito de fabricação">Defeito de fabricação</SelectItem>
+                        <SelectItem value="Interpretação">Interpretação</SelectItem>
+                        <SelectItem value="Especificação técnica">Especificação técnica</SelectItem>
+                        <SelectItem value="Processo de soldagem">Processo de soldagem</SelectItem>
+                        <SelectItem value="Acabamento/Pintura">Acabamento/Pintura</SelectItem>
+                        <SelectItem value="Outros">Outros</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={engineeringTicketForm.control} name="priority" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Prioridade *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a prioridade" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Alta">Alta</SelectItem>
+                        <SelectItem value="Média">Média</SelectItem>
+                        <SelectItem value="Baixa">Baixa</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={engineeringTicketForm.control} name="assignedTo" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Responsável na Engenharia</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Nome do responsável pela análise" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+
+              {selectedEngineeringTicket && (
+                <FormField control={engineeringTicketForm.control} name="status" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status do Chamado</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Aberto">Aberto</SelectItem>
+                        <SelectItem value="Em análise">Em análise</SelectItem>
+                        <SelectItem value="Aguardando resposta">Aguardando resposta</SelectItem>
+                        <SelectItem value="Resolvido">Resolvido</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
+
+              <FormField control={engineeringTicketForm.control} name="pauseSchedule" render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                  <div className="space-y-0.5">
+                    <FormLabel>Pausar Cronograma</FormLabel>
+                    <FormDescription>
+                      Pausar automaticamente o cronograma do item até a resolução do chamado
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                  </FormControl>
+                </FormItem>
+              )} />
+
+              {/* Histórico de Comentários */}
+              {selectedEngineeringTicket && selectedEngineeringTicket.comments && selectedEngineeringTicket.comments.length > 0 && (
+                <div className="space-y-4">
+                  <h4 className="font-medium">Histórico de Comentários</h4>
+                  <div className="border rounded-md p-4 max-h-60 overflow-y-auto space-y-3">
+                    {selectedEngineeringTicket.comments.map((comment, index) => (
+                      <div key={index} className="border-b pb-2 last:border-b-0">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-medium text-sm">{comment.author}</span>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">{comment.type}</Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {format(comment.timestamp, 'dd/MM/yy HH:mm')}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{comment.comment}</p>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Adicionar Novo Comentário */}
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Adicionar comentário..."
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAddComment(selectedEngineeringTicket.id);
+                        }
+                      }}
+                    />
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="icon"
+                      onClick={() => handleAddComment(selectedEngineeringTicket.id)}
+                      disabled={isAddingComment || !newComment.trim()}
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsEngineeringTicketFormOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit">
+                  {selectedEngineeringTicket ? 'Salvar Alterações' : 'Abrir Chamado'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={isEngineeringTicketDeleting} onOpenChange={setIsEngineeringTicketDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Isso excluirá permanentemente o chamado 
+              <span className="font-bold"> {engineeringTicketToDelete?.ticketNumber}</span> e todo seu histórico.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmEngineeringTicketDelete} 
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              Sim, excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -3207,7 +3939,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         </CardContent>
     </Card>
     <Card>
-        <CardHeader><CardTitle className="text-base">4. Equipamentos e Consumíveis</CardHeader></CardHeader>
+        <CardHeader><CardTitle className="text-base">4. Equipamentos e Consumíveis</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField control={form.control} name="penetrant" render={({ field }) => ( <FormItem><FormLabel>Penetrante</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="developer" render={({ field }) => ( <FormItem><FormLabel>Revelador</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
@@ -3218,7 +3950,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         </CardContent>
     </Card>
     <Card>
-        <CardHeader><CardTitle className="text-base">5. Procedimento de Execução</CardHeader></CardHeader>
+        <CardHeader><CardTitle className="text-base">5. Procedimento de Execução</CardTitle></CardHeader>
         <CardContent className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-6">
                 {Object.entries({preCleaning: "Limpeza Prévia", penetrantApplication: "Aplicação do Penetrante", excessRemoval: "Remoção do Excesso", developerApplication: "Aplicação do Revelador"}).map(([key, label]) => (
@@ -3249,7 +3981,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         </CardContent>
     </Card>
     <Card>
-      <CardHeader><CardTitle className="text-base">7. Conclusão</CardHeader></CardHeader>
+      <CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação Aplicado</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII, AWS D1.1" /></FormControl><FormMessage /></FormItem> )} />
@@ -3257,7 +3989,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
       </CardContent>
     </Card>
     <Card>
-      <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardHeader></CardHeader>
+      <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
       <CardContent>
           <FormItem>
               <FormLabel>Registro Fotográfico</FormLabel>
@@ -3368,7 +4100,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
             
             <Card>
-                <CardHeader><CardTitle className="text-base">3. Normas e Critérios Aplicados</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">3. Normas e Critérios Aplicados</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="executionStandard" render={({ field }) => ( <FormItem><FormLabel>Norma de Execução</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME V Art. 4" /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII Div. 1" /></FormControl><FormMessage /></FormItem> )} />
@@ -3378,7 +4110,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">4. Equipamentos e Acessórios</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">4. Equipamentos e Acessórios</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento (Marca/Modelo)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="equipmentSerial" render={({ field }) => ( <FormItem><FormLabel>Nº de Série</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
@@ -3392,7 +4124,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">5. Parâmetros do Ensaio</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">5. Parâmetros do Ensaio</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="pulseMode" render={({ field }) => ( <FormItem><FormLabel>Modo de Pulso</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Pulso-Eco, etc." /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="range" render={({ field }) => ( <FormItem><FormLabel>Alcance (mm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
@@ -3404,7 +4136,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
             
             <Card>
-                <CardHeader><CardTitle className="text-base">6. Resultados Detalhados</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">6. Resultados Detalhados</CardTitle></CardHeader>
                 <CardContent>
                     {fieldArrayProps.fields.length > 0 && (
                         <Table><TableHeader><TableRow><TableHead>Junta</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
@@ -3440,7 +4172,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
             
             <Card>
-                <CardHeader><CardTitle className="text-base">7. Conclusão</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
                 <CardContent>
                     <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o resultado"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="rejectionCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Rejeição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Especifique o critério de rejeição" /></FormControl><FormMessage /></FormItem> )} />
@@ -3449,7 +4181,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
                 <CardContent>
                      <FormItem>
                         <FormLabel>Registro Fotográfico</FormLabel>
@@ -3536,7 +4268,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                      <FormField control={form.control} name="rootCause" render={({ field }) => ( <FormItem><FormLabel>Causa Raiz Identificada</FormLabel><FormControl><Input {...field} placeholder="Qual foi a causa raiz do problema?" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
                      <FormField control={form.control} name="analysisTool" render={({ field }) => ( <FormItem><FormLabel>Ferramenta de Análise Utilizada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma ferramenta" /></SelectTrigger></FormControl><SelectContent>{analysisToolOptions.map(tool => (<SelectItem key={tool} value={tool}>{tool}</SelectItem>))}</SelectContent></Select><FormMessage /></FormItem> )}/>
@@ -3561,7 +4293,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">4. Ações Corretivas e Preventivas</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">4. Ações Corretivas e Preventivas</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                      <FormField control={form.control} name="correctiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Corretiva Imediata</FormLabel><FormControl><Textarea placeholder="O que foi feito para corrigir o problema?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
                      <FormField control={form.control} name="preventiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Preventiva Definida</FormLabel><FormControl><Textarea placeholder="O que será feito para evitar que o problema ocorra novamente?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
@@ -3573,7 +4305,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">5. Aprendizado Consolidado</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">5. Aprendizado Consolidado</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                     <FormField control={form.control} name="lessonSummary" render={({ field }) => ( <FormItem><FormLabel>Resumo da Lição Aprendida</FormLabel><FormControl><Textarea placeholder="Qual é a principal lição aprendida com este evento?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
                     <FormField control={form.control} name="procedureChangeNeeded" render={({ field }) => (
@@ -3602,7 +4334,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">6. Evidências e Aprovações</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">6. Evidências e Aprovações</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                     <FormField control={form.control} name="evidence" render={({ field }) => (
                         <FormItem>
