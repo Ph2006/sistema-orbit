@@ -1912,35 +1912,54 @@ export default function QualityPage() {
         if (report.photos && report.photos.length > 0) {
             y = finalY + 10;
             if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
-            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Fotos da Inspeção', 15, y);
-            y += 7;
+            docPdf.setFontSize(12).setFont(undefined, 'bold').text('Registro Fotográfico', 15, y);
+            y += 10;
 
-            const photoWidth = (pageWidth - 45) / 2;
-            const photoHeight = photoWidth * (3/4);
+            const photoWidth = (pageWidth - 45) / 2; // 2 fotos por linha
+            const photoHeight = photoWidth * (3/4); // Proporção 4:3
             let x = 15;
+            let photoCount = 0;
 
-            for (const photoDataUri of report.photos) {
-                if (y + photoHeight > pageHeight - 45) {
+            for (let i = 0; i < report.photos.length; i++) {
+                const photoDataUri = report.photos[i];
+                
+                // Verificar se precisa de nova página
+                if (y + photoHeight > pageHeight - 20) {
                     docPdf.addPage();
                     y = 20;
                     x = 15;
+                    photoCount = 0;
                 }
                 
                 try {
                     docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
+                    
+                    // Adicionar numeração da foto
+                    docPdf.setFontSize(8).setFont(undefined, 'normal');
+                    docPdf.text(`Foto ${i + 1}`, x + photoWidth/2, y + photoHeight + 5, { align: 'center' });
+                    
                 } catch(e) {
-                    console.error("jsPDF error adding image: ", e);
-                    docPdf.text("Erro ao carregar imagem", x, y + 10);
+                    console.error("Erro ao adicionar imagem ao PDF:", e);
+                    docPdf.setFontSize(10).text("Erro ao carregar imagem", x, y + 10);
                 }
 
-                if (x === 15) {
-                    x = 15 + photoWidth + 15;
+                photoCount++;
+                
+                // Layout: 2 fotos por linha
+                if (photoCount % 2 === 1) {
+                    x = 15 + photoWidth + 15; // Segunda posição
                 } else {
-                    x = 15;
-                    y += photoHeight + 5;
+                    x = 15; // Primeira posição da próxima linha
+                    y += photoHeight + 15; // Pular para próxima linha
                 }
             }
-            finalY = y > finalY ? y : finalY;
+            
+            // Ajustar finalY se necessário
+            if (photoCount % 2 === 1) {
+                finalY = y + photoHeight + 15;
+            } else {
+                finalY = y;
+            }
         }
         
         const footerText = `DIM-MEC-2025-01.REV0`;
@@ -3817,16 +3836,6 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         if (!files) return;
 
         const currentPhotos = form.getValues("photos") || [];
-        
-        // Limitar a 4 fotos para evitar exceder limite do Firestore
-        if (currentPhotos.length + files.length > 4) {
-            toast({
-                variant: "destructive",
-                title: "Limite de fotos excedido",
-                description: "Máximo de 4 fotos por relatório para evitar problemas de tamanho.",
-            });
-            return;
-        }
 
         const compressedPhotos = await Promise.all(
             Array.from(files).map(file => compressImage(file, 800, 0.6))
@@ -4048,7 +4057,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             <FormControl>
                 <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
             </FormControl>
-            <FormDescription>Selecione até 4 imagens (serão comprimidas automaticamente para otimizar o tamanho).</FormDescription>
+            <FormDescription>Selecione imagens (serão comprimidas automaticamente para otimizar o tamanho).</FormDescription>
             {watchedPhotos && watchedPhotos.length > 0 && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
                     {watchedPhotos.map((photo, index) => (
@@ -4693,4 +4702,5 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
 }
 
 
+    
     
