@@ -2853,7 +2853,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         }
         
         fieldArrayProps.update(editMeasurementIndex, {
-            ...fieldArrayProps.fields[editResultIndex],
+            ...fieldArrayProps.fields[editMeasurementIndex],
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
             toleranceMin: tolMin ?? undefined,
