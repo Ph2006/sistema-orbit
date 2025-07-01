@@ -25,7 +25,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, TicketCheck } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -182,6 +183,41 @@ const validateDataSizeBeforeSave = (data: any): boolean => {
     console.log(`✓ Tamanho dos dados OK: ${(dataSize / 1024).toFixed(1)}KB`);
     return true;
 };
+
+// === TIPOS E INTERFACES PARA CHAMADOS DE ENGENHARIA ===
+interface EngineeringTicket {
+  id: string;
+  ticketNumber?: string;
+  orderId: string;
+  itemId: string;
+  category: string;
+  description: string;
+  priority: 'Baixa' | 'Média' | 'Alta' | 'Crítica';
+  status: 'Aberto' | 'Em análise' | 'Resolvido';
+  openedAt: Date;
+  resolvedAt?: Date;
+  estimatedResolutionTime?: number; // em horas
+  actualResolutionTime?: number; // em horas
+  assignedTo?: string;
+  openedBy: string;
+  orderNumber: string;
+  itemName: string;
+  customerName: string;
+  pausedDays: number;
+  comments: Array<{
+    id: string;
+    author: string;
+    content: string;
+    timestamp: Date;
+    type: 'comment' | 'status_change' | 'assignment';
+  }>;
+  attachments?: string[];
+  tags?: string[];
+  rootCause?: string;
+  solution?: string;
+  preventiveActions?: string;
+}
+
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -239,8 +275,8 @@ const dimensionalMeasurementSchema = z.object({
   id: z.string(),
   dimensionName: z.string().min(1, "O nome da dimensão é obrigatório."),
   nominalValue: z.coerce.number(),
-  toleranceMin: z.coerce.number().optional(),
-  toleranceMax: z.coerce.number().optional(),
+  toleranceMin: z.string().optional(), // Mudou de number para string
+  toleranceMax: z.string().optional(), // Mudou de number para string
   measuredValue: z.coerce.number(),
   instrumentUsed: z.string({ required_error: "O instrumento é obrigatório." }),
   result: z.enum(["Conforme", "Não Conforme"]),
@@ -595,8 +631,16 @@ export default function QualityPage() {
   const [ultrasoundReports, setUltrasoundReports] = useState<UltrasoundReport[]>([]);
   const [lessonsLearnedReports, setLessonsLearnedReports] = useState<LessonsLearnedReport[]>([]);
 
+  // Estados para chamados de engenharia
+  const [engineeringTickets, setEngineeringTickets] = useState<EngineeringTicket[]>([]);
+  const [engineeringTicketSearchQuery, setEngineeringTicketSearchQuery] = useState("");
+  const [isEngineeringTicketFormOpen, setIsEngineeringTicketFormOpen] = useState(false);
+  const [selectedEngineeringTicket, setSelectedEngineeringTicket] = useState<EngineeringTicket | null>(null);
+  const [engineeringTicketToDelete, setEngineeringTicketToDelete] = useState<EngineeringTicket | null>(null);
+  const [isDeleteEngineeringTicketAlertOpen, setIsDeleteEngineeringTicketAlertOpen] = useState(false);
+
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
-  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | 'lessonsLearned' | null>(null);
+  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | 'lessonsLearned' | 'engineeringTicket' | null>(null);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
@@ -612,6 +656,18 @@ export default function QualityPage() {
   const rncForm = useForm<z.infer<typeof nonConformanceSchema>>({
     resolver: zodResolver(nonConformanceSchema),
     defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } },
+  });
+
+  const engineeringTicketForm = useForm<z.infer<typeof engineeringTicketSchema>>({
+      resolver: zodResolver(engineeringTicketSchema),
+      defaultValues: {
+        openedAt: new Date(),
+        status: 'Aberto',
+        priority: 'Média',
+        comments: [],
+        attachments: [],
+        tags: [],
+      },
   });
 
   const calibrationForm = useForm<z.infer<typeof calibrationSchema>>({
@@ -807,7 +863,7 @@ export default function QualityPage() {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
         materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
-        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot
+        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot, engineeringTicketsSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -820,6 +876,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
         getDocs(collection(db, "companies", "mecald", "ultrasoundReports")),
         getDocs(collection(db, "companies", "mecald", "lessonsLearned")),
+        getDocs(collection(db, "companies", "mecald", "engineeringTickets")), // VERIFICAR SE ESTÁ SENDO BUSCADO
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -871,11 +928,26 @@ export default function QualityPage() {
       const dimReportsList = dimensionalReportsSnapshot.docs.map(doc => {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
-        const item = order?.items.find(i => i.id === data.itemId);
+        
+        // Buscar item usando dados salvos ou fallback para busca por ID
+        let itemDescription = data.itemDescription; // Usar descrição salva primeiro
+        
+        if (!itemDescription) {
+            // Fallback: buscar pelo itemId se não tiver descrição salva
+            const item = order?.items.find(i => i.id === data.itemId);
+            itemDescription = item?.description || 'Item não encontrado';
+        }
+        
         const overallResult = (data.measurements || []).every((m: any) => m.result === "Conforme") ? "Conforme" : "Não Conforme";
+        
         return {
-          id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(),
-          orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', overallResult
+            id: doc.id, 
+            ...data, 
+            inspectionDate: data.inspectionDate.toDate(),
+            orderNumber: data.orderNumber || order?.number || 'N/A', 
+            itemName: itemDescription,
+            itemCode: data.itemCode || 'N/A',
+            overallResult
         } as DimensionalReport;
       }).sort((a, b) => (parseInt((a.reportNumber || '0').replace(/[^0-9]/g, '')) || 0) - (parseInt((b.reportNumber || '0').replace(/[^0-9]/g, '')) || 0));
       setDimensionalReports(dimReportsList);
@@ -940,6 +1012,78 @@ export default function QualityPage() {
       });
       setLessonsLearnedReports(lessonsList.sort((a,b) => (b.reportNumber || '').localeCompare(a.reportNumber || '')));
 
+      // PROCESSAMENTO DOS CHAMADOS DE ENGENHARIA - VERSÃO CORRIGIDA
+      console.log("=== PROCESSANDO CHAMADOS DE ENGENHARIA ===");
+      console.log("Documentos encontrados:", engineeringTicketsSnapshot.docs.length);
+      
+      const ticketsList = engineeringTicketsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log(`Processando chamado ${doc.id}:`, data);
+        
+        try {
+          const order = ordersList.find(o => o.id === data.orderId);
+          const item = order?.items.find(i => i.id === data.itemId);
+          
+          // Calcular dias pausados de forma segura
+          let pausedDays = 0;
+          if (data.openedAt) {
+            const openedDate = data.openedAt.toDate ? data.openedAt.toDate() : new Date(data.openedAt);
+            const endDate = data.status === 'Resolvido' && data.resolvedAt 
+                ? (data.resolvedAt.toDate ? data.resolvedAt.toDate() : new Date(data.resolvedAt))
+                : new Date();
+            pausedDays = differenceInDays(endDate, openedDate);
+          }
+          
+          // Processar comentários de forma segura
+          const processedComments = (data.comments || []).map((c: any) => {
+            try {
+              return {
+                ...c,
+                timestamp: c.timestamp?.toDate ? c.timestamp.toDate() : new Date(c.timestamp || Date.now()),
+              };
+            } catch (error) {
+              console.warn("Erro ao processar comentário:", error);
+              return {
+                ...c,
+                timestamp: new Date(),
+              };
+            }
+          });
+          
+          const ticketData = {
+            id: doc.id,
+            ...data,
+            openedAt: data.openedAt?.toDate ? data.openedAt.toDate() : new Date(data.openedAt || Date.now()),
+            resolvedAt: data.resolvedAt ? (data.resolvedAt.toDate ? data.resolvedAt.toDate() : new Date(data.resolvedAt)) : null,
+            orderNumber: order?.number || 'N/A',
+            itemName: item?.description || 'Item não encontrado',
+            customerName: order?.customerName || 'N/A',
+            pausedDays,
+            comments: processedComments,
+          } as EngineeringTicket;
+          
+          console.log(`✓ Chamado processado:`, ticketData.ticketNumber);
+          return ticketData;
+          
+        } catch (error) {
+          console.error(`Erro ao processar chamado ${doc.id}:`, error);
+          // Retornar dados básicos em caso de erro
+          return {
+            id: doc.id,
+            ...data,
+            openedAt: new Date(),
+            resolvedAt: null,
+            orderNumber: 'N/A',
+            itemName: 'Erro no processamento',
+            customerName: 'N/A',
+            pausedDays: 0,
+            comments: [],
+          } as EngineeringTicket;
+        }
+      });
+      
+      console.log(`✓ Total de chamados processados: ${ticketsList.length}`);
+      setEngineeringTickets(ticketsList.sort((a,b) => b.openedAt.getTime() - a.openedAt.getTime()));
 
     } catch (error) {
       console.error("Error fetching quality data:", error);
@@ -1149,9 +1293,27 @@ export default function QualityPage() {
        console.log("=== SALVANDO RELATÓRIO DIMENSIONAL ===");
        console.log("Dados recebidos:", values);
        console.log("Fotos recebidas:", values.photos?.length || 0);
-
+       console.log("Item ID selecionado:", values.itemId);
+       
+       // Buscar informações do item selecionado
+       const selectedOrder = orders.find(o => o.id === values.orderId);
+       const selectedItem = selectedOrder?.items.find(i => i.id === values.itemId);
+       
+       console.log("Pedido encontrado:", selectedOrder);
+       console.log("Item encontrado:", selectedItem);
+       
+       if (!selectedItem) {
+           toast({
+               variant: "destructive",
+               title: "Erro",
+               description: "Item selecionado não encontrado. Selecione um item válido.",
+           });
+           return;
+       }
+       
        const { reportNumber, ...restOfValues } = values;
        
+       // Preparar dados para salvar - INCLUINDO informações do item
        const dataToSave = { 
         ...restOfValues,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
@@ -1159,25 +1321,43 @@ export default function QualityPage() {
         quantityInspected: values.quantityInspected || null,
         notes: values.notes || null,
         photos: values.photos || [],
-        measurements: values.measurements || []
+        measurements: values.measurements || [],
+        
+        // DADOS DO ITEM - SALVANDO EXPLICITAMENTE
+        itemId: values.itemId,
+        itemCode: selectedItem.code || null,
+        itemDescription: selectedItem.description,
+        itemQuantity: selectedItem.quantity || null,
+        
+        // DADOS DO PEDIDO
+        orderId: values.orderId,
+        orderNumber: selectedOrder?.number || 'N/A',
+        customerName: selectedOrder?.customerName || 'N/A',
+        projectName: selectedOrder?.projectName || null,
       };
       
-      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
-      if (!validateDataSizeBeforeSave(dataToSave)) {
+      // VALIDAÇÃO DO TAMANHO
+      const dataSize = JSON.stringify(dataToSave).length;
+      console.log(`Tamanho dos dados: ${(dataSize / 1024).toFixed(1)}KB`);
+      
+      if (dataSize > 900000) { // 900KB
           toast({
               variant: "destructive",
-              title: "Relatório muito grande para salvar",
-              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+              title: "Relatório muito grande",
+              description: "O relatório excede o limite. Remova algumas fotos.",
           });
           return;
       }
       
-      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
-      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
+      console.log("=== DADOS FINAIS PARA FIRESTORE ===");
+      console.log("Item salvo:", {
+          itemId: dataToSave.itemId,
+          itemCode: dataToSave.itemCode,
+          itemDescription: dataToSave.itemDescription
+      });
 
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
-         console.log("✓ Relatório atualizado no Firestore com sucesso!");
          toast({ title: "Relatório atualizado!" });
        } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "dimensionalReports"));
@@ -1188,18 +1368,8 @@ export default function QualityPage() {
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
         const finalData = { ...dataToSave, reportNumber: newReportNumber };
 
-         // Validação final antes de salvar
-         if (!validateDataSizeBeforeSave(finalData)) {
-             toast({
-                 variant: "destructive",
-                 title: "Relatório muito grande para salvar",
-                 description: `O relatório final excede o limite. Remova algumas fotos.`,
-             });
-             return;
-         }
-         
          await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), finalData);
-         console.log("✓ Dados salvos no Firestore com sucesso!");
+         console.log("✓ Relatório salvo com item:", finalData.itemDescription);
          toast({ title: "Relatório dimensional criado!" });
        }
        
@@ -1209,9 +1379,7 @@ export default function QualityPage() {
      } catch (error) { 
          console.error("❌ Erro ao salvar relatório:", error);
          
-         // Verificar se é erro de tamanho do Firestore
-         if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
-             (error as any)?.message?.includes('Document exceeds maximum size')) {
+         if ((error as any)?.message?.includes('exceeds the maximum allowed size')) {
              toast({ 
                  variant: "destructive", 
                  title: "Relatório muito grande", 
@@ -1221,7 +1389,7 @@ export default function QualityPage() {
              toast({ variant: "destructive", title: "Erro ao salvar relatório" });
          }
      }
-  };
+};
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
         console.log("=== SALVANDO RELATÓRIO DE SOLDA ===");
@@ -1824,6 +1992,7 @@ export default function QualityPage() {
         case 'liquidPenetrant': liquidPenetrantForm.handleSubmit(onLiquidPenetrantSubmit)(data); break;
         case 'ultrasound': ultrasoundReportForm.handleSubmit(onUltrasoundReportSubmit)(data); break;
         case 'lessonsLearned': lessonsLearnedForm.handleSubmit(onLessonsLearnedSubmit)(data); break;
+        case 'engineeringTicket': engineeringTicketForm.handleSubmit(onEngineeringTicketSubmit)(data); break;
     }
   };
 
@@ -1941,11 +2110,12 @@ export default function QualityPage() {
         const body = report.measurements.map(m => {
             const instrument = calibrations.find(c => c.equipmentName === m.instrumentUsed);
             const instrumentDisplay = instrument ? `${instrument.equipmentName} (${instrument.internalCode})` : m.instrumentUsed;
+            
             return [
                 m.dimensionName,
                 m.nominalValue.toString(),
-                m.toleranceMin?.toString() ?? '-',
-                m.toleranceMax?.toString() ?? '-',
+                m.toleranceMin || '-',
+                m.toleranceMax || '-', 
                 m.measuredValue.toString(),
                 instrumentDisplay,
                 m.result
@@ -1954,7 +2124,7 @@ export default function QualityPage() {
 
         autoTable(docPdf, {
             startY: y,
-            head: [['Dimensão', 'Nominal', 'Tol. Inferior (-)', 'Tol. Superior (+)', 'Medido', 'Instrumento', 'Resultado']],
+            head: [['Dimensão', 'Nominal', 'Tolerância 1', 'Tolerância 2', 'Medido', 'Instrumento', 'Resultado']],
             body: body,
             headStyles: { fillColor: [40, 40, 40] },
             didParseCell: (data) => {
@@ -2670,9 +2840,10 @@ export default function QualityPage() {
         case 'liquidPenetrant': return liquidPenetrantForm;
         case 'ultrasound': return ultrasoundReportForm;
         case 'lessonsLearned': return lessonsLearnedForm;
+        case 'engineeringTicket': return engineeringTicketForm;
         default: return null;
     }
-  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm, ultrasoundReportForm, lessonsLearnedForm]);
+  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm, ultrasoundReportForm, lessonsLearnedForm, engineeringTicketForm]);
   
 
   return (
@@ -3061,6 +3232,7 @@ export default function QualityPage() {
                 {dialogType === 'liquidPenetrant' && (selectedInspection ? 'Editar Relatório de LP' : 'Novo Relatório de LP')}
                 {dialogType === 'ultrasound' && (selectedInspection ? 'Editar Relatório de UT' : 'Novo Relatório de UT')}
                 {dialogType === 'lessonsLearned' && (selectedInspection ? 'Editar Lição Aprendida' : 'Registrar Nova Lição Aprendida')}
+                {dialogType === 'engineeringTicket' && (selectedEngineeringTicket ? 'Editar Chamado de Engenharia' : 'Novo Chamado de Engenharia')}
             </DialogTitle>
             <DialogDescription>Preencha os campos para registrar a inspeção.</DialogDescription>
         </DialogHeader>
@@ -3089,6 +3261,9 @@ export default function QualityPage() {
                             )}
                              {dialogType === 'lessonsLearned' && (
                                 <LessonsLearnedForm form={lessonsLearnedForm} orders={orders} teamMembers={teamMembers} />
+                            )}
+                             {dialogType === 'engineeringTicket' && (
+                                <EngineeringTicketForm form={engineeringTicketForm} orders={orders} teamMembers={teamMembers} />
                             )}
                         </div>
                     </ScrollArea>
@@ -3385,9 +3560,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const handleAddMeasurement = () => {
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
-        const tolMin = newMeasurement.toleranceMin !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMin)) : null;
-        const tolMax = newMeasurement.toleranceMax !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMax)) : null;
-    
+        
         if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
             toast({
                 variant: "destructive",
@@ -3396,26 +3569,72 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             });
             return;
         }
-    
-        let result: "Conforme" | "Não Conforme" = "Conforme";
-        const lowerBound = tolMin !== null ? nominal - tolMin : nominal;
-        const upperBound = tolMax !== null ? nominal + tolMax : nominal;
 
-        if (measured < lowerBound || measured > upperBound) {
-            result = "Não Conforme";
+        // Nova lógica para tolerâncias com sinais
+        let result: "Conforme" | "Não Conforme" = "Conforme";
+        
+        // Verificar tolerâncias se foram preenchidas
+        if (newMeasurement.toleranceMin || newMeasurement.toleranceMax) {
+            let lowerBound = nominal;
+            let upperBound = nominal;
+            
+            // Processar tolerância 1
+            if (newMeasurement.toleranceMin) {
+                const tol1 = newMeasurement.toleranceMin.trim();
+                if (tol1.startsWith('+')) {
+                    upperBound = nominal + Math.abs(parseFloat(tol1.substring(1)));
+                } else if (tol1.startsWith('-')) {
+                    lowerBound = nominal - Math.abs(parseFloat(tol1.substring(1)));
+                } else {
+                    // Se não tem sinal, assume como ±
+                    const tolValue = Math.abs(parseFloat(tol1));
+                    lowerBound = nominal - tolValue;
+                    upperBound = nominal + tolValue;
+                }
+            }
+            
+            // Processar tolerância 2
+            if (newMeasurement.toleranceMax) {
+                const tol2 = newMeasurement.toleranceMax.trim();
+                if (tol2.startsWith('+')) {
+                    upperBound = nominal + Math.abs(parseFloat(tol2.substring(1)));
+                } else if (tol2.startsWith('-')) {
+                    lowerBound = nominal - Math.abs(parseFloat(tol2.substring(1)));
+                } else {
+                    // Se não tem sinal, assume como ±
+                    const tolValue = Math.abs(parseFloat(tol2));
+                    if (!newMeasurement.toleranceMin) {
+                        lowerBound = nominal - tolValue;
+                        upperBound = nominal + tolValue;
+                    }
+                }
+            }
+            
+            // Verificar se o valor medido está dentro da tolerância
+            if (measured < lowerBound || measured > upperBound) {
+                result = "Não Conforme";
+            }
         }
         
         fieldArrayProps.append({
             id: Date.now().toString(),
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
-            toleranceMin: tolMin ?? undefined,
-            toleranceMax: tolMax ?? undefined,
+            toleranceMin: newMeasurement.toleranceMin || undefined,
+            toleranceMax: newMeasurement.toleranceMax || undefined,
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
             result: result,
         });
-        setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
+        
+        setNewMeasurement({ 
+            dimensionName: '', 
+            nominalValue: '', 
+            toleranceMin: '', 
+            toleranceMax: '', 
+            measuredValue: '', 
+            instrumentUsed: '' 
+        });
     };
     
     const handleEditMeasurement = (index: number) => {
@@ -3436,8 +3655,6 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
-        const tolMin = newMeasurement.toleranceMin !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMin)) : null;
-        const tolMax = newMeasurement.toleranceMax !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMax)) : null;
 
         if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
             toast({
@@ -3448,20 +3665,58 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             return;
         }
 
+        // Nova lógica para tolerâncias com sinais
         let result: "Conforme" | "Não Conforme" = "Conforme";
-        const lowerBound = tolMin !== null ? nominal - tolMin : nominal;
-        const upperBound = tolMax !== null ? nominal + tolMax : nominal;
         
-        if (measured < lowerBound || measured > upperBound) {
-            result = "Não Conforme";
+        // Verificar tolerâncias se foram preenchidas
+        if (newMeasurement.toleranceMin || newMeasurement.toleranceMax) {
+            let lowerBound = nominal;
+            let upperBound = nominal;
+            
+            // Processar tolerância 1
+            if (newMeasurement.toleranceMin) {
+                const tol1 = newMeasurement.toleranceMin.trim();
+                if (tol1.startsWith('+')) {
+                    upperBound = nominal + Math.abs(parseFloat(tol1.substring(1)));
+                } else if (tol1.startsWith('-')) {
+                    lowerBound = nominal - Math.abs(parseFloat(tol1.substring(1)));
+                } else {
+                    // Se não tem sinal, assume como ±
+                    const tolValue = Math.abs(parseFloat(tol1));
+                    lowerBound = nominal - tolValue;
+                    upperBound = nominal + tolValue;
+                }
+            }
+            
+            // Processar tolerância 2
+            if (newMeasurement.toleranceMax) {
+                const tol2 = newMeasurement.toleranceMax.trim();
+                if (tol2.startsWith('+')) {
+                    upperBound = nominal + Math.abs(parseFloat(tol2.substring(1)));
+                } else if (tol2.startsWith('-')) {
+                    lowerBound = nominal - Math.abs(parseFloat(tol2.substring(1)));
+                } else {
+                    // Se não tem sinal, assume como ±
+                    const tolValue = Math.abs(parseFloat(tol2));
+                    if (!newMeasurement.toleranceMin) {
+                        lowerBound = nominal - tolValue;
+                        upperBound = nominal + tolValue;
+                    }
+                }
+            }
+            
+            // Verificar se o valor medido está dentro da tolerância
+            if (measured < lowerBound || measured > upperBound) {
+                result = "Não Conforme";
+            }
         }
         
         fieldArrayProps.update(editMeasurementIndex, {
-            ...fieldArrayProps.fields[editResultIndex],
+            ...fieldArrayProps.fields[editMeasurementIndex],
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
-            toleranceMin: tolMin ?? undefined,
-            toleranceMax: tolMax ?? undefined,
+            toleranceMin: newMeasurement.toleranceMin || undefined,
+            toleranceMax: newMeasurement.toleranceMax || undefined,
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
             result: result,
@@ -3510,7 +3765,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
         <CardContent>
             {fieldArrayProps.fields.length > 0 && (
-            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tol. (-)</TableHead><TableHead>Tol. (+)</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tolerância 1</TableHead><TableHead>Tolerância 2</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
             <TableBody>
                 {fieldArrayProps.fields.map((field: any, index: number) => (
                 <TableRow key={field.id}>
@@ -3537,12 +3792,12 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                         <Input type="number" step="any" value={newMeasurement.nominalValue} onChange={(e) => setNewMeasurement({...newMeasurement, nominalValue: e.target.value})} placeholder="100.0"/>
                     </div>
                     <div>
-                        <Label>Tolerância Inferior (-)</Label>
-                        <Input type="number" step="any" value={newMeasurement.toleranceMin} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMin: e.target.value})} placeholder="Ex: 0.1"/>
+                        <Label>Tolerância 1</Label>
+                        <Input type="text" value={newMeasurement.toleranceMin} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMin: e.target.value})} placeholder="Ex: +0.1 ou -0.05"/>
                     </div>
                     <div>
-                        <Label>Tolerância Superior (+)</Label>
-                        <Input type="number" step="any" value={newMeasurement.toleranceMax} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMax: e.target.value})} placeholder="Ex: 0.2"/>
+                        <Label>Tolerância 2</Label>
+                        <Input type="text" value={newMeasurement.toleranceMax} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMax: e.target.value})} placeholder="Ex: +0.2 ou -0.1"/>
                     </div>
                     <div>
                         <Label>Valor Medido</Label>
