@@ -2760,16 +2760,81 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         const files = e.target.files;
         if (!files) return;
 
-        Array.from(files).forEach(file => {
+        const maxFileSize = 5 * 1024 * 1024; // 5MB
+        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+        const maxFiles = 10;
+        
+        const currentPhotos = form.getValues("photos") || [];
+        
+        if (currentPhotos.length + files.length > maxFiles) {
+            toast({
+                variant: "destructive",
+                title: "Limite de arquivos excedido",
+                description: `Você pode anexar no máximo ${maxFiles} fotos por relatório.`,
+            });
+            return;
+        }
+
+        const validFiles = Array.from(files).filter(file => {
+            if (!allowedTypes.includes(file.type)) {
+                toast({
+                    variant: "destructive",
+                    title: "Tipo de arquivo inválido",
+                    description: `O arquivo "${file.name}" não é um tipo de imagem suportado. Use JPEG, PNG ou WebP.`,
+                });
+                return false;
+            }
+            
+            if (file.size > maxFileSize) {
+                toast({
+                    variant: "destructive",
+                    title: "Arquivo muito grande",
+                    description: `O arquivo "${file.name}" é muito grande. O tamanho máximo é 5MB.`,
+                });
+                return false;
+            }
+            
+            return true;
+        });
+
+        if (validFiles.length === 0) return;
+
+        let processedCount = 0;
+        const totalFiles = validFiles.length;
+
+        toast({
+            title: "Processando imagens...",
+            description: `Carregando ${totalFiles} imagem(ns). Aguarde...`,
+        });
+
+        validFiles.forEach(file => {
             const reader = new FileReader();
             reader.onload = (event) => {
                 if (event.target?.result) {
                     const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
                     form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                    
+                    processedCount++;
+                    if (processedCount === totalFiles) {
+                        toast({
+                            title: "Imagens carregadas com sucesso!",
+                            description: `${totalFiles} imagem(ns) foram anexadas ao relatório.`,
+                        });
+                    }
                 }
+            };
+            reader.onerror = () => {
+                toast({
+                    variant: "destructive",
+                    title: "Erro ao carregar imagem",
+                    description: `Não foi possível processar o arquivo "${file.name}".`,
+                });
             };
             reader.readAsDataURL(file);
         });
+        
+        // Limpar o input para permitir selecionar os mesmos arquivos novamente
+        e.target.value = '';
     };
 
     const removePhoto = (index: number) => {
@@ -2974,26 +3039,95 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente (Nome)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
         </div>
         
-        <FormItem>
-            <FormLabel>Fotos da Inspeção</FormLabel>
-            <FormControl>
-                <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
-            </FormControl>
-            <FormDescription>Selecione uma ou mais imagens para anexar ao relatório. Imagens grandes podem demorar para salvar.</FormDescription>
-            {watchedPhotos && watchedPhotos.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
-                    {watchedPhotos.map((photo, index) => (
-                        <div key={index} className="relative">
-                            <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
-                            <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
-                                <Trash2 className="h-3 w-3" />
+        <Card>
+            <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                    📷 Registro Fotográfico
+                    <Badge variant="secondary">{watchedPhotos?.length || 0}/10</Badge>
+                </CardTitle>
+                <CardDescription>
+                    Anexe fotos da inspeção dimensional para documentar o processo e resultados.
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <FormItem>
+                    <FormLabel>Selecionar Fotos</FormLabel>
+                    <FormControl>
+                        <div className="flex items-center justify-center w-full">
+                            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                    <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                                        <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                                    </svg>
+                                    <p className="mb-2 text-sm text-gray-500">
+                                        <span className="font-semibold">Clique para selecionar</span> ou arraste as imagens
+                                    </p>
+                                    <p className="text-xs text-gray-500">PNG, JPG, JPEG, WebP (máx. 5MB cada)</p>
+                                </div>
+                                <Input 
+                                    type="file" 
+                                    multiple 
+                                    accept="image/jpeg,image/jpg,image/png,image/webp" 
+                                    onChange={handlePhotoUpload} 
+                                    className="hidden"
+                                />
+                            </label>
+                        </div>
+                    </FormControl>
+                    <FormDescription className="text-xs">
+                        • Máximo 10 fotos por relatório<br/>
+                        • Tamanho máximo: 5MB por imagem<br/>
+                        • Formatos aceitos: JPEG, PNG, WebP<br/>
+                        • Dica: Fotos menores carregam mais rápido
+                    </FormDescription>
+                </FormItem>
+
+                {watchedPhotos && watchedPhotos.length > 0 && (
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h4 className="font-medium text-sm">Fotos Anexadas</h4>
+                            <Button 
+                                type="button" 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => form.setValue("photos", [], { shouldValidate: true })}
+                            >
+                                Remover Todas
                             </Button>
                         </div>
-                    ))}
-                </div>
-            )}
-            <FormMessage />
-        </FormItem>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                            {watchedPhotos.map((photo, index) => (
+                                <div key={index} className="relative group">
+                                    <div className="relative overflow-hidden rounded-lg border">
+                                        <Image 
+                                            src={photo} 
+                                            alt={`Inspeção ${index + 1}`} 
+                                            width={200} 
+                                            height={200} 
+                                            className="object-cover w-full aspect-square transition-transform group-hover:scale-105" 
+                                        />
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+                                        <Button 
+                                            type="button" 
+                                            size="icon" 
+                                            variant="destructive" 
+                                            className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={() => removePhoto(index)}
+                                        >
+                                            <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                    <p className="text-xs text-center mt-1 text-muted-foreground">
+                                        Foto {index + 1}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                <FormMessage />
+            </CardContent>
+        </Card>
 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
     </>);
