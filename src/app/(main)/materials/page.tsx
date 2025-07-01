@@ -1,4 +1,173 @@
-"use client";
+<Dialog open={isRequisitionFormOpen} onOpenChange={setIsRequisitionFormOpen}>
+                <DialogContent className="max-w-4xl h-[95vh] flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle>{selectedRequisition ? `Editar Requisição Nº ${selectedRequisition.requisitionNumber}` : "Nova Requisição de Material"}</DialogTitle>
+                        <DialogDescription>{selectedRequisition ? "Altere os dados da requisição." : "Preencha as informações para solicitar materiais."}</DialogDescription>
+                    </DialogHeader>
+                    <Form {...requisitionForm}>
+                        <form onSubmit={requisitionForm.handleSubmit(onRequisitionSubmit)} className="flex-grow flex flex-col min-h-0">
+                            <Tabs defaultValue="details" className="flex-grow flex flex-col min-h-0">
+                                <TabsList>
+                                    <TabsTrigger value="details">Detalhes da Requisição</TabsTrigger>
+                                    <TabsTrigger value="items">Lista de Materiais</TabsTrigger>
+                                </TabsList>
+                                <div className="flex-grow mt-4 overflow-hidden">
+                                <ScrollArea className="h-full pr-6">
+                                <TabsContent value="details" className="space-y-6">
+                                  <Card><CardHeader><CardTitle>Identificação</CardTitle></CardHeader>
+                                    <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                        <FormField control={requisitionForm.control} name="date" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                                        <FormField control={requisitionForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent>{RequisitionStatus.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                                        <FormField control={requisitionForm.control} name="requestedBy" render={({ field }) => ( <FormItem><FormLabel>Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um responsável"/></SelectTrigger></FormControl><SelectContent>{team.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                                        <FormField control={requisitionForm.control} name="department" render={({ field }) => ( <FormItem><FormLabel>Departamento</FormLabel><FormControl><Input placeholder="Ex: Produção" {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem> )} />
+                                        <FormField control={requisitionForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>OS Vinculada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS"/></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                                         <FormItem><FormLabel>Cliente Vinculado</FormLabel><Input value={requisitionForm.watch('customer.name') || 'Selecione uma OS'} disabled /></FormItem>
+                                    </CardContent>
+                                  </Card>
+                                  <Card>
+                                    <CardHeader><CardTitle>Comentários</CardTitle></CardHeader>
+                                    <CardContent> <FormField control={requisitionForm.control} name="generalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Gerais</FormLabel><FormControl><Textarea placeholder="Qualquer informação adicional..." {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem> )} /></CardContent>
+                                  </Card>
+                                </TabsContent>
+                                <TabsContent value="items" className="space-y-4">
+                                    <Card><CardHeader><CardTitle>Item da Requisição</CardTitle><CardDescription>{editItemIndex !== null ? 'Edite os dados do item.' : 'Preencha e adicione um novo item.'}</CardDescription></CardHeader>
+                                        <CardContent className="space-y-4">
+                                            <div className="space-y-4">
+                                                <div><Label>Descrição</Label><Input placeholder="Ex: Chapa de Aço 1/4" value={currentItem.description} onChange={e => handleCurrentItemChange('description', e.target.value)} /></div>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                    <div><Label>Qtd. Solicitada</Label><Input type="number" value={currentItem.quantityRequested} onChange={e => handleCurrentItemChange('quantityRequested', e.target.value)} /></div>
+                                                    <div><Label>Unidade</Label><Input placeholder="kg, m, pç" value={currentItem.unit} onChange={e => handleCurrentItemChange('unit', e.target.value)} /></div>
+                                                    <div><Label>Peso Unit. (kg)</Label><Input type="number" step="0.01" value={currentItem.pesoUnitario || ''} onChange={e => handleCurrentItemChange('pesoUnitario', e.target.value)} /></div>
+                                                    <div className="flex flex-col space-y-2"><Label>Entrega Prevista</Label><Popover><PopoverTrigger asChild><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !currentItem.deliveryDate && "text-muted-foreground")}>{currentItem.deliveryDate ? format(currentItem.deliveryDate, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={currentItem.deliveryDate || undefined} onSelect={date => handleCurrentItemChange('deliveryDate', date)} /></PopoverContent></Popover></div>
+                                                </div>
+                                                <div><Label>Observações</Label><Input placeholder="Ex: Certificado de qualidade" value={currentItem.notes || ''} onChange={e => handleCurrentItemChange('notes', e.target.value)} /></div>
+                                            </div>
+                                             <div className="flex justify-end gap-2">{editItemIndex !== null && ( <Button type="button" variant="outline" onClick={handleCancelEditItem}>Cancelar Edição</Button> )}<Button type="button" onClick={editItemIndex !== null ? handleUpdateItem : handleAddItem}><PlusCircle className="mr-2 h-4 w-4" />{editItemIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}</Button></div>
+                                        </CardContent>
+                                    </Card>
+                                    {reqItems.length > 0 && (
+                                        <Card><CardHeader><CardTitle>Itens Adicionados</CardTitle></CardHeader>
+                                            <CardContent><Table><TableHeader><TableRow><TableHead>Descrição</TableHead><TableHead>Qtd.</TableHead><TableHead>Unid.</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                                    <TableBody>{reqItems.map((item, index) => ( <TableRow key={item.id} className={cn(editItemIndex === index && "bg-secondary")}><TableCell className="font-medium">{item.description}</TableCell><TableCell>{item.quantityRequested}</TableCell><TableCell>{item.unit}</TableCell><TableCell>{item.status}</TableCell><TableCell className="text-right"><Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => removeReqItem(index)}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow> ))}</TableBody>
+                                                </Table></CardContent>
+                                        </Card>
+                                    )}
+                                </TabsContent>
+                                </ScrollArea>
+                                </div>
+                            </Tabs>
+                            <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0">
+                                <Button type="button" variant="outline" onClick={() => setIsRequisitionFormOpen(false)}>Cancelar</Button>
+                                <Button type="submit" disabled={requisitionForm.formState.isSubmitting}>{requisitionForm.formState.isSubmitting ? "Salvando..." : (selectedRequisition ? "Salvar Alterações" : "Criar Requisição")}</Button>
+                            </DialogFooter>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isCuttingPlanFormOpen} onOpenChange={setIsCuttingPlanFormOpen}>
+                <DialogContent className="max-w-5xl h-[95vh] flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle>{selectedCuttingPlan ? `Editar Plano de Corte Nº ${selectedCuttingPlan.planNumber}` : "Novo Plano de Corte"}</DialogTitle>
+                        <DialogDescription>{selectedCuttingPlan ? "Altere os dados do plano." : "Crie um novo plano de otimização de corte."}</DialogDescription>
+                    </DialogHeader>
+                     <Form {...cuttingPlanForm}>
+                        <form onSubmit={cuttingPlanForm.handleSubmit(onCuttingPlanSubmit)} className="flex-grow flex flex-col min-h-0 space-y-4">
+                            <ScrollArea className="flex-1 pr-6 -mr-6">
+                                <div className="space-y-6">
+                                    <Card>
+                                        <CardHeader><CardTitle>Informações Gerais</CardTitle></CardHeader>
+                                        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            <FormField control={cuttingPlanForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>OS Vinculada (Opcional)</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS"/></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                                            <FormItem><FormLabel>Cliente Vinculado</FormLabel><Input value={cuttingPlanForm.watch('customer.name') || 'Selecione uma OS'} disabled /></FormItem>
+                                        </CardContent>
+                                    </Card>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                        <div className="space-y-6">
+                                            <Card><CardHeader><CardTitle>Parâmetros de Entrada</CardTitle></CardHeader>
+                                                <CardContent className="space-y-4">
+                                                    <FormField control={cuttingPlanForm.control} name="materialDescription" render={({ field }) => ( <FormItem><FormLabel>Descrição do Material da Barra</FormLabel><FormControl><Input placeholder="Ex: Cantoneira 2 x 3/16" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                                                    <FormField control={cuttingPlanForm.control} name="stockLength" render={({ field }) => ( <FormItem><FormLabel>Comprimento da Barra (mm)</FormLabel><FormControl><Input type="number" placeholder="6000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                                                    <FormField control={cuttingPlanForm.control} name="kerf" render={({ field }) => ( <FormItem><FormLabel>Espessura do Corte / Kerf (mm)</FormLabel><FormControl><Input type="number" placeholder="3" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                                                     <FormField control={cuttingPlanForm.control} name="deliveryDate" render={({ field }) => ( <FormItem><FormLabel>Entrega Prevista</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("w-full pl-3 text-left", !field.value && "text-muted-foreground")}>{field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                                                </CardContent>
+                                            </Card>
+                                            <Card><CardHeader><CardTitle>Item do Plano de Corte</CardTitle><CardDescription>{editCutIndex !== null ? 'Edite os dados.' : 'Preencha e adicione.'}</CardDescription></CardHeader>
+                                                <CardContent className="space-y-4">
+                                                    <div><Label>Descrição</Label><Input placeholder={`Peça ${cutItems.length + 1}`} value={currentCutItem.description} onChange={e => handleCurrentCutItemChange('description', e.target.value)} /></div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                        <div><Label>Código</Label><Input placeholder="Opcional" value={currentCutItem.code || ''} onChange={e => handleCurrentCutItemChange('code', e.target.value)} /></div>
+                                                        <div><Label>Comprimento (mm)</Label><Input type="number" value={currentCutItem.length} onChange={e => handleCurrentCutItemChange('length', e.target.value)} /></div>
+                                                        <div><Label>Quantidade</Label><Input type="number" value={currentCutItem.quantity} onChange={e => handleCurrentCutItemChange('quantity', e.target.value)} /></div>
+                                                    </div>
+                                                    <div className="flex justify-end gap-2">{editCutIndex !== null && (<Button type="button" variant="outline" onClick={handleCancelEditCutItem}>Cancelar</Button>)}<Button type="button" onClick={editCutIndex !== null ? handleUpdateCutItem : handleAddCutItem}><PlusCircle className="mr-2 h-4 w-4" />{editCutIndex !== null ? 'Atualizar' : 'Adicionar'}</Button></div>
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+                                        <div className="space-y-6">
+                                            <Card>
+                                                <CardHeader>
+                                                    <CardTitle>Resultados do Plano</CardTitle>
+                                                    <CardDescription>Padrões otimizados para o corte.</CardDescription>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    {cuttingPlanForm.getValues('summary') ? (
+                                                        <>
+                                                            <Table><TableHeader><TableRow><TableHead>Padrão</TableHead><TableHead>Uso/Sobra</TableHead><TableHead>Nº</TableHead><TableHead>Rend.</TableHead></TableRow></TableHeader>
+                                                                <TableBody>{(cuttingPlanForm.getValues('patterns') || []).map((p: any) => ( <TableRow key={p.patternId}><TableCell className="text-xs">{p.patternString}</TableCell><TableCell>{(p.barUsage || 0).toFixed(0)}mm/<span className="text-destructive">{(p.leftover || 0).toFixed(0)}mm</span></TableCell><TableCell>{p.barsNeeded}</TableCell><TableCell>{(p.yieldPercentage || 0).toFixed(1)}%</TableCell></TableRow> ))}</TableBody>
+                                                            </Table>
+                                                            <Separator className="my-4" />
+                                                            <div className="text-sm space-y-2">
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Total de Barras:</span> <span>{cuttingPlanForm.getValues('summary.totalBars')}</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Rendimento Total:</span> <span>{(cuttingPlanForm.getValues('summary.totalYieldPercentage') || 0).toFixed(2)}%</span></div>
+                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Sucata Total (%):</span> <span className="text-destructive">{(cuttingPlanForm.getValues('summary.totalScrapPercentage') || 0).toFixed(2)}%</span></div>
+                                                            </div>
+                                                        </>
+                                                    ) : ( <div className="text-center text-muted-foreground py-10"><p>Gere um plano para ver os resultados.</p></div> )}
+                                                </CardContent>
+                                            </Card>
+                                            {cutItems.length > 0 && (
+                                                <Card><CardHeader><CardTitle>Itens a Cortar</CardTitle></CardHeader>
+                                                    <CardContent><Table><TableHeader><TableRow><TableHead>Cód</TableHead><TableHead>Descrição</TableHead><TableHead>Comp.</TableHead><TableHead>Qtd.</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                                            <TableBody>{cutItems.map((item, index) => ( <TableRow key={item.id}><TableCell>{item.code}</TableCell><TableCell>{item.description}</TableCell><TableCell>{item.length}</TableCell><TableCell>{item.quantity}</TableCell><TableCell className="text-right"><Button type="button" variant="ghost" size="icon" onClick={() => handleEditCutItem(index)}><Pencil className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => removeCutItem(index)}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow> ))}</TableBody>
+                                                        </Table></CardContent>
+                                                </Card>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </ScrollArea>
+                            <DialogFooter className="pt-4 border-t gap-2 flex-shrink-0">
+                                <Button type="button" className="w-full sm:w-auto" onClick={generateCuttingPlan}><BrainCircuit className="mr-2 h-4 w-4" /> Gerar Plano de Corte</Button>
+                                <div className="flex-grow"></div>
+                                <Button type="button" variant="outline" onClick={() => setIsCuttingPlanFormOpen(false)}>Cancelar</Button>
+                                <Button type="submit" disabled={cuttingPlanForm.formState.isSubmitting}>{cuttingPlanForm.formState.isSubmitting ? "Salvando..." : "Salvar Plano de Corte"}</Button>
+                            </DialogFooter>
+                        </form>
+                     </Form>
+                </DialogContent>
+            </Dialog>
+
+             <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                        <AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o item selecionado.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </>
+    );
+}d grid-cols-1 md:grid-cols-3 gap-4">
+                                                    <div><Label>Código</Label><Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} /></div>
+                                                    <div><Label>Material</Label><Input placeholder="Ex: Aço 1020" value={currentItem.material || ''} onChange={e => handleCurrentItemChange('material', e.target.value)} /></div>
+                                                    <div><Label>Dimensão</Label><Input placeholder="Ex: 1/2'' x 1.2m" value={currentItem.dimensao || ''} onChange={e => handleCurrentItemChange('dimensao', e.target.value)} /></div>
+                                                </div>
+                                                <div className="gri"use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -661,7 +830,16 @@ export default function MaterialsPage() {
                             <CardContent>
                                 {isLoading ? <Skeleton className="h-64 w-full" /> : (
                                      <Table>
-                                        <TableHeader><TableRow><TableHead>Nº</TableHead><TableHead>Data</TableHead><TableHead>Solicitante</TableHead><TableHead>OS Vinculada</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Nº</TableHead>
+                                                <TableHead>Data</TableHead>
+                                                <TableHead>Solicitante</TableHead>
+                                                <TableHead>OS Vinculada</TableHead>
+                                                <TableHead>Status</TableHead>
+                                                <TableHead className="text-right">Ações</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
                                         <TableBody>
                                             {filteredRequisitions.length > 0 ? (
                                                 filteredRequisitions.map(req => (
@@ -670,11 +848,47 @@ export default function MaterialsPage() {
                                                         <TableCell>{format(req.date, 'dd/MM/yyyy')}</TableCell>
                                                         <TableCell>{req.requestedBy}</TableCell>
                                                         <TableCell>{orders.find(o => o.id === req.orderId)?.internalOS || 'N/A'}</TableCell>
-                                                        <TableCell><Badge variant={getStatusVariant(req.status)} className={cn(req.status === 'Atendida Totalmente' && 'bg-green-600')}>{req.status}</Badge></TableCell>
-                                                        <TableCell className="text-right"><Button variant="ghost" size="icon" onClick={() => handleOpenRequisitionForm(req)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRequisition(req)}><Trash2 className="h-4 w-4" /></Button></TableCell>
+                                                        <TableCell>
+                                                            <Badge variant={getStatusVariant(req.status)} className={cn(req.status === 'Atendida Totalmente' && 'bg-green-600')}>
+                                                                {req.status}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-right">
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="icon" 
+                                                                onClick={() => handleExportPDF(req)}
+                                                                title="Exportar PDF"
+                                                            >
+                                                                <FileDown className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="icon" 
+                                                                onClick={() => handleOpenRequisitionForm(req)}
+                                                                title="Editar"
+                                                            >
+                                                                <Pencil className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="icon" 
+                                                                className="text-destructive" 
+                                                                onClick={() => handleDeleteRequisition(req)}
+                                                                title="Excluir"
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        </TableCell>
                                                     </TableRow>
                                                 ))
-                                            ) : ( <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhuma requisição encontrada.</TableCell></TableRow> )}
+                                            ) : ( 
+                                                <TableRow>
+                                                    <TableCell colSpan={6} className="h-24 text-center">
+                                                        Nenhuma requisição encontrada.
+                                                    </TableCell>
+                                                </TableRow> 
+                                            )}
                                         </TableBody>
                                     </Table>
                                 )}
@@ -729,176 +943,3 @@ export default function MaterialsPage() {
                     </TabsContent>
                 </Tabs>
             </div>
-
-            <Dialog open={isRequisitionFormOpen} onOpenChange={setIsRequisitionFormOpen}>
-                <DialogContent className="max-w-4xl h-[95vh] flex flex-col">
-                    <DialogHeader>
-                        <DialogTitle>{selectedRequisition ? `Editar Requisição Nº ${selectedRequisition.requisitionNumber}` : "Nova Requisição de Material"}</DialogTitle>
-                        <DialogDescription>{selectedRequisition ? "Altere os dados da requisição." : "Preencha as informações para solicitar materiais."}</DialogDescription>
-                    </DialogHeader>
-                    <Form {...requisitionForm}>
-                        <form onSubmit={requisitionForm.handleSubmit(onRequisitionSubmit)} className="flex-grow flex flex-col min-h-0">
-                            <Tabs defaultValue="details" className="flex-grow flex flex-col min-h-0">
-                                <TabsList>
-                                    <TabsTrigger value="details">Detalhes da Requisição</TabsTrigger>
-                                    <TabsTrigger value="items">Lista de Materiais</TabsTrigger>
-                                </TabsList>
-                                <div className="flex-grow mt-4 overflow-hidden">
-                                <ScrollArea className="h-full pr-6">
-                                <TabsContent value="details" className="space-y-6">
-                                  <Card><CardHeader><CardTitle>Identificação</CardTitle></CardHeader>
-                                    <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                        <FormField control={requisitionForm.control} name="date" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-                                        <FormField control={requisitionForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent>{RequisitionStatus.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                                        <FormField control={requisitionForm.control} name="requestedBy" render={({ field }) => ( <FormItem><FormLabel>Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um responsável"/></SelectTrigger></FormControl><SelectContent>{team.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                                        <FormField control={requisitionForm.control} name="department" render={({ field }) => ( <FormItem><FormLabel>Departamento</FormLabel><FormControl><Input placeholder="Ex: Produção" {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem> )} />
-                                        <FormField control={requisitionForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>OS Vinculada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS"/></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                                         <FormItem><FormLabel>Cliente Vinculado</FormLabel><Input value={requisitionForm.watch('customer.name') || 'Selecione uma OS'} disabled /></FormItem>
-                                    </CardContent>
-                                  </Card>
-                                  <Card>
-                                    <CardHeader><CardTitle>Comentários</CardTitle></CardHeader>
-                                    <CardContent> <FormField control={requisitionForm.control} name="generalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Gerais</FormLabel><FormControl><Textarea placeholder="Qualquer informação adicional..." {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem> )} /></CardContent>
-                                  </Card>
-                                </TabsContent>
-                                <TabsContent value="items" className="space-y-4">
-                                    <Card><CardHeader><CardTitle>Item da Requisição</CardTitle><CardDescription>{editItemIndex !== null ? 'Edite os dados do item.' : 'Preencha e adicione um novo item.'}</CardDescription></CardHeader>
-                                        <CardContent className="space-y-4">
-                                            <div className="space-y-4">
-                                                <div><Label>Descrição</Label><Input placeholder="Ex: Chapa de Aço 1/4" value={currentItem.description} onChange={e => handleCurrentItemChange('description', e.target.value)} /></div>
-                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                    <div><Label>Código</Label><Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} /></div>
-                                                    <div><Label>Material</Label><Input placeholder="Ex: Aço 1020" value={currentItem.material || ''} onChange={e => handleCurrentItemChange('material', e.target.value)} /></div>
-                                                    <div><Label>Dimensão</Label><Input placeholder="Ex: 1/2'' x 1.2m" value={currentItem.dimensao || ''} onChange={e => handleCurrentItemChange('dimensao', e.target.value)} /></div>
-                                                </div>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                    <div><Label>Qtd. Solicitada</Label><Input type="number" value={currentItem.quantityRequested} onChange={e => handleCurrentItemChange('quantityRequested', e.target.value)} /></div>
-                                                    <div><Label>Unidade</Label><Input placeholder="kg, m, pç" value={currentItem.unit} onChange={e => handleCurrentItemChange('unit', e.target.value)} /></div>
-                                                    <div><Label>Peso Unit. (kg)</Label><Input type="number" step="0.01" value={currentItem.pesoUnitario || ''} onChange={e => handleCurrentItemChange('pesoUnitario', e.target.value)} /></div>
-                                                    <div className="flex flex-col space-y-2"><Label>Entrega Prevista</Label><Popover><PopoverTrigger asChild><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !currentItem.deliveryDate && "text-muted-foreground")}>{currentItem.deliveryDate ? format(currentItem.deliveryDate, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={currentItem.deliveryDate || undefined} onSelect={date => handleCurrentItemChange('deliveryDate', date)} /></PopoverContent></Popover></div>
-                                                </div>
-                                                <div><Label>Observações</Label><Input placeholder="Ex: Certificado de qualidade" value={currentItem.notes || ''} onChange={e => handleCurrentItemChange('notes', e.target.value)} /></div>
-                                            </div>
-                                             <div className="flex justify-end gap-2">{editItemIndex !== null && ( <Button type="button" variant="outline" onClick={handleCancelEditItem}>Cancelar Edição</Button> )}<Button type="button" onClick={editItemIndex !== null ? handleUpdateItem : handleAddItem}><PlusCircle className="mr-2 h-4 w-4" />{editItemIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}</Button></div>
-                                        </CardContent>
-                                    </Card>
-                                    {reqItems.length > 0 && (
-                                        <Card><CardHeader><CardTitle>Itens Adicionados</CardTitle></CardHeader>
-                                            <CardContent><Table><TableHeader><TableRow><TableHead>Descrição</TableHead><TableHead>Qtd.</TableHead><TableHead>Unid.</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                                    <TableBody>{reqItems.map((item, index) => ( <TableRow key={item.id} className={cn(editItemIndex === index && "bg-secondary")}><TableCell className="font-medium">{item.description}</TableCell><TableCell>{item.quantityRequested}</TableCell><TableCell>{item.unit}</TableCell><TableCell>{item.status}</TableCell><TableCell className="text-right"><Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => removeReqItem(index)}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow> ))}</TableBody>
-                                                </Table></CardContent>
-                                        </Card>
-                                    )}
-                                </TabsContent>
-                                </ScrollArea>
-                                </div>
-                            </Tabs>
-                            <DialogFooter className="pt-6 border-t mt-4 flex-shrink-0">
-                                <Button type="button" variant="outline" onClick={() => setIsRequisitionFormOpen(false)}>Cancelar</Button>
-                                <Button type="submit" disabled={requisitionForm.formState.isSubmitting}>{requisitionForm.formState.isSubmitting ? "Salvando..." : (selectedRequisition ? "Salvar Alterações" : "Criar Requisição")}</Button>
-                            </DialogFooter>
-                        </form>
-                    </Form>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={isCuttingPlanFormOpen} onOpenChange={setIsCuttingPlanFormOpen}>
-                <DialogContent className="max-w-5xl h-[95vh] flex flex-col">
-                    <DialogHeader>
-                        <DialogTitle>{selectedCuttingPlan ? `Editar Plano de Corte Nº ${selectedCuttingPlan.planNumber}` : "Novo Plano de Corte"}</DialogTitle>
-                        <DialogDescription>{selectedCuttingPlan ? "Altere os dados do plano." : "Crie um novo plano de otimização de corte."}</DialogDescription>
-                    </DialogHeader>
-                     <Form {...cuttingPlanForm}>
-                        <form onSubmit={cuttingPlanForm.handleSubmit(onCuttingPlanSubmit)} className="flex-grow flex flex-col min-h-0 space-y-4">
-                            <ScrollArea className="flex-1 pr-6 -mr-6">
-                                <div className="space-y-6">
-                                    <Card>
-                                        <CardHeader><CardTitle>Informações Gerais</CardTitle></CardHeader>
-                                        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            <FormField control={cuttingPlanForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>OS Vinculada (Opcional)</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS"/></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                                            <FormItem><FormLabel>Cliente Vinculado</FormLabel><Input value={cuttingPlanForm.watch('customer.name') || 'Selecione uma OS'} disabled /></FormItem>
-                                        </CardContent>
-                                    </Card>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                        <div className="space-y-6">
-                                            <Card><CardHeader><CardTitle>Parâmetros de Entrada</CardTitle></CardHeader>
-                                                <CardContent className="space-y-4">
-                                                    <FormField control={cuttingPlanForm.control} name="materialDescription" render={({ field }) => ( <FormItem><FormLabel>Descrição do Material da Barra</FormLabel><FormControl><Input placeholder="Ex: Cantoneira 2 x 3/16" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                                                    <FormField control={cuttingPlanForm.control} name="stockLength" render={({ field }) => ( <FormItem><FormLabel>Comprimento da Barra (mm)</FormLabel><FormControl><Input type="number" placeholder="6000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                                                    <FormField control={cuttingPlanForm.control} name="kerf" render={({ field }) => ( <FormItem><FormLabel>Espessura do Corte / Kerf (mm)</FormLabel><FormControl><Input type="number" placeholder="3" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                                                     <FormField control={cuttingPlanForm.control} name="deliveryDate" render={({ field }) => ( <FormItem><FormLabel>Entrega Prevista</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("w-full pl-3 text-left", !field.value && "text-muted-foreground")}>{field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-                                                </CardContent>
-                                            </Card>
-                                            <Card><CardHeader><CardTitle>Item do Plano de Corte</CardTitle><CardDescription>{editCutIndex !== null ? 'Edite os dados.' : 'Preencha e adicione.'}</CardDescription></CardHeader>
-                                                <CardContent className="space-y-4">
-                                                    <div><Label>Descrição</Label><Input placeholder={`Peça ${cutItems.length + 1}`} value={currentCutItem.description} onChange={e => handleCurrentCutItemChange('description', e.target.value)} /></div>
-                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                        <div><Label>Código</Label><Input placeholder="Opcional" value={currentCutItem.code || ''} onChange={e => handleCurrentCutItemChange('code', e.target.value)} /></div>
-                                                        <div><Label>Comprimento (mm)</Label><Input type="number" value={currentCutItem.length} onChange={e => handleCurrentCutItemChange('length', e.target.value)} /></div>
-                                                        <div><Label>Quantidade</Label><Input type="number" value={currentCutItem.quantity} onChange={e => handleCurrentCutItemChange('quantity', e.target.value)} /></div>
-                                                    </div>
-                                                    <div className="flex justify-end gap-2">{editCutIndex !== null && (<Button type="button" variant="outline" onClick={handleCancelEditCutItem}>Cancelar</Button>)}<Button type="button" onClick={editCutIndex !== null ? handleUpdateCutItem : handleAddCutItem}><PlusCircle className="mr-2 h-4 w-4" />{editCutIndex !== null ? 'Atualizar' : 'Adicionar'}</Button></div>
-                                                </CardContent>
-                                            </Card>
-                                        </div>
-                                        <div className="space-y-6">
-                                            <Card>
-                                                <CardHeader>
-                                                    <CardTitle>Resultados do Plano</CardTitle>
-                                                    <CardDescription>Padrões otimizados para o corte.</CardDescription>
-                                                </CardHeader>
-                                                <CardContent>
-                                                    {cuttingPlanForm.getValues('summary') ? (
-                                                        <>
-                                                            <Table><TableHeader><TableRow><TableHead>Padrão</TableHead><TableHead>Uso/Sobra</TableHead><TableHead>Nº</TableHead><TableHead>Rend.</TableHead></TableRow></TableHeader>
-                                                                <TableBody>{(cuttingPlanForm.getValues('patterns') || []).map((p: any) => ( <TableRow key={p.patternId}><TableCell className="text-xs">{p.patternString}</TableCell><TableCell>{(p.barUsage || 0).toFixed(0)}mm/<span className="text-destructive">{(p.leftover || 0).toFixed(0)}mm</span></TableCell><TableCell>{p.barsNeeded}</TableCell><TableCell>{(p.yieldPercentage || 0).toFixed(1)}%</TableCell></TableRow> ))}</TableBody>
-                                                            </Table>
-                                                            <Separator className="my-4" />
-                                                            <div className="text-sm space-y-2">
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Total de Barras:</span> <span>{cuttingPlanForm.getValues('summary.totalBars')}</span></div>
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Rendimento Total:</span> <span>{(cuttingPlanForm.getValues('summary.totalYieldPercentage') || 0).toFixed(2)}%</span></div>
-                                                                <div className="flex justify-between font-medium"><span className="text-muted-foreground">Sucata Total (%):</span> <span className="text-destructive">{(cuttingPlanForm.getValues('summary.totalScrapPercentage') || 0).toFixed(2)}%</span></div>
-                                                            </div>
-                                                        </>
-                                                    ) : ( <div className="text-center text-muted-foreground py-10"><p>Gere um plano para ver os resultados.</p></div> )}
-                                                </CardContent>
-                                            </Card>
-                                            {cutItems.length > 0 && (
-                                                <Card><CardHeader><CardTitle>Itens a Cortar</CardTitle></CardHeader>
-                                                    <CardContent><Table><TableHeader><TableRow><TableHead>Cód</TableHead><TableHead>Descrição</TableHead><TableHead>Comp.</TableHead><TableHead>Qtd.</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                                            <TableBody>{cutItems.map((item, index) => ( <TableRow key={item.id}><TableCell>{item.code}</TableCell><TableCell>{item.description}</TableCell><TableCell>{item.length}</TableCell><TableCell>{item.quantity}</TableCell><TableCell className="text-right"><Button type="button" variant="ghost" size="icon" onClick={() => handleEditCutItem(index)}><Pencil className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => removeCutItem(index)}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow> ))}</TableBody>
-                                                        </Table></CardContent>
-                                                </Card>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </ScrollArea>
-                            <DialogFooter className="pt-4 border-t gap-2 flex-shrink-0">
-                                <Button type="button" className="w-full sm:w-auto" onClick={generateCuttingPlan}><BrainCircuit className="mr-2 h-4 w-4" /> Gerar Plano de Corte</Button>
-                                <div className="flex-grow"></div>
-                                <Button type="button" variant="outline" onClick={() => setIsCuttingPlanFormOpen(false)}>Cancelar</Button>
-                                <Button type="submit" disabled={cuttingPlanForm.formState.isSubmitting}>{cuttingPlanForm.formState.isSubmitting ? "Salvando..." : "Salvar Plano de Corte"}</Button>
-                            </DialogFooter>
-                        </form>
-                     </Form>
-                </DialogContent>
-            </Dialog>
-
-             <AlertDialog open={isDeleting} onOpenChange={setIsDeleting}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-                        <AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o item selecionado.</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
-        </>
-    );
-}
-
-    
