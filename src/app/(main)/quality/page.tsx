@@ -24,8 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, TicketCheck } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, TicketCheck, Clock, MoreVertical, Play, Pause, Paperclip, Send, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -33,161 +32,9 @@ import { Calendar } from "@/components/ui/calendar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-// === COMPONENTE VISUAL DE INDICADOR DE TAMANHO ===
-const DataSizeIndicator = ({ data, maxSizeKB = 900 }: { data: any, maxSizeKB?: number }) => {
-    const currentSizeKB = (JSON.stringify(data).length / 1024);
-    const percentage = (currentSizeKB / maxSizeKB) * 100;
-    
-    const getColor = () => {
-        if (percentage < 50) return 'bg-green-500';
-        if (percentage < 75) return 'bg-yellow-500';
-        if (percentage < 90) return 'bg-orange-500';
-        return 'bg-red-500';
-    };
-    
-    const getTextColor = () => {
-        if (percentage < 50) return 'text-green-700';
-        if (percentage < 75) return 'text-yellow-700';
-        if (percentage < 90) return 'text-orange-700';
-        return 'text-red-700';
-    };
-    
-    return (
-        <div className="w-full space-y-2">
-            <div className="flex items-center justify-between text-xs">
-                <span className={`font-medium ${getTextColor()}`}>
-                    Tamanho do Relatório
-                </span>
-                <span className={`font-mono ${getTextColor()}`}>
-                    {currentSizeKB.toFixed(1)}KB / {maxSizeKB}KB
-                </span>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                    className={`h-2 rounded-full transition-all duration-300 ${getColor()}`}
-                    style={{ width: `${Math.min(100, percentage)}%` }}
-                />
-            </div>
-            {percentage > 90 && (
-                <p className="text-xs text-red-600 font-medium">
-                    ⚠️ Relatório próximo do limite! Remova algumas fotos.
-                </p>
-            )}
-        </div>
-    );
-};
-
-// === FUNÇÃO DE COMPRESSÃO OTIMIZADA PARA FIRESTORE ===
-const compressImageForFirestore = (file: File, maxWidth: number = 800, quality: number = 0.5): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        
-        reader.onload = (event) => {
-            const dataUrl = event.target?.result as string;
-            if (!dataUrl) {
-                reject(new Error('Erro ao ler arquivo'));
-                return;
-            }
-            
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            if (!ctx) {
-                reject(new Error('Canvas não suportado'));
-                return;
-            }
-            
-            const image = document.createElement('img');
-            
-            image.onload = () => {
-                try {
-                    let { width, height } = image;
-                    
-                    // Redimensionamento mais agressivo
-                    const maxDimension = maxWidth;
-                    if (width > height && width > maxDimension) {
-                        height = (height * maxDimension) / width;
-                        width = maxDimension;
-                    } else if (height > maxDimension) {
-                        width = (width * maxDimension) / height;
-                        height = maxDimension;
-                    }
-                    
-                    canvas.width = width;
-                    canvas.height = height;
-                    
-                    // Desenhar com qualidade otimizada
-                    ctx.imageSmoothingEnabled = true;
-                    ctx.imageSmoothingQuality = 'medium';
-                    ctx.drawImage(image, 0, 0, width, height);
-                    
-                    // Compressão mais agressiva baseada no tamanho do arquivo
-                    let finalQuality = quality;
-                    const fileSizeKB = file.size / 1024;
-                    
-                    if (fileSizeKB > 5000) finalQuality = 0.3; // > 5MB
-                    else if (fileSizeKB > 2000) finalQuality = 0.4; // > 2MB
-                    else if (fileSizeKB > 1000) finalQuality = 0.5; // > 1MB
-                    else if (fileSizeKB > 500) finalQuality = 0.6; // > 500KB
-                    
-                    let compressedDataUrl = canvas.toDataURL('image/jpeg', finalQuality);
-                    
-                    // Verificar se ainda está muito grande e comprimir mais se necessário
-                    const estimatedSizeKB = (compressedDataUrl.length * 0.75) / 1024;
-                    
-                    if (estimatedSizeKB > 100) { // Se maior que 100KB, comprimir mais
-                        finalQuality = Math.max(0.2, finalQuality - 0.2);
-                        compressedDataUrl = canvas.toDataURL('image/jpeg', finalQuality);
-                        console.log(`Compressão adicional aplicada: qualidade ${finalQuality}`);
-                    }
-                    
-                    const finalSizeKB = (compressedDataUrl.length * 0.75) / 1024;
-                    console.log(`Foto comprimida - Original: ${fileSizeKB.toFixed(1)}KB → Final: ${finalSizeKB.toFixed(1)}KB`);
-                    
-                    resolve(compressedDataUrl);
-                } catch (error) {
-                    console.error('Erro ao comprimir imagem:', error);
-                    reject(error);
-                }
-            };
-            
-            image.onerror = () => reject(new Error('Erro ao carregar imagem'));
-            image.src = dataUrl;
-        };
-        
-        reader.onerror = () => reject(new Error('Erro ao ler arquivo'));
-        reader.readAsDataURL(file);
-    });
-};
-
-// === CONFIGURAÇÕES E VALIDAÇÕES PARA FIRESTORE ===
-const PHOTO_LIMITS = {
-    MAX_PHOTOS: 6,           // Máximo 6 fotos por relatório
-    MAX_PHOTO_SIZE_KB: 120,  // Máximo 120KB por foto
-    MAX_TOTAL_SIZE_KB: 500,  // Máximo 500KB total em fotos
-    IMAGE_MAX_WIDTH: 800,    // Largura máxima da imagem
-    COMPRESSION_QUALITY: 0.5 // Qualidade de compressão JPEG
-};
-
-const validateDataSizeBeforeSave = (data: any): boolean => {
-    const dataSize = JSON.stringify(data).length;
-    const maxSize = 900000; // 900KB de segurança
-    
-    if (dataSize > maxSize) {
-        console.error(`❌ Dados muito grandes: ${(dataSize / 1024).toFixed(1)}KB (máximo: ${(maxSize / 1024).toFixed(1)}KB)`);
-        return false;
-    }
-    
-    console.log(`✓ Tamanho dos dados OK: ${(dataSize / 1024).toFixed(1)}KB`);
-    return true;
-};
-
-
-
-
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 
 // --- SCHEMAS ---
@@ -243,8 +90,8 @@ const dimensionalMeasurementSchema = z.object({
   id: z.string(),
   dimensionName: z.string().min(1, "O nome da dimensão é obrigatório."),
   nominalValue: z.coerce.number(),
-  toleranceMin: z.string().optional(), // Mudou de number para string
-  toleranceMax: z.string().optional(), // Mudou de number para string
+  toleranceMin: z.coerce.number().optional(),
+  toleranceMax: z.coerce.number().optional(),
   measuredValue: z.coerce.number(),
   instrumentUsed: z.string({ required_error: "O instrumento é obrigatório." }),
   result: z.enum(["Conforme", "Não Conforme"]),
@@ -259,7 +106,7 @@ const dimensionalReportSchema = z.object({
   inspectedBy: z.string({ required_error: "O inspetor é obrigatório." }),
   customerInspector: z.string().optional(),
   inspectionDate: z.date({ required_error: "A data da inspeção é obrigatória." }),
-  quantityInspected: z.coerce.number().min(1, "A quantidade inspecionada é obrigatória.").optional(),
+  quantityInspected: z.coerce.number().min(1).optional(),
   photos: z.array(z.string()).optional(),
   notes: z.string().optional(),
   measurements: z.array(dimensionalMeasurementSchema).min(1, "Adicione pelo menos uma medição."),
@@ -366,17 +213,6 @@ const paintingReportSchema = z.object({
         inspectionDate: z.date().optional().nullable(),
     }).optional(),
     photos: z.array(z.string()).optional(),
-});
-
-const engineeringTicketSchema = z.object({
-  id: z.string().optional(),
-  createdAt: z.date({ required_error: "A data é obrigatória." }),
-  requester: z.string({ required_error: "Solicitante obrigatório." }),
-  orderId: z.string().optional(),
-  description: z.string({ required_error: "Descrição obrigatória." }).min(5),
-  status: z.enum(["Aberto", "Em andamento", "Fechado"]).default("Aberto"),
-  responsible: z.string().optional(),
-  notes: z.string().optional(),
 });
 
 
@@ -516,7 +352,46 @@ const lessonsLearnedSchema = z.object({
   closeDate: z.date().optional().nullable(),
 });
 
+const engineeringTicketCommentSchema = z.object({
+  id: z.string().optional(),
+  author: z.string(),
+  comment: z.string().min(1, "O comentário é obrigatório."),
+  timestamp: z.date(),
+  type: z.enum(["Comentário", "Alteração de Status", "Anexo"]).default("Comentário"),
+});
 
+const engineeringTicketSchema = z.object({
+  id: z.string().optional(),
+  ticketNumber: z.string().optional(),
+  orderId: z.string({ required_error: "Selecione um pedido." }),
+  itemId: z.string({ required_error: "Selecione um item." }),
+  requestingDepartment: z.string({ required_error: "O departamento solicitante é obrigatório." }),
+  openedBy: z.string({ required_error: "O responsável pela abertura é obrigatório." }),
+  description: z.string().min(20, "A descrição deve ter pelo menos 20 caracteres."),
+  category: z.enum([
+    "Desenho incorreto",
+    "Material fora de medida", 
+    "Defeito de fabricação",
+    "Interpretação",
+    "Outros"
+  ], { required_error: "Selecione uma categoria." }),
+  priority: z.enum(["Alta", "Média", "Baixa"], { required_error: "Selecione a prioridade." }),
+  status: z.enum([
+    "Aberto",
+    "Em análise", 
+    "Aguardando resposta",
+    "Solução proposta",
+    "Resolvido"
+  ]).default("Aberto"),
+  assignedTo: z.string().optional(),
+  openedAt: z.date(),
+  resolvedAt: z.date().optional(),
+  attachments: z.array(z.string()).optional(),
+  comments: z.array(engineeringTicketCommentSchema).optional(),
+  pauseSchedule: z.boolean().default(true),
+  estimatedResolutionTime: z.coerce.number().optional(),
+  actualResolutionTime: z.coerce.number().optional(),
+});
 
 
 
@@ -532,15 +407,13 @@ type LiquidPenetrantReport = z.infer<typeof liquidPenetrantSchema> & { id: strin
 type UltrasoundReport = z.infer<typeof ultrasoundReportSchema> & { id: string, orderNumber: string, itemName: string };
 type UltrasoundResult = z.infer<typeof ultrasoundResultSchema>;
 type LessonsLearnedReport = z.infer<typeof lessonsLearnedSchema> & { id: string, orderNumber?: string };
+type EngineeringTicket = z.infer<typeof engineeringTicketSchema> & { id: string, orderNumber?: string, itemName?: string, customerName?: string, pausedDays?: number };
+type EngineeringTicketComment = z.infer<typeof engineeringTicketCommentSchema> & { id: string };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
     logo?: { preview?: string };
 };
-
-
-
-// --- HELPER FUNCTIONS ---
 
 
 // --- HELPER FUNCTIONS ---
@@ -615,6 +488,7 @@ export default function QualityPage() {
   const [liquidPenetrantReports, setLiquidPenetrantReports] = useState<LiquidPenetrantReport[]>([]);
   const [ultrasoundReports, setUltrasoundReports] = useState<UltrasoundReport[]>([]);
   const [lessonsLearnedReports, setLessonsLearnedReports] = useState<LessonsLearnedReport[]>([]);
+  const [engineeringTickets, setEngineeringTickets] = useState<EngineeringTicket[]>([]);
 
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
   const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | 'lessonsLearned' | null>(null);
@@ -625,6 +499,15 @@ export default function QualityPage() {
   const [isInspectionsDetailOpen, setIsInspectionsDetailOpen] = useState(false);
   const [selectedOrderForInspections, setSelectedOrderForInspections] = useState<OrderInfo | null>(null);
 
+  // Engineering Tickets states
+  const [isEngineeringTicketFormOpen, setIsEngineeringTicketFormOpen] = useState(false);
+  const [isEngineeringTicketDeleting, setIsEngineeringTicketDeleting] = useState(false);
+  const [selectedEngineeringTicket, setSelectedEngineeringTicket] = useState<EngineeringTicket | null>(null);
+  const [engineeringTicketToDelete, setEngineeringTicketToDelete] = useState<EngineeringTicket | null>(null);
+  const [engineeringTicketSearchQuery, setEngineeringTicketSearchQuery] = useState("");
+  const [newComment, setNewComment] = useState("");
+  const [isAddingComment, setIsAddingComment] = useState(false);
+
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -634,8 +517,6 @@ export default function QualityPage() {
     resolver: zodResolver(nonConformanceSchema),
     defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } },
   });
-
-
 
   const calibrationForm = useForm<z.infer<typeof calibrationSchema>>({
     resolver: zodResolver(calibrationSchema),
@@ -821,6 +702,25 @@ export default function QualityPage() {
       },
   });
 
+  const engineeringTicketForm = useForm<z.infer<typeof engineeringTicketSchema>>({
+    resolver: zodResolver(engineeringTicketSchema),
+    defaultValues: {
+      orderId: undefined,
+      itemId: undefined,
+      requestingDepartment: '',
+      openedBy: user?.email || '',
+      description: '',
+      category: undefined,
+      priority: undefined,
+      status: 'Aberto',
+      assignedTo: '',
+      openedAt: new Date(),
+      attachments: [],
+      comments: [],
+      pauseSchedule: true,
+    },
+  });
+
 
   // --- DATA FETCHING ---
   const fetchAllData = async () => {
@@ -830,7 +730,7 @@ export default function QualityPage() {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
         materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
-        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot
+        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot, engineeringTicketsSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -843,7 +743,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
         getDocs(collection(db, "companies", "mecald", "ultrasoundReports")),
         getDocs(collection(db, "companies", "mecald", "lessonsLearned")),
-
+        getDocs(collection(db, "companies", "mecald", "engineeringTickets")),
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -895,26 +795,11 @@ export default function QualityPage() {
       const dimReportsList = dimensionalReportsSnapshot.docs.map(doc => {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
-        
-        // Buscar item usando dados salvos ou fallback para busca por ID
-        let itemDescription = data.itemDescription; // Usar descrição salva primeiro
-        
-        if (!itemDescription) {
-            // Fallback: buscar pelo itemId se não tiver descrição salva
-            const item = order?.items.find(i => i.id === data.itemId);
-            itemDescription = item?.description || 'Item não encontrado';
-        }
-        
+        const item = order?.items.find(i => i.id === data.itemId);
         const overallResult = (data.measurements || []).every((m: any) => m.result === "Conforme") ? "Conforme" : "Não Conforme";
-        
         return {
-            id: doc.id, 
-            ...data, 
-            inspectionDate: data.inspectionDate.toDate(),
-            orderNumber: data.orderNumber || order?.number || 'N/A', 
-            itemName: itemDescription,
-            itemCode: data.itemCode || 'N/A',
-            overallResult
+          id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(),
+          orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', overallResult
         } as DimensionalReport;
       }).sort((a, b) => (parseInt((a.reportNumber || '0').replace(/[^0-9]/g, '')) || 0) - (parseInt((b.reportNumber || '0').replace(/[^0-9]/g, '')) || 0));
       setDimensionalReports(dimReportsList);
@@ -978,6 +863,36 @@ export default function QualityPage() {
           } as LessonsLearnedReport;
       });
       setLessonsLearnedReports(lessonsList.sort((a,b) => (b.reportNumber || '').localeCompare(a.reportNumber || '')));
+
+      const ticketsList = engineeringTicketsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        const order = ordersList.find(o => o.id === data.orderId);
+        const item = order?.items.find(i => i.id === data.itemId);
+        const pausedDays = data.status === 'Resolvido' && data.resolvedAt 
+            ? differenceInDays(data.resolvedAt.toDate(), data.openedAt.toDate())
+            : differenceInDays(new Date(), data.openedAt.toDate());
+        
+        return {
+            id: doc.id,
+            ...data,
+            openedAt: data.openedAt.toDate(),
+            resolvedAt: data.resolvedAt ? data.resolvedAt.toDate() : null,
+            orderNumber: order?.number,
+            itemName: item?.description,
+            customerName: order?.customerName,
+            pausedDays,
+            comments: (data.comments || []).map((c: any) => ({
+                  ...c,
+                  timestamp: c.timestamp.toDate(),
+              })),
+              orderNumber: order?.number || 'N/A',
+              itemName: item?.description || 'Item não encontrado',
+              customerName: order?.customerName || 'N/A',
+              pausedDays,
+          } as EngineeringTicket;
+      });
+      setEngineeringTickets(ticketsList.sort((a,b) => b.openedAt.getTime() - a.openedAt.getTime()));
+
 
     } catch (error) {
       console.error("Error fetching quality data:", error);
@@ -1111,34 +1026,14 @@ export default function QualityPage() {
 
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
-      console.log("=== SALVANDO RELATÓRIO DE MATERIAL ===");
-      console.log("Dados recebidos:", values);
-      console.log("Fotos recebidas:", values.photos?.length || 0);
-
       const { reportNumber, ...restOfValues } = values;
       const dataToSave: any = { 
         ...restOfValues, 
         receiptDate: Timestamp.fromDate(values.receiptDate),
         quantityReceived: values.quantityReceived ?? null,
-        photos: values.photos || [],
       };
-
-      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
-      if (!validateDataSizeBeforeSave(dataToSave)) {
-          toast({
-              variant: "destructive",
-              title: "Relatório muito grande para salvar",
-              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
-          });
-          return;
-      }
-
-      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
-      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
-
       if (selectedInspection) {
         await setDoc(doc(db, "companies", "mecald", "rawMaterialInspections", selectedInspection.id), dataToSave);
-        console.log("✓ Relatório atualizado no Firestore com sucesso!");
         toast({ title: "Relatório atualizado!" });
       } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "rawMaterialInspections"));
@@ -1147,109 +1042,57 @@ export default function QualityPage() {
             .filter(n => !isNaN(n) && Number.isFinite(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
-        const finalData = { ...dataToSave, reportNumber: newReportNumber };
+        dataToSave.reportNumber = newReportNumber;
 
-        // Validação final antes de salvar
-        if (!validateDataSizeBeforeSave(finalData)) {
-            toast({
-                variant: "destructive",
-                title: "Relatório muito grande para salvar",
-                description: `O relatório final excede o limite. Remova algumas fotos.`,
-            });
-            return;
-        }
-
-        await addDoc(collection(db, "companies", "mecald", "rawMaterialInspections"), finalData);
-        console.log("✓ Dados salvos no Firestore com sucesso!");
+        await addDoc(collection(db, "companies", "mecald", "rawMaterialInspections"), dataToSave);
         toast({ title: "Relatório de inspeção de material criado!" });
       }
-      
-      setIsInspectionFormOpen(false); 
-      await fetchAllData();
-    } catch (error) { 
-        console.error("❌ Erro ao salvar relatório:", error);
-        
-        // Verificar se é erro de tamanho do Firestore
-        if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
-            (error as any)?.message?.includes('Document exceeds maximum size')) {
-            toast({ 
-                variant: "destructive", 
-                title: "Relatório muito grande", 
-                description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
-            });
-        } else {
-            toast({ variant: "destructive", title: "Erro ao salvar relatório" });
-        }
-    }
+      setIsInspectionFormOpen(false); await fetchAllData();
+    } catch (error) { console.error("Error saving material inspection:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
   };
   const onDimensionalReportSubmit = async (values: z.infer<typeof dimensionalReportSchema>) => {
     try {
        console.log("=== SALVANDO RELATÓRIO DIMENSIONAL ===");
        console.log("Dados recebidos:", values);
        console.log("Fotos recebidas:", values.photos?.length || 0);
-       console.log("Item ID selecionado:", values.itemId);
-       
-       // Buscar informações do item selecionado
-       const selectedOrder = orders.find(o => o.id === values.orderId);
-       const selectedItem = selectedOrder?.items.find(i => i.id === values.itemId);
-       
-       console.log("Pedido encontrado:", selectedOrder);
-       console.log("Item encontrado:", selectedItem);
-       
-       if (!selectedItem) {
-           toast({
-               variant: "destructive",
-               title: "Erro",
-               description: "Item selecionado não encontrado. Selecione um item válido.",
-           });
-           return;
-       }
        
        const { reportNumber, ...restOfValues } = values;
        
-       // Preparar dados para salvar - INCLUINDO informações do item
-       const dataToSave = { 
+       // Preparar dados para salvar removendo campos undefined (Firestore não aceita undefined)
+       const cleanDataForFirestore = (obj: any): any => {
+         const cleaned: any = {};
+         Object.keys(obj).forEach(key => {
+           const value = obj[key];
+           if (value !== undefined) {
+             if (Array.isArray(value)) {
+               cleaned[key] = value;
+             } else if (value !== null && value !== '') {
+               cleaned[key] = value;
+             } else if (value === null || value === '') {
+               cleaned[key] = null; // Firestore aceita null, mas não undefined
+             }
+           }
+         });
+         return cleaned;
+       };
+       
+       const dataToSave = cleanDataForFirestore({ 
         ...restOfValues,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         customerInspector: values.customerInspector || null,
         quantityInspected: values.quantityInspected || null,
-        notes: values.notes || null,
+        notes: values.notes || null, // Garantir que notes seja null ao invés de undefined
+        // Garantir que fotos sejam sempre um array
         photos: values.photos || [],
-        measurements: values.measurements || [],
-        
-        // DADOS DO ITEM - SALVANDO EXPLICITAMENTE
-        itemId: values.itemId,
-        itemCode: selectedItem.code || null,
-        itemDescription: selectedItem.description,
-        itemQuantity: selectedItem.quantity || null,
-        
-        // DADOS DO PEDIDO
-        orderId: values.orderId,
-        orderNumber: selectedOrder?.number || 'N/A',
-        customerName: selectedOrder?.customerName || 'N/A',
-        projectName: selectedOrder?.projectName || null,
-      };
-      
-      // VALIDAÇÃO DO TAMANHO
-      const dataSize = JSON.stringify(dataToSave).length;
-      console.log(`Tamanho dos dados: ${(dataSize / 1024).toFixed(1)}KB`);
-      
-      if (dataSize > 900000) { // 900KB
-          toast({
-              variant: "destructive",
-              title: "Relatório muito grande",
-              description: "O relatório excede o limite. Remova algumas fotos.",
-          });
-          return;
-      }
-      
-      console.log("=== DADOS FINAIS PARA FIRESTORE ===");
-      console.log("Item salvo:", {
-          itemId: dataToSave.itemId,
-          itemCode: dataToSave.itemCode,
-          itemDescription: dataToSave.itemDescription
+        // Garantir que medições sejam sempre um array  
+        measurements: values.measurements || []
       });
-
+      
+      console.log("Dados finais para salvar:", dataToSave);
+      console.log("Fotos finais incluídas:", dataToSave.photos?.length || 0);
+      if (dataToSave.photos?.length > 0) {
+        console.log("Primeira foto (100 caracteres):", dataToSave.photos[0]?.substring(0, 100));
+      }
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
          toast({ title: "Relatório atualizado!" });
@@ -1263,54 +1106,19 @@ export default function QualityPage() {
         const finalData = { ...dataToSave, reportNumber: newReportNumber };
 
          await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), finalData);
-         console.log("✓ Relatório salvo com item:", finalData.itemDescription);
          toast({ title: "Relatório dimensional criado!" });
        }
-       
-       setIsInspectionFormOpen(false); 
-       await fetchAllData();
-       
-     } catch (error: any) { 
-         console.error("❌ Erro ao salvar relatório:", error);
-         if (error?.code === 403 || error?.message?.toLowerCase().includes('permission')) {
-             toast({ 
-                 variant: "destructive", 
-                 title: "Permissão negada", 
-                 description: "Você não tem permissão para salvar este relatório. Verifique se está autenticado e se as regras do Firestore permitem esta operação." 
-             });
-         } else if ((error as any)?.message?.includes('exceeds the maximum allowed size')) {
-             toast({ 
-                 variant: "destructive", 
-                 title: "Relatório muito grande", 
-                 description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
-             });
-         } else {
-             toast({ variant: "destructive", title: "Erro ao salvar relatório" });
-         }
-     }
-};
+       setIsInspectionFormOpen(false); await fetchAllData();
+     } catch (error) { console.error("Error saving dimensional report:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
+  };
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
-        console.log("=== SALVANDO RELATÓRIO DE SOLDA ===");
-        console.log("Dados recebidos:", values);
-        console.log("Fotos recebidas:", values.photos?.length || 0);
-
         const dataToSave: any = {
             ...values,
             inspectionDate: Timestamp.fromDate(values.inspectionDate),
             photos: values.photos || [],
             customerInspector: values.customerInspector || null,
         };
-
-        // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
-        if (!validateDataSizeBeforeSave(dataToSave)) {
-            toast({
-                variant: "destructive",
-                title: "Relatório muito grande para salvar",
-                description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
-            });
-            return;
-        }
         
         const docRef = selectedInspection
             ? doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id)
@@ -1325,43 +1133,17 @@ export default function QualityPage() {
             const utNumbers = utReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
             const allNumbers = [...weldNumbers, ...lpNumbers, ...utNumbers];
             const highestNumber = Math.max(0, ...allNumbers);
-            const finalReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
-            dataToSave.reportNumber = finalReportNumber;
-
-            // Validação final antes de salvar
-            if (!validateDataSizeBeforeSave(dataToSave)) {
-                toast({
-                    variant: "destructive",
-                    title: "Relatório muito grande para salvar",
-                    description: `O relatório final excede o limite. Remova algumas fotos.`,
-                });
-                return;
-            }
+            dataToSave.reportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         }
-
-        console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
-        console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
     
         await setDoc(docRef, dataToSave, { merge: true });
-        console.log("✓ Relatório salvo no Firestore com sucesso!");
         
         toast({ title: selectedInspection ? "Relatório de solda atualizado!" : "Relatório de solda criado!" });
         setIsInspectionFormOpen(false);
         await fetchAllData();
     } catch (error) {
-        console.error("❌ Erro ao salvar relatório:", error);
-        
-        // Verificar se é erro de tamanho do Firestore
-        if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
-            (error as any)?.message?.includes('Document exceeds maximum size')) {
-            toast({ 
-                variant: "destructive", 
-                title: "Relatório muito grande", 
-                description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
-            });
-        } else {
-            toast({ variant: "destructive", title: "Erro ao salvar relatório" });
-        }
+        console.error("Error saving welding inspection:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar relatório" });
     }
   };
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
@@ -1386,10 +1168,6 @@ export default function QualityPage() {
   };
   const onLiquidPenetrantSubmit = async (values: z.infer<typeof liquidPenetrantSchema>) => {
     try {
-      console.log("=== SALVANDO RELATÓRIO DE LP ===");
-      console.log("Dados recebidos:", values);
-      console.log("Fotos recebidas:", values.photos?.length || 0);
-
       const dataToSave = {
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         orderId: values.orderId,
@@ -1420,22 +1198,8 @@ export default function QualityPage() {
         photos: values.photos || [],
       };
 
-      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
-      if (!validateDataSizeBeforeSave(dataToSave)) {
-          toast({
-              variant: "destructive",
-              title: "Relatório muito grande para salvar",
-              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
-          });
-          return;
-      }
-
-      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
-      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
-
       if (selectedInspection) {
         await updateDoc(doc(db, "companies", "mecald", "liquidPenetrantReports", selectedInspection.id), dataToSave);
-        console.log("✓ Relatório atualizado no Firestore com sucesso!");
         toast({ title: "Relatório de LP atualizado!" });
       } else {
         const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
@@ -1448,48 +1212,23 @@ export default function QualityPage() {
         const highestNumber = Math.max(0, ...allNumbers);
         const newReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         
-        const finalData = { ...dataToSave, reportNumber: newReportNumber };
-
-        // Validação final antes de salvar
-        if (!validateDataSizeBeforeSave(finalData)) {
-            toast({
-                variant: "destructive",
-                title: "Relatório muito grande para salvar",
-                description: `O relatório final excede o limite. Remova algumas fotos.`,
-            });
-            return;
-        }
-        
-        await addDoc(collection(db, "companies", "mecald", "liquidPenetrantReports"), finalData);
-        console.log("✓ Dados salvos no Firestore com sucesso!");
+        await addDoc(collection(db, "companies", "mecald", "liquidPenetrantReports"), {
+          ...dataToSave,
+          reportNumber: newReportNumber,
+        });
         toast({ title: "Relatório de LP criado!" });
       }
 
       setIsInspectionFormOpen(false);
       await fetchAllData();
     } catch (error) {
-      console.error("❌ Erro ao salvar relatório:", error);
-      
-      // Verificar se é erro de tamanho do Firestore
-      if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
-          (error as any)?.message?.includes('Document exceeds maximum size')) {
-          toast({ 
-              variant: "destructive", 
-              title: "Relatório muito grande", 
-              description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
-          });
-      } else {
-          toast({ variant: "destructive", title: "Erro ao salvar relatório de LP" });
-      }
+      console.error("Error saving liquid penetrant report:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar relatório de LP" });
     }
   };
 
   const onUltrasoundReportSubmit = async (values: z.infer<typeof ultrasoundReportSchema>) => {
     try {
-      console.log("=== SALVANDO RELATÓRIO DE ULTRASSOM ===");
-      console.log("Dados recebidos:", values);
-      console.log("Fotos recebidas:", values.photos?.length || 0);
-
       const dataToSave = {
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
@@ -1524,22 +1263,8 @@ export default function QualityPage() {
         finalNotes: values.finalNotes || null,
       };
 
-      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
-      if (!validateDataSizeBeforeSave(dataToSave)) {
-          toast({
-              variant: "destructive",
-              title: "Relatório muito grande para salvar",
-              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
-          });
-          return;
-      }
-
-      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
-      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
-
       if (selectedInspection) {
         await updateDoc(doc(db, "companies", "mecald", "ultrasoundReports", selectedInspection.id), dataToSave);
-        console.log("✓ Relatório atualizado no Firestore com sucesso!");
         toast({ title: "Relatório de Ultrassom atualizado!" });
       } else {
         const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
@@ -1552,39 +1277,18 @@ export default function QualityPage() {
         const highestNumber = Math.max(0, ...allNumbers);
         const newReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         
-        const finalData = { ...dataToSave, reportNumber: newReportNumber };
-
-        // Validação final antes de salvar
-        if (!validateDataSizeBeforeSave(finalData)) {
-            toast({
-                variant: "destructive",
-                title: "Relatório muito grande para salvar",
-                description: `O relatório final excede o limite. Remova algumas fotos.`,
-            });
-            return;
-        }
-        
-        await addDoc(collection(db, "companies", "mecald", "ultrasoundReports"), finalData);
-        console.log("✓ Dados salvos no Firestore com sucesso!");
+        await addDoc(collection(db, "companies", "mecald", "ultrasoundReports"), {
+          ...dataToSave,
+          reportNumber: newReportNumber,
+        });
         toast({ title: "Relatório de Ultrassom criado!" });
       }
 
       setIsInspectionFormOpen(false);
       await fetchAllData();
     } catch (error) {
-      console.error("❌ Erro ao salvar relatório:", error);
-      
-      // Verificar se é erro de tamanho do Firestore
-      if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
-          (error as any)?.message?.includes('Document exceeds maximum size')) {
-          toast({ 
-              variant: "destructive", 
-              title: "Relatório muito grande", 
-              description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
-          });
-      } else {
-          toast({ variant: "destructive", title: "Erro ao salvar relatório de Ultrassom" });
-      }
+      console.error("Error saving ultrasound report:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar relatório de Ultrassom" });
     }
   };
 
@@ -1624,10 +1328,6 @@ export default function QualityPage() {
     }
   };
 
-
-
-  // --- END SUBMIT FUNCTIONS ---
-
   const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(inspection); setDialogType('material');
     if (inspection) { 
@@ -1645,7 +1345,11 @@ export default function QualityPage() {
   const handleOpenDimensionalForm = (report: DimensionalReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report); setDialogType('dimensional');
     if (report) { 
-        dimensionalReportForm.reset(report); 
+        dimensionalReportForm.reset({
+            ...report,
+            inspectionDate: report.inspectionDate ? new Date(report.inspectionDate) : new Date(),
+            quantityInspected: report.quantityInspected || undefined,
+        }); 
     } else { 
         dimensionalReportForm.reset({ 
             reportNumber: '', inspectionDate: new Date(), 
@@ -1866,6 +1570,193 @@ export default function QualityPage() {
         setIsInspectionFormOpen(true);
     };
 
+  // --- ENGINEERING TICKETS FUNCTIONS ---
+  const onEngineeringTicketSubmit = async (values: z.infer<typeof engineeringTicketSchema>) => {
+    try {
+      const docData = {
+        ...values,
+        openedAt: Timestamp.fromDate(values.openedAt),
+        resolvedAt: values.resolvedAt ? Timestamp.fromDate(values.resolvedAt) : null,
+        comments: (values.comments || []).map(c => ({
+          ...c,
+          timestamp: Timestamp.fromDate(c.timestamp),
+        })),
+      };
+
+      if (selectedEngineeringTicket) {
+        await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedEngineeringTicket.id), docData);
+        toast({ title: "Chamado atualizado com sucesso!" });
+      } else {
+        const nextNumber = engineeringTickets.length > 0 
+          ? Math.max(...engineeringTickets.map(t => parseInt((t.ticketNumber || 'ENG-0').replace('ENG-', '')) || 0)) + 1 
+          : 1;
+        docData.ticketNumber = `ENG-${nextNumber.toString().padStart(3, '0')}`;
+        await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), docData);
+        toast({ title: "Chamado criado com sucesso!" });
+      }
+
+      await fetchAllData();
+      setIsEngineeringTicketFormOpen(false);
+      setSelectedEngineeringTicket(null);
+      engineeringTicketForm.reset();
+    } catch (error) {
+      console.error("Error saving engineering ticket:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar chamado" });
+    }
+  };
+
+  const handleAddEngineeringTicketClick = (order: OrderInfo | null = null) => {
+    setSelectedEngineeringTicket(null);
+    engineeringTicketForm.reset({
+      orderId: order?.id || undefined,
+      itemId: undefined,
+      requestingDepartment: '',
+      openedBy: user?.email || '',
+      description: '',
+      category: undefined,
+      priority: undefined,
+      status: 'Aberto',
+      assignedTo: '',
+      openedAt: new Date(),
+      attachments: [],
+      comments: [],
+      pauseSchedule: true,
+    });
+    setIsEngineeringTicketFormOpen(true);
+  };
+
+  const handleEditEngineeringTicketClick = (ticket: EngineeringTicket) => {
+    setSelectedEngineeringTicket(ticket);
+    engineeringTicketForm.reset({
+      ...ticket,
+      openedAt: ticket.openedAt,
+      resolvedAt: ticket.resolvedAt || undefined,
+    });
+    setIsEngineeringTicketFormOpen(true);
+  };
+
+  const handleDeleteEngineeringTicketClick = (ticket: EngineeringTicket) => {
+    setEngineeringTicketToDelete(ticket);
+    setIsEngineeringTicketDeleting(true);
+  };
+
+  const handleConfirmEngineeringTicketDelete = async () => {
+    if (!engineeringTicketToDelete) return;
+    try {
+      await deleteDoc(doc(db, "companies", "mecald", "engineeringTickets", engineeringTicketToDelete.id));
+      await fetchAllData();
+      toast({ title: "Chamado excluído com sucesso!" });
+    } catch (error) {
+      console.error("Error deleting engineering ticket:", error);
+      toast({ variant: "destructive", title: "Erro ao excluir chamado" });
+    } finally {
+      setIsEngineeringTicketDeleting(false);
+      setEngineeringTicketToDelete(null);
+    }
+  };
+
+  const handleAddComment = async (ticketId: string) => {
+    if (!newComment.trim()) return;
+    
+    setIsAddingComment(true);
+    try {
+      const comment = {
+        id: Date.now().toString(),
+        author: user?.email || 'Usuário',
+        comment: newComment,
+        timestamp: Timestamp.fromDate(new Date()),
+        type: 'Comentário' as const,
+      };
+
+      await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", ticketId), {
+        comments: arrayUnion(comment)
+      });
+
+      setNewComment('');
+      await fetchAllData();
+      toast({ title: "Comentário adicionado!" });
+    } catch (error) {
+      console.error("Error adding comment:", error);
+      toast({ variant: "destructive", title: "Erro ao adicionar comentário" });
+    } finally {
+      setIsAddingComment(false);
+    }
+  };
+
+  const handleUpdateTicketStatus = async (ticketId: string, newStatus: string) => {
+    try {
+      const updateData: any = { status: newStatus };
+      if (newStatus === 'Resolvido') {
+        updateData.resolvedAt = Timestamp.fromDate(new Date());
+      }
+
+      const statusComment = {
+        id: Date.now().toString(),
+        author: user?.email || 'Sistema',
+        comment: `Status alterado para: ${newStatus}`,
+        timestamp: Timestamp.fromDate(new Date()),
+        type: 'Alteração de Status' as const,
+      };
+
+      await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", ticketId), {
+        ...updateData,
+        comments: arrayUnion(statusComment)
+      });
+
+      await fetchAllData();
+      toast({ title: "Status atualizado!" });
+    } catch (error) {
+      console.error("Error updating status:", error);
+      toast({ variant: "destructive", title: "Erro ao atualizar status" });
+    }
+  };
+
+  // Engineering Tickets filtered data
+  const filteredEngineeringTickets = useMemo(() => {
+    if (!engineeringTicketSearchQuery) return engineeringTickets;
+    const query = engineeringTicketSearchQuery.toLowerCase();
+    return engineeringTickets.filter(ticket =>
+      (ticket.ticketNumber || '').toLowerCase().includes(query) ||
+      (ticket.orderNumber || '').toLowerCase().includes(query) ||
+      (ticket.itemName || '').toLowerCase().includes(query) ||
+      (ticket.customerName || '').toLowerCase().includes(query) ||
+      (ticket.description || '').toLowerCase().includes(query) ||
+      (ticket.category || '').toLowerCase().includes(query) ||
+      (ticket.status || '').toLowerCase().includes(query)
+    );
+  }, [engineeringTickets, engineeringTicketSearchQuery]);
+
+  // Engineering Tickets dashboard metrics
+  const engineeringMetrics = useMemo(() => {
+    const total = engineeringTickets.length;
+    const byStatus = engineeringTickets.reduce((acc, ticket) => {
+      acc[ticket.status] = (acc[ticket.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const byCategory = engineeringTickets.reduce((acc, ticket) => {
+      acc[ticket.category] = (acc[ticket.category] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const avgResolutionTime = engineeringTickets
+      .filter(t => t.status === 'Resolvido' && t.actualResolutionTime)
+      .reduce((sum, t) => sum + (t.actualResolutionTime || 0), 0) / 
+      engineeringTickets.filter(t => t.status === 'Resolvido').length || 0;
+
+    const topCategories = Object.entries(byCategory)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5);
+
+    return {
+      total,
+      byStatus,
+      byCategory,
+      avgResolutionTime,
+      topCategories,
+    };
+  }, [engineeringTickets]);
+
   const handleDeleteInspectionClick = (inspection: any, type: string) => { setInspectionToDelete({ ...inspection, type }); setIsDeleteInspectionAlertOpen(true); };
   const handleConfirmDeleteInspection = async () => {
     if (!inspectionToDelete) return;
@@ -1885,8 +1776,6 @@ export default function QualityPage() {
         toast({ title: "Relatório excluído!" }); setIsDeleteInspectionAlertOpen(false); await fetchAllData();
     } catch (error) { toast({ variant: "destructive", title: "Erro ao excluir relatório" }); }
   };
-
-
   
   const handleInspectionFormSubmit = (data: any) => {
     switch(dialogType) {
@@ -1981,6 +1870,8 @@ export default function QualityPage() {
 
   const handleDimensionalReportPDF = async (report: DimensionalReport) => {
     toast({ title: "Gerando PDF..." });
+    console.log("Relatório dimensional para PDF:", report);
+    console.log("Fotos no relatório:", report.photos?.length || 0);
     try {
         const companyRef = doc(db, "companies", "mecald", "settings", "company");
         const companySnap = await getDoc(companyRef);
@@ -2014,12 +1905,11 @@ export default function QualityPage() {
         const body = report.measurements.map(m => {
             const instrument = calibrations.find(c => c.equipmentName === m.instrumentUsed);
             const instrumentDisplay = instrument ? `${instrument.equipmentName} (${instrument.internalCode})` : m.instrumentUsed;
-            
             return [
                 m.dimensionName,
                 m.nominalValue.toString(),
-                m.toleranceMin || '-',
-                m.toleranceMax || '-', 
+                m.toleranceMin?.toString() ?? '-',
+                m.toleranceMax?.toString() ?? '-',
                 m.measuredValue.toString(),
                 instrumentDisplay,
                 m.result
@@ -2028,7 +1918,7 @@ export default function QualityPage() {
 
         autoTable(docPdf, {
             startY: y,
-            head: [['Dimensão', 'Nominal', 'Tolerância 1', 'Tolerância 2', 'Medido', 'Instrumento', 'Resultado']],
+            head: [['Dimensão', 'Nominal', 'Tol. Inferior (-)', 'Tol. Superior (+)', 'Medido', 'Instrumento', 'Resultado']],
             body: body,
             headStyles: { fillColor: [40, 40, 40] },
             didParseCell: (data) => {
@@ -2042,109 +1932,96 @@ export default function QualityPage() {
 
         let finalY = (docPdf as any).lastAutoTable.finalY;
 
-        // Seção de Fotos - versão melhorada
+        // Seção de Fotos com logs detalhados
         console.log("=== SEÇÃO DE FOTOS NO PDF ===");
         console.log("report.photos exists:", !!report.photos);
         console.log("report.photos is array:", Array.isArray(report.photos));
         console.log("report.photos length:", report.photos?.length || 0);
-
+        console.log("report.photos raw data:", report.photos);
+        
         if (report.photos && Array.isArray(report.photos) && report.photos.length > 0) {
             console.log("✓ Fotos encontradas! Adicionando ao PDF. Total:", report.photos.length);
             
-            y = finalY + 15;
+            y = finalY + 10;
             if (y > pageHeight - 60) { 
                 docPdf.addPage(); 
                 y = 20; 
             }
             
-            docPdf.setFontSize(14).setFont(undefined, 'bold');
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
             docPdf.text('Registro Fotográfico', 15, y);
             y += 10;
 
-            // Configurações para layout das fotos
-            const photosPerRow = 2;
-            const photoWidth = (pageWidth - 45) / photosPerRow; // 2 fotos por linha
-            const photoHeight = photoWidth * 0.75; // Proporção 4:3
-            let currentX = 15;
+            const photoWidth = (pageWidth - 45) / 2; // 2 fotos por linha
+            const photoHeight = photoWidth * (3/4); // Proporção 4:3
+            let x = 15;
             let photoCount = 0;
 
             for (let i = 0; i < report.photos.length; i++) {
                 const photoDataUri = report.photos[i];
                 console.log(`--- Processando foto ${i + 1} de ${report.photos.length} ---`);
+                console.log(`Tipo: ${typeof photoDataUri}`);
+                console.log(`Tem dados: ${!!photoDataUri}`);
+                console.log(`É string: ${typeof photoDataUri === 'string'}`);
+                console.log(`Início: ${photoDataUri?.substring(0, 50)}`);
+                console.log(`É data URI: ${photoDataUri?.startsWith('data:image/')}`);
                 
                 // Verificar se precisa de nova página
-                if (y + photoHeight + 20 > pageHeight - 25) {
+                if (y + photoHeight > pageHeight - 25) {
                     docPdf.addPage();
                     y = 20;
-                    currentX = 15;
+                    x = 15;
                     photoCount = 0;
-                    
-                    // Reescrever título na nova página
-                    docPdf.setFontSize(14).setFont(undefined, 'bold');
-                    docPdf.text('Registro Fotográfico (continuação)', 15, y);
-                    y += 10;
                 }
                 
                 try {
                     if (photoDataUri && typeof photoDataUri === 'string' && photoDataUri.startsWith('data:image/')) {
-                        console.log(`✓ Adicionando foto ${i + 1} ao PDF na posição (${currentX}, ${y})`);
-                        
-                        // Adicionar borda ao redor da foto
-                        docPdf.setDrawColor(200, 200, 200);
-                        docPdf.setLineWidth(0.5);
-                        docPdf.rect(currentX - 1, y - 1, photoWidth + 2, photoHeight + 2);
-                        
-                        // Adicionar a imagem
-                        docPdf.addImage(photoDataUri, 'JPEG', currentX, y, photoWidth, photoHeight);
+                        console.log(`✓ Adicionando foto ${i + 1} ao PDF...`);
+                        docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
                         
                         // Adicionar numeração da foto
-                        docPdf.setFontSize(10).setFont(undefined, 'bold');
-                        docPdf.setTextColor(60, 60, 60);
-                        docPdf.text(`Foto ${i + 1}`, currentX + photoWidth/2, y + photoHeight + 8, { align: 'center' });
+                        docPdf.setFontSize(8).setFont(undefined, 'normal');
+                        docPdf.text(`Foto ${i + 1}`, x + photoWidth/2, y + photoHeight + 5, { align: 'center' });
                         
                         console.log(`✓ Foto ${i + 1} adicionada com sucesso!`);
                     } else {
-                        console.warn(`❌ Foto ${i + 1} inválida - dados corrompidos ou formato incorreto`);
-                        
-                        // Desenhar placeholder para foto inválida
-                        docPdf.setFillColor(240, 240, 240);
-                        docPdf.rect(currentX, y, photoWidth, photoHeight, 'F');
-                        docPdf.setFontSize(10).setTextColor(120, 120, 120);
-                        docPdf.text(`Foto ${i + 1}: Erro ao carregar`, currentX + photoWidth/2, y + photoHeight/2, { align: 'center' });
+                        console.warn(`❌ Foto ${i + 1} inválida:`, {
+                            exists: !!photoDataUri,
+                            type: typeof photoDataUri,
+                            isString: typeof photoDataUri === 'string',
+                            startsWithData: photoDataUri?.startsWith('data:image/'),
+                            preview: photoDataUri?.substring(0, 100)
+                        });
+                        docPdf.setFontSize(10).text(`Foto ${i + 1}: Dados inválidos`, x, y + 10);
                     }
                 } catch(e) {
                     console.error(`❌ Erro ao adicionar foto ${i + 1} ao PDF:`, e);
-                    
-                    // Desenhar placeholder para erro
-                    docPdf.setFillColor(250, 200, 200);
-                    docPdf.rect(currentX, y, photoWidth, photoHeight, 'F');
-                    docPdf.setFontSize(10).setTextColor(150, 50, 50);
-                    docPdf.text(`Foto ${i + 1}: Erro no processamento`, currentX + photoWidth/2, y + photoHeight/2, { align: 'center' });
+                    docPdf.setFontSize(10).text(`Foto ${i + 1}: Erro ao carregar`, x, y + 10);
                 }
 
                 photoCount++;
                 
-                // Calcular posição da próxima foto
-                if (photoCount % photosPerRow === 0) {
-                    // Nova linha
-                    currentX = 15;
-                    y += photoHeight + 20;
+                // Layout: 2 fotos por linha
+                if (photoCount % 2 === 1) {
+                    x = 15 + photoWidth + 15; // Segunda posição
                 } else {
-                    // Próxima coluna
-                    currentX += photoWidth + 15;
+                    x = 15; // Primeira posição da próxima linha
+                    y += photoHeight + 15; // Pular para próxima linha
                 }
             }
             
-            // Ajustar finalY considerando a última linha
-            if (photoCount % photosPerRow !== 0) {
-                finalY = y + photoHeight + 20;
+            // Ajustar finalY se necessário
+            if (photoCount % 2 === 1) {
+                finalY = y + photoHeight + 15;
             } else {
                 finalY = y;
             }
-            
-            console.log(`✓ Todas as ${report.photos.length} fotos processadas para o PDF`);
         } else {
             console.log("❌ Nenhuma foto encontrada no relatório para o PDF");
+            console.log("Motivos possíveis:");
+            console.log("- report.photos não existe:", !report.photos);
+            console.log("- report.photos não é array:", !Array.isArray(report.photos));
+            console.log("- report.photos está vazio:", report.photos?.length === 0);
         }
         
         const footerText = `DIM-MEC-2025-01.REV0`;
@@ -2734,6 +2611,268 @@ export default function QualityPage() {
     }
   };
 
+  const handleEngineeringTicketPDF = async (ticket: EngineeringTicket) => {
+    toast({ title: "Gerando PDF do Chamado..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === ticket.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === ticket.itemId);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+
+        // Header
+        if (companyData.logo?.preview) { 
+            try { 
+                docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); 
+            } catch(e) {} 
+        }
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(`Chamado para Engenharia Nº ${ticket.ticketNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
+        y += 25;
+        
+        const addSection = (title: string, data: (string | number | null | undefined)[][], colWidths?: any) => {
+            if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(11).setFont(undefined, 'bold');
+            docPdf.text(title, 15, y);
+            y += 2;
+            autoTable(docPdf, {
+                startY: y, 
+                theme: 'grid', 
+                body: data.map(row => row.map(cell => cell ?? 'N/A')),
+                styles: { fontSize: 8, cellPadding: 1.5, lineWidth: 0.1, lineColor: [200, 200, 200] },
+                columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50, ...colWidths } },
+            });
+            y = (docPdf as any).lastAutoTable.finalY + 5;
+        }
+
+        // Seção 1: Identificação do Chamado
+        addSection('1. Identificação do Chamado', [
+            ['Código do Chamado', ticket.ticketNumber],
+            ['Data de Abertura', format(ticket.openedAt, 'dd/MM/yyyy HH:mm')],
+            ['Pedido / OS', orderInfo?.number],
+            ['Cliente', orderInfo?.customerName],
+            ['Item Relacionado', itemInfo?.description],
+            ['Código do Item', itemInfo?.code || 'N/A'],
+        ]);
+
+        // Seção 2: Solicitação
+        addSection('2. Detalhes da Solicitação', [
+            ['Departamento Solicitante', ticket.requestingDepartment],
+            ['Responsável pela Abertura', ticket.openedBy],
+            ['Categoria do Problema', ticket.category],
+            ['Prioridade', ticket.priority],
+            ['Status Atual', ticket.status],
+            ['Responsável Engenharia', ticket.assignedTo || 'Não atribuído'],
+        ]);
+
+        // Seção 3: Descrição do Problema
+        if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+        docPdf.setFontSize(11).setFont(undefined, 'bold');
+        docPdf.text('3. Descrição Detalhada do Problema', 15, y);
+        y += 8;
+        
+        const descriptionLines = docPdf.splitTextToSize(ticket.description || 'N/A', pageWidth - 30);
+        docPdf.setFontSize(9).setFont(undefined, 'normal');
+        descriptionLines.forEach((line: string) => {
+            if (y > pageHeight - 20) { docPdf.addPage(); y = 20; }
+            docPdf.text(line, 15, y);
+            y += 5;
+        });
+        y += 5;
+
+        // Seção 4: Histórico de Comentários
+        if (ticket.comments && ticket.comments.length > 0) {
+            if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(11).setFont(undefined, 'bold');
+            docPdf.text('4. Histórico de Comentários e Ações', 15, y);
+            y += 8;
+
+            ticket.comments.forEach((comment, index) => {
+                if (y > pageHeight - 30) { docPdf.addPage(); y = 20; }
+                
+                docPdf.setFontSize(9).setFont(undefined, 'bold');
+                docPdf.text(`${index + 1}. ${format(comment.timestamp, 'dd/MM/yyyy HH:mm')} - ${comment.author}`, 15, y);
+                y += 5;
+                
+                docPdf.setFontSize(8).setFont(undefined, 'normal');
+                docPdf.text(`Tipo: ${comment.type}`, 20, y);
+                y += 4;
+                
+                const commentLines = docPdf.splitTextToSize(comment.comment, pageWidth - 40);
+                commentLines.forEach((line: string) => {
+                    if (y > pageHeight - 15) { docPdf.addPage(); y = 20; }
+                    docPdf.text(line, 20, y);
+                    y += 4;
+                });
+                y += 3;
+            });
+        }
+
+        // Seção 5: Métricas e Status
+        const pausedDays = ticket.status === 'Resolvido' && ticket.resolvedAt 
+            ? differenceInDays(ticket.resolvedAt, ticket.openedAt)
+            : differenceInDays(new Date(), ticket.openedAt);
+
+        addSection('5. Métricas e Resolução', [
+            ['Tempo Total Parado', `${pausedDays} dias`],
+            ['Data de Resolução', ticket.resolvedAt ? format(ticket.resolvedAt, 'dd/MM/yyyy HH:mm') : 'Não resolvido'],
+            ['Cronograma Pausado', ticket.pauseSchedule ? 'Sim' : 'Não'],
+        ]);
+
+        // Footer com numeração
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(`CH-ENG-001.REV0`, 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`ChamadoEngenharia_${ticket.ticketNumber || ticket.id}.pdf`);
+        toast({ title: "PDF gerado com sucesso!", description: "O arquivo foi baixado." });
+    } catch (error) {
+        console.error("Error exporting engineering ticket PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF.", description: "Verifique os dados e tente novamente." });
+    }
+  };
+
+  // Função para gerar relatório consolidado dos chamados do pedido
+  const handleOrderTicketsReport = async (order: OrderInfo) => {
+    try {
+        const orderTickets = engineeringTickets.filter(ticket => ticket.orderId === order.id);
+        
+        if (orderTickets.length === 0) {
+            toast({ variant: "destructive", title: "Nenhum chamado", description: "Não há chamados para este pedido." });
+            return;
+        }
+
+        toast({ title: "Gerando Relatório de Chamados..." });
+
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        
+        const docPdf = new jsPDF({ orientation: "landscape" });
+        const pageHeight = docPdf.internal.pageSize.height;
+        const pageWidth = docPdf.internal.pageSize.width;
+        let y = 20;
+        
+        // Header
+        if (companyData.logo?.preview) {
+            try { 
+                docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 40, 20); 
+            } catch(e) {}
+        }
+        
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(companyData.nomeFantasia || 'Sua Empresa', pageWidth - 15, y + 10, { align: 'right' });
+        
+        y += 40;
+        docPdf.setFontSize(18).setFont(undefined, 'bold').text(`Relatório de Chamados - Pedido ${order.number}`, pageWidth / 2, y, { align: 'center' });
+        docPdf.setFontSize(12).setFont(undefined, 'normal').text(`Cliente: ${order.customerName}`, pageWidth / 2, y + 10, { align: 'center' });
+        docPdf.text(`Data do Relatório: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, pageWidth / 2, y + 20, { align: 'center' });
+        
+        y += 35;
+        
+        // Função para calcular dias
+        const calculateDays = (ticket: EngineeringTicket) => {
+            const now = new Date();
+            const openedDate = ticket.openedAt;
+            
+            if (ticket.status === 'Resolvido' && ticket.resolvedAt) {
+                return Math.ceil((ticket.resolvedAt.getTime() - openedDate.getTime()) / (1000 * 60 * 60 * 24));
+            } else {
+                return Math.ceil((now.getTime() - openedDate.getTime()) / (1000 * 60 * 60 * 24));
+            }
+        };
+        
+        // Resumo dos chamados
+        const resolvedTickets = orderTickets.filter(t => t.status === 'Resolvido');
+        const avgResolutionTime = resolvedTickets.length > 0 
+            ? Math.round(resolvedTickets.reduce((acc, t) => acc + calculateDays(t), 0) / resolvedTickets.length)
+            : 0;
+
+        const summaryData = [
+            ['Métrica', 'Valor'],
+            ['Total de Chamados', orderTickets.length.toString()],
+            ['Chamados Abertos', orderTickets.filter(t => t.status !== 'Resolvido').length.toString()],
+            ['Chamados Resolvidos', resolvedTickets.length.toString()],
+            ['Tempo Médio de Resolução (dias)', avgResolutionTime > 0 ? avgResolutionTime.toString() : 'N/A']
+        ];
+        
+        autoTable(docPdf, {
+            startY: y,
+            head: [summaryData[0]],
+            body: summaryData.slice(1),
+            styles: { fontSize: 10, cellPadding: 4 },
+            headStyles: { fillColor: [37, 99, 235], fontSize: 11, textColor: 255 },
+            columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 40 } },
+            margin: { left: 15, right: 15 },
+        });
+        y = (docPdf as any).lastAutoTable.finalY + 20;
+        
+        // Detalhes dos chamados
+        const ticketsData = [
+            ['Nº Chamado', 'Item', 'Categoria', 'Status', 'Abertura', 'Resolução', 'Dias']
+        ];
+        
+        orderTickets.forEach(ticket => {
+            const days = calculateDays(ticket);
+            const daysLabel = ticket.status === 'Resolvido' 
+                ? `${days} (fechado)` 
+                : `${days} (aberto)`;
+            
+            ticketsData.push([
+                ticket.ticketNumber || 'N/A',
+                ticket.itemName || 'N/A',
+                ticket.category || 'N/A',
+                ticket.status || 'N/A',
+                format(ticket.openedAt, 'dd/MM/yy'),
+                ticket.resolvedAt ? format(ticket.resolvedAt, 'dd/MM/yy') : '-',
+                daysLabel
+            ]);
+        });
+        
+        autoTable(docPdf, {
+            startY: y,
+            head: [ticketsData[0]],
+            body: ticketsData.slice(1),
+            styles: { fontSize: 9, cellPadding: 3 },
+            headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
+            columnStyles: {
+                0: { cellWidth: 25 },
+                1: { cellWidth: 'auto' },
+                2: { cellWidth: 30 },
+                3: { cellWidth: 25 },
+                4: { cellWidth: 20 },
+                5: { cellWidth: 20 },
+                6: { cellWidth: 25 }
+            },
+            margin: { left: 15, right: 15 },
+        });
+        
+        // Footer
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(`REL-CHAMADOS-001.REV0`, 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`Relatorio_Chamados_${order.number}.pdf`);
+        toast({ title: "Relatório gerado!", description: "O relatório dos chamados foi baixado com sucesso." });
+    } catch (error) {
+        console.error("Error generating tickets report:", error);
+        toast({ variant: "destructive", title: "Erro", description: "Não foi possível gerar o relatório." });
+    }
+  };
+
 
   const currentForm = useMemo(() => {
     switch(dialogType) {
@@ -2866,6 +3005,8 @@ export default function QualityPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+
         </Tabs>
       </div>
 
@@ -3117,51 +3258,173 @@ export default function QualityPage() {
                         </Card>
                     </AccordionContent>
                 </AccordionItem>
+                
                 <AccordionItem value="engineering-tickets">
                     <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
                         <div className="flex items-center gap-2">
-                            <Phone className="h-5 w-5 text-primary" />
-                            Chamados de Engenharia
+                            <TicketCheck className="h-5 w-5 text-primary" />
+                            Chamados para Engenharia
                         </div>
                     </AccordionTrigger>
                     <AccordionContent className="pt-2">
+                        {/* Dashboard de Chamados */}
+                        <div className="grid gap-4 md:grid-cols-4 mb-6">
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Total</CardTitle>
+                                    <TicketCheck className="h-4 w-4 text-muted-foreground" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold">{engineeringMetrics.total}</div>
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Em Aberto</CardTitle>
+                                    <AlertCircle className="h-4 w-4 text-orange-500" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold text-orange-500">{engineeringMetrics.byStatus['Aberto'] || 0}</div>
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Em Análise</CardTitle>
+                                    <Clock className="h-4 w-4 text-blue-500" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold text-blue-500">{engineeringMetrics.byStatus['Em análise'] || 0}</div>
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="flex-row items-center justify-between pb-2">
+                                    <CardTitle className="text-sm font-medium">Resolvidos</CardTitle>
+                                    <CheckCircle className="h-4 w-4 text-green-500" />
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold text-green-500">{engineeringMetrics.byStatus['Resolvido'] || 0}</div>
+                                </CardContent>
+                            </Card>
+                        </div>
+
                         <Card>
                             <CardHeader className="flex-row justify-between items-center">
-                                <CardTitle className="text-base">Chamados Abertos</CardTitle>
-                                <Button size="sm" onClick={handleAddEngineeringClick}>
-                                    <PlusCircle className="mr-2 h-4 w-4" />Novo Chamado
-                                </Button>
+                                <CardTitle className="text-base">Histórico de Chamados</CardTitle>
+                                <div className="flex gap-2">
+                                    {selectedOrderForInspections && (
+                                        <Button size="sm" variant="outline" onClick={() => handleOrderTicketsReport(selectedOrderForInspections)}>
+                                            <FileDown className="mr-2 h-4 w-4" />Relatório do Pedido
+                                        </Button>
+                                    )}
+                                    <Button size="sm" onClick={() => handleAddEngineeringTicketClick(selectedOrderForInspections)}>
+                                        <PlusCircle className="mr-2 h-4 w-4" />Novo Chamado
+                                    </Button>
+                                </div>
                             </CardHeader>
                             <CardContent>
-                                {isEngineeringLoading ? <Skeleton className="h-40 w-full" /> :
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Nº</TableHead>
-                                                <TableHead>Data</TableHead>
-                                                <TableHead>Solicitante</TableHead>
-                                                <TableHead>Descrição</TableHead>
-                                                <TableHead>Status</TableHead>
-                                                <TableHead className="text-right">Ações</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {engineeringTickets.length > 0 ? engineeringTickets.filter(t => t.status !== "Fechado").map(ticket => (
-                                                <TableRow key={ticket.id}>
-                                                    <TableCell className="font-mono">{ticket.id.slice(-5).toUpperCase()}</TableCell>
-                                                    <TableCell>{ticket.createdAt && (ticket.createdAt.toDate ? format(ticket.createdAt.toDate(), 'dd/MM/yy') : format(new Date(ticket.createdAt), 'dd/MM/yy'))}</TableCell>
-                                                    <TableCell>{ticket.requester}</TableCell>
-                                                    <TableCell className="max-w-[200px] truncate">{ticket.description}</TableCell>
-                                                    <TableCell><Badge variant={getStatusVariant(ticket.status)}>{ticket.status}</Badge></TableCell>
-                                                    <TableCell className="text-right">
-                                                        <Button variant="ghost" size="icon" onClick={() => handleEditEngineeringClick(ticket)}><Pencil className="h-4 w-4" /></Button>
-                                                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteEngineeringClick(ticket)}><Trash2 className="h-4 w-4" /></Button>
-                                                    </TableCell>
+                                {isLoading ? (
+                                    <Skeleton className="h-40 w-full" />
+                                ) : (
+                                    <>
+                                        <div className="mb-4">
+                                            <div className="relative">
+                                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                                                <Input 
+                                                    placeholder="Pesquisar chamados..." 
+                                                    value={engineeringTicketSearchQuery}
+                                                    onChange={(e) => setEngineeringTicketSearchQuery(e.target.value)}
+                                                    className="pl-10"
+                                                />
+                                            </div>
+                                        </div>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Código</TableHead>
+                                                    <TableHead>Item</TableHead>
+                                                    <TableHead>Categoria</TableHead>
+                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Abertura</TableHead>
+                                                    <TableHead className="text-right">Ações</TableHead>
                                                 </TableRow>
-                                            )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum chamado aberto.</TableCell></TableRow>}
-                                        </TableBody>
-                                    </Table>
-                                }
+                                            </TableHeader>
+                                            <TableBody>
+                                                {filteredEngineeringTickets
+                                                    .filter(ticket => !selectedOrderForInspections || ticket.orderId === selectedOrderForInspections.id)
+                                                    .length > 0 ? filteredEngineeringTickets
+                                                    .filter(ticket => !selectedOrderForInspections || ticket.orderId === selectedOrderForInspections.id)
+                                                    .map(ticket => (
+                                                    <TableRow key={ticket.id}>
+                                                        <TableCell className="font-mono">{ticket.ticketNumber}</TableCell>
+                                                        <TableCell>
+                                                            <div className="text-sm">{ticket.itemName}</div>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <Badge variant="outline">{ticket.category}</Badge>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <Badge variant={getStatusVariant(ticket.status)}>
+                                                                {ticket.status}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell>{format(ticket.openedAt, 'dd/MM/yy')}</TableCell>
+                                                        <TableCell className="text-right">
+                                                            <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild>
+                                                                    <Button variant="ghost" size="icon">
+                                                                        <MoreVertical className="h-4 w-4" />
+                                                                    </Button>
+                                                                </DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end">
+                                                                    <DropdownMenuItem onClick={() => handleEditEngineeringTicketClick(ticket)}>
+                                                                        <Pencil className="mr-2 h-4 w-4" />
+                                                                        Editar
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuItem onClick={() => handleEngineeringTicketPDF(ticket)}>
+                                                                        <FileDown className="mr-2 h-4 w-4" />
+                                                                        Exportar PDF
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem 
+                                                                        onClick={() => handleUpdateTicketStatus(ticket.id, 'Em análise')}
+                                                                        disabled={ticket.status === 'Em análise' || ticket.status === 'Resolvido'}
+                                                                    >
+                                                                        <Play className="mr-2 h-4 w-4" />
+                                                                        Iniciar Análise
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuItem 
+                                                                        onClick={() => handleUpdateTicketStatus(ticket.id, 'Resolvido')}
+                                                                        disabled={ticket.status === 'Resolvido'}
+                                                                    >
+                                                                        <CheckCircle className="mr-2 h-4 w-4" />
+                                                                        Marcar como Resolvido
+                                                                    </DropdownMenuItem>
+                                                                    <DropdownMenuSeparator />
+                                                                    <DropdownMenuItem 
+                                                                        onClick={() => handleDeleteEngineeringTicketClick(ticket)}
+                                                                        className="text-destructive"
+                                                                    >
+                                                                        <Trash2 className="mr-2 h-4 w-4" />
+                                                                        Excluir
+                                                                    </DropdownMenuItem>
+                                                                </DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )) : (
+                                                    <TableRow>
+                                                        <TableCell colSpan={6} className="h-24 text-center">
+                                                            {selectedOrderForInspections 
+                                                                ? `Nenhum chamado encontrado para o pedido ${selectedOrderForInspections.number}.`
+                                                                : 'Nenhum chamado encontrado.'
+                                                            }
+                                                        </TableCell>
+                                                    </TableRow>
+                                                )}
+                                            </TableBody>
+                                        </Table>
+                                    </>
+                                )}
                             </CardContent>
                         </Card>
                     </AccordionContent>
@@ -3224,62 +3487,287 @@ export default function QualityPage() {
         )}
         </DialogContent>
       </Dialog>
+      <AlertDialog open={isDeleteInspectionAlertOpen} onOpenChange={setIsDeleteInspectionAlertOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita e excluirá permanentemente o relatório de inspeção.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmDeleteInspection} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
-      {/* Dialog para formulário de chamado de engenharia */}
-      <Dialog open={isEngineeringFormOpen} onOpenChange={setIsEngineeringFormOpen}>
-        <DialogContent className="max-w-lg">
+      {/* Engineering Tickets Dialogs */}
+      <Dialog open={isEngineeringTicketFormOpen} onOpenChange={setIsEngineeringTicketFormOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{selectedEngineeringTicket ? "Editar Chamado de Engenharia" : "Novo Chamado de Engenharia"}</DialogTitle>
-            <DialogDescription>Preencha os campos para registrar o chamado.</DialogDescription>
+            <DialogTitle>{selectedEngineeringTicket ? "Editar Chamado" : "Abrir Chamado para Engenharia"}</DialogTitle>
+            <DialogDescription>
+              Preencha os detalhes do problema para que a engenharia possa analisar e resolver.
+            </DialogDescription>
           </DialogHeader>
-          <Form {...engineeringForm}>
-            <form onSubmit={engineeringForm.handleSubmit(onEngineeringSubmit)} className="space-y-4">
-              <FormField control={engineeringForm.control} name="description" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Descrição</FormLabel>
-                  <FormControl><Textarea {...field} placeholder="Descreva o problema ou solicitação" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={engineeringForm.control} name="orderId" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Pedido Relacionado</FormLabel>
-                  <FormControl>
+          <Form {...engineeringTicketForm}>
+            <form onSubmit={engineeringTicketForm.handleSubmit(onEngineeringTicketSubmit)} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField control={engineeringTicketForm.control} name="orderId" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Pedido *</FormLabel>
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <SelectTrigger><SelectValue placeholder="Selecione um pedido (opcional)" /></SelectTrigger>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione um pedido" />
+                        </SelectTrigger>
+                      </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Nenhum</SelectItem>
-                        {orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}
+                        {orders.map(o => (
+                          <SelectItem key={o.id} value={o.id}>
+                            Nº {o.number} - {o.customerName}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                
+                <FormField control={engineeringTicketForm.control} name="itemId" render={({ field }) => {
+                  const watchedOrderId = engineeringTicketForm.watch("orderId");
+                  const availableItems = orders.find(o => o.id === watchedOrderId)?.items || [];
+                  
+                  return (
+                    <FormItem>
+                      <FormLabel>Item Relacionado *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger disabled={!watchedOrderId}>
+                            <SelectValue placeholder="Selecione um item" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {availableItems.map(i => (
+                            <SelectItem key={i.id} value={i.id}>
+                              {i.code ? `[${i.code}] ` : ''}{i.description}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }} />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField control={engineeringTicketForm.control} name="requestingDepartment" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Departamento Solicitante *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o departamento" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Produção">Produção</SelectItem>
+                        <SelectItem value="Qualidade">Qualidade</SelectItem>
+                        <SelectItem value="Vendas">Vendas</SelectItem>
+                        <SelectItem value="Compras">Compras</SelectItem>
+                        <SelectItem value="Logística">Logística</SelectItem>
+                        <SelectItem value="Engenharia">Engenharia</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={engineeringTicketForm.control} name="openedBy" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Responsável pela Abertura *</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Nome de quem está abrindo o chamado" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+
+              <FormField control={engineeringTicketForm.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Descrição Detalhada do Problema *</FormLabel>
+                  <FormControl>
+                    <Textarea 
+                      {...field} 
+                      placeholder="Descreva detalhadamente o problema encontrado, circunstâncias, impacto, etc."
+                      className="min-h-[120px]"
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
-              <FormField control={engineeringForm.control} name="responsible" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Responsável</FormLabel>
-                  <FormControl><Input {...field} placeholder="Nome do responsável (opcional)" /></FormControl>
-                  <FormMessage />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FormField control={engineeringTicketForm.control} name="category" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Categoria do Problema *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a categoria" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Desenho incorreto">Desenho incorreto</SelectItem>
+                        <SelectItem value="Material fora de medida">Material fora de medida</SelectItem>
+                        <SelectItem value="Defeito de fabricação">Defeito de fabricação</SelectItem>
+                        <SelectItem value="Interpretação">Interpretação</SelectItem>
+                        <SelectItem value="Especificação técnica">Especificação técnica</SelectItem>
+                        <SelectItem value="Processo de soldagem">Processo de soldagem</SelectItem>
+                        <SelectItem value="Acabamento/Pintura">Acabamento/Pintura</SelectItem>
+                        <SelectItem value="Outros">Outros</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={engineeringTicketForm.control} name="priority" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Prioridade *</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a prioridade" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Alta">Alta</SelectItem>
+                        <SelectItem value="Média">Média</SelectItem>
+                        <SelectItem value="Baixa">Baixa</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <FormField control={engineeringTicketForm.control} name="assignedTo" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Responsável na Engenharia</FormLabel>
+                    <FormControl>
+                      <Input {...field} placeholder="Nome do responsável pela análise" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+
+              {selectedEngineeringTicket && (
+                <FormField control={engineeringTicketForm.control} name="status" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status do Chamado</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Aberto">Aberto</SelectItem>
+                        <SelectItem value="Em análise">Em análise</SelectItem>
+                        <SelectItem value="Aguardando resposta">Aguardando resposta</SelectItem>
+                        <SelectItem value="Resolvido">Resolvido</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              )}
+
+              <FormField control={engineeringTicketForm.control} name="pauseSchedule" render={({ field }) => (
+                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                  <div className="space-y-0.5">
+                    <FormLabel>Pausar Cronograma</FormLabel>
+                    <FormDescription>
+                      Pausar automaticamente o cronograma do item até a resolução do chamado
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                  </FormControl>
                 </FormItem>
               )} />
-              <FormField control={engineeringForm.control} name="notes" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Observações</FormLabel>
-                  <FormControl><Textarea {...field} placeholder="Observações adicionais (opcional)" /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
+
+              {/* Histórico de Comentários */}
+              {selectedEngineeringTicket && selectedEngineeringTicket.comments && selectedEngineeringTicket.comments.length > 0 && (
+                <div className="space-y-4">
+                  <h4 className="font-medium">Histórico de Comentários</h4>
+                  <div className="border rounded-md p-4 max-h-60 overflow-y-auto space-y-3">
+                    {selectedEngineeringTicket.comments.map((comment, index) => (
+                      <div key={index} className="border-b pb-2 last:border-b-0">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-medium text-sm">{comment.author}</span>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">{comment.type}</Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {format(comment.timestamp, 'dd/MM/yy HH:mm')}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{comment.comment}</p>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Adicionar Novo Comentário */}
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Adicionar comentário..."
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAddComment(selectedEngineeringTicket.id);
+                        }
+                      }}
+                    />
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="icon"
+                      onClick={() => handleAddComment(selectedEngineeringTicket.id)}
+                      disabled={isAddingComment || !newComment.trim()}
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsEngineeringFormOpen(false)}>Cancelar</Button>
-                <Button type="submit">Salvar</Button>
+                <Button type="button" variant="outline" onClick={() => setIsEngineeringTicketFormOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit">
+                  {selectedEngineeringTicket ? 'Salvar Alterações' : 'Abrir Chamado'}
+                </Button>
               </DialogFooter>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={isDeleteInspectionAlertOpen} onOpenChange={setIsDeleteInspectionAlertOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita e excluirá permanentemente o relatório de inspeção.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmDeleteInspection} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <AlertDialog open={isEngineeringTicketDeleting} onOpenChange={setIsEngineeringTicketDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Isso excluirá permanentemente o chamado 
+              <span className="font-bold"> {engineeringTicketToDelete?.ticketNumber}</span> e todo seu histórico.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmEngineeringTicketDelete} 
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              Sim, excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -3287,89 +3775,26 @@ export default function QualityPage() {
 
 // --- SUB-COMPONENTS FOR FORMS ---
 function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
-    const { toast } = useToast();
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
 
     const watchedPhotos = form.watch("photos", []);
 
-    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files) return;
         
-        const currentPhotos = form.getValues("photos") || [];
-        
-        // Verificar limite de fotos (máximo 6 por formulário)
-        if (currentPhotos.length + files.length > 6) {
-            toast({
-                title: "Muitas fotos",
-                description: `Máximo de 6 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`,
-                variant: "destructive",
-            });
-            return;
-        }
-        
-        const validFiles = Array.from(files).filter(file => {
-            // Verificar tipo de arquivo
-            if (!file.type.startsWith('image/')) {
-                toast({
-                    title: "Tipo de arquivo inválido",
-                    description: `O arquivo ${file.name} não é uma imagem válida.`,
-                    variant: "destructive",
-                });
-                return false;
-            }
-            
-            // Verificar tamanho (máximo 20MB)
-            if (file.size > 20 * 1024 * 1024) {
-                toast({
-                    title: "Arquivo muito grande",
-                    description: `O arquivo ${file.name} é muito grande (máximo 20MB).`,
-                    variant: "destructive",
-                });
-                return false;
-            }
-            
-            return true;
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                }
+            };
+            reader.readAsDataURL(file);
         });
-        
-        if (validFiles.length === 0) return;
-        
-        try {
-            const compressedPhotos = await Promise.all(
-                validFiles.map(async (file) => {
-                    try {
-                        console.log(`Processando foto: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImageForFirestore(file);
-                    } catch (error) {
-                        console.error(`Erro ao comprimir ${file.name}:`, error);
-                        // Em caso de erro, usar o arquivo original
-                        return new Promise<string>((resolve) => {
-                            const reader = new FileReader();
-                            reader.onload = (e) => resolve(e.target?.result as string);
-                            reader.readAsDataURL(file);
-                        });
-                    }
-                })
-            );
-            
-            const updatedPhotos = [...currentPhotos, ...compressedPhotos];
-            form.setValue("photos", updatedPhotos, { shouldValidate: true });
-            
-            toast({
-                title: "Fotos adicionadas",
-                description: `${validFiles.length} foto(s) processada(s) com sucesso.`,
-            });
-            
-        } catch (error) {
-            console.error('Erro ao processar fotos:', error);
-            toast({
-                title: "Erro ao processar fotos",
-                description: "Tente novamente ou entre em contato com o suporte.",
-                variant: "destructive",
-            });
-        }
     };
 
     const removePhoto = (index: number) => {
@@ -3397,59 +3822,20 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
                 Selecione uma ou mais imagens para anexar ao relatório.
             </FormDescription>
             {watchedPhotos && watchedPhotos.length > 0 && (
-                <div className="space-y-2">
-                    <div className="flex justify-between items-center text-sm text-muted-foreground">
-                        <span>{watchedPhotos.length} de 6 fotos</span>
-                        <span>Compressão aplicada automaticamente</span>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {watchedPhotos.map((photo: string, index: number) => (
-                            <div key={index} className="relative group">
-                                <div className="aspect-square overflow-hidden rounded-lg border border-border">
-                                    <Image 
-                                        src={photo} 
-                                        alt={`Foto ${index + 1}`} 
-                                        width={200} 
-                                        height={200} 
-                                        className="w-full h-full object-cover transition-transform group-hover:scale-105" 
-                                    />
-                                </div>
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={() => removePhoto(index)}
-                                        className="shadow-lg"
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-1" />
-                                        Remover
-                                    </Button>
-                                </div>
-                                <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                                    {index + 1}
-                                </div>
-                                <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                                    {Math.round((photo.length * 0.75) / 1024)}KB
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                    {watchedPhotos.map((photo: string, index: number) => (
+                        <div key={index} className="relative">
+                            <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                            <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                <Trash2 className="h-3 w-3" />
+                            </Button>
+                        </div>
+                    ))}
                 </div>
             )}
             <FormMessage />
         </FormItem>
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
-        
-        {/* Indicador de tamanho do relatório */}
-        <Card>
-            <CardHeader>
-                <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <DataSizeIndicator data={form.getValues()} />
-            </CardContent>
-        </Card>
     </>);
 }
 
@@ -3473,85 +3859,114 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
 
     const watchedPhotos = form.watch("photos", []);
 
+    const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.7): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            
+            reader.onload = (event) => {
+                const dataUrl = event.target?.result as string;
+                if (!dataUrl) {
+                    reject(new Error('Erro ao ler arquivo'));
+                    return;
+                }
+                
+                // Se não for necessário redimensionar, retornar diretamente
+                if (file.size < 500000) { // Menos de 500KB
+                    resolve(dataUrl);
+                    return;
+                }
+                
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    if (!ctx) {
+                        reject(new Error('Canvas não suportado'));
+                        return;
+                    }
+                    
+                    const image = document.createElement('img');
+                    
+                    image.onload = () => {
+                        try {
+                            // Calcular dimensões mantendo proporção
+                            let { width, height } = image;
+                            
+                            if (width > height && width > maxWidth) {
+                                height = (height * maxWidth) / width;
+                                width = maxWidth;
+                            } else if (height > maxWidth) {
+                                width = (width * maxWidth) / height;
+                                height = maxWidth;
+                            }
+                            
+                            canvas.width = width;
+                            canvas.height = height;
+                            
+                            // Desenhar e comprimir
+                            ctx.drawImage(image, 0, 0, width, height);
+                            const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                            resolve(compressedDataUrl);
+                        } catch (error) {
+                            console.error('Erro ao comprimir imagem:', error);
+                            reject(error);
+                        }
+                    };
+                    
+                    image.onerror = () => {
+                        reject(new Error('Erro ao carregar imagem'));
+                    };
+                    
+                    image.src = dataUrl;
+                    
+                } catch (error) {
+                    console.error('Erro na compressão:', error);
+                    reject(error);
+                }
+            };
+            
+            reader.onerror = () => {
+                reject(new Error('Erro ao ler arquivo'));
+            };
+            
+            reader.readAsDataURL(file);
+        });
+    };
+
     const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files) return;
-        
+
         const currentPhotos = form.getValues("photos") || [];
-        
-        // Verificar limite de fotos (máximo 8 por relatório dimensional)
-        if (currentPhotos.length + files.length > 8) {
-            toast({
-                title: "Muitas fotos",
-                description: `Máximo de 8 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`,
-                variant: "destructive",
-            });
-            return;
-        }
-        
-        const validFiles = Array.from(files).filter(file => {
-            // Verificar tipo de arquivo
-            if (!file.type.startsWith('image/')) {
-                toast({
-                    title: "Tipo de arquivo inválido",
-                    description: `O arquivo ${file.name} não é uma imagem válida.`,
-                    variant: "destructive",
-                });
-                return false;
-            }
-            
-            // Verificar tamanho (máximo 20MB)
-            if (file.size > 20 * 1024 * 1024) {
-                toast({
-                    title: "Arquivo muito grande",
-                    description: `O arquivo ${file.name} é muito grande (máximo 20MB).`,
-                    variant: "destructive",
-                });
-                return false;
-            }
-            
-            return true;
-        });
-        
-        if (validFiles.length === 0) return;
-        
+
         try {
             const compressedPhotos = await Promise.all(
-                validFiles.map(async (file) => {
+                Array.from(files).map(async (file) => {
                     try {
-                        console.log(`Processando foto dimensional: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImageForFirestore(file);
+                        return await compressImage(file, 800, 0.6);
                     } catch (error) {
                         console.error(`Erro ao comprimir ${file.name}:`, error);
-                        // Em caso de erro, usar o arquivo original
-                        return new Promise<string>((resolve) => {
-                            const reader = new FileReader();
-                            reader.onload = (e) => resolve(e.target?.result as string);
-                            reader.readAsDataURL(file);
+                        toast({
+                            variant: "destructive",
+                            title: "Erro ao processar foto",
+                            description: `Não foi possível processar ${file.name}. Tente novamente.`,
                         });
+                        throw error;
                     }
                 })
             );
-            
+
             const updatedPhotos = [...currentPhotos, ...compressedPhotos];
             form.setValue("photos", updatedPhotos, { shouldValidate: true });
             
             toast({
                 title: "Fotos adicionadas",
-                description: `${validFiles.length} foto(s) processada(s) com sucesso.`,
+                description: `${files.length} foto(s) comprimida(s) e adicionada(s) ao relatório.`,
             });
-            
         } catch (error) {
-            console.error('Erro ao processar fotos:', error);
-            toast({
-                title: "Erro ao processar fotos",
-                description: "Tente novamente ou entre em contato com o suporte.",
-                variant: "destructive",
-            });
+            console.error('Erro no upload de fotos:', error);
+            // Toast de erro já foi mostrado na função de compressão individual
         }
-        
-        // Limpar o input para permitir selecionar os mesmos arquivos novamente
-        e.target.value = '';
     };
 
     const removePhoto = (index: number) => {
@@ -3563,7 +3978,9 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const handleAddMeasurement = () => {
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
-        
+        const tolMin = newMeasurement.toleranceMin !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMin)) : null;
+        const tolMax = newMeasurement.toleranceMax !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMax)) : null;
+    
         if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
             toast({
                 variant: "destructive",
@@ -3572,72 +3989,26 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             });
             return;
         }
-
-        // Nova lógica para tolerâncias com sinais
+    
         let result: "Conforme" | "Não Conforme" = "Conforme";
-        
-        // Verificar tolerâncias se foram preenchidas
-        if (newMeasurement.toleranceMin || newMeasurement.toleranceMax) {
-            let lowerBound = nominal;
-            let upperBound = nominal;
-            
-            // Processar tolerância 1
-            if (newMeasurement.toleranceMin) {
-                const tol1 = newMeasurement.toleranceMin.trim();
-                if (tol1.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol1.substring(1)));
-                } else if (tol1.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol1.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol1));
-                    lowerBound = nominal - tolValue;
-                    upperBound = nominal + tolValue;
-                }
-            }
-            
-            // Processar tolerância 2
-            if (newMeasurement.toleranceMax) {
-                const tol2 = newMeasurement.toleranceMax.trim();
-                if (tol2.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol2.substring(1)));
-                } else if (tol2.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol2.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol2));
-                    if (!newMeasurement.toleranceMin) {
-                        lowerBound = nominal - tolValue;
-                        upperBound = nominal + tolValue;
-                    }
-                }
-            }
-            
-            // Verificar se o valor medido está dentro da tolerância
-            if (measured < lowerBound || measured > upperBound) {
-                result = "Não Conforme";
-            }
+        const lowerBound = tolMin !== null ? nominal - tolMin : nominal;
+        const upperBound = tolMax !== null ? nominal + tolMax : nominal;
+
+        if (measured < lowerBound || measured > upperBound) {
+            result = "Não Conforme";
         }
         
         fieldArrayProps.append({
             id: Date.now().toString(),
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
-            toleranceMin: newMeasurement.toleranceMin || undefined,
-            toleranceMax: newMeasurement.toleranceMax || undefined,
+            toleranceMin: tolMin ?? undefined,
+            toleranceMax: tolMax ?? undefined,
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
             result: result,
         });
-        
-        setNewMeasurement({ 
-            dimensionName: '', 
-            nominalValue: '', 
-            toleranceMin: '', 
-            toleranceMax: '', 
-            measuredValue: '', 
-            instrumentUsed: '' 
-        });
+        setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
     };
     
     const handleEditMeasurement = (index: number) => {
@@ -3658,6 +4029,8 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
+        const tolMin = newMeasurement.toleranceMin !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMin)) : null;
+        const tolMax = newMeasurement.toleranceMax !== '' ? Math.abs(parseFloat(newMeasurement.toleranceMax)) : null;
 
         if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
             toast({
@@ -3668,58 +4041,20 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             return;
         }
 
-        // Nova lógica para tolerâncias com sinais
         let result: "Conforme" | "Não Conforme" = "Conforme";
+        const lowerBound = tolMin !== null ? nominal - tolMin : nominal;
+        const upperBound = tolMax !== null ? nominal + tolMax : nominal;
         
-        // Verificar tolerâncias se foram preenchidas
-        if (newMeasurement.toleranceMin || newMeasurement.toleranceMax) {
-            let lowerBound = nominal;
-            let upperBound = nominal;
-            
-            // Processar tolerância 1
-            if (newMeasurement.toleranceMin) {
-                const tol1 = newMeasurement.toleranceMin.trim();
-                if (tol1.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol1.substring(1)));
-                } else if (tol1.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol1.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol1));
-                    lowerBound = nominal - tolValue;
-                    upperBound = nominal + tolValue;
-                }
-            }
-            
-            // Processar tolerância 2
-            if (newMeasurement.toleranceMax) {
-                const tol2 = newMeasurement.toleranceMax.trim();
-                if (tol2.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol2.substring(1)));
-                } else if (tol2.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol2.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol2));
-                    if (!newMeasurement.toleranceMin) {
-                        lowerBound = nominal - tolValue;
-                        upperBound = nominal + tolValue;
-                    }
-                }
-            }
-            
-            // Verificar se o valor medido está dentro da tolerância
-            if (measured < lowerBound || measured > upperBound) {
-                result = "Não Conforme";
-            }
+        if (measured < lowerBound || measured > upperBound) {
+            result = "Não Conforme";
         }
         
         fieldArrayProps.update(editMeasurementIndex, {
             ...fieldArrayProps.fields[editMeasurementIndex],
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
-            toleranceMin: newMeasurement.toleranceMin || undefined,
-            toleranceMax: newMeasurement.toleranceMax || undefined,
+            toleranceMin: tolMin ?? undefined,
+            toleranceMax: tolMax ?? undefined,
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
             result: result,
@@ -3768,7 +4103,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
         <CardContent>
             {fieldArrayProps.fields.length > 0 && (
-            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tolerância 1</TableHead><TableHead>Tolerância 2</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tol. (-)</TableHead><TableHead>Tol. (+)</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
             <TableBody>
                 {fieldArrayProps.fields.map((field: any, index: number) => (
                 <TableRow key={field.id}>
@@ -3795,12 +4130,12 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                         <Input type="number" step="any" value={newMeasurement.nominalValue} onChange={(e) => setNewMeasurement({...newMeasurement, nominalValue: e.target.value})} placeholder="100.0"/>
                     </div>
                     <div>
-                        <Label>Tolerância 1</Label>
-                        <Input type="text" value={newMeasurement.toleranceMin} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMin: e.target.value})} placeholder="Ex: +0.1 ou -0.05"/>
+                        <Label>Tolerância Inferior (-)</Label>
+                        <Input type="number" step="any" value={newMeasurement.toleranceMin} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMin: e.target.value})} placeholder="Ex: 0.1"/>
                     </div>
                     <div>
-                        <Label>Tolerância 2</Label>
-                        <Input type="text" value={newMeasurement.toleranceMax} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMax: e.target.value})} placeholder="Ex: +0.2 ou -0.1"/>
+                        <Label>Tolerância Superior (+)</Label>
+                        <Input type="number" step="any" value={newMeasurement.toleranceMax} onChange={(e) => setNewMeasurement({...newMeasurement, toleranceMax: e.target.value})} placeholder="Ex: 0.2"/>
                     </div>
                     <div>
                         <Label>Valor Medido</Label>
@@ -3836,107 +4171,28 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             <FormField control={form.control} name="customerInspector" render={({ field }) => ( <FormItem><FormLabel>Inspetor do Cliente (Nome)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
         </div>
         
-        <Card>
-            <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                    📷 Registro Fotográfico
-                    <Badge variant="secondary">{watchedPhotos?.length || 0}/10</Badge>
-                </CardTitle>
-                <CardDescription>
-                    Anexe fotos da inspeção dimensional para documentar o processo e resultados.
-                </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                <FormItem>
-                    <FormLabel>Selecionar Fotos</FormLabel>
-                    <FormControl>
-                        <div className="flex items-center justify-center w-full">
-                            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
-                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                    <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
-                                        <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
-                                    </svg>
-                                    <p className="mb-2 text-sm text-gray-500">
-                                        <span className="font-semibold">Clique para selecionar</span> ou arraste as imagens
-                                    </p>
-                                    <p className="text-xs text-gray-500">PNG, JPG, JPEG, WebP (máx. 5MB cada)</p>
-                                </div>
-                                <Input 
-                                    type="file" 
-                                    multiple 
-                                    accept="image/jpeg,image/jpg,image/png,image/webp" 
-                                    onChange={handlePhotoUpload} 
-                                    className="hidden"
-                                />
-                            </label>
-                        </div>
-                    </FormControl>
-                    <FormDescription className="text-xs">
-                        • Máximo 10 fotos por relatório<br/>
-                        • Tamanho máximo: 5MB por imagem<br/>
-                        • Formatos aceitos: JPEG, PNG, WebP<br/>
-                        • Dica: Fotos menores carregam mais rápido
-                    </FormDescription>
-                </FormItem>
-
-                {watchedPhotos && watchedPhotos.length > 0 && (
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <h4 className="font-medium text-sm">Fotos Anexadas</h4>
-                            <Button 
-                                type="button" 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => form.setValue("photos", [], { shouldValidate: true })}
-                            >
-                                Remover Todas
+        <FormItem>
+            <FormLabel>Fotos da Inspeção</FormLabel>
+            <FormControl>
+                <Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} />
+            </FormControl>
+            <FormDescription>Selecione imagens (serão comprimidas automaticamente para otimizar o tamanho).</FormDescription>
+            {watchedPhotos && watchedPhotos.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                    {watchedPhotos.map((photo, index) => (
+                        <div key={index} className="relative">
+                            <Image src={photo} alt={`Preview ${index + 1}`} width={150} height={150} className="rounded-md object-cover w-full aspect-square" />
+                            <Button type="button" size="icon" variant="destructive" className="absolute top-1 right-1 h-6 w-6 z-10" onClick={() => removePhoto(index)}>
+                                <Trash2 className="h-3 w-3" />
                             </Button>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                            {watchedPhotos.map((photo, index) => (
-                                <div key={index} className="relative group">
-                                    <div className="relative overflow-hidden rounded-lg border">
-                                        <Image 
-                                            src={photo} 
-                                            alt={`Inspeção ${index + 1}`} 
-                                            width={200} 
-                                            height={200} 
-                                            className="object-cover w-full aspect-square transition-transform group-hover:scale-105" 
-                                        />
-                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
-                                        <Button 
-                                            type="button" 
-                                            size="icon" 
-                                            variant="destructive" 
-                                            className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => removePhoto(index)}
-                                        >
-                                            <Trash2 className="h-3 w-3" />
-                                        </Button>
-                                    </div>
-                                    <p className="text-xs text-center mt-1 text-muted-foreground">
-                                        Foto {index + 1}
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-                <FormMessage />
-            </CardContent>
-        </Card>
+                    ))}
+                </div>
+            )}
+            <FormMessage />
+        </FormItem>
 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
-        
-        {/* Indicador de tamanho do relatório */}
-        <Card>
-            <CardHeader>
-                <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <DataSizeIndicator data={form.getValues()} />
-            </CardContent>
-        </Card>
     </>);
 }
 
@@ -3948,61 +4204,20 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
 
     const watchedPhotos = form.watch("photos", []);
 
-    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files) return;
         
-        const currentPhotos = form.getValues("photos") || [];
-        
-        // Verificar limite de fotos (máximo 6 por inspeção de solda)
-        if (currentPhotos.length + files.length > 6) {
-            alert(`Máximo de 6 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`);
-            return;
-        }
-        
-        const validFiles = Array.from(files).filter(file => {
-            // Verificar tipo de arquivo
-            if (!file.type.startsWith('image/')) {
-                alert(`O arquivo ${file.name} não é uma imagem válida.`);
-                return false;
-            }
-            
-            // Verificar tamanho (máximo 20MB)
-            if (file.size > 20 * 1024 * 1024) {
-                alert(`O arquivo ${file.name} é muito grande (máximo 20MB).`);
-                return false;
-            }
-            
-            return true;
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                }
+            };
+            reader.readAsDataURL(file);
         });
-        
-        if (validFiles.length === 0) return;
-        
-        try {
-            const compressedPhotos = await Promise.all(
-                validFiles.map(async (file) => {
-                    try {
-                        console.log(`Processando foto de solda: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImageForFirestore(file);
-                    } catch (error) {
-                        console.error(`Erro ao comprimir ${file.name}:`, error);
-                        // Em caso de erro, usar o arquivo original
-                        return new Promise<string>((resolve) => {
-                            const reader = new FileReader();
-                            reader.onload = (e) => resolve(e.target?.result as string);
-                            reader.readAsDataURL(file);
-                        });
-                    }
-                })
-            );
-            
-            const updatedPhotos = [...currentPhotos, ...compressedPhotos];
-            form.setValue("photos", updatedPhotos, { shouldValidate: true });
-            
-        } catch (error) {
-            console.error('Erro ao processar fotos:', error);
-            alert("Erro ao processar fotos. Tente novamente.");
-        }
     };
 
     const removePhoto = (index: number) => {
@@ -4116,16 +4331,6 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
             <FormField control={form.control} name="releaseResponsible" render={({ field }) => ( <FormItem><FormLabel>Responsável Liberação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
         </CardContent>
       </Card>
-      
-      {/* Indicador de tamanho do relatório */}
-      <Card>
-          <CardHeader>
-              <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
-          </CardHeader>
-          <CardContent>
-              <DataSizeIndicator data={form.getValues()} />
-          </CardContent>
-      </Card>
     </div>);
 }
 
@@ -4143,61 +4348,19 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
   useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
   const watchedPhotos = form.watch("photos", []);
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files) return;
-      
-      const currentPhotos = form.getValues("photos") || [];
-      
-      // Verificar limite de fotos (máximo 6 por relatório LP)
-      if (currentPhotos.length + files.length > 6) {
-          alert(`Máximo de 6 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`);
-          return;
-      }
-      
-      const validFiles = Array.from(files).filter(file => {
-          // Verificar tipo de arquivo
-          if (!file.type.startsWith('image/')) {
-              alert(`O arquivo ${file.name} não é uma imagem válida.`);
-              return false;
-          }
-          
-          // Verificar tamanho (máximo 20MB)
-          if (file.size > 20 * 1024 * 1024) {
-              alert(`O arquivo ${file.name} é muito grande (máximo 20MB).`);
-              return false;
-          }
-          
-          return true;
+      Array.from(files).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+              if (event.target?.result) {
+                  const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                  form.setValue("photos", updatedPhotos, { shouldValidate: true });
+              }
+          };
+          reader.readAsDataURL(file);
       });
-      
-      if (validFiles.length === 0) return;
-      
-      try {
-          const compressedPhotos = await Promise.all(
-              validFiles.map(async (file) => {
-                  try {
-                      console.log(`Processando foto LP: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                      return await compressImageForFirestore(file);
-                  } catch (error) {
-                      console.error(`Erro ao comprimir ${file.name}:`, error);
-                      // Em caso de erro, usar o arquivo original
-                      return new Promise<string>((resolve) => {
-                          const reader = new FileReader();
-                          reader.onload = (e) => resolve(e.target?.result as string);
-                          reader.readAsDataURL(file);
-                      });
-                  }
-              })
-          );
-          
-          const updatedPhotos = [...currentPhotos, ...compressedPhotos];
-          form.setValue("photos", updatedPhotos, { shouldValidate: true });
-          
-      } catch (error) {
-          console.error('Erro ao processar fotos:', error);
-          alert("Erro ao processar fotos. Tente novamente.");
-      }
   };
 
   const removePhoto = (index: number) => {
@@ -4313,16 +4476,6 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
           </FormItem>
       </CardContent>
     </Card>
-    
-    {/* Indicador de tamanho do relatório */}
-    <Card>
-        <CardHeader>
-            <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
-        </CardHeader>
-        <CardContent>
-            <DataSizeIndicator data={form.getValues()} />
-        </CardContent>
-    </Card>
     </div>);
 }
 
@@ -4365,82 +4518,19 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
 
     const watchedPhotos = form.watch("photos", []);
 
-    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files) return;
-        
-        const currentPhotos = form.getValues("photos") || [];
-        
-        // Verificar limite de fotos (máximo 6 por relatório de ultrassom)
-        if (currentPhotos.length + files.length > 6) {
-            toast({
-                title: "Muitas fotos",
-                description: `Máximo de 6 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`,
-                variant: "destructive",
-            });
-            return;
-        }
-        
-        const validFiles = Array.from(files).filter(file => {
-            // Verificar tipo de arquivo
-            if (!file.type.startsWith('image/')) {
-                toast({
-                    title: "Tipo de arquivo inválido",
-                    description: `O arquivo ${file.name} não é uma imagem válida.`,
-                    variant: "destructive",
-                });
-                return false;
-            }
-            
-            // Verificar tamanho (máximo 20MB)
-            if (file.size > 20 * 1024 * 1024) {
-                toast({
-                    title: "Arquivo muito grande",
-                    description: `O arquivo ${file.name} é muito grande (máximo 20MB).`,
-                    variant: "destructive",
-                });
-                return false;
-            }
-            
-            return true;
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    const updatedPhotos = [...form.getValues("photos") || [], event.target.result as string];
+                    form.setValue("photos", updatedPhotos, { shouldValidate: true });
+                }
+            };
+            reader.readAsDataURL(file);
         });
-        
-        if (validFiles.length === 0) return;
-        
-        try {
-            const compressedPhotos = await Promise.all(
-                validFiles.map(async (file) => {
-                    try {
-                        console.log(`Processando foto de ultrassom: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImageForFirestore(file);
-                    } catch (error) {
-                        console.error(`Erro ao comprimir ${file.name}:`, error);
-                        // Em caso de erro, usar o arquivo original
-                        return new Promise<string>((resolve) => {
-                            const reader = new FileReader();
-                            reader.onload = (e) => resolve(e.target?.result as string);
-                            reader.readAsDataURL(file);
-                        });
-                    }
-                })
-            );
-            
-            const updatedPhotos = [...currentPhotos, ...compressedPhotos];
-            form.setValue("photos", updatedPhotos, { shouldValidate: true });
-            
-            toast({
-                title: "Fotos adicionadas",
-                description: `${validFiles.length} foto(s) processada(s) com sucesso.`,
-            });
-            
-        } catch (error) {
-            console.error('Erro ao processar fotos:', error);
-            toast({
-                title: "Erro ao processar fotos",
-                description: "Tente novamente ou entre em contato com o suporte.",
-                variant: "destructive",
-            });
-        }
     };
 
     const removePhoto = (index: number) => {
@@ -4576,16 +4666,6 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                         )}
                         <FormMessage />
                     </FormItem>
-                </CardContent>
-            </Card>
-            
-            {/* Indicador de tamanho do relatório */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <DataSizeIndicator data={form.getValues()} />
                 </CardContent>
             </Card>
         </div>
@@ -4741,4 +4821,3 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
 }
 
 
-    
