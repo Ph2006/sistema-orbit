@@ -180,7 +180,7 @@ export default function MaterialsPage() {
     const { toast } = useToast();
 
     // State for the temporary item form
-    const emptyRequisitionItem: RequisitionItem = { id: Date.now().toString(), description: "", quantityRequested: 1, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null, inspectionStatus: "Pendente" };
+    const emptyRequisitionItem: RequisitionItem = { id: Date.now().toString(), description: "", quantityRequested: 1, quantityFulfilled: 0, unit: "", material: "", dimensao: "", pesoUnitario: 0, status: "Pendente", code: '', notes: '', deliveryDate: null, inspectionStatus: "Pendente" };
     const [currentItem, setCurrentItem] = useState<RequisitionItem>(emptyRequisitionItem);
     const [editItemIndex, setEditItemIndex] = useState<number | null>(null);
 
@@ -231,8 +231,14 @@ export default function MaterialsPage() {
                             deliveryDate = new Date(data.deliveryDate);
                         }
                     }
-                  return { id: doc.id, internalOS: data.internalOS.toString(), customerName: data.customer?.name || data.customerName || 'N/A', customerId: data.customer?.id || data.customerId || '', deliveryDate: deliveryDate };
-              }).filter((order): order is OrderInfo => order !== null);
+                  return { 
+                    id: doc.id, 
+                    internalOS: data.internalOS.toString(), 
+                    customerName: data.customer?.name || data.customerName || 'N/A', 
+                    customerId: data.customer?.id || data.customerId || '', 
+                    deliveryDate: deliveryDate 
+                  };
+              }).filter(order => order !== null) as OrderInfo[];
             setOrders(ordersDataList);
 
             if (teamSnapshot.exists()) {
@@ -345,21 +351,44 @@ export default function MaterialsPage() {
     
     const onRequisitionSubmit = async (data: Requisition) => {
         try {
-            const newHistoryEntry = { timestamp: new Date(), user: user?.email || "Sistema", action: selectedRequisition ? "Edição" : "Criação", details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` };
-            const finalHistory = [...(data.history || []), newHistoryEntry];
+            // Remover campos undefined para evitar erros do Firestore
+            const cleanData = { ...data };
             
-            const dataToSave: any = { ...data, history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), date: Timestamp.fromDate(data.date), 
-                items: data.items.map(item => ({ 
+            // Tratar campo customer - remover se undefined ou vazio
+            if (!cleanData.customer || (!cleanData.customer.id && !cleanData.customer.name)) {
+                delete cleanData.customer;
+            }
+            
+            // Tratar outros campos opcionais
+            if (!cleanData.department) delete cleanData.department;
+            if (!cleanData.orderId) delete cleanData.orderId;
+            if (!cleanData.generalNotes) delete cleanData.generalNotes;
+            
+            const newHistoryEntry = { timestamp: new Date(), user: user?.email || "Sistema", action: selectedRequisition ? "Edição" : "Criação", details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` };
+            const finalHistory = [...(cleanData.history || []), newHistoryEntry];
+            
+            const dataToSave: any = { 
+                ...cleanData, 
+                history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), 
+                date: Timestamp.fromDate(cleanData.date), 
+                items: cleanData.items.map(item => ({ 
                     ...item, 
                     deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, 
                     deliveryReceiptDate: item.deliveryReceiptDate ? Timestamp.fromDate(new Date(item.deliveryReceiptDate)) : null
                 })) 
             };
             
-            if (data.approval) { dataToSave.approval = { ...data.approval, approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null } } 
-            else { dataToSave.approval = null; }
+            // Tratar approval corretamente
+            if (cleanData.approval && (cleanData.approval.approvedBy || cleanData.approval.justification || cleanData.approval.approvalDate)) { 
+                dataToSave.approval = { 
+                    ...cleanData.approval, 
+                    approvalDate: cleanData.approval.approvalDate ? Timestamp.fromDate(new Date(cleanData.approval.approvalDate)) : null 
+                }; 
+            } else { 
+                delete dataToSave.approval;
+            }
 
-            if (selectedRequisition) {
+            if (selectedRequisition?.id) {
                 await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave);
             } else {
                 const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
@@ -379,7 +408,7 @@ export default function MaterialsPage() {
     const onCuttingPlanSubmit = async (data: CuttingPlan) => {
         try {
             const dataToSave: any = { ...data, createdAt: Timestamp.fromDate(data.createdAt), deliveryDate: data.deliveryDate ? Timestamp.fromDate(new Date(data.deliveryDate)) : null };
-            if (selectedCuttingPlan) {
+            if (selectedCuttingPlan?.id) {
                 await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), dataToSave);
             } else {
                 const planNumbers = cuttingPlansList.map(p => parseInt(p.planNumber || "0", 10)).filter(n => !isNaN(n));
