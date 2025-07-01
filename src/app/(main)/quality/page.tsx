@@ -368,6 +368,17 @@ const paintingReportSchema = z.object({
     photos: z.array(z.string()).optional(),
 });
 
+const engineeringTicketSchema = z.object({
+  id: z.string().optional(),
+  createdAt: z.date({ required_error: "A data é obrigatória." }),
+  requester: z.string({ required_error: "Solicitante obrigatório." }),
+  orderId: z.string().optional(),
+  description: z.string({ required_error: "Descrição obrigatória." }).min(5),
+  status: z.enum(["Aberto", "Em andamento", "Fechado"]).default("Aberto"),
+  responsible: z.string().optional(),
+  notes: z.string().optional(),
+});
+
 
 
 const liquidPenetrantSchema = z.object({
@@ -3109,11 +3120,45 @@ export default function QualityPage() {
                         </div>
                     </AccordionTrigger>
                     <AccordionContent className="pt-2">
-                        <PlaceholderCard 
-                            title="Chamados de Engenharia"
-                            description="Sistema para abertura e acompanhamento de chamados para a engenharia estará disponível em breve."
-                            icon={Phone} 
-                        />
+                        <Card>
+                            <CardHeader className="flex-row justify-between items-center">
+                                <CardTitle className="text-base">Chamados Abertos</CardTitle>
+                                <Button size="sm" onClick={handleAddEngineeringClick}>
+                                    <PlusCircle className="mr-2 h-4 w-4" />Novo Chamado
+                                </Button>
+                            </CardHeader>
+                            <CardContent>
+                                {isEngineeringLoading ? <Skeleton className="h-40 w-full" /> :
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Nº</TableHead>
+                                                <TableHead>Data</TableHead>
+                                                <TableHead>Solicitante</TableHead>
+                                                <TableHead>Descrição</TableHead>
+                                                <TableHead>Status</TableHead>
+                                                <TableHead className="text-right">Ações</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {engineeringTickets.length > 0 ? engineeringTickets.filter(t => t.status !== "Fechado").map(ticket => (
+                                                <TableRow key={ticket.id}>
+                                                    <TableCell className="font-mono">{ticket.id.slice(-5).toUpperCase()}</TableCell>
+                                                    <TableCell>{ticket.createdAt && (ticket.createdAt.toDate ? format(ticket.createdAt.toDate(), 'dd/MM/yy') : format(new Date(ticket.createdAt), 'dd/MM/yy'))}</TableCell>
+                                                    <TableCell>{ticket.requester}</TableCell>
+                                                    <TableCell className="max-w-[200px] truncate">{ticket.description}</TableCell>
+                                                    <TableCell><Badge variant={getStatusVariant(ticket.status)}>{ticket.status}</Badge></TableCell>
+                                                    <TableCell className="text-right">
+                                                        <Button variant="ghost" size="icon" onClick={() => handleEditEngineeringClick(ticket)}><Pencil className="h-4 w-4" /></Button>
+                                                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteEngineeringClick(ticket)}><Trash2 className="h-4 w-4" /></Button>
+                                                    </TableCell>
+                                                </TableRow>
+                                            )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum chamado aberto.</TableCell></TableRow>}
+                                        </TableBody>
+                                    </Table>
+                                }
+                            </CardContent>
+                        </Card>
                     </AccordionContent>
                 </AccordionItem>
             </Accordion>
@@ -3174,6 +3219,61 @@ export default function QualityPage() {
         )}
         </DialogContent>
       </Dialog>
+
+      {/* Dialog para formulário de chamado de engenharia */}
+      <Dialog open={isEngineeringFormOpen} onOpenChange={setIsEngineeringFormOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{selectedEngineeringTicket ? "Editar Chamado de Engenharia" : "Novo Chamado de Engenharia"}</DialogTitle>
+            <DialogDescription>Preencha os campos para registrar o chamado.</DialogDescription>
+          </DialogHeader>
+          <Form {...engineeringForm}>
+            <form onSubmit={engineeringForm.handleSubmit(onEngineeringSubmit)} className="space-y-4">
+              <FormField control={engineeringForm.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Descrição</FormLabel>
+                  <FormControl><Textarea {...field} placeholder="Descreva o problema ou solicitação" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={engineeringForm.control} name="orderId" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Pedido Relacionado</FormLabel>
+                  <FormControl>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <SelectTrigger><SelectValue placeholder="Selecione um pedido (opcional)" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Nenhum</SelectItem>
+                        {orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={engineeringForm.control} name="responsible" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Responsável</FormLabel>
+                  <FormControl><Input {...field} placeholder="Nome do responsável (opcional)" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={engineeringForm.control} name="notes" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Observações</FormLabel>
+                  <FormControl><Textarea {...field} placeholder="Observações adicionais (opcional)" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsEngineeringFormOpen(false)}>Cancelar</Button>
+                <Button type="submit">Salvar</Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={isDeleteInspectionAlertOpen} onOpenChange={setIsDeleteInspectionAlertOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita e excluirá permanentemente o relatório de inspeção.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmDeleteInspection} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </>
   );
