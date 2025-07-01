@@ -184,39 +184,8 @@ const validateDataSizeBeforeSave = (data: any): boolean => {
     return true;
 };
 
-// === TIPOS E INTERFACES PARA CHAMADOS DE ENGENHARIA ===
-interface EngineeringTicket {
-  id: string;
-  ticketNumber?: string;
-  orderId: string;
-  itemId: string;
-  category: string;
-  description: string;
-  priority: 'Baixa' | 'Média' | 'Alta' | 'Crítica';
-  status: 'Aberto' | 'Em análise' | 'Resolvido';
-  openedAt: Date;
-  resolvedAt?: Date;
-  estimatedResolutionTime?: number; // em horas
-  actualResolutionTime?: number; // em horas
-  assignedTo?: string;
-  openedBy: string;
-  orderNumber: string;
-  itemName: string;
-  customerName: string;
-  pausedDays: number;
-  comments: Array<{
-    id: string;
-    author: string;
-    content: string;
-    timestamp: Date;
-    type: 'comment' | 'status_change' | 'assignment';
-  }>;
-  attachments?: string[];
-  tags?: string[];
-  rootCause?: string;
-  solution?: string;
-  preventiveActions?: string;
-}
+
+
 
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -537,57 +506,7 @@ const lessonsLearnedSchema = z.object({
   closeDate: z.date().optional().nullable(),
 });
 
-const engineeringTicketCommentSchema = z.object({
-  id: z.string().optional(),
-  author: z.string().min(1, "Autor é obrigatório"),
-  comment: z.string().min(1, "Comentário é obrigatório"),
-  timestamp: z.date(),
-  type: z.enum(["comment", "internal_note", "status_change"]).default("comment"),
-});
 
-const engineeringTicketSchema = z.object({
-  id: z.string().optional(),
-  ticketNumber: z.string().min(1, "Número do chamado é obrigatório"),
-  orderId: z.string().min(1, "ID do pedido é obrigatório"),
-  itemId: z.string().min(1, "ID do item é obrigatório"),
-  requestingDepartment: z.string().min(1, "Departamento solicitante é obrigatório"),
-  openedBy: z.string().min(1, "Aberto por é obrigatório"),
-  description: z.string().min(1, "Descrição é obrigatória"),
-  category: z.enum([
-    "Alteração de projeto",
-    "Dúvida técnica",
-    "Problema de qualidade",
-    "Melhoria de processo",
-    "Solicitação de análise",
-    "Outro"
-  ]),
-  priority: z.enum(["Baixa", "Média", "Alta", "Crítica"]),
-  status: z.enum([
-    "Aberto",
-    "Em análise",
-    "Aguardando informações",
-    "Em desenvolvimento",
-    "Pausado",
-    "Resolvido",
-    "Fechado",
-    "Cancelado"
-  ]),
-  assignedTo: z.string().optional(),
-  openedAt: z.date(),
-  resolvedAt: z.date().optional().nullable(),
-  attachments: z.array(z.string()).optional(),
-  comments: z.array(engineeringTicketCommentSchema).optional(),
-  pauseSchedule: z.object({
-    isPaused: z.boolean().default(false),
-    pausedAt: z.date().optional().nullable(),
-    pausedBy: z.string().optional(),
-    pauseReason: z.string().optional(),
-    resumedAt: z.date().optional().nullable(),
-    resumedBy: z.string().optional(),
-  }).optional(),
-  estimatedResolutionTime: z.number().optional(),
-  actualResolutionTime: z.number().optional(),
-});
 
 
 
@@ -609,16 +528,7 @@ type CompanyData = {
     logo?: { preview?: string };
 };
 
-type EngineeringTicket = z.infer<typeof engineeringTicketSchema> & { 
-  id: string, 
-  orderNumber?: string, 
-  itemName?: string, 
-  customerName?: string, 
-  pausedDays?: number 
-};
-type EngineeringTicketComment = z.infer<typeof engineeringTicketCommentSchema> & { 
-  id: string 
-};
+
 
 // --- HELPER FUNCTIONS ---
 
@@ -696,16 +606,8 @@ export default function QualityPage() {
   const [ultrasoundReports, setUltrasoundReports] = useState<UltrasoundReport[]>([]);
   const [lessonsLearnedReports, setLessonsLearnedReports] = useState<LessonsLearnedReport[]>([]);
 
-  // Estados para chamados de engenharia
-  const [engineeringTickets, setEngineeringTickets] = useState<EngineeringTicket[]>([]);
-  const [engineeringTicketSearchQuery, setEngineeringTicketSearchQuery] = useState("");
-  const [isEngineeringTicketFormOpen, setIsEngineeringTicketFormOpen] = useState(false);
-  const [selectedEngineeringTicket, setSelectedEngineeringTicket] = useState<EngineeringTicket | null>(null);
-  const [engineeringTicketToDelete, setEngineeringTicketToDelete] = useState<EngineeringTicket | null>(null);
-  const [isDeleteEngineeringTicketAlertOpen, setIsDeleteEngineeringTicketAlertOpen] = useState(false);
-
   const [isInspectionFormOpen, setIsInspectionFormOpen] = useState(false);
-  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | 'lessonsLearned' | 'engineeringTicket' | null>(null);
+  const [dialogType, setDialogType] = useState<'material' | 'dimensional' | 'welding' | 'painting' | 'liquidPenetrant' | 'ultrasound' | 'lessonsLearned' | null>(null);
   const [selectedInspection, setSelectedInspection] = useState<any | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<any | null>(null);
   const [isDeleteInspectionAlertOpen, setIsDeleteInspectionAlertOpen] = useState(false);
@@ -723,26 +625,7 @@ export default function QualityPage() {
     defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } },
   });
 
-  const engineeringTicketForm = useForm<z.infer<typeof engineeringTicketSchema>>({
-      resolver: zodResolver(engineeringTicketSchema),
-      defaultValues: {
-        ticketNumber: '',
-        orderId: '',
-        itemId: '',
-        requestingDepartment: '',
-        openedBy: '',
-        description: '',
-        category: 'Dúvida técnica',
-        priority: 'Média',
-        status: 'Aberto',
-        openedAt: new Date(),
-        comments: [],
-        attachments: [],
-        pauseSchedule: {
-          isPaused: false,
-        },
-      },
-  });
+
 
   const calibrationForm = useForm<z.infer<typeof calibrationSchema>>({
     resolver: zodResolver(calibrationSchema),
@@ -937,7 +820,7 @@ export default function QualityPage() {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
         materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
-        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot, engineeringTicketsSnapshot
+        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -950,7 +833,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
         getDocs(collection(db, "companies", "mecald", "ultrasoundReports")),
         getDocs(collection(db, "companies", "mecald", "lessonsLearned")),
-        getDocs(collection(db, "companies", "mecald", "engineeringTickets")), // VERIFICAR SE ESTÁ SENDO BUSCADO
+
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -1085,79 +968,6 @@ export default function QualityPage() {
           } as LessonsLearnedReport;
       });
       setLessonsLearnedReports(lessonsList.sort((a,b) => (b.reportNumber || '').localeCompare(a.reportNumber || '')));
-
-      // PROCESSAMENTO DOS CHAMADOS DE ENGENHARIA - VERSÃO CORRIGIDA
-      console.log("=== PROCESSANDO CHAMADOS DE ENGENHARIA ===");
-      console.log("Documentos encontrados:", engineeringTicketsSnapshot.docs.length);
-      
-      const ticketsList = engineeringTicketsSnapshot.docs.map(doc => {
-        const data = doc.data();
-        console.log(`Processando chamado ${doc.id}:`, data);
-        
-        try {
-          const order = ordersList.find(o => o.id === data.orderId);
-          const item = order?.items.find(i => i.id === data.itemId);
-          
-          // Calcular dias pausados de forma segura
-          let pausedDays = 0;
-          if (data.openedAt) {
-            const openedDate = data.openedAt.toDate ? data.openedAt.toDate() : new Date(data.openedAt);
-            const endDate = data.status === 'Resolvido' && data.resolvedAt 
-                ? (data.resolvedAt.toDate ? data.resolvedAt.toDate() : new Date(data.resolvedAt))
-                : new Date();
-            pausedDays = differenceInDays(endDate, openedDate);
-          }
-          
-          // Processar comentários de forma segura
-          const processedComments = (data.comments || []).map((c: any) => {
-            try {
-              return {
-                ...c,
-                timestamp: c.timestamp?.toDate ? c.timestamp.toDate() : new Date(c.timestamp || Date.now()),
-              };
-            } catch (error) {
-              console.warn("Erro ao processar comentário:", error);
-              return {
-                ...c,
-                timestamp: new Date(),
-              };
-            }
-          });
-          
-          const ticketData = {
-            id: doc.id,
-            ...data,
-            openedAt: data.openedAt?.toDate ? data.openedAt.toDate() : new Date(data.openedAt || Date.now()),
-            resolvedAt: data.resolvedAt ? (data.resolvedAt.toDate ? data.resolvedAt.toDate() : new Date(data.resolvedAt)) : null,
-            orderNumber: order?.number || 'N/A',
-            itemName: item?.description || 'Item não encontrado',
-            customerName: order?.customerName || 'N/A',
-            pausedDays,
-            comments: processedComments,
-          } as EngineeringTicket;
-          
-          console.log(`✓ Chamado processado:`, ticketData.ticketNumber);
-          return ticketData;
-          
-        } catch (error) {
-          console.error(`Erro ao processar chamado ${doc.id}:`, error);
-          // Retornar dados básicos em caso de erro
-          return {
-            id: doc.id,
-            ...data,
-            openedAt: new Date(),
-            resolvedAt: null,
-            orderNumber: 'N/A',
-            itemName: 'Erro no processamento',
-            customerName: 'N/A',
-            pausedDays: 0,
-            comments: [],
-          } as EngineeringTicket;
-        }
-      });
-      
-      console.log(`✓ Total de chamados processados: ${ticketsList.length}`);
-      setEngineeringTickets(ticketsList.sort((a,b) => b.openedAt.getTime() - a.openedAt.getTime()));
 
     } catch (error) {
       console.error("Error fetching quality data:", error);
@@ -1799,45 +1609,7 @@ export default function QualityPage() {
     }
   };
 
-  const onEngineeringTicketSubmit = async (values: z.infer<typeof engineeringTicketSchema>) => {
-    try {
-        const dataToSave: any = {
-            ...values,
-            openedAt: Timestamp.fromDate(values.openedAt),
-            resolvedAt: values.resolvedAt ? Timestamp.fromDate(values.resolvedAt) : null,
-            comments: values.comments?.map(comment => ({
-                ...comment,
-                timestamp: Timestamp.fromDate(comment.timestamp)
-            })) || [],
-        };
 
-        if (selectedEngineeringTicket) {
-            await setDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedEngineeringTicket.id), dataToSave, { merge: true });
-            toast({ title: "Chamado de Engenharia atualizado!" });
-        } else {
-            const ticketsSnapshot = await getDocs(collection(db, "companies", "mecald", "engineeringTickets"));
-            const currentYear = new Date().getFullYear();
-            const yearTickets = ticketsSnapshot.docs
-                .map(d => d.data().ticketNumber)
-                .filter(num => num && num.startsWith(`ENG-${currentYear}`));
-            const highestNumber = yearTickets.reduce((max, num) => {
-                const seq = parseInt(num.split('-')[2], 10);
-                return seq > max ? seq : max;
-            }, 0);
-            dataToSave.ticketNumber = `ENG-${currentYear}-${(highestNumber + 1).toString().padStart(3, '0')}`;
-            
-            await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), dataToSave);
-            toast({ title: "Chamado de Engenharia criado!" });
-        }
-        setIsInspectionFormOpen(false);
-        setSelectedEngineeringTicket(null);
-        engineeringTicketForm.reset();
-        await fetchAllData();
-    } catch (error) {
-        console.error("Error saving engineering ticket:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar chamado de engenharia" });
-    }
-  };
 
   // --- END SUBMIT FUNCTIONS ---
 
@@ -2099,19 +1871,7 @@ export default function QualityPage() {
     } catch (error) { toast({ variant: "destructive", title: "Erro ao excluir relatório" }); }
   };
 
-  const handleConfirmDeleteEngineeringTicket = async () => {
-    if (!engineeringTicketToDelete) return;
-    try {
-        await deleteDoc(doc(db, "companies", "mecald", "engineeringTickets", engineeringTicketToDelete.id));
-        toast({ title: "Chamado de engenharia excluído!" });
-        setIsDeleteEngineeringTicketAlertOpen(false);
-        setEngineeringTicketToDelete(null);
-        await fetchAllData();
-    } catch (error) {
-        console.error("Error deleting engineering ticket:", error);
-        toast({ variant: "destructive", title: "Erro ao excluir chamado de engenharia" });
-    }
-  };
+
   
   const handleInspectionFormSubmit = (data: any) => {
     switch(dialogType) {
@@ -2122,7 +1882,6 @@ export default function QualityPage() {
         case 'liquidPenetrant': liquidPenetrantForm.handleSubmit(onLiquidPenetrantSubmit)(data); break;
         case 'ultrasound': ultrasoundReportForm.handleSubmit(onUltrasoundReportSubmit)(data); break;
         case 'lessonsLearned': lessonsLearnedForm.handleSubmit(onLessonsLearnedSubmit)(data); break;
-        case 'engineeringTicket': engineeringTicketForm.handleSubmit(onEngineeringTicketSubmit)(data); break;
     }
   };
 
@@ -2970,10 +2729,9 @@ export default function QualityPage() {
         case 'liquidPenetrant': return liquidPenetrantForm;
         case 'ultrasound': return ultrasoundReportForm;
         case 'lessonsLearned': return lessonsLearnedForm;
-        case 'engineeringTicket': return engineeringTicketForm;
         default: return null;
     }
-  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm, ultrasoundReportForm, lessonsLearnedForm, engineeringTicketForm]);
+  }, [dialogType, materialInspectionForm, dimensionalReportForm, weldingInspectionForm, paintingReportForm, liquidPenetrantForm, ultrasoundReportForm, lessonsLearnedForm]);
   
 
   return (
@@ -3371,7 +3129,6 @@ export default function QualityPage() {
                 {dialogType === 'liquidPenetrant' && (selectedInspection ? 'Editar Relatório de LP' : 'Novo Relatório de LP')}
                 {dialogType === 'ultrasound' && (selectedInspection ? 'Editar Relatório de UT' : 'Novo Relatório de UT')}
                 {dialogType === 'lessonsLearned' && (selectedInspection ? 'Editar Lição Aprendida' : 'Registrar Nova Lição Aprendida')}
-                {dialogType === 'engineeringTicket' && (selectedEngineeringTicket ? 'Editar Chamado de Engenharia' : 'Novo Chamado de Engenharia')}
             </DialogTitle>
             <DialogDescription>Preencha os campos para registrar a inspeção.</DialogDescription>
         </DialogHeader>
@@ -3400,9 +3157,6 @@ export default function QualityPage() {
                             )}
                              {dialogType === 'lessonsLearned' && (
                                 <LessonsLearnedForm form={lessonsLearnedForm} orders={orders} teamMembers={teamMembers} />
-                            )}
-                             {dialogType === 'engineeringTicket' && (
-                                <EngineeringTicketForm form={engineeringTicketForm} orders={orders} teamMembers={teamMembers} />
                             )}
                         </div>
                     </ScrollArea>
