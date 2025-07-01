@@ -3862,88 +3862,75 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
 
     const compressImage = (file: File, maxWidth: number = 800, quality: number = 0.7): Promise<string> => {
         return new Promise((resolve, reject) => {
-            try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                if (!ctx) {
-                    reject(new Error('Canvas context not available'));
+            const reader = new FileReader();
+            
+            reader.onload = (event) => {
+                const dataUrl = event.target?.result as string;
+                if (!dataUrl) {
+                    reject(new Error('Erro ao ler arquivo'));
                     return;
                 }
                 
-                const img = new Image();
+                // Se não for necessário redimensionar, retornar diretamente
+                if (file.size < 500000) { // Menos de 500KB
+                    resolve(dataUrl);
+                    return;
+                }
                 
-                img.onload = () => {
-                    try {
-                        // Calcular dimensões mantendo proporção
-                        let { width, height } = img;
-                        if (width > height) {
-                            if (width > maxWidth) {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    if (!ctx) {
+                        reject(new Error('Canvas não suportado'));
+                        return;
+                    }
+                    
+                    const image = document.createElement('img');
+                    
+                    image.onload = () => {
+                        try {
+                            // Calcular dimensões mantendo proporção
+                            let { width, height } = image;
+                            
+                            if (width > height && width > maxWidth) {
                                 height = (height * maxWidth) / width;
                                 width = maxWidth;
-                            }
-                        } else {
-                            if (height > maxWidth) {
+                            } else if (height > maxWidth) {
                                 width = (width * maxWidth) / height;
                                 height = maxWidth;
                             }
+                            
+                            canvas.width = width;
+                            canvas.height = height;
+                            
+                            // Desenhar e comprimir
+                            ctx.drawImage(image, 0, 0, width, height);
+                            const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                            resolve(compressedDataUrl);
+                        } catch (error) {
+                            console.error('Erro ao comprimir imagem:', error);
+                            reject(error);
                         }
-                        
-                        canvas.width = width;
-                        canvas.height = height;
-                        
-                        // Desenhar e comprimir
-                        ctx.drawImage(img, 0, 0, width, height);
-                        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-                        resolve(compressedDataUrl);
-                    } catch (error) {
-                        console.error('Erro ao processar imagem:', error);
-                        reject(error);
-                    }
-                };
-                
-                img.onerror = () => {
-                    reject(new Error('Falha ao carregar imagem'));
-                };
-                
-                const url = URL.createObjectURL(file);
-                img.src = url;
-                
-                // Limpar URL object após uso para evitar memory leak
-                img.onload = () => {
-                    URL.revokeObjectURL(url);
-                    try {
-                        // Calcular dimensões mantendo proporção
-                        let { width, height } = img;
-                        if (width > height) {
-                            if (width > maxWidth) {
-                                height = (height * maxWidth) / width;
-                                width = maxWidth;
-                            }
-                        } else {
-                            if (height > maxWidth) {
-                                width = (width * maxWidth) / height;
-                                height = maxWidth;
-                            }
-                        }
-                        
-                        canvas.width = width;
-                        canvas.height = height;
-                        
-                        // Desenhar e comprimir
-                        ctx.drawImage(img, 0, 0, width, height);
-                        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-                        resolve(compressedDataUrl);
-                    } catch (error) {
-                        console.error('Erro ao processar imagem:', error);
-                        reject(error);
-                    }
-                };
-                
-            } catch (error) {
-                console.error('Erro na função compressImage:', error);
-                reject(error);
-            }
+                    };
+                    
+                    image.onerror = () => {
+                        reject(new Error('Erro ao carregar imagem'));
+                    };
+                    
+                    image.src = dataUrl;
+                    
+                } catch (error) {
+                    console.error('Erro na compressão:', error);
+                    reject(error);
+                }
+            };
+            
+            reader.onerror = () => {
+                reject(new Error('Erro ao ler arquivo'));
+            };
+            
+            reader.readAsDataURL(file);
         });
     };
 
