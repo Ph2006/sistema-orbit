@@ -2745,7 +2745,6 @@ export default function QualityPage() {
                 <TabsTrigger value="rnc">Relatórios de Não Conformidade (RNC)</TabsTrigger>
                 <TabsTrigger value="calibrations">Calibração de Equipamentos</TabsTrigger>
                 <TabsTrigger value="inspections">Inspeções e Documentos</TabsTrigger>
-                <TabsTrigger value="engineering">Chamados de Engenharia</TabsTrigger>
             </TabsList>
             
             <TabsContent value="rnc">
@@ -2851,14 +2850,24 @@ export default function QualityPage() {
                     )}
                 </CardContent>
               </Card>
-            </TabsContent>
-            
-            <TabsContent value="engineering">
-                <PlaceholderCard 
-                    title="Chamados de Engenharia"
-                    description="Sistema para abertura e acompanhamento de chamados para a engenharia."
-                    icon={Phone} 
-                />
+              
+              {/* Seção de Chamados de Engenharia */}
+              <Card className="mt-6">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Phone className="h-5 w-5" />
+                        Chamados de Engenharia
+                    </CardTitle>
+                    <CardDescription>Sistema para abertura e acompanhamento de chamados para a engenharia.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <PlaceholderCard 
+                        title="Funcionalidade em Desenvolvimento"
+                        description="Sistema para abertura e acompanhamento de chamados para a engenharia estará disponível em breve."
+                        icon={Phone} 
+                    />
+                </CardContent>
+              </Card>
             </TabsContent>
         </Tabs>
       </div>
