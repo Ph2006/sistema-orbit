@@ -472,6 +472,7 @@ export default function MaterialsPage() {
     }
     
     const handleExportAllRequisitionsPDF = async () => {
+        console.log("🔵 handleExportAllRequisitionsPDF chamada", { requisitions: requisitions.length });
         if (!requisitions || requisitions.length === 0) {
             toast({ variant: 'destructive', title: 'Nenhuma requisição encontrada', description: 'Não há requisições para exportar.' });
             return;
@@ -581,6 +582,7 @@ export default function MaterialsPage() {
     };
 
     const handleExportRequisitionPDF = async (requisition: Requisition) => {
+        console.log("🔵 handleExportRequisitionPDF chamada", { requisition: requisition?.id });
         if (!requisition || !requisition.items || requisition.items.length === 0) {
             toast({ variant: 'destructive', title: 'Nenhum item encontrado', description: 'A requisição deve ter pelo menos um item para ser exportada.' });
             return;
@@ -848,7 +850,14 @@ export default function MaterialsPage() {
                         </div>
                         {activeTab === 'requisitions' ? (
                             <>
-                                <Button onClick={() => handleExportAllRequisitionsPDF()} disabled={isLoadingData} variant="outline">
+                                <Button onClick={() => {
+                                    console.log("🔵 Botão Exportar Todas clicado", { 
+                                        activeTab, 
+                                        isLoadingData, 
+                                        requisitionsCount: requisitions.length 
+                                    });
+                                    handleExportAllRequisitionsPDF();
+                                }} disabled={isLoadingData} variant="outline">
                                     <FileDown className="mr-2 h-4 w-4" /> Exportar Todas (PDF)
                                 </Button>
                                 <Button onClick={() => handleOpenRequisitionForm()} disabled={isLoadingData}>
@@ -930,7 +939,10 @@ export default function MaterialsPage() {
                                                             <TooltipProvider>
                                                                 <Tooltip>
                                                                     <TooltipTrigger asChild>
-                                                                        <Button variant="ghost" size="icon" onClick={() => handleExportRequisitionPDF(req)}>
+                                                                        <Button variant="ghost" size="icon" onClick={() => {
+                                                                            console.log("🔵 Botão Exportar Individual clicado", { reqId: req.id });
+                                                                            handleExportRequisitionPDF(req);
+                                                                        }}>
                                                                             <FileDown className="h-4 w-4" />
                                                                         </Button>
                                                                     </TooltipTrigger>

@@ -3341,7 +3341,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         </CardContent>
     </Card>
     <Card>
-        <CardHeader><CardTitle className="text-base">4. Equipamentos e Consumíveis</CardHeader></CardHeader>
+        <CardHeader><CardTitle className="text-base">4. Equipamentos e Consumíveis</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField control={form.control} name="penetrant" render={({ field }) => ( <FormItem><FormLabel>Penetrante</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
             <FormField control={form.control} name="developer" render={({ field }) => ( <FormItem><FormLabel>Revelador</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Nome e fabricante" /></FormControl><FormMessage /></FormItem> )}/>
@@ -3352,7 +3352,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         </CardContent>
     </Card>
     <Card>
-        <CardHeader><CardTitle className="text-base">5. Procedimento de Execução</CardHeader></CardHeader>
+        <CardHeader><CardTitle className="text-base">5. Procedimento de Execução</CardTitle></CardHeader>
         <CardContent className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-6">
                 {Object.entries({preCleaning: "Limpeza Prévia", penetrantApplication: "Aplicação do Penetrante", excessRemoval: "Remoção do Excesso", developerApplication: "Aplicação do Revelador"}).map(([key, label]) => (
@@ -3383,7 +3383,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
         </CardContent>
     </Card>
     <Card>
-      <CardHeader><CardTitle className="text-base">7. Conclusão</CardHeader></CardHeader>
+      <CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
         <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação Aplicado</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII, AWS D1.1" /></FormControl><FormMessage /></FormItem> )} />
@@ -3391,7 +3391,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
       </CardContent>
     </Card>
     <Card>
-      <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardHeader></CardHeader>
+      <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
       <CardContent>
           <FormItem>
               <FormLabel>Registro Fotográfico</FormLabel>
@@ -3502,7 +3502,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
             
             <Card>
-                <CardHeader><CardTitle className="text-base">3. Normas e Critérios Aplicados</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">3. Normas e Critérios Aplicados</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="executionStandard" render={({ field }) => ( <FormItem><FormLabel>Norma de Execução</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME V Art. 4" /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII Div. 1" /></FormControl><FormMessage /></FormItem> )} />
@@ -3512,7 +3512,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">4. Equipamentos e Acessórios</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">4. Equipamentos e Acessórios</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento (Marca/Modelo)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="equipmentSerial" render={({ field }) => ( <FormItem><FormLabel>Nº de Série</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
@@ -3526,7 +3526,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">5. Parâmetros do Ensaio</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">5. Parâmetros do Ensaio</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormField control={form.control} name="pulseMode" render={({ field }) => ( <FormItem><FormLabel>Modo de Pulso</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Pulso-Eco, etc." /></FormControl><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="range" render={({ field }) => ( <FormItem><FormLabel>Alcance (mm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
@@ -3538,7 +3538,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
             
             <Card>
-                <CardHeader><CardTitle className="text-base">6. Resultados Detalhados</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">6. Resultados Detalhados</CardTitle></CardHeader>
                 <CardContent>
                     {fieldArrayProps.fields.length > 0 && (
                         <Table><TableHeader><TableRow><TableHead>Junta</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
@@ -3574,7 +3574,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
             
             <Card>
-                <CardHeader><CardTitle className="text-base">7. Conclusão</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
                 <CardContent>
                     <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o resultado"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
                     <FormField control={form.control} name="rejectionCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Rejeição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Especifique o critério de rejeição" /></FormControl><FormMessage /></FormItem> )} />
@@ -3583,7 +3583,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
                 <CardContent>
                      <FormItem>
                         <FormLabel>Registro Fotográfico</FormLabel>
@@ -3670,7 +3670,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">3. Análise do Problema</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                      <FormField control={form.control} name="rootCause" render={({ field }) => ( <FormItem><FormLabel>Causa Raiz Identificada</FormLabel><FormControl><Input {...field} placeholder="Qual foi a causa raiz do problema?" value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )}/>
                      <FormField control={form.control} name="analysisTool" render={({ field }) => ( <FormItem><FormLabel>Ferramenta de Análise Utilizada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma ferramenta" /></SelectTrigger></FormControl><SelectContent>{analysisToolOptions.map(tool => (<SelectItem key={tool} value={tool}>{tool}</SelectItem>))}</SelectContent></Select><FormMessage /></FormItem> )}/>
@@ -3695,7 +3695,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">4. Ações Corretivas e Preventivas</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">4. Ações Corretivas e Preventivas</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                      <FormField control={form.control} name="correctiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Corretiva Imediata</FormLabel><FormControl><Textarea placeholder="O que foi feito para corrigir o problema?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
                      <FormField control={form.control} name="preventiveAction" render={({ field }) => ( <FormItem><FormLabel>Ação Preventiva Definida</FormLabel><FormControl><Textarea placeholder="O que será feito para evitar que o problema ocorra novamente?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
@@ -3707,7 +3707,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">5. Aprendizado Consolidado</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">5. Aprendizado Consolidado</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                     <FormField control={form.control} name="lessonSummary" render={({ field }) => ( <FormItem><FormLabel>Resumo da Lição Aprendida</FormLabel><FormControl><Textarea placeholder="Qual é a principal lição aprendida com este evento?" {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
                     <FormField control={form.control} name="procedureChangeNeeded" render={({ field }) => (
@@ -3736,7 +3736,7 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
                 </CardContent>
             </Card>
             <Card>
-                <CardHeader><CardTitle className="text-base">6. Evidências e Aprovações</CardHeader></CardHeader>
+                <CardHeader><CardTitle className="text-base">6. Evidências e Aprovações</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                     <FormField control={form.control} name="evidence" render={({ field }) => (
                         <FormItem>
