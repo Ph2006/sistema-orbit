@@ -2850,24 +2850,6 @@ export default function QualityPage() {
                     )}
                 </CardContent>
               </Card>
-              
-              {/* Seção de Chamados de Engenharia */}
-              <Card className="mt-6">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Phone className="h-5 w-5" />
-                        Chamados de Engenharia
-                    </CardTitle>
-                    <CardDescription>Sistema para abertura e acompanhamento de chamados para a engenharia.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <PlaceholderCard 
-                        title="Funcionalidade em Desenvolvimento"
-                        description="Sistema para abertura e acompanhamento de chamados para a engenharia estará disponível em breve."
-                        icon={Phone} 
-                    />
-                </CardContent>
-              </Card>
             </TabsContent>
         </Tabs>
       </div>
@@ -3118,6 +3100,21 @@ export default function QualityPage() {
                                 }
                             </CardContent>
                         </Card>
+                    </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="engineering-tickets">
+                    <AccordionTrigger className="text-lg font-semibold bg-muted/50 px-4 rounded-md hover:bg-muted">
+                        <div className="flex items-center gap-2">
+                            <Phone className="h-5 w-5 text-primary" />
+                            Chamados de Engenharia
+                        </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                        <PlaceholderCard 
+                            title="Chamados de Engenharia"
+                            description="Sistema para abertura e acompanhamento de chamados para a engenharia estará disponível em breve."
+                            icon={Phone} 
+                        />
                     </AccordionContent>
                 </AccordionItem>
             </Accordion>
