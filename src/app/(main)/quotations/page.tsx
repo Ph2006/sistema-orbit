@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -6,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -40,7 +41,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 const itemSchema = z.object({
   id: z.string().optional(),
-  code: z.string().min(1, "O código é obrigatório."),
+  code: z.string().optional(),
   description: z.string().min(3, "A descrição é obrigatória."),
   quantity: z.coerce.number().min(1, "A quantidade deve ser pelo menos 1."),
   unitPrice: z.coerce.number().min(0, "O preço não pode ser negativo."),
@@ -96,28 +97,21 @@ const serviceOptions = [
 
 const calculateItemTotals = (item: Item | any) => {
     const quantity = Number(item.quantity) || 0;
-    const unitPriceWithTax = Number(item.unitPrice) || 0;
+    const unitPrice = Number(item.unitPrice) || 0;
     const taxRate = Number(item.taxRate) || 0;
 
-    const unitPriceWithoutTax = taxRate > 0 ? unitPriceWithTax / (1 + (taxRate / 100)) : unitPriceWithTax;
-    const totalPriceWithoutTax = quantity * unitPriceWithoutTax;
-    const totalPriceWithTax = quantity * unitPriceWithTax;
-    const taxAmount = totalPriceWithTax - totalPriceWithoutTax;
+    const totalPrice = quantity * unitPrice;
+    const taxAmount = totalPrice * (taxRate / 100);
+    const totalWithTax = totalPrice + taxAmount;
     
-    return { 
-        unitPriceWithoutTax, 
-        unitPriceWithTax, 
-        totalPriceWithoutTax, 
-        totalPriceWithTax, 
-        taxAmount 
-    };
+    return { totalPrice, taxAmount, totalWithTax };
 };
 
 const calculateGrandTotal = (items: Item[] | any[]) => {
     if (!items) return 0;
     return items.reduce((acc, item) => {
-        const { totalPriceWithTax } = calculateItemTotals(item);
-        return acc + totalPriceWithTax;
+        const { totalWithTax } = calculateItemTotals(item);
+        return acc + totalWithTax;
     }, 0);
 };
 
@@ -293,7 +287,7 @@ export default function QuotationsPage() {
     const onSubmit = async (values: z.infer<typeof quotationSchema>) => {
         try {
             const itemsWithTotals = values.items.map(item => {
-                const { totalPriceWithoutTax, taxAmount, totalPriceWithTax } = calculateItemTotals(item);
+                const { totalPrice, taxAmount, totalWithTax } = calculateItemTotals(item);
                 // Explicitly create the object to save, excluding the react-hook-form 'id'
                 return {
                     code: item.code || '',
@@ -305,9 +299,9 @@ export default function QuotationsPage() {
                     leadTimeDays: item.leadTimeDays || 0,
                     notes: item.notes || '',
                     // Calculated fields
-                    totalPriceWithoutTax,
+                    totalPrice,
                     taxAmount,
-                    totalPriceWithTax,
+                    totalWithTax,
                     totalWeight: (item.quantity || 0) * (item.unitWeight || 0)
                 };
             });
@@ -411,25 +405,6 @@ export default function QuotationsPage() {
         setCurrentItem(emptyItem);
         setEditIndex(null);
     }
-
-    const handleDuplicateItem = (index: number) => {
-        const itemToDuplicate = watchedItems[index];
-        if (!itemToDuplicate) return;
-        
-        // Criar uma cópia do item com novo ID, mantendo a descrição original
-        const duplicatedItem = {
-            ...itemToDuplicate,
-            id: undefined, // Remover ID para criar novo item
-        };
-        
-        // Adicionar o item duplicado no final da lista
-        append(duplicatedItem);
-        
-        toast({
-            title: "Item duplicado!",
-            description: `"${itemToDuplicate.description}" foi duplicado e adicionado ao final da lista.`,
-        });
-    };
     
     const handleAddClick = () => {
         setSelectedQuotation(null);
@@ -637,20 +612,16 @@ export default function QuotationsPage() {
                 docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
                 y += 10;
     
-                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Preço Unit. s/ Imp.', 'Preço Unit. c/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
-                const body = items.map(item => {
-                    const { unitPriceWithoutTax, totalPriceWithTax } = calculateItemTotals(item);
-                    return [
-                        item.code || '-',
-                        item.description,
-                        item.quantity,
-                        item.unitWeight ? `${item.unitWeight.toLocaleString('pt-BR')} kg` : '-',
-                        unitPriceWithoutTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                        item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                        (item.taxRate || 0).toFixed(1) + '%',
-                        totalPriceWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                    ];
-                });
+                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
+                const body = items.map(item => [
+                    item.code || '-',
+                    item.description,
+                    item.quantity,
+                    item.unitWeight ? `${item.unitWeight.toLocaleString('pt-BR')} kg` : '-',
+                    item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                    (item.taxRate || 0).toLocaleString('pt-BR'),
+                    calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                ]);
                 autoTable(docPdf, {
                     startY: y,
                     head,
@@ -658,14 +629,13 @@ export default function QuotationsPage() {
                     styles: { fontSize: 8 },
                     headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
                     columnStyles: {
-                        0: { cellWidth: 30 },
+                        0: { cellWidth: 35 },
                         1: { cellWidth: 'auto' },
-                        2: { cellWidth: 15, halign: 'center' },
-                        3: { cellWidth: 22, halign: 'center' },
-                        4: { cellWidth: 30, halign: 'center' },
-                        5: { cellWidth: 30, halign: 'center' },
-                        6: { cellWidth: 20, halign: 'center' },
-                        7: { cellWidth: 35, halign: 'center' },
+                        2: { cellWidth: 15, halign: 'right' },
+                        3: { cellWidth: 25, halign: 'right' },
+                        4: { cellWidth: 35, halign: 'right' },
+                        5: { cellWidth: 25, halign: 'right' },
+                        6: { cellWidth: 40, halign: 'right' },
                     }
                 });
                 y = (docPdf as any).lastAutoTable.finalY + 10;
@@ -722,14 +692,14 @@ export default function QuotationsPage() {
                     [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
                     ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
                     [],
-                    ['Item', 'Código', 'Qtd', 'Preço Unit.', 'Imposto (%)', 'Total c/ Imp.'],
+                    ['Item', 'Código', 'Qtd', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.'],
                     ...items.map(item => [
                         item.description,
                         item.code,
                         item.quantity,
                         item.unitPrice,
                         item.taxRate || 0,
-                        calculateItemTotals(item).totalPriceWithTax
+                        calculateItemTotals(item).totalWithTax
                     ]),
                     [],
                     ['', '', '', '', 'Valor Total:', grandTotal],
@@ -960,23 +930,23 @@ export default function QuotationsPage() {
                                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
                                                 <div>
                                                     <FormLabel>Código</FormLabel>
-                                                    <Input placeholder="Código do item" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} />
+                                                    <Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} />
                                                 </div>
                                                 <div>
                                                     <FormLabel>Quantidade</FormLabel>
                                                     <Input type="number" placeholder="1" value={currentItem.quantity} onChange={e => handleCurrentItemChange('quantity', e.target.value)} />
                                                 </div>
                                                 <div>
-                                                    <FormLabel>Peso Unit. (kg)</FormLabel>
-                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitWeight || ''} onChange={e => handleCurrentItemChange('unitWeight', e.target.value)} />
+                                                    <FormLabel>Preço Unitário s/ Imposto (R$)</FormLabel>
+                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitPrice} onChange={e => handleCurrentItemChange('unitPrice', e.target.value)} />
                                                 </div>
                                                 <div>
                                                     <FormLabel>Imposto (%)</FormLabel>
                                                     <Input type="number" step="0.01" placeholder="0" value={currentItem.taxRate || ''} onChange={e => handleCurrentItemChange('taxRate', e.target.value)} />
                                                 </div>
                                                 <div>
-                                                    <FormLabel>Preço Unitário c/ Imposto (R$)</FormLabel>
-                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitPrice} onChange={e => handleCurrentItemChange('unitPrice', e.target.value)} />
+                                                    <FormLabel>Peso Unit. (kg)</FormLabel>
+                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitWeight || ''} onChange={e => handleCurrentItemChange('unitWeight', e.target.value)} />
                                                 </div>
                                             </div>
                                             <div className="flex justify-end gap-2">
@@ -999,25 +969,28 @@ export default function QuotationsPage() {
                                                 <Table>
                                                     <TableHeader>
                                                         <TableRow>
+                                                            <TableHead>Código</TableHead>
                                                             <TableHead>Descrição</TableHead>
                                                             <TableHead className="w-[80px]">Qtd.</TableHead>
-                                                            <TableHead className="w-[120px]">Preço Unit.</TableHead>
-                                                            <TableHead className="w-[150px]">Total</TableHead>
+                                                            <TableHead className="w-[120px]">Preço Unit. s/ Imp.</TableHead>
+                                                            <TableHead className="w-[80px]">Imposto (%)</TableHead>
+                                                            <TableHead className="w-[150px]">Total c/ Imp.</TableHead>
                                                             <TableHead className="w-[100px] text-right">Ações</TableHead>
                                                         </TableRow>
                                                     </TableHeader>
                                                     <TableBody>
                                                         {watchedItems.map((item, index) => {
-                                                            const { totalPriceWithTax } = calculateItemTotals(item);
+                                                            const { totalWithTax } = calculateItemTotals(item);
                                                             return (
                                                                 <TableRow key={index} className={cn(editIndex === index && "bg-secondary")}>
+                                                                    <TableCell className="font-mono text-sm">{item.code || '-'}</TableCell>
                                                                     <TableCell className="font-medium">{item.description}</TableCell>
                                                                     <TableCell>{item.quantity}</TableCell>
                                                                     <TableCell>{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
-                                                                    <TableCell>{totalPriceWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
+                                                                    <TableCell>{item.taxRate || 0}%</TableCell>
+                                                                    <TableCell>{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
                                                                     <TableCell className="text-right">
                                                                         <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button>
-                                                                        <Button type="button" variant="ghost" size="icon" onClick={() => handleDuplicateItem(index)}><Copy className="h-4 w-4" /></Button>
                                                                         <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
                                                                     </TableCell>
                                                                 </TableRow>
@@ -1174,24 +1147,25 @@ export default function QuotationsPage() {
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
+                                                    <TableHead>Código</TableHead>
                                                     <TableHead>Descrição</TableHead>
                                                     <TableHead className="text-center w-[60px]">Qtd.</TableHead>
-                                                    <TableHead className="text-right w-[120px]">Valor Unit.</TableHead>
-                                                    <TableHead className="text-right w-[150px]">Subtotal c/ Imposto</TableHead>
+                                                    <TableHead className="text-right w-[120px]">Valor Unit. s/ Imp.</TableHead>
+                                                    <TableHead className="text-center w-[80px]">Imp. (%)</TableHead>
+                                                    <TableHead className="text-right w-[150px]">Subtotal c/ Imp.</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
                                                 {selectedQuotation.items.map((item, index) => {
-                                                    const { totalPriceWithTax } = calculateItemTotals(item);
+                                                    const { totalWithTax } = calculateItemTotals(item);
                                                     return (
                                                         <TableRow key={index}>
-                                                            <TableCell className="font-medium">
-                                                                {item.description}
-                                                                {item.code && <span className="block text-xs text-muted-foreground">Cód: {item.code}</span>}
-                                                            </TableCell>
+                                                            <TableCell className="font-mono text-sm">{item.code || '-'}</TableCell>
+                                                            <TableCell className="font-medium">{item.description}</TableCell>
                                                             <TableCell className="text-center">{item.quantity}</TableCell>
                                                             <TableCell className="text-right">{item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
-                                                            <TableCell className="text-right font-semibold">{totalPriceWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                                                            <TableCell className="text-center">{item.taxRate || 0}%</TableCell>
+                                                            <TableCell className="text-right font-semibold">{totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                                                         </TableRow>
                                                     )
                                                 })}
