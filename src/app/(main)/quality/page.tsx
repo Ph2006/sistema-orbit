@@ -34,8 +34,52 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-// === FUNÇÃO DE COMPRESSÃO DE IMAGENS MELHORADA ===
-const compressImage = (file: File, maxWidth: number = 1200, quality: number = 0.8): Promise<string> => {
+// === COMPONENTE VISUAL DE INDICADOR DE TAMANHO ===
+const DataSizeIndicator = ({ data, maxSizeKB = 900 }: { data: any, maxSizeKB?: number }) => {
+    const currentSizeKB = (JSON.stringify(data).length / 1024);
+    const percentage = (currentSizeKB / maxSizeKB) * 100;
+    
+    const getColor = () => {
+        if (percentage < 50) return 'bg-green-500';
+        if (percentage < 75) return 'bg-yellow-500';
+        if (percentage < 90) return 'bg-orange-500';
+        return 'bg-red-500';
+    };
+    
+    const getTextColor = () => {
+        if (percentage < 50) return 'text-green-700';
+        if (percentage < 75) return 'text-yellow-700';
+        if (percentage < 90) return 'text-orange-700';
+        return 'text-red-700';
+    };
+    
+    return (
+        <div className="w-full space-y-2">
+            <div className="flex items-center justify-between text-xs">
+                <span className={`font-medium ${getTextColor()}`}>
+                    Tamanho do Relatório
+                </span>
+                <span className={`font-mono ${getTextColor()}`}>
+                    {currentSizeKB.toFixed(1)}KB / {maxSizeKB}KB
+                </span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                    className={`h-2 rounded-full transition-all duration-300 ${getColor()}`}
+                    style={{ width: `${Math.min(100, percentage)}%` }}
+                />
+            </div>
+            {percentage > 90 && (
+                <p className="text-xs text-red-600 font-medium">
+                    ⚠️ Relatório próximo do limite! Remova algumas fotos.
+                </p>
+            )}
+        </div>
+    );
+};
+
+// === FUNÇÃO DE COMPRESSÃO OTIMIZADA PARA FIRESTORE ===
+const compressImageForFirestore = (file: File, maxWidth: number = 800, quality: number = 0.5): Promise<string> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         
@@ -46,90 +90,97 @@ const compressImage = (file: File, maxWidth: number = 1200, quality: number = 0.
                 return;
             }
             
-            // Verificar tamanho do arquivo original
-            const fileSizeKB = file.size / 1024;
-            console.log(`Arquivo original: ${file.name}, Tamanho: ${fileSizeKB.toFixed(1)}KB`);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
             
-            // Se arquivo já é pequeno, não comprimir
-            if (fileSizeKB < 300) {
-                console.log('Arquivo pequeno, mantendo original');
-                resolve(dataUrl);
+            if (!ctx) {
+                reject(new Error('Canvas não suportado'));
                 return;
             }
             
-            try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                if (!ctx) {
-                    reject(new Error('Canvas não suportado'));
-                    return;
-                }
-                
-                const image = document.createElement('img');
-                
-                image.onload = () => {
-                    try {
-                        // Calcular dimensões mantendo proporção
-                        let { width, height } = image;
-                        
-                        // Redimensionar apenas se necessário
-                        if (width > maxWidth || height > maxWidth) {
-                            if (width > height) {
-                                height = (height * maxWidth) / width;
-                                width = maxWidth;
-                            } else {
-                                width = (width * maxWidth) / height;
-                                height = maxWidth;
-                            }
-                        }
-                        
-                        canvas.width = width;
-                        canvas.height = height;
-                        
-                        // Melhorar qualidade do redimensionamento
-                        ctx.imageSmoothingEnabled = true;
-                        ctx.imageSmoothingQuality = 'high';
-                        
-                        // Desenhar e comprimir
-                        ctx.drawImage(image, 0, 0, width, height);
-                        
-                        // Ajustar qualidade baseada no tamanho do arquivo
-                        let finalQuality = quality;
-                        if (fileSizeKB > 2000) finalQuality = 0.6; // Arquivos > 2MB
-                        else if (fileSizeKB > 1000) finalQuality = 0.7; // Arquivos > 1MB
-                        
-                        const compressedDataUrl = canvas.toDataURL('image/jpeg', finalQuality);
-                        
-                        // Verificar tamanho final
-                        const finalSizeKB = (compressedDataUrl.length * 0.75) / 1024; // Estimativa
-                        console.log(`Arquivo comprimido: ${finalSizeKB.toFixed(1)}KB`);
-                        
-                        resolve(compressedDataUrl);
-                    } catch (error) {
-                        console.error('Erro ao comprimir imagem:', error);
-                        resolve(dataUrl); // Retornar original em caso de erro
+            const image = document.createElement('img');
+            
+            image.onload = () => {
+                try {
+                    let { width, height } = image;
+                    
+                    // Redimensionamento mais agressivo
+                    const maxDimension = maxWidth;
+                    if (width > height && width > maxDimension) {
+                        height = (height * maxDimension) / width;
+                        width = maxDimension;
+                    } else if (height > maxDimension) {
+                        width = (width * maxDimension) / height;
+                        height = maxDimension;
                     }
-                };
-                
-                image.onerror = () => {
-                    reject(new Error('Erro ao carregar imagem'));
-                };
-                
-                image.src = dataUrl;
-                
-            } catch (error) {
-                console.error('Erro na compressão:', error);
-                resolve(dataUrl); // Retornar original em caso de erro
-            }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    
+                    // Desenhar com qualidade otimizada
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'medium';
+                    ctx.drawImage(image, 0, 0, width, height);
+                    
+                    // Compressão mais agressiva baseada no tamanho do arquivo
+                    let finalQuality = quality;
+                    const fileSizeKB = file.size / 1024;
+                    
+                    if (fileSizeKB > 5000) finalQuality = 0.3; // > 5MB
+                    else if (fileSizeKB > 2000) finalQuality = 0.4; // > 2MB
+                    else if (fileSizeKB > 1000) finalQuality = 0.5; // > 1MB
+                    else if (fileSizeKB > 500) finalQuality = 0.6; // > 500KB
+                    
+                    let compressedDataUrl = canvas.toDataURL('image/jpeg', finalQuality);
+                    
+                    // Verificar se ainda está muito grande e comprimir mais se necessário
+                    const estimatedSizeKB = (compressedDataUrl.length * 0.75) / 1024;
+                    
+                    if (estimatedSizeKB > 100) { // Se maior que 100KB, comprimir mais
+                        finalQuality = Math.max(0.2, finalQuality - 0.2);
+                        compressedDataUrl = canvas.toDataURL('image/jpeg', finalQuality);
+                        console.log(`Compressão adicional aplicada: qualidade ${finalQuality}`);
+                    }
+                    
+                    const finalSizeKB = (compressedDataUrl.length * 0.75) / 1024;
+                    console.log(`Foto comprimida - Original: ${fileSizeKB.toFixed(1)}KB → Final: ${finalSizeKB.toFixed(1)}KB`);
+                    
+                    resolve(compressedDataUrl);
+                } catch (error) {
+                    console.error('Erro ao comprimir imagem:', error);
+                    reject(error);
+                }
+            };
+            
+            image.onerror = () => reject(new Error('Erro ao carregar imagem'));
+            image.src = dataUrl;
         };
         
-        reader.onerror = () => {
-            reject(new Error('Erro ao ler arquivo'));
-        };
-        
+        reader.onerror = () => reject(new Error('Erro ao ler arquivo'));
         reader.readAsDataURL(file);
     });
+};
+
+// === CONFIGURAÇÕES E VALIDAÇÕES PARA FIRESTORE ===
+const PHOTO_LIMITS = {
+    MAX_PHOTOS: 6,           // Máximo 6 fotos por relatório
+    MAX_PHOTO_SIZE_KB: 120,  // Máximo 120KB por foto
+    MAX_TOTAL_SIZE_KB: 500,  // Máximo 500KB total em fotos
+    IMAGE_MAX_WIDTH: 800,    // Largura máxima da imagem
+    COMPRESSION_QUALITY: 0.5 // Qualidade de compressão JPEG
+};
+
+const validateDataSizeBeforeSave = (data: any): boolean => {
+    const dataSize = JSON.stringify(data).length;
+    const maxSize = 900000; // 900KB de segurança
+    
+    if (dataSize > maxSize) {
+        console.error(`❌ Dados muito grandes: ${(dataSize / 1024).toFixed(1)}KB (máximo: ${(maxSize / 1024).toFixed(1)}KB)`);
+        return false;
+    }
+    
+    console.log(`✓ Tamanho dos dados OK: ${(dataSize / 1024).toFixed(1)}KB`);
+    return true;
 };
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1022,14 +1073,34 @@ export default function QualityPage() {
 
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
+      console.log("=== SALVANDO RELATÓRIO DE MATERIAL ===");
+      console.log("Dados recebidos:", values);
+      console.log("Fotos recebidas:", values.photos?.length || 0);
+
       const { reportNumber, ...restOfValues } = values;
       const dataToSave: any = { 
         ...restOfValues, 
         receiptDate: Timestamp.fromDate(values.receiptDate),
         quantityReceived: values.quantityReceived ?? null,
+        photos: values.photos || [],
       };
+
+      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
+      if (!validateDataSizeBeforeSave(dataToSave)) {
+          toast({
+              variant: "destructive",
+              title: "Relatório muito grande para salvar",
+              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+          });
+          return;
+      }
+
+      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
+      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
+
       if (selectedInspection) {
         await setDoc(doc(db, "companies", "mecald", "rawMaterialInspections", selectedInspection.id), dataToSave);
+        console.log("✓ Relatório atualizado no Firestore com sucesso!");
         toast({ title: "Relatório atualizado!" });
       } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "rawMaterialInspections"));
@@ -1038,72 +1109,71 @@ export default function QualityPage() {
             .filter(n => !isNaN(n) && Number.isFinite(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
-        dataToSave.reportNumber = newReportNumber;
+        const finalData = { ...dataToSave, reportNumber: newReportNumber };
 
-        await addDoc(collection(db, "companies", "mecald", "rawMaterialInspections"), dataToSave);
+        // Validação final antes de salvar
+        if (!validateDataSizeBeforeSave(finalData)) {
+            toast({
+                variant: "destructive",
+                title: "Relatório muito grande para salvar",
+                description: `O relatório final excede o limite. Remova algumas fotos.`,
+            });
+            return;
+        }
+
+        await addDoc(collection(db, "companies", "mecald", "rawMaterialInspections"), finalData);
+        console.log("✓ Dados salvos no Firestore com sucesso!");
         toast({ title: "Relatório de inspeção de material criado!" });
       }
-      setIsInspectionFormOpen(false); await fetchAllData();
-    } catch (error) { console.error("Error saving material inspection:", error); toast({ variant: "destructive", title: "Erro ao salvar relatório" }); }
+      
+      setIsInspectionFormOpen(false); 
+      await fetchAllData();
+    } catch (error) { 
+        console.error("❌ Erro ao salvar relatório:", error);
+        
+        // Verificar se é erro de tamanho do Firestore
+        if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
+            (error as any)?.message?.includes('Document exceeds maximum size')) {
+            toast({ 
+                variant: "destructive", 
+                title: "Relatório muito grande", 
+                description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
+            });
+        } else {
+            toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+        }
+    }
   };
   const onDimensionalReportSubmit = async (values: z.infer<typeof dimensionalReportSchema>) => {
     try {
        console.log("=== SALVANDO RELATÓRIO DIMENSIONAL ===");
        console.log("Dados recebidos:", values);
        console.log("Fotos recebidas:", values.photos?.length || 0);
-       
-       // Log detalhado das fotos
-       if (values.photos && values.photos.length > 0) {
-           values.photos.forEach((photo, index) => {
-               console.log(`Foto ${index + 1}:`);
-               console.log(`  Tipo: ${typeof photo}`);
-               console.log(`  É string: ${typeof photo === 'string'}`);
-               console.log(`  É data URI: ${photo?.startsWith('data:image/')}`);
-               console.log(`  Tamanho: ${photo?.length || 0} caracteres`);
-               console.log(`  Preview: ${photo?.substring(0, 100)}...`);
-           });
-       }
 
        const { reportNumber, ...restOfValues } = values;
        
-       // Preparar dados para Firestore
-       const cleanDataForFirestore = (obj: any): any => {
-         const cleaned: any = {};
-         Object.keys(obj).forEach(key => {
-           const value = obj[key];
-           if (value !== undefined && value !== null && value !== '') {
-             if (Array.isArray(value)) {
-               cleaned[key] = value;
-             } else {
-               cleaned[key] = value;
-             }
-           }
-         });
-         return cleaned;
-       };
-       
-       const dataToSave = cleanDataForFirestore({ 
-        ...restOfValues, 
+       const dataToSave = { 
+        ...restOfValues,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         customerInspector: values.customerInspector || null,
         quantityInspected: values.quantityInspected || null,
         notes: values.notes || null,
-        photos: values.photos || [], // Garantir que seja sempre um array
+        photos: values.photos || [],
         measurements: values.measurements || []
-      });
+      };
       
-      console.log("=== DADOS FINAIS PARA FIRESTORE ===");
-      console.log("Dados finais:", dataToSave);
-      console.log("Fotos no objeto final:", dataToSave.photos?.length || 0);
-      
-      if (dataToSave.photos?.length > 0) {
-        console.log("=== VERIFICAÇÃO DAS FOTOS FINAIS ===");
-        dataToSave.photos.forEach((photo: string, index: number) => {
-            console.log(`Foto final ${index + 1}:`);
-            console.log(`  Válida: ${photo && typeof photo === 'string' && photo.startsWith('data:image/')}`);
-            console.log(`  Tamanho: ${photo?.length || 0} caracteres`);
-        });
+      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
+      if (!validateDataSizeBeforeSave(dataToSave)) {
+          toast({
+              variant: "destructive",
+              title: "Relatório muito grande para salvar",
+              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+          });
+          return;
       }
+      
+      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
+      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
 
        if (selectedInspection) {
          await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
@@ -1118,28 +1188,62 @@ export default function QualityPage() {
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
         const finalData = { ...dataToSave, reportNumber: newReportNumber };
 
-         console.log("=== SALVANDO NO FIRESTORE ===");
-         console.log("Dados que serão salvos:", finalData);
+         // Validação final antes de salvar
+         if (!validateDataSizeBeforeSave(finalData)) {
+             toast({
+                 variant: "destructive",
+                 title: "Relatório muito grande para salvar",
+                 description: `O relatório final excede o limite. Remova algumas fotos.`,
+             });
+             return;
+         }
          
          await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), finalData);
          console.log("✓ Dados salvos no Firestore com sucesso!");
          toast({ title: "Relatório dimensional criado!" });
        }
+       
        setIsInspectionFormOpen(false); 
        await fetchAllData();
+       
      } catch (error) { 
-         console.error("❌ Erro ao salvar relatório:", error); 
-         toast({ variant: "destructive", title: "Erro ao salvar relatório" }); 
+         console.error("❌ Erro ao salvar relatório:", error);
+         
+         // Verificar se é erro de tamanho do Firestore
+         if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
+             (error as any)?.message?.includes('Document exceeds maximum size')) {
+             toast({ 
+                 variant: "destructive", 
+                 title: "Relatório muito grande", 
+                 description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
+             });
+         } else {
+             toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+         }
      }
   };
   const onWeldingInspectionSubmit = async (values: z.infer<typeof weldingInspectionSchema>) => {
     try {
+        console.log("=== SALVANDO RELATÓRIO DE SOLDA ===");
+        console.log("Dados recebidos:", values);
+        console.log("Fotos recebidas:", values.photos?.length || 0);
+
         const dataToSave: any = {
             ...values,
             inspectionDate: Timestamp.fromDate(values.inspectionDate),
             photos: values.photos || [],
             customerInspector: values.customerInspector || null,
         };
+
+        // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
+        if (!validateDataSizeBeforeSave(dataToSave)) {
+            toast({
+                variant: "destructive",
+                title: "Relatório muito grande para salvar",
+                description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+            });
+            return;
+        }
         
         const docRef = selectedInspection
             ? doc(db, "companies", "mecald", "weldingInspections", selectedInspection.id)
@@ -1154,17 +1258,43 @@ export default function QualityPage() {
             const utNumbers = utReportsSnapshot.docs.map(d => parseInt((d.data().reportNumber || "END-0").replace(/[^0-9]/g, ""), 10)).filter(n => !isNaN(n));
             const allNumbers = [...weldNumbers, ...lpNumbers, ...utNumbers];
             const highestNumber = Math.max(0, ...allNumbers);
-            dataToSave.reportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
+            const finalReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
+            dataToSave.reportNumber = finalReportNumber;
+
+            // Validação final antes de salvar
+            if (!validateDataSizeBeforeSave(dataToSave)) {
+                toast({
+                    variant: "destructive",
+                    title: "Relatório muito grande para salvar",
+                    description: `O relatório final excede o limite. Remova algumas fotos.`,
+                });
+                return;
+            }
         }
+
+        console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
+        console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
     
         await setDoc(docRef, dataToSave, { merge: true });
+        console.log("✓ Relatório salvo no Firestore com sucesso!");
         
         toast({ title: selectedInspection ? "Relatório de solda atualizado!" : "Relatório de solda criado!" });
         setIsInspectionFormOpen(false);
         await fetchAllData();
     } catch (error) {
-        console.error("Error saving welding inspection:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+        console.error("❌ Erro ao salvar relatório:", error);
+        
+        // Verificar se é erro de tamanho do Firestore
+        if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
+            (error as any)?.message?.includes('Document exceeds maximum size')) {
+            toast({ 
+                variant: "destructive", 
+                title: "Relatório muito grande", 
+                description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
+            });
+        } else {
+            toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+        }
     }
   };
    const onPaintingReportSubmit = async (values: z.infer<typeof paintingReportSchema>) => {
@@ -1189,6 +1319,10 @@ export default function QualityPage() {
   };
   const onLiquidPenetrantSubmit = async (values: z.infer<typeof liquidPenetrantSchema>) => {
     try {
+      console.log("=== SALVANDO RELATÓRIO DE LP ===");
+      console.log("Dados recebidos:", values);
+      console.log("Fotos recebidas:", values.photos?.length || 0);
+
       const dataToSave = {
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         orderId: values.orderId,
@@ -1219,8 +1353,22 @@ export default function QualityPage() {
         photos: values.photos || [],
       };
 
+      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
+      if (!validateDataSizeBeforeSave(dataToSave)) {
+          toast({
+              variant: "destructive",
+              title: "Relatório muito grande para salvar",
+              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+          });
+          return;
+      }
+
+      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
+      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
+
       if (selectedInspection) {
         await updateDoc(doc(db, "companies", "mecald", "liquidPenetrantReports", selectedInspection.id), dataToSave);
+        console.log("✓ Relatório atualizado no Firestore com sucesso!");
         toast({ title: "Relatório de LP atualizado!" });
       } else {
         const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
@@ -1233,23 +1381,48 @@ export default function QualityPage() {
         const highestNumber = Math.max(0, ...allNumbers);
         const newReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         
-        await addDoc(collection(db, "companies", "mecald", "liquidPenetrantReports"), {
-          ...dataToSave,
-          reportNumber: newReportNumber,
-        });
+        const finalData = { ...dataToSave, reportNumber: newReportNumber };
+
+        // Validação final antes de salvar
+        if (!validateDataSizeBeforeSave(finalData)) {
+            toast({
+                variant: "destructive",
+                title: "Relatório muito grande para salvar",
+                description: `O relatório final excede o limite. Remova algumas fotos.`,
+            });
+            return;
+        }
+        
+        await addDoc(collection(db, "companies", "mecald", "liquidPenetrantReports"), finalData);
+        console.log("✓ Dados salvos no Firestore com sucesso!");
         toast({ title: "Relatório de LP criado!" });
       }
 
       setIsInspectionFormOpen(false);
       await fetchAllData();
     } catch (error) {
-      console.error("Error saving liquid penetrant report:", error);
-      toast({ variant: "destructive", title: "Erro ao salvar relatório de LP" });
+      console.error("❌ Erro ao salvar relatório:", error);
+      
+      // Verificar se é erro de tamanho do Firestore
+      if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
+          (error as any)?.message?.includes('Document exceeds maximum size')) {
+          toast({ 
+              variant: "destructive", 
+              title: "Relatório muito grande", 
+              description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
+          });
+      } else {
+          toast({ variant: "destructive", title: "Erro ao salvar relatório de LP" });
+      }
     }
   };
 
   const onUltrasoundReportSubmit = async (values: z.infer<typeof ultrasoundReportSchema>) => {
     try {
+      console.log("=== SALVANDO RELATÓRIO DE ULTRASSOM ===");
+      console.log("Dados recebidos:", values);
+      console.log("Fotos recebidas:", values.photos?.length || 0);
+
       const dataToSave = {
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
@@ -1284,8 +1457,22 @@ export default function QualityPage() {
         finalNotes: values.finalNotes || null,
       };
 
+      // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
+      if (!validateDataSizeBeforeSave(dataToSave)) {
+          toast({
+              variant: "destructive",
+              title: "Relatório muito grande para salvar",
+              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+          });
+          return;
+      }
+
+      console.log(`Fotos incluídas: ${dataToSave.photos?.length || 0}`);
+      console.log(`Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
+
       if (selectedInspection) {
         await updateDoc(doc(db, "companies", "mecald", "ultrasoundReports", selectedInspection.id), dataToSave);
+        console.log("✓ Relatório atualizado no Firestore com sucesso!");
         toast({ title: "Relatório de Ultrassom atualizado!" });
       } else {
         const weldReportsSnapshot = await getDocs(collection(db, "companies", "mecald", "weldingInspections"));
@@ -1298,18 +1485,39 @@ export default function QualityPage() {
         const highestNumber = Math.max(0, ...allNumbers);
         const newReportNumber = `END-${(highestNumber + 1).toString().padStart(4, "0")}`;
         
-        await addDoc(collection(db, "companies", "mecald", "ultrasoundReports"), {
-          ...dataToSave,
-          reportNumber: newReportNumber,
-        });
+        const finalData = { ...dataToSave, reportNumber: newReportNumber };
+
+        // Validação final antes de salvar
+        if (!validateDataSizeBeforeSave(finalData)) {
+            toast({
+                variant: "destructive",
+                title: "Relatório muito grande para salvar",
+                description: `O relatório final excede o limite. Remova algumas fotos.`,
+            });
+            return;
+        }
+        
+        await addDoc(collection(db, "companies", "mecald", "ultrasoundReports"), finalData);
+        console.log("✓ Dados salvos no Firestore com sucesso!");
         toast({ title: "Relatório de Ultrassom criado!" });
       }
 
       setIsInspectionFormOpen(false);
       await fetchAllData();
     } catch (error) {
-      console.error("Error saving ultrasound report:", error);
-      toast({ variant: "destructive", title: "Erro ao salvar relatório de Ultrassom" });
+      console.error("❌ Erro ao salvar relatório:", error);
+      
+      // Verificar se é erro de tamanho do Firestore
+      if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
+          (error as any)?.message?.includes('Document exceeds maximum size')) {
+          toast({ 
+              variant: "destructive", 
+              title: "Relatório muito grande", 
+              description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
+          });
+      } else {
+          toast({ variant: "destructive", title: "Erro ao salvar relatório de Ultrassom" });
+      }
     }
   };
 
@@ -2901,6 +3109,7 @@ export default function QualityPage() {
 
 // --- SUB-COMPONENTS FOR FORMS ---
 function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+    const { toast } = useToast();
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
     useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
@@ -2954,7 +3163,7 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
                 validFiles.map(async (file) => {
                     try {
                         console.log(`Processando foto: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImage(file);
+                        return await compressImageForFirestore(file);
                     } catch (error) {
                         console.error(`Erro ao comprimir ${file.name}:`, error);
                         // Em caso de erro, usar o arquivo original
@@ -3053,6 +3262,16 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
             <FormMessage />
         </FormItem>
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+        
+        {/* Indicador de tamanho do relatório */}
+        <Card>
+            <CardHeader>
+                <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <DataSizeIndicator data={form.getValues()} />
+            </CardContent>
+        </Card>
     </>);
 }
 
@@ -3123,7 +3342,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                 validFiles.map(async (file) => {
                     try {
                         console.log(`Processando foto dimensional: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImage(file);
+                        return await compressImageForFirestore(file);
                     } catch (error) {
                         console.error(`Erro ao comprimir ${file.name}:`, error);
                         // Em caso de erro, usar o arquivo original
@@ -3450,6 +3669,16 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         </Card>
 
         <FormField control={form.control} name="notes" render={({ field }) => ( <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Detalhes técnicos, observações, etc." /></FormControl><FormMessage /></FormItem> )}/>
+        
+        {/* Indicador de tamanho do relatório */}
+        <Card>
+            <CardHeader>
+                <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <DataSizeIndicator data={form.getValues()} />
+            </CardContent>
+        </Card>
     </>);
 }
 
@@ -3496,7 +3725,7 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
                 validFiles.map(async (file) => {
                     try {
                         console.log(`Processando foto de solda: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImage(file);
+                        return await compressImageForFirestore(file);
                     } catch (error) {
                         console.error(`Erro ao comprimir ${file.name}:`, error);
                         // Em caso de erro, usar o arquivo original
@@ -3629,6 +3858,16 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
             <FormField control={form.control} name="releaseResponsible" render={({ field }) => ( <FormItem><FormLabel>Responsável Liberação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Opcional" /></FormControl><FormMessage /></FormItem> )} />
         </CardContent>
       </Card>
+      
+      {/* Indicador de tamanho do relatório */}
+      <Card>
+          <CardHeader>
+              <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
+          </CardHeader>
+          <CardContent>
+              <DataSizeIndicator data={form.getValues()} />
+          </CardContent>
+      </Card>
     </div>);
 }
 
@@ -3681,7 +3920,7 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
               validFiles.map(async (file) => {
                   try {
                       console.log(`Processando foto LP: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                      return await compressImage(file);
+                      return await compressImageForFirestore(file);
                   } catch (error) {
                       console.error(`Erro ao comprimir ${file.name}:`, error);
                       // Em caso de erro, usar o arquivo original
@@ -3816,6 +4055,16 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
           </FormItem>
       </CardContent>
     </Card>
+    
+    {/* Indicador de tamanho do relatório */}
+    <Card>
+        <CardHeader>
+            <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
+        </CardHeader>
+        <CardContent>
+            <DataSizeIndicator data={form.getValues()} />
+        </CardContent>
+    </Card>
     </div>);
 }
 
@@ -3905,7 +4154,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                 validFiles.map(async (file) => {
                     try {
                         console.log(`Processando foto de ultrassom: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
-                        return await compressImage(file);
+                        return await compressImageForFirestore(file);
                     } catch (error) {
                         console.error(`Erro ao comprimir ${file.name}:`, error);
                         // Em caso de erro, usar o arquivo original
@@ -4069,6 +4318,16 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                         )}
                         <FormMessage />
                     </FormItem>
+                </CardContent>
+            </Card>
+            
+            {/* Indicador de tamanho do relatório */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <DataSizeIndicator data={form.getValues()} />
                 </CardContent>
             </Card>
         </div>
