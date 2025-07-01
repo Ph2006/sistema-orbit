@@ -1,0 +1,3 @@
+# Deploy Trigger
+# Este arquivo força um novo deploy quando modificado
+Deploy: 2025-07-01 15:30:00 - Forçando novo deploy com indicador de versão

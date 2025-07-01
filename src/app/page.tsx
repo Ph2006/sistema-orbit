@@ -35,6 +35,11 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
+      
+      {/* Indicador de versão para verificar deploy */}
+      <div className="fixed bottom-2 right-2 text-xs text-muted-foreground bg-background/80 px-2 py-1 rounded">
+        v2025.07.01-deploy
+      </div>
     </main>
   );
 }
