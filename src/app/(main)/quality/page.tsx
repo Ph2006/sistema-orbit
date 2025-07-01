@@ -1270,10 +1270,15 @@ export default function QualityPage() {
        setIsInspectionFormOpen(false); 
        await fetchAllData();
        
-     } catch (error) { 
+     } catch (error: any) { 
          console.error("❌ Erro ao salvar relatório:", error);
-         
-         if ((error as any)?.message?.includes('exceeds the maximum allowed size')) {
+         if (error?.code === 403 || error?.message?.toLowerCase().includes('permission')) {
+             toast({ 
+                 variant: "destructive", 
+                 title: "Permissão negada", 
+                 description: "Você não tem permissão para salvar este relatório. Verifique se está autenticado e se as regras do Firestore permitem esta operação." 
+             });
+         } else if ((error as any)?.message?.includes('exceeds the maximum allowed size')) {
              toast({ 
                  variant: "destructive", 
                  title: "Relatório muito grande", 
