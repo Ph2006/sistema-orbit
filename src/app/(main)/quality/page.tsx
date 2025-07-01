@@ -537,6 +537,58 @@ const lessonsLearnedSchema = z.object({
   closeDate: z.date().optional().nullable(),
 });
 
+const engineeringTicketCommentSchema = z.object({
+  id: z.string().optional(),
+  author: z.string().min(1, "Autor é obrigatório"),
+  comment: z.string().min(1, "Comentário é obrigatório"),
+  timestamp: z.date(),
+  type: z.enum(["comment", "internal_note", "status_change"]).default("comment"),
+});
+
+const engineeringTicketSchema = z.object({
+  id: z.string().optional(),
+  ticketNumber: z.string().min(1, "Número do chamado é obrigatório"),
+  orderId: z.string().min(1, "ID do pedido é obrigatório"),
+  itemId: z.string().min(1, "ID do item é obrigatório"),
+  requestingDepartment: z.string().min(1, "Departamento solicitante é obrigatório"),
+  openedBy: z.string().min(1, "Aberto por é obrigatório"),
+  description: z.string().min(1, "Descrição é obrigatória"),
+  category: z.enum([
+    "Alteração de projeto",
+    "Dúvida técnica",
+    "Problema de qualidade",
+    "Melhoria de processo",
+    "Solicitação de análise",
+    "Outro"
+  ]),
+  priority: z.enum(["Baixa", "Média", "Alta", "Crítica"]),
+  status: z.enum([
+    "Aberto",
+    "Em análise",
+    "Aguardando informações",
+    "Em desenvolvimento",
+    "Pausado",
+    "Resolvido",
+    "Fechado",
+    "Cancelado"
+  ]),
+  assignedTo: z.string().optional(),
+  openedAt: z.date(),
+  resolvedAt: z.date().optional().nullable(),
+  attachments: z.array(z.string()).optional(),
+  comments: z.array(engineeringTicketCommentSchema).optional(),
+  pauseSchedule: z.object({
+    isPaused: z.boolean().default(false),
+    pausedAt: z.date().optional().nullable(),
+    pausedBy: z.string().optional(),
+    pauseReason: z.string().optional(),
+    resumedAt: z.date().optional().nullable(),
+    resumedBy: z.string().optional(),
+  }).optional(),
+  estimatedResolutionTime: z.number().optional(),
+  actualResolutionTime: z.number().optional(),
+});
+
 
 
 // --- TYPES ---
@@ -556,6 +608,19 @@ type CompanyData = {
     nomeFantasia?: string;
     logo?: { preview?: string };
 };
+
+type EngineeringTicket = z.infer<typeof engineeringTicketSchema> & { 
+  id: string, 
+  orderNumber?: string, 
+  itemName?: string, 
+  customerName?: string, 
+  pausedDays?: number 
+};
+type EngineeringTicketComment = z.infer<typeof engineeringTicketCommentSchema> & { 
+  id: string 
+};
+
+// --- HELPER FUNCTIONS ---
 
 
 // --- HELPER FUNCTIONS ---
@@ -661,12 +726,21 @@ export default function QualityPage() {
   const engineeringTicketForm = useForm<z.infer<typeof engineeringTicketSchema>>({
       resolver: zodResolver(engineeringTicketSchema),
       defaultValues: {
-        openedAt: new Date(),
-        status: 'Aberto',
+        ticketNumber: '',
+        orderId: '',
+        itemId: '',
+        requestingDepartment: '',
+        openedBy: '',
+        description: '',
+        category: 'Dúvida técnica',
         priority: 'Média',
+        status: 'Aberto',
+        openedAt: new Date(),
         comments: [],
         attachments: [],
-        tags: [],
+        pauseSchedule: {
+          isPaused: false,
+        },
       },
   });
 
@@ -1725,6 +1799,48 @@ export default function QualityPage() {
     }
   };
 
+  const onEngineeringTicketSubmit = async (values: z.infer<typeof engineeringTicketSchema>) => {
+    try {
+        const dataToSave: any = {
+            ...values,
+            openedAt: Timestamp.fromDate(values.openedAt),
+            resolvedAt: values.resolvedAt ? Timestamp.fromDate(values.resolvedAt) : null,
+            comments: values.comments?.map(comment => ({
+                ...comment,
+                timestamp: Timestamp.fromDate(comment.timestamp)
+            })) || [],
+        };
+
+        if (selectedEngineeringTicket) {
+            await setDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedEngineeringTicket.id), dataToSave, { merge: true });
+            toast({ title: "Chamado de Engenharia atualizado!" });
+        } else {
+            const ticketsSnapshot = await getDocs(collection(db, "companies", "mecald", "engineeringTickets"));
+            const currentYear = new Date().getFullYear();
+            const yearTickets = ticketsSnapshot.docs
+                .map(d => d.data().ticketNumber)
+                .filter(num => num && num.startsWith(`ENG-${currentYear}`));
+            const highestNumber = yearTickets.reduce((max, num) => {
+                const seq = parseInt(num.split('-')[2], 10);
+                return seq > max ? seq : max;
+            }, 0);
+            dataToSave.ticketNumber = `ENG-${currentYear}-${(highestNumber + 1).toString().padStart(3, '0')}`;
+            
+            await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), dataToSave);
+            toast({ title: "Chamado de Engenharia criado!" });
+        }
+        setIsInspectionFormOpen(false);
+        setSelectedEngineeringTicket(null);
+        engineeringTicketForm.reset();
+        await fetchAllData();
+    } catch (error) {
+        console.error("Error saving engineering ticket:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar chamado de engenharia" });
+    }
+  };
+
+  // --- END SUBMIT FUNCTIONS ---
+
   const handleOpenMaterialForm = (inspection: RawMaterialInspection | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(inspection); setDialogType('material');
     if (inspection) { 
@@ -1981,6 +2097,20 @@ export default function QualityPage() {
         await deleteDoc(doc(db, "companies", "mecald", collectionName, inspectionToDelete.id));
         toast({ title: "Relatório excluído!" }); setIsDeleteInspectionAlertOpen(false); await fetchAllData();
     } catch (error) { toast({ variant: "destructive", title: "Erro ao excluir relatório" }); }
+  };
+
+  const handleConfirmDeleteEngineeringTicket = async () => {
+    if (!engineeringTicketToDelete) return;
+    try {
+        await deleteDoc(doc(db, "companies", "mecald", "engineeringTickets", engineeringTicketToDelete.id));
+        toast({ title: "Chamado de engenharia excluído!" });
+        setIsDeleteEngineeringTicketAlertOpen(false);
+        setEngineeringTicketToDelete(null);
+        await fetchAllData();
+    } catch (error) {
+        console.error("Error deleting engineering ticket:", error);
+        toast({ variant: "destructive", title: "Erro ao excluir chamado de engenharia" });
+    }
   };
   
   const handleInspectionFormSubmit = (data: any) => {
@@ -2857,6 +2987,7 @@ export default function QualityPage() {
                 <TabsTrigger value="rnc">Relatórios de Não Conformidade (RNC)</TabsTrigger>
                 <TabsTrigger value="calibrations">Calibração de Equipamentos</TabsTrigger>
                 <TabsTrigger value="inspections">Inspeções e Documentos</TabsTrigger>
+                <TabsTrigger value="engineering">Chamados de Engenharia</TabsTrigger>
             </TabsList>
             
             <TabsContent value="rnc">
