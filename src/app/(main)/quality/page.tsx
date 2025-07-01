@@ -3094,6 +3094,14 @@ export default function QualityPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+            
+            <TabsContent value="engineering">
+                <PlaceholderCard 
+                    title="Chamados de Engenharia"
+                    description="Sistema para abertura e acompanhamento de chamados para a engenharia."
+                    icon={Phone} 
+                />
+            </TabsContent>
         </Tabs>
       </div>
 
