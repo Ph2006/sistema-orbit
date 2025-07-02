@@ -7,6 +7,9 @@ import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, query, where, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { format } from "date-fns";
+import { jsPDF } from "jspdf";
+import 'jspdf-autotable';
+import { CSVLink } from "react-csv";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,8 +24,18 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
     PlusCircle, Pencil, Trash2, Phone, AlertCircle, 
-    CheckCircle, Clock, AlertTriangle, FileText, User
+    CheckCircle, Clock, AlertTriangle, FileText, User,
+    Download, FileDown, Printer, ChevronDown, BarChart
 } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuGroup,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // === TIPOS E INTERFACES ===
 type OrderInfo = { 
@@ -120,89 +133,85 @@ export default function OrderEngineeringTickets({
     });
 
     // === DATA FETCHING ===
-    // SUBSTITUA a função fetchTicketsForOrder no arquivo OrderEngineeringTickets.tsx
-
-    // SUBSTITUA a função fetchTicketsForOrder por esta versão simplificada:
-
-const fetchTicketsForOrder = async () => {
-    if (!selectedOrder?.id) {
-        console.log("❌ Nenhum pedido selecionado");
-        setTickets([]);
-        setIsLoading(false);
-        return;
-    }
-    
-    console.log("=== BUSCANDO CHAMADOS ===");
-    console.log("🎯 Pedido:", selectedOrder.number, "| ID:", selectedOrder.id);
-    
-    setIsLoading(true);
-    
-    try {
-        // Query simples sem orderBy
-        const ticketsQuery = query(
-            collection(db, "companies", "mecald", "engineeringTickets"),
-            where("orderId", "==", selectedOrder.id)
-        );
-        
-        const snapshot = await getDocs(ticketsQuery);
-        console.log(`📊 Encontrados: ${snapshot.docs.length} chamados`);
-        
-        if (snapshot.empty) {
-            console.log("ℹ️ Nenhum chamado para este pedido");
+    const fetchTicketsForOrder = async () => {
+        if (!selectedOrder?.id) {
+            console.log("❌ Nenhum pedido selecionado");
             setTickets([]);
             setIsLoading(false);
             return;
         }
         
-        // Processar documentos
-        const ticketsList = snapshot.docs.map(doc => {
-            const data = doc.data();
-            const item = selectedOrder.items.find(i => i.id === data.itemId);
+        console.log("=== BUSCANDO CHAMADOS ===");
+        console.log("🎯 Pedido:", selectedOrder.number, "| ID:", selectedOrder.id);
+        
+        setIsLoading(true);
+        
+        try {
+            // Query simples sem orderBy
+            const ticketsQuery = query(
+                collection(db, "companies", "mecald", "engineeringTickets"),
+                where("orderId", "==", selectedOrder.id)
+            );
             
-            console.log(`📋 Ticket: ${data.ticketNumber || doc.id.slice(0, 8)}`);
+            const snapshot = await getDocs(ticketsQuery);
+            console.log(`📊 Encontrados: ${snapshot.docs.length} chamados`);
             
-            return {
-                id: doc.id,
-                ticketNumber: data.ticketNumber || `ENG-${doc.id.slice(0, 6)}`,
-                title: data.title || "Sem título",
-                description: data.description || "",
-                orderId: data.orderId,
-                itemId: data.itemId || "",
-                priority: data.priority || "Média",
-                category: data.category || "Esclarecimento Técnico",
-                status: data.status || "Aberto",
-                requestedBy: data.requestedBy || "Usuário",
-                assignedTo: data.assignedTo || "",
-                createdDate: data.createdDate?.toDate ? data.createdDate.toDate() : new Date(),
-                dueDate: data.dueDate?.toDate ? data.dueDate.toDate() : null,
-                resolvedDate: data.resolvedDate?.toDate ? data.resolvedDate.toDate() : null,
-                resolution: data.resolution || "",
-                comments: (data.comments || []).map((comment: any) => ({
-                    ...comment,
-                    timestamp: comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(),
-                })),
-                itemName: item?.description || 'N/A',
-            } as EngineeringTicket;
-        });
-        
-        // Ordenar por data
-        ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
-        
-        console.log(`✅ ${ticketsList.length} chamados processados`);
-        setTickets(ticketsList);
-        
-    } catch (error) {
-        console.error("❌ Erro:", error);
-        toast({ 
-            variant: "destructive", 
-            title: "Erro ao carregar chamados",
-            description: "Verifique o console para detalhes"
-        });
-        setTickets([]);
-    } finally {
-        setIsLoading(false);
-    }
-};
+            if (snapshot.empty) {
+                console.log("ℹ️ Nenhum chamado para este pedido");
+                setTickets([]);
+                setIsLoading(false);
+                return;
+            }
+            
+            // Processar documentos
+            const ticketsList = snapshot.docs.map(doc => {
+                const data = doc.data();
+                const item = selectedOrder.items.find(i => i.id === data.itemId);
+                
+                console.log(`📋 Ticket: ${data.ticketNumber || doc.id.slice(0, 8)}`);
+                
+                return {
+                    id: doc.id,
+                    ticketNumber: data.ticketNumber || `ENG-${doc.id.slice(0, 6)}`,
+                    title: data.title || "Sem título",
+                    description: data.description || "",
+                    orderId: data.orderId,
+                    itemId: data.itemId || "",
+                    priority: data.priority || "Média",
+                    category: data.category || "Esclarecimento Técnico",
+                    status: data.status || "Aberto",
+                    requestedBy: data.requestedBy || "Usuário",
+                    assignedTo: data.assignedTo || "",
+                    createdDate: data.createdDate?.toDate ? data.createdDate.toDate() : new Date(),
+                    dueDate: data.dueDate?.toDate ? data.dueDate.toDate() : null,
+                    resolvedDate: data.resolvedDate?.toDate ? data.resolvedDate.toDate() : null,
+                    resolution: data.resolution || "",
+                    comments: (data.comments || []).map((comment: any) => ({
+                        ...comment,
+                        timestamp: comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(),
+                    })),
+                    itemName: item?.description || 'N/A',
+                } as EngineeringTicket;
+            });
+            
+            // Ordenar por data
+            ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
+            
+            console.log(`✅ ${ticketsList.length} chamados processados`);
+            setTickets(ticketsList);
+            
+        } catch (error) {
+            console.error("❌ Erro:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao carregar chamados",
+                description: "Verifique o console para detalhes"
+            });
+            setTickets([]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
         if (selectedOrder?.id && !parentLoading) {
@@ -354,6 +363,174 @@ const fetchTicketsForOrder = async () => {
         }
     };
 
+    // === NOVAS FUNCIONALIDADES: EXPORTAÇÃO E RELATÓRIOS ===
+    // Preparar dados para exportação CSV
+    const csvData = useMemo(() => {
+        return tickets.map(ticket => ({
+            Número: ticket.ticketNumber,
+            Título: ticket.title,
+            Categoria: ticket.category,
+            Item: ticket.itemName,
+            Prioridade: ticket.priority,
+            Status: ticket.status,
+            Solicitante: ticket.requestedBy,
+            Responsável: ticket.assignedTo || 'Não atribuído',
+            'Data de Abertura': format(ticket.createdDate, 'dd/MM/yyyy HH:mm'),
+            'Prazo': ticket.dueDate ? format(ticket.dueDate, 'dd/MM/yyyy') : 'Não definido',
+            'Data de Resolução': ticket.resolvedDate ? format(ticket.resolvedDate, 'dd/MM/yyyy') : 'Não resolvido',
+            Descrição: ticket.description,
+            Resolução: ticket.resolution || 'Não resolvido'
+        }));
+    }, [tickets]);
+
+    // Configuração para CSV
+    const csvHeaders = [
+        { label: 'Número', key: 'Número' },
+        { label: 'Título', key: 'Título' },
+        { label: 'Categoria', key: 'Categoria' },
+        { label: 'Item', key: 'Item' },
+        { label: 'Prioridade', key: 'Prioridade' },
+        { label: 'Status', key: 'Status' },
+        { label: 'Solicitante', key: 'Solicitante' },
+        { label: 'Responsável', key: 'Responsável' },
+        { label: 'Data de Abertura', key: 'Data de Abertura' },
+        { label: 'Prazo', key: 'Prazo' },
+        { label: 'Data de Resolução', key: 'Data de Resolução' },
+        { label: 'Descrição', key: 'Descrição' },
+        { label: 'Resolução', key: 'Resolução' }
+    ];
+
+    // Gerar relatório PDF
+    const generatePdfReport = () => {
+        try {
+            if (!selectedOrder) return;
+
+            const doc = new jsPDF();
+            
+            // Configuração do título
+            doc.setFontSize(18);
+            doc.text('Relatório de Chamados de Engenharia', 14, 20);
+            
+            // Informações do pedido
+            doc.setFontSize(12);
+            doc.text(`Pedido: ${selectedOrder.number}`, 14, 30);
+            doc.text(`Cliente: ${selectedOrder.customerName}`, 14, 37);
+            doc.text(`Data do relatório: ${format(new Date(), 'dd/MM/yyyy')}`, 14, 44);
+            
+            // Estatísticas
+            const openTickets = tickets.filter(t => t.status === "Aberto").length;
+            const inProgressTickets = tickets.filter(t => t.status === "Em Análise").length;
+            const resolvedTickets = tickets.filter(t => t.status === "Resolvido").length;
+            const closedTickets = tickets.filter(t => t.status === "Fechado").length;
+            const waitingTickets = tickets.filter(t => t.status === "Aguardando Cliente").length;
+            
+            doc.text('Resumo:', 14, 55);
+            doc.text(`Total de chamados: ${tickets.length}`, 20, 62);
+            doc.text(`Abertos: ${openTickets}`, 20, 69);
+            doc.text(`Em análise: ${inProgressTickets}`, 20, 76);
+            doc.text(`Aguardando cliente: ${waitingTickets}`, 20, 83);
+            doc.text(`Resolvidos: ${resolvedTickets}`, 20, 90);
+            doc.text(`Fechados: ${closedTickets}`, 20, 97);
+            
+            // Cálculo do tempo médio de resolução para tickets resolvidos/fechados
+            const resolvedOrClosedTickets = tickets.filter(
+                t => (t.status === "Resolvido" || t.status === "Fechado") && t.resolvedDate
+            );
+            
+            let avgResolutionTime = 0;
+            if (resolvedOrClosedTickets.length > 0) {
+                const totalDays = resolvedOrClosedTickets.reduce((acc, ticket) => {
+                    if (ticket.resolvedDate) {
+                        const diffTime = Math.abs(ticket.resolvedDate.getTime() - ticket.createdDate.getTime());
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        return acc + diffDays;
+                    }
+                    return acc;
+                }, 0);
+                
+                avgResolutionTime = totalDays / resolvedOrClosedTickets.length;
+                doc.text(`Tempo médio de resolução: ${avgResolutionTime.toFixed(1)} dias`, 20, 104);
+            }
+            
+            // Tabela de chamados
+            const tableData = tickets.map(ticket => [
+                ticket.ticketNumber,
+                ticket.title.substring(0, 25) + (ticket.title.length > 25 ? '...' : ''),
+                ticket.status,
+                ticket.priority,
+                format(ticket.createdDate, 'dd/MM/yy'),
+                ticket.resolvedDate ? format(ticket.resolvedDate, 'dd/MM/yy') : '-'
+            ]);
+            
+            // Configuração da tabela
+            (doc as any).autoTable({
+                startY: 115,
+                head: [['Número', 'Título', 'Status', 'Prioridade', 'Abertura', 'Resolução']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { fillColor: [66, 66, 66], textColor: 255 },
+                alternateRowStyles: { fillColor: [240, 240, 240] },
+                margin: { top: 115 },
+            });
+            
+            // Detalhes dos chamados abertos (não resolvidos)
+            const openTicketsList = tickets.filter(t => t.status !== "Resolvido" && t.status !== "Fechado");
+            
+            if (openTicketsList.length > 0) {
+                const currentY = (doc as any).lastAutoTable.finalY + 15;
+                
+                doc.text('Detalhes dos Chamados Abertos:', 14, currentY);
+                
+                let y = currentY + 10;
+                openTicketsList.forEach((ticket, index) => {
+                    // Adicionar nova página se necessário
+                    if (y > 270) {
+                        doc.addPage();
+                        y = 20;
+                    }
+                    
+                    doc.setFontSize(11);
+                    doc.text(`${index + 1}. ${ticket.ticketNumber} - ${ticket.title}`, 14, y);
+                    y += 7;
+                    
+                    doc.setFontSize(10);
+                    doc.text(`Status: ${ticket.status} | Prioridade: ${ticket.priority} | Categoria: ${ticket.category}`, 18, y);
+                    y += 7;
+                    
+                    doc.text(`Abertura: ${format(ticket.createdDate, 'dd/MM/yyyy')} | Responsável: ${ticket.assignedTo || 'Não atribuído'}`, 18, y);
+                    y += 7;
+                    
+                    // Descrição (truncada)
+                    const descriptionLines = doc.splitTextToSize(`Descrição: ${ticket.description}`, 180);
+                    if (descriptionLines.length > 2) {
+                        // Limitar a 2 linhas
+                        doc.text(descriptionLines.slice(0, 2), 18, y);
+                        doc.text('...', 18, y + 14);
+                    } else {
+                        doc.text(descriptionLines, 18, y);
+                    }
+                    
+                    y += Math.min(descriptionLines.length, 2) * 7 + 12;
+                });
+            }
+            
+            // Salvar o PDF
+            doc.save(`Relatório-Chamados-Pedido-${selectedOrder.number}.pdf`);
+            
+            toast({ 
+                title: "Relatório gerado com sucesso",
+                description: "O download do PDF foi iniciado"
+            });
+        } catch (error) {
+            console.error("Erro ao gerar relatório:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao gerar relatório",
+                description: "Verifique o console para detalhes"
+            });
+        }
+    };
+
     if (!selectedOrder) {
         return (
             <Card>
@@ -380,10 +557,43 @@ const fetchTicketsForOrder = async () => {
                         Pedido: {selectedOrder.number} - {selectedOrder.customerName}
                     </p>
                 </div>
-                <Button size="sm" onClick={handleNewTicket}>
-                    <PlusCircle className="mr-2 h-4 w-4"/>
-                    Novo Chamado
-                </Button>
+                <div className="flex gap-2">
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm">
+                                <Download className="mr-2 h-4 w-4"/>
+                                Exportar
+                                <ChevronDown className="ml-2 h-4 w-4" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-56">
+                            <DropdownMenuLabel>Opções de Exportação</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuGroup>
+                                <DropdownMenuItem asChild>
+                                    <CSVLink 
+                                        data={csvData}
+                                        headers={csvHeaders}
+                                        filename={`chamados-pedido-${selectedOrder.number}.csv`}
+                                        className="flex items-center cursor-pointer w-full"
+                                    >
+                                        <FileDown className="mr-2 h-4 w-4" />
+                                        <span>Exportar para CSV</span>
+                                    </CSVLink>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={generatePdfReport}>
+                                    <Printer className="mr-2 h-4 w-4" />
+                                    <span>Gerar Relatório PDF</span>
+                                </DropdownMenuItem>
+                            </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                    
+                    <Button size="sm" onClick={handleNewTicket}>
+                        <PlusCircle className="mr-2 h-4 w-4"/>
+                        Novo Chamado
+                    </Button>
+                </div>
             </CardHeader>
             <CardContent>
                 {isLoading ? (
