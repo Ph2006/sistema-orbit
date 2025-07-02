@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -7,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -405,6 +404,28 @@ export default function QuotationsPage() {
         setCurrentItem(emptyItem);
         setEditIndex(null);
     }
+
+    const handleDuplicateItem = (index: number) => {
+        const itemToDuplicate = watchedItems[index];
+        // Create a copy of the item with a modified description to indicate it's a duplicate
+        const duplicatedItem = {
+            ...itemToDuplicate,
+            description: `${itemToDuplicate.description} (Cópia)`,
+            quantity: 1 // Reset quantity to 1 for the duplicate
+        };
+        
+        // Add the duplicated item right after the original
+        const newItems = [...watchedItems];
+        newItems.splice(index + 1, 0, duplicatedItem);
+        
+        // Update the form with all items
+        form.setValue('items', newItems);
+        
+        toast({
+            title: "Item duplicado!",
+            description: "O item foi duplicado e adicionado à lista. Você pode editá-lo conforme necessário.",
+        });
+    };
     
     const handleAddClick = () => {
         setSelectedQuotation(null);
@@ -964,6 +985,9 @@ export default function QuotationsPage() {
                                         <Card>
                                             <CardHeader>
                                                 <CardTitle>Itens Adicionados</CardTitle>
+                                                <CardDescription>
+                                                    Use o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
+                                                </CardDescription>
                                             </CardHeader>
                                             <CardContent>
                                                 <Table>
@@ -975,7 +999,7 @@ export default function QuotationsPage() {
                                                             <TableHead className="w-[120px]">Preço Unit. s/ Imp.</TableHead>
                                                             <TableHead className="w-[80px]">Imposto (%)</TableHead>
                                                             <TableHead className="w-[150px]">Total c/ Imp.</TableHead>
-                                                            <TableHead className="w-[100px] text-right">Ações</TableHead>
+                                                            <TableHead className="w-[120px] text-right">Ações</TableHead>
                                                         </TableRow>
                                                     </TableHeader>
                                                     <TableBody>
@@ -990,8 +1014,23 @@ export default function QuotationsPage() {
                                                                     <TableCell>{item.taxRate || 0}%</TableCell>
                                                                     <TableCell>{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
                                                                     <TableCell className="text-right">
-                                                                        <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button>
-                                                                        <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => remove(index)}><Trash2 className="h-4 w-4" /></Button>
+                                                                        <div className="flex items-center gap-1">
+                                                                            <Button 
+                                                                                type="button" 
+                                                                                variant="ghost" 
+                                                                                size="icon"
+                                                                                onClick={() => handleDuplicateItem(index)}
+                                                                                title="Duplicar item"
+                                                                            >
+                                                                                <Copy className="h-4 w-4" />
+                                                                            </Button>
+                                                                            <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}>
+                                                                                <Pencil className="h-4 w-4" />
+                                                                            </Button>
+                                                                            <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => remove(index)}>
+                                                                                <Trash2 className="h-4 w-4" />
+                                                                            </Button>
+                                                                        </div>
                                                                     </TableCell>
                                                                 </TableRow>
                                                             )
