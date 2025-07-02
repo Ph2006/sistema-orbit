@@ -101,6 +101,7 @@ export default function OrderEngineeringTickets({
     const [selectedTicket, setSelectedTicket] = useState<EngineeringTicket | null>(null);
     const [ticketToDelete, setTicketToDelete] = useState<EngineeringTicket | null>(null);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     // Form
     const form = useForm<z.infer<typeof engineeringTicketSchema>>({
@@ -119,77 +120,47 @@ export default function OrderEngineeringTickets({
     });
 
     // === DATA FETCHING ===
-    // SUBSTITUA a função fetchTicketsForOrder no arquivo OrderEngineeringTickets.tsx
-
-const fetchTicketsForOrder = async () => {
-    if (!selectedOrder?.id) {
-        console.log("❌ Nenhum pedido selecionado para buscar chamados");
-        setTickets([]);
-        setIsLoading(false);
-        return;
-    }
-    
-    console.log("=== BUSCANDO CHAMADOS DE ENGENHARIA ===");
-    console.log("🎯 Pedido selecionado:", selectedOrder.number, "ID:", selectedOrder.id);
-    
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-        // BUSCA SIMPLES SEM orderBy (funciona sem índice)
-        console.log("🔍 Executando query sem orderBy...");
-        
-        const ticketsQuery = query(
-            collection(db, "companies", "mecald", "engineeringTickets"),
-            where("orderId", "==", selectedOrder.id)
-        );
-        
-        const snapshot = await getDocs(ticketsQuery);
-        console.log(`📊 Documentos encontrados: ${snapshot.docs.length}`);
-        
-        if (snapshot.empty) {
-            console.log("ℹ️ Nenhum chamado encontrado para este pedido");
+    const fetchTicketsForOrder = async () => {
+        if (!selectedOrder?.id) {
+            console.log("❌ Nenhum pedido selecionado");
             setTickets([]);
+            setIsLoading(false);
             return;
         }
         
-        // Processar os documentos encontrados
-        const ticketsList: EngineeringTicket[] = [];
+        console.log("=== BUSCANDO CHAMADOS ===");
+        console.log("🎯 Pedido:", selectedOrder.number, "| ID:", selectedOrder.id);
         
-        snapshot.docs.forEach((doc, index) => {
-            try {
+        setIsLoading(true);
+        
+        try {
+            // Query simples sem orderBy
+            const ticketsQuery = query(
+                collection(db, "companies", "mecald", "engineeringTickets"),
+                where("orderId", "==", selectedOrder.id)
+            );
+            
+            const snapshot = await getDocs(ticketsQuery);
+            console.log(`📊 Encontrados: ${snapshot.docs.length} chamados`);
+            
+            if (snapshot.empty) {
+                console.log("ℹ️ Nenhum chamado para este pedido");
+                setTickets([]);
+                setIsLoading(false);
+                return;
+            }
+            
+            // Processar documentos
+            const ticketsList = snapshot.docs.map(doc => {
                 const data = doc.data();
-                console.log(`📋 Processando documento ${index + 1}:`, {
-                    id: doc.id,
-                    ticketNumber: data.ticketNumber,
-                    title: data.title?.substring(0, 30) + "...",
-                    status: data.status
-                });
-                
-                // Encontrar item relacionado
                 const item = selectedOrder.items.find(i => i.id === data.itemId);
                 
-                // Processar comentários com segurança
-                const processedComments = (data.comments || []).map((comment: any) => {
-                    try {
-                        return {
-                            ...comment,
-                            timestamp: comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(comment.timestamp || Date.now()),
-                        };
-                    } catch (e) {
-                        console.warn(`⚠️ Erro ao processar comentário:`, e);
-                        return {
-                            ...comment,
-                            timestamp: new Date(),
-                        };
-                    }
-                });
+                console.log(`📋 Ticket: ${data.ticketNumber || doc.id.slice(0, 8)}`);
                 
-                // Criar objeto do ticket
-                const ticket: EngineeringTicket = {
+                return {
                     id: doc.id,
                     ticketNumber: data.ticketNumber || `ENG-${doc.id.slice(0, 6)}`,
-                    title: data.title || "Título não definido",
+                    title: data.title || "Sem título",
                     description: data.description || "",
                     orderId: data.orderId,
                     itemId: data.itemId || "",
@@ -202,49 +173,32 @@ const fetchTicketsForOrder = async () => {
                     dueDate: data.dueDate?.toDate ? data.dueDate.toDate() : null,
                     resolvedDate: data.resolvedDate?.toDate ? data.resolvedDate.toDate() : null,
                     resolution: data.resolution || "",
-                    comments: processedComments,
+                    comments: (data.comments || []).map((comment: any) => ({
+                        ...comment,
+                        timestamp: comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(),
+                    })),
                     itemName: item?.description || 'N/A',
-                };
-                
-                ticketsList.push(ticket);
-                
-            } catch (docError) {
-                console.error(`❌ Erro ao processar documento ${doc.id}:`, docError);
-            }
-        });
-        
-        // Ordenar por data de criação (mais recente primeiro)
-        ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
-        
-        console.log(`✅ ${ticketsList.length} chamados processados e ordenados com sucesso`);
-        setTickets(ticketsList);
-        
-    } catch (error) {
-        console.error("❌ Erro ao buscar chamados:", error);
-        
-        // Verificar tipo de erro
-        if (error.message?.includes('index')) {
-            setError("Aguardando criação do índice no Firebase (pode levar alguns minutos)");
-            console.log("⏳ Índice ainda sendo criado, aguarde...");
-        } else if (error.message?.includes('permission')) {
-            setError("Erro de permissão ao acessar os dados");
-            console.log("🔐 Verifique as regras de segurança do Firestore");
-        } else {
-            setError(`Erro: ${error.message}`);
+                } as EngineeringTicket;
+            });
+            
+            // Ordenar por data
+            ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
+            
+            console.log(`✅ ${ticketsList.length} chamados processados`);
+            setTickets(ticketsList);
+            
+        } catch (error) {
+            console.error("❌ Erro:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao carregar chamados",
+                description: "Verifique o console para detalhes"
+            });
+            setTickets([]);
+        } finally {
+            setIsLoading(false);
         }
-        
-        toast({ 
-            variant: "destructive", 
-            title: "Erro ao carregar chamados",
-            description: error.message?.includes('index') 
-                ? "Aguarde a criação do índice no Firebase" 
-                : "Verifique o console para mais detalhes"
-        });
-        
-    } finally {
-        setIsLoading(false);
-    }
-};
+    };
 
     useEffect(() => {
         if (selectedOrder?.id && !parentLoading) {
