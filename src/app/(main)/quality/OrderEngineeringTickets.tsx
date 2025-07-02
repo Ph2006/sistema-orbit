@@ -119,45 +119,132 @@ export default function OrderEngineeringTickets({
     });
 
     // === DATA FETCHING ===
-    const fetchTicketsForOrder = async () => {
-        if (!selectedOrder?.id) return;
+    // SUBSTITUA a função fetchTicketsForOrder no arquivo OrderEngineeringTickets.tsx
+
+const fetchTicketsForOrder = async () => {
+    if (!selectedOrder?.id) {
+        console.log("❌ Nenhum pedido selecionado para buscar chamados");
+        setTickets([]);
+        setIsLoading(false);
+        return;
+    }
+    
+    console.log("=== BUSCANDO CHAMADOS DE ENGENHARIA ===");
+    console.log("🎯 Pedido selecionado:", selectedOrder.number, "ID:", selectedOrder.id);
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+        // BUSCA SIMPLES SEM orderBy (funciona sem índice)
+        console.log("🔍 Executando query sem orderBy...");
         
-        setIsLoading(true);
-        try {
-            const ticketsQuery = query(
-                collection(db, "companies", "mecald", "engineeringTickets"),
-                where("orderId", "==", selectedOrder.id),
-                orderBy("createdDate", "desc")
-            );
-            
-            const ticketsSnapshot = await getDocs(ticketsQuery);
-            
-            const ticketsList = ticketsSnapshot.docs.map(doc => {
+        const ticketsQuery = query(
+            collection(db, "companies", "mecald", "engineeringTickets"),
+            where("orderId", "==", selectedOrder.id)
+        );
+        
+        const snapshot = await getDocs(ticketsQuery);
+        console.log(`📊 Documentos encontrados: ${snapshot.docs.length}`);
+        
+        if (snapshot.empty) {
+            console.log("ℹ️ Nenhum chamado encontrado para este pedido");
+            setTickets([]);
+            return;
+        }
+        
+        // Processar os documentos encontrados
+        const ticketsList: EngineeringTicket[] = [];
+        
+        snapshot.docs.forEach((doc, index) => {
+            try {
                 const data = doc.data();
+                console.log(`📋 Processando documento ${index + 1}:`, {
+                    id: doc.id,
+                    ticketNumber: data.ticketNumber,
+                    title: data.title?.substring(0, 30) + "...",
+                    status: data.status
+                });
+                
+                // Encontrar item relacionado
                 const item = selectedOrder.items.find(i => i.id === data.itemId);
                 
-                return {
+                // Processar comentários com segurança
+                const processedComments = (data.comments || []).map((comment: any) => {
+                    try {
+                        return {
+                            ...comment,
+                            timestamp: comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(comment.timestamp || Date.now()),
+                        };
+                    } catch (e) {
+                        console.warn(`⚠️ Erro ao processar comentário:`, e);
+                        return {
+                            ...comment,
+                            timestamp: new Date(),
+                        };
+                    }
+                });
+                
+                // Criar objeto do ticket
+                const ticket: EngineeringTicket = {
                     id: doc.id,
-                    ...data,
-                    createdDate: data.createdDate.toDate(),
-                    dueDate: data.dueDate?.toDate() || null,
-                    resolvedDate: data.resolvedDate?.toDate() || null,
-                    comments: (data.comments || []).map((comment: any) => ({
-                        ...comment,
-                        timestamp: comment.timestamp.toDate(),
-                    })),
+                    ticketNumber: data.ticketNumber || `ENG-${doc.id.slice(0, 6)}`,
+                    title: data.title || "Título não definido",
+                    description: data.description || "",
+                    orderId: data.orderId,
+                    itemId: data.itemId || "",
+                    priority: data.priority || "Média",
+                    category: data.category || "Esclarecimento Técnico",
+                    status: data.status || "Aberto",
+                    requestedBy: data.requestedBy || "Usuário",
+                    assignedTo: data.assignedTo || "",
+                    createdDate: data.createdDate?.toDate ? data.createdDate.toDate() : new Date(),
+                    dueDate: data.dueDate?.toDate ? data.dueDate.toDate() : null,
+                    resolvedDate: data.resolvedDate?.toDate ? data.resolvedDate.toDate() : null,
+                    resolution: data.resolution || "",
+                    comments: processedComments,
                     itemName: item?.description || 'N/A',
-                } as EngineeringTicket;
-            });
-            
-            setTickets(ticketsList);
-        } catch (error) {
-            console.error("Error fetching tickets for order:", error);
-            toast({ variant: "destructive", title: "Erro ao buscar chamados" });
-        } finally {
-            setIsLoading(false);
+                };
+                
+                ticketsList.push(ticket);
+                
+            } catch (docError) {
+                console.error(`❌ Erro ao processar documento ${doc.id}:`, docError);
+            }
+        });
+        
+        // Ordenar por data de criação (mais recente primeiro)
+        ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
+        
+        console.log(`✅ ${ticketsList.length} chamados processados e ordenados com sucesso`);
+        setTickets(ticketsList);
+        
+    } catch (error) {
+        console.error("❌ Erro ao buscar chamados:", error);
+        
+        // Verificar tipo de erro
+        if (error.message?.includes('index')) {
+            setError("Aguardando criação do índice no Firebase (pode levar alguns minutos)");
+            console.log("⏳ Índice ainda sendo criado, aguarde...");
+        } else if (error.message?.includes('permission')) {
+            setError("Erro de permissão ao acessar os dados");
+            console.log("🔐 Verifique as regras de segurança do Firestore");
+        } else {
+            setError(`Erro: ${error.message}`);
         }
-    };
+        
+        toast({ 
+            variant: "destructive", 
+            title: "Erro ao carregar chamados",
+            description: error.message?.includes('index') 
+                ? "Aguarde a criação do índice no Firebase" 
+                : "Verifique o console para mais detalhes"
+        });
+        
+    } finally {
+        setIsLoading(false);
+    }
+};
 
     useEffect(() => {
         if (selectedOrder?.id && !parentLoading) {
