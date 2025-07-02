@@ -618,6 +618,9 @@ export default function QualityPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(true);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [selectedOrderForInspections, setSelectedOrderForInspections] = useState<OrderInfo | null>(null);
 
   // --- FORMS ---
   const rncForm = useForm<z.infer<typeof nonConformanceSchema>>({
@@ -3110,13 +3113,15 @@ export default function QualityPage() {
                         </div>
                     </AccordionTrigger>
                     <AccordionContent className="pt-2">
-                        <PlaceholderCard 
-                            title="Chamados de Engenharia"
-                            description="Sistema para abertura e acompanhamento de chamados para a engenharia estará disponível em breve."
-                            icon={Phone} 
+                        <OrderEngineeringTickets 
+                            selectedOrder={selectedOrderForInspections}
+                            teamMembers={teamMembers}
+                            user={user}
+                            toast={toast}
+                            isLoading={isLoading}
                         />
-                    </AccordionContent>
-                </AccordionItem>
+            </AccordionContent>
+        </AccordionItem>
             </Accordion>
             </ScrollArea>
             </div>
