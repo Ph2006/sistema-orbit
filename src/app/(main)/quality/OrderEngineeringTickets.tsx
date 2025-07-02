@@ -120,85 +120,89 @@ export default function OrderEngineeringTickets({
     });
 
     // === DATA FETCHING ===
-    const fetchTicketsForOrder = async () => {
-        if (!selectedOrder?.id) {
-            console.log("❌ Nenhum pedido selecionado");
+    // SUBSTITUA a função fetchTicketsForOrder no arquivo OrderEngineeringTickets.tsx
+
+    // SUBSTITUA a função fetchTicketsForOrder por esta versão simplificada:
+
+const fetchTicketsForOrder = async () => {
+    if (!selectedOrder?.id) {
+        console.log("❌ Nenhum pedido selecionado");
+        setTickets([]);
+        setIsLoading(false);
+        return;
+    }
+    
+    console.log("=== BUSCANDO CHAMADOS ===");
+    console.log("🎯 Pedido:", selectedOrder.number, "| ID:", selectedOrder.id);
+    
+    setIsLoading(true);
+    
+    try {
+        // Query simples sem orderBy
+        const ticketsQuery = query(
+            collection(db, "companies", "mecald", "engineeringTickets"),
+            where("orderId", "==", selectedOrder.id)
+        );
+        
+        const snapshot = await getDocs(ticketsQuery);
+        console.log(`📊 Encontrados: ${snapshot.docs.length} chamados`);
+        
+        if (snapshot.empty) {
+            console.log("ℹ️ Nenhum chamado para este pedido");
             setTickets([]);
             setIsLoading(false);
             return;
         }
         
-        console.log("=== BUSCANDO CHAMADOS ===");
-        console.log("🎯 Pedido:", selectedOrder.number, "| ID:", selectedOrder.id);
+        // Processar documentos
+        const ticketsList = snapshot.docs.map(doc => {
+            const data = doc.data();
+            const item = selectedOrder.items.find(i => i.id === data.itemId);
+            
+            console.log(`📋 Ticket: ${data.ticketNumber || doc.id.slice(0, 8)}`);
+            
+            return {
+                id: doc.id,
+                ticketNumber: data.ticketNumber || `ENG-${doc.id.slice(0, 6)}`,
+                title: data.title || "Sem título",
+                description: data.description || "",
+                orderId: data.orderId,
+                itemId: data.itemId || "",
+                priority: data.priority || "Média",
+                category: data.category || "Esclarecimento Técnico",
+                status: data.status || "Aberto",
+                requestedBy: data.requestedBy || "Usuário",
+                assignedTo: data.assignedTo || "",
+                createdDate: data.createdDate?.toDate ? data.createdDate.toDate() : new Date(),
+                dueDate: data.dueDate?.toDate ? data.dueDate.toDate() : null,
+                resolvedDate: data.resolvedDate?.toDate ? data.resolvedDate.toDate() : null,
+                resolution: data.resolution || "",
+                comments: (data.comments || []).map((comment: any) => ({
+                    ...comment,
+                    timestamp: comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(),
+                })),
+                itemName: item?.description || 'N/A',
+            } as EngineeringTicket;
+        });
         
-        setIsLoading(true);
+        // Ordenar por data
+        ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
         
-        try {
-            // Query simples sem orderBy
-            const ticketsQuery = query(
-                collection(db, "companies", "mecald", "engineeringTickets"),
-                where("orderId", "==", selectedOrder.id)
-            );
-            
-            const snapshot = await getDocs(ticketsQuery);
-            console.log(`📊 Encontrados: ${snapshot.docs.length} chamados`);
-            
-            if (snapshot.empty) {
-                console.log("ℹ️ Nenhum chamado para este pedido");
-                setTickets([]);
-                setIsLoading(false);
-                return;
-            }
-            
-            // Processar documentos
-            const ticketsList = snapshot.docs.map(doc => {
-                const data = doc.data();
-                const item = selectedOrder.items.find(i => i.id === data.itemId);
-                
-                console.log(`📋 Ticket: ${data.ticketNumber || doc.id.slice(0, 8)}`);
-                
-                return {
-                    id: doc.id,
-                    ticketNumber: data.ticketNumber || `ENG-${doc.id.slice(0, 6)}`,
-                    title: data.title || "Sem título",
-                    description: data.description || "",
-                    orderId: data.orderId,
-                    itemId: data.itemId || "",
-                    priority: data.priority || "Média",
-                    category: data.category || "Esclarecimento Técnico",
-                    status: data.status || "Aberto",
-                    requestedBy: data.requestedBy || "Usuário",
-                    assignedTo: data.assignedTo || "",
-                    createdDate: data.createdDate?.toDate ? data.createdDate.toDate() : new Date(),
-                    dueDate: data.dueDate?.toDate ? data.dueDate.toDate() : null,
-                    resolvedDate: data.resolvedDate?.toDate ? data.resolvedDate.toDate() : null,
-                    resolution: data.resolution || "",
-                    comments: (data.comments || []).map((comment: any) => ({
-                        ...comment,
-                        timestamp: comment.timestamp?.toDate ? comment.timestamp.toDate() : new Date(),
-                    })),
-                    itemName: item?.description || 'N/A',
-                } as EngineeringTicket;
-            });
-            
-            // Ordenar por data
-            ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
-            
-            console.log(`✅ ${ticketsList.length} chamados processados`);
-            setTickets(ticketsList);
-            
-        } catch (error) {
-            console.error("❌ Erro:", error);
-            toast({ 
-                variant: "destructive", 
-                title: "Erro ao carregar chamados",
-                description: "Verifique o console para detalhes"
-            });
-            setTickets([]);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        console.log(`✅ ${ticketsList.length} chamados processados`);
+        setTickets(ticketsList);
+        
+    } catch (error) {
+        console.error("❌ Erro:", error);
+        toast({ 
+            variant: "destructive", 
+            title: "Erro ao carregar chamados",
+            description: "Verifique o console para detalhes"
+        });
+        setTickets([]);
+    } finally {
+        setIsLoading(false);
+    }
+};
 
     useEffect(() => {
         if (selectedOrder?.id && !parentLoading) {
@@ -601,7 +605,7 @@ export default function OrderEngineeringTickets({
                                                 </SelectTrigger>
                                             </FormControl>
                                             <SelectContent>
-                                                <SelectItem value="">Nenhum item específico</SelectItem>
+                                                <SelectItem value="none">Nenhum item específico</SelectItem>
                                                 {selectedOrder.items.map(item => (
                                                     <SelectItem key={item.id} value={item.id}>
                                                         {item.code ? `[${item.code}] ` : ''}{item.description}
@@ -677,7 +681,7 @@ export default function OrderEngineeringTickets({
                                                         </SelectTrigger>
                                                     </FormControl>
                                                     <SelectContent>
-                                                        <SelectItem value="">Não atribuído</SelectItem>
+                                                        <SelectItem value="none">Não atribuído</SelectItem>
                                                         {teamMembers.map(member => (
                                                             <SelectItem key={member.id} value={member.name}>
                                                                 {member.name}
