@@ -618,7 +618,6 @@ export default function QualityPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [selectedOrderForInspections, setSelectedOrderForInspections] = useState<OrderInfo | null>(null);
 
