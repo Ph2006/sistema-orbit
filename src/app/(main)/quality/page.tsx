@@ -618,8 +618,7 @@ export default function QualityPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [selectedOrderForInspections, setSelectedOrderForInspections] = useState<OrderInfo | null>(null);
+  
 
   // --- FORMS ---
   const rncForm = useForm<z.infer<typeof nonConformanceSchema>>({
