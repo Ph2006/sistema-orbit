@@ -414,16 +414,12 @@ export default function QuotationsPage() {
             quantity: 1 // Reset quantity to 1 for the duplicate
         };
         
-        // Add the duplicated item right after the original
-        const newItems = [...watchedItems];
-        newItems.splice(index + 1, 0, duplicatedItem);
-        
-        // Update the form with all items
-        form.setValue('items', newItems);
+        // Add the duplicated item to the end of the list
+        append(duplicatedItem);
         
         toast({
             title: "Item duplicado!",
-            description: "O item foi duplicado e adicionado à lista. Você pode editá-lo conforme necessário.",
+            description: "O item foi duplicado e adicionado ao final da lista. Você pode editá-lo conforme necessário.",
         });
     };
     
@@ -1190,7 +1186,6 @@ export default function QuotationsPage() {
                                                     <TableHead>Descrição</TableHead>
                                                     <TableHead className="text-center w-[60px]">Qtd.</TableHead>
                                                     <TableHead className="text-right w-[120px]">Valor Unit. s/ Imp.</TableHead>
-                                                    <TableHead className="text-center w-[80px]">Imp. (%)</TableHead>
                                                     <TableHead className="text-right w-[150px]">Subtotal c/ Imp.</TableHead>
                                                 </TableRow>
                                             </TableHeader>
@@ -1283,7 +1278,7 @@ export default function QuotationsPage() {
                         Sim, excluir
                     </AlertDialogAction>
                     </AlertDialogFooter>
-                </AlertDialogContent>
+                    </AlertDialogContent>
             </AlertDialog>
 
             <Dialog open={isGenerateOrderDialogOpen} onOpenChange={setIsGenerateOrderDialogOpen}>
