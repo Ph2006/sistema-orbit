@@ -6,7 +6,7 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, setDoc, getDoc, arrayUnion, arrayRemove } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, uploadDimensionalReportPhotos } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, addMonths, isPast, differenceInDays } from "date-fns";
 import jsPDF from "jspdf";
@@ -1220,18 +1220,10 @@ export default function QualityPage() {
         projectName: selectedOrder?.projectName || null,
       };
       
-      // VALIDAÇÃO DO TAMANHO
+      // LOGS DE DEPURAÇÃO (sem validação de tamanho - agora usando Storage)
       const dataSize = JSON.stringify(dataToSave).length;
       console.log(`Tamanho dos dados: ${(dataSize / 1024).toFixed(1)}KB`);
-      
-      if (dataSize > 900000) { // 900KB
-          toast({
-              variant: "destructive",
-              title: "Relatório muito grande",
-              description: "O relatório excede o limite. Remova algumas fotos.",
-          });
-          return;
-      }
+      console.log(`Fotos no relatório: ${dataToSave.photos?.length || 0} (URLs apenas)`);
       
       console.log("=== DADOS FINAIS PARA FIRESTORE ===");
       console.log("Item salvo:", {
@@ -2071,7 +2063,27 @@ export default function QualityPage() {
                 }
                 
                 try {
-                    if (photoDataUri && typeof photoDataUri === 'string' && photoDataUri.startsWith('data:image/')) {
+                    let imageData = photoDataUri;
+                    
+                    // Se for uma URL (novo formato), converter para base64 para uso no PDF
+                    if (photoDataUri && typeof photoDataUri === 'string' && photoDataUri.startsWith('http')) {
+                        console.log(`Converting URL to base64 for PDF: ${photoDataUri.substring(0, 100)}...`);
+                        try {
+                            const response = await fetch(photoDataUri);
+                            const blob = await response.blob();
+                            imageData = await new Promise<string>((resolve) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result as string);
+                                reader.readAsDataURL(blob);
+                            });
+                            console.log(`✓ URL converted to base64 for PDF`);
+                        } catch (urlError) {
+                            console.error(`❌ Erro ao converter URL para base64:`, urlError);
+                            imageData = null;
+                        }
+                    }
+                    
+                    if (imageData && typeof imageData === 'string' && imageData.startsWith('data:image/')) {
                         console.log(`✓ Adicionando foto ${i + 1} ao PDF na posição (${currentX}, ${y})`);
                         
                         // Adicionar borda ao redor da foto
@@ -2080,7 +2092,7 @@ export default function QualityPage() {
                         docPdf.rect(currentX - 1, y - 1, photoWidth + 2, photoHeight + 2);
                         
                         // Adicionar a imagem
-                        docPdf.addImage(photoDataUri, 'JPEG', currentX, y, photoWidth, photoHeight);
+                        docPdf.addImage(imageData, 'JPEG', currentX, y, photoWidth, photoHeight);
                         
                         // Adicionar numeração da foto
                         docPdf.setFontSize(10).setFont(undefined, 'bold');
@@ -3412,6 +3424,12 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         if (validFiles.length === 0) return;
         
         try {
+            toast({
+                title: "Fazendo upload das fotos...",
+                description: "Por favor, aguarde enquanto as fotos são enviadas para o servidor.",
+            });
+
+            // Comprimir as fotos primeiro
             const compressedPhotos = await Promise.all(
                 validFiles.map(async (file) => {
                     try {
@@ -3428,19 +3446,27 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                     }
                 })
             );
+
+            // Gerar ID temporário para organizar as fotos (será usado no Storage)
+            const tempReportId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             
-            const updatedPhotos = [...currentPhotos, ...compressedPhotos];
+            // Fazer upload das fotos para o Firebase Storage
+            console.log("Enviando fotos para Firebase Storage...");
+            const photoUrls = await uploadDimensionalReportPhotos(compressedPhotos, tempReportId);
+            console.log(`✓ ${photoUrls.length} fotos enviadas com sucesso para Storage`);
+            
+            const updatedPhotos = [...currentPhotos, ...photoUrls];
             form.setValue("photos", updatedPhotos, { shouldValidate: true });
             
             toast({
-                title: "Fotos adicionadas",
-                description: `${validFiles.length} foto(s) processada(s) com sucesso.`,
+                title: "Fotos enviadas com sucesso!",
+                description: `${validFiles.length} foto(s) salva(s) no servidor.`,
             });
             
         } catch (error) {
             console.error('Erro ao processar fotos:', error);
             toast({
-                title: "Erro ao processar fotos",
+                title: "Erro ao enviar fotos",
                 description: "Tente novamente ou entre em contato com o suporte.",
                 variant: "destructive",
             });
