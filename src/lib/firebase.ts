@@ -35,4 +35,20 @@ export async function uploadBase64ToStorage(base64: string, path: string): Promi
   return await getDownloadURL(storageRef);
 }
 
+/**
+ * Faz upload de múltiplas fotos para o Firebase Storage específico para relatórios dimensionais
+ * @param base64Photos Array de strings base64 das imagens
+ * @param reportId ID único do relatório (usado para organizar as fotos)
+ * @returns Array de URLs públicas das imagens
+ */
+export async function uploadDimensionalReportPhotos(base64Photos: string[], reportId: string): Promise<string[]> {
+  const uploadPromises = base64Photos.map(async (base64, index) => {
+    const timestamp = Date.now();
+    const photoPath = `dimensionalReports/${reportId}/photo_${index + 1}_${timestamp}.jpg`;
+    return await uploadBase64ToStorage(base64, photoPath);
+  });
+  
+  return await Promise.all(uploadPromises);
+}
+
 export { app, db, auth, analytics, storage };
