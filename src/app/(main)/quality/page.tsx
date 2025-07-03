@@ -204,6 +204,7 @@ const nonConformanceSchema = z.object({
   description: z.string().min(10, "A descrição detalhada é obrigatória (mín. 10 caracteres)."),
   type: z.enum(["Interna", "Reclamação de Cliente"], { required_error: "Selecione o tipo de não conformidade." }),
   status: z.enum(["Aberta", "Em Análise", "Concluída"]),
+  photos: z.array(z.string()).optional(),
 });
 
 const calibrationSchema = z.object({
@@ -623,9 +624,10 @@ export default function QualityPage() {
 
   // --- FORMS ---
   const rncForm = useForm<z.infer<typeof nonConformanceSchema>>({
-    resolver: zodResolver(nonConformanceSchema),
-    defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } },
-  });
+  resolver: zodResolver(nonConformanceSchema),
+  defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' }, photos: [] },
+});
+
 
 
 
@@ -855,9 +857,9 @@ export default function QualityPage() {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
         return {
-          id: doc.id, date: data.date.toDate(), orderId: data.orderId, orderNumber: order?.number || 'N/A',
-          item: { id: data.itemId, description: data.itemDescription }, customerName: order?.customerName || 'N/A',
-          description: data.description, type: data.type, status: data.status,
+            id: doc.id, date: data.date.toDate(), orderId: data.orderId, orderNumber: order?.number || 'N/A',
+            item: { id: data.itemId, description: data.itemDescription }, customerName: order?.customerName || 'N/A',
+            description: data.description, type: data.type, status: data.status,
         } as NonConformance;
       });
       setReports(reportsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
@@ -1033,7 +1035,18 @@ export default function QualityPage() {
       const dataToSave: any = {
         date: Timestamp.fromDate(values.date), orderId: values.orderId, itemId: values.item.id, itemDescription: values.item.description,
         customerId: order.customerId, customerName: order.customerName, description: values.description, type: values.type, status: values.status,
-      };
+        photos: values.photos || [],
+    };
+
+    // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
+    if (!validateDataSizeBeforeSave(dataToSave)) {
+        toast({
+            variant: "destructive",
+            title: "Relatório muito grande para salvar",
+            description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+        });
+        return;
+    }
 
       if (selectedReport) {
         await updateDoc(doc(db, "companies", "mecald", "qualityReports", selectedReport.id), dataToSave);
@@ -1049,7 +1062,7 @@ export default function QualityPage() {
       toast({ variant: "destructive", title: "Erro ao salvar relatório" });
     }
   };
-  const handleAddRncClick = () => { setSelectedReport(null); rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } }); setIsRncFormOpen(true); };
+  const handleAddRncClick = () => { setSelectedReport(null); rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' }, photos: [] }); setIsRncFormOpen(true); };
   const handleEditRncClick = (report: NonConformance) => { setSelectedReport(report); rncForm.reset({ ...report, item: { id: report.item.id, description: report.item.description } }); setIsRncFormOpen(true); };
   const handleDeleteRncClick = (report: NonConformance) => { setReportToDelete(report); setIsRncDeleting(true); };
   const handleConfirmRncDelete = async () => {
@@ -1060,6 +1073,90 @@ export default function QualityPage() {
       setIsRncDeleting(false); await fetchAllData();
     } catch (error) { toast({ variant: "destructive", title: "Erro ao excluir relatório" }); }
   };
+  const handleRncPDF = async (report: NonConformance) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      const companySnap = await getDoc(companyRef);
+      const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+      const orderInfo = orders.find(o => o.id === report.orderId);
+
+      const docPdf = new jsPDF();
+      const pageWidth = docPdf.internal.pageSize.width;
+      const pageHeight = docPdf.internal.pageSize.height;
+      let y = 15;
+      
+      if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+      docPdf.setFontSize(16).setFont(undefined, 'bold');
+      docPdf.text(`Relatório de Não Conformidade - ${report.type}`, pageWidth / 2, y + 8, { align: 'center' });
+      y += 25;
+
+      autoTable(docPdf, {
+          startY: y,
+          theme: 'plain',
+          styles: { fontSize: 9 },
+          body: [
+              ['Data da Ocorrência', format(report.date, 'dd/MM/yyyy'), 'Status', report.status],
+              ['Pedido', `${orderInfo?.number || 'N/A'}`, 'Cliente', report.customerName],
+              ['Item Afetado', `${report.item.description}`, 'Tipo', report.type],
+          ],
+      });
+      y = (docPdf as any).lastAutoTable.finalY + 10;
+
+      // Descrição do problema
+      docPdf.setFontSize(12).setFont(undefined, 'bold');
+      docPdf.text('Descrição da Não Conformidade:', 15, y);
+      y += 7;
+      const splitDescription = docPdf.splitTextToSize(report.description, pageWidth - 30);
+      docPdf.setFontSize(10).setFont(undefined, 'normal');
+      docPdf.text(splitDescription, 15, y);
+      y += (splitDescription.length * 5) + 10;
+
+      // Seção de Fotos
+      if (report.photos && report.photos.length > 0) {
+          if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+          docPdf.setFontSize(12).setFont(undefined, 'bold');
+          docPdf.text('Registro Fotográfico da Não Conformidade', 15, y);
+          y += 7;
+
+          const photoWidth = (pageWidth - 45) / 2;
+          const photoHeight = photoWidth * (3/4);
+          let x = 15;
+
+          for (let i = 0; i < report.photos.length; i++) {
+              const photoDataUri = report.photos[i];
+              if (y + photoHeight > pageHeight - 45) {
+                  docPdf.addPage();
+                  y = 20;
+                  x = 15;
+              }
+              try {
+                  docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
+                  // Adicionar numeração da foto
+                  docPdf.setFontSize(8).setFont(undefined, 'bold');
+                  docPdf.text(`Foto ${i + 1}`, x + photoWidth/2, y + photoHeight + 5, { align: 'center' });
+              } catch(e) { 
+                  docPdf.setFontSize(10).text(`Erro ao carregar foto ${i + 1}`, x, y + 10); 
+              }
+              x = (x === 15) ? (15 + photoWidth + 15) : 15;
+              if (x === 15) y += photoHeight + 15;
+          }
+      }
+
+      const pageCount = docPdf.internal.getNumberOfPages();
+      for(let i = 1; i <= pageCount; i++) {
+          docPdf.setPage(i);
+          docPdf.setFontSize(8).setFont(undefined, 'normal');
+          docPdf.text('RNC-MEC-202501.REV0', 15, pageHeight - 10);
+          docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+      }
+      
+      docPdf.save(`RNC_${report.type.replace(' ', '_')}_${format(report.date, 'dd-MM-yyyy')}.pdf`);
+  } catch (error) {
+      console.error("Error exporting RNC PDF:", error);
+      toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+  }
+};
   const watchedRncOrderId = rncForm.watch("orderId");
   const availableRncItems = useMemo(() => { if (!watchedRncOrderId) return []; return orders.find(o => o.id === watchedRncOrderId)?.items || []; }, [watchedRncOrderId, orders]);
   useEffect(() => { rncForm.setValue('item', {id: '', description: ''}); }, [watchedRncOrderId, rncForm]);
@@ -2765,9 +2862,10 @@ export default function QualityPage() {
                             <TableCell>{report.item.description}</TableCell><TableCell>{report.type}</TableCell>
                             <TableCell><Badge variant={getStatusVariant(report.status)}>{report.status}</Badge></TableCell>
                             <TableCell className="text-right">
-                              <Button variant="ghost" size="icon" onClick={() => handleEditRncClick(report)}><Pencil className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRncClick(report)}><Trash2 className="h-4 w-4" /></Button>
-                            </TableCell></TableRow>))
+                                <Button variant="ghost" size="icon" onClick={() => handleRncPDF(report)}><FileDown className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleEditRncClick(report)}><Pencil className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRncClick(report)}><Trash2 className="h-4 w-4" /></Button>
+                            </TableCell>
                       ) : ( <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de não conformidade encontrado.</TableCell></TableRow> )}
                     </TableBody></Table> }
                 </CardContent></Card>
@@ -2864,7 +2962,8 @@ export default function QualityPage() {
               <FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
           <FormField control={rncForm.control} name="type" render={({ field }) => ( <FormItem><FormLabel>Tipo de Não Conformidade</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Interna">Interna</SelectItem><SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
           <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
-          <FormField control={rncForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Aberta">Aberta</SelectItem><SelectItem value="Em Análise">Em Análise</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+          <RncPhotoUploadSection form={rncForm} />
+          <FormField control={rncForm.control} name="status" render={...
           <DialogFooter><Button type="submit">Salvar</Button></DialogFooter>
       </form></Form></DialogContent></Dialog>
       <AlertDialog open={isRncDeleting} onOpenChange={setIsRncDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o relatório de não conformidade.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmRncDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
@@ -4638,7 +4737,192 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
             </Card>
         </div>
     );
+    // --- COMPONENTE PARA UPLOAD DE FOTOS EM RNC ---
+function RncPhotoUploadSection({ form }: { form: any }) {
+    const { toast } = useToast();
+    const watchedPhotos = form.watch("photos", []);
+
+    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+        
+        const currentPhotos = form.getValues("photos") || [];
+        
+        // Verificar limite de fotos (máximo 4 por RNC)
+        if (currentPhotos.length + files.length > 4) {
+            toast({
+                title: "Muitas fotos",
+                description: `Máximo de 4 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`,
+                variant: "destructive",
+            });
+            return;
+        }
+        
+        const validFiles = Array.from(files).filter(file => {
+            // Verificar tipo de arquivo
+            if (!file.type.startsWith('image/')) {
+                toast({
+                    title: "Tipo de arquivo inválido",
+                    description: `O arquivo ${file.name} não é uma imagem válida.`,
+                    variant: "destructive",
+                });
+                return false;
+            }
+            
+            // Verificar tamanho (máximo 20MB)
+            if (file.size > 20 * 1024 * 1024) {
+                toast({
+                    title: "Arquivo muito grande",
+                    description: `O arquivo ${file.name} é muito grande (máximo 20MB).`,
+                    variant: "destructive",
+                });
+                return false;
+            }
+            
+            return true;
+        });
+        
+        if (validFiles.length === 0) return;
+        
+        try {
+            const compressedPhotos = await Promise.all(
+                validFiles.map(async (file) => {
+                    try {
+                        console.log(`Processando foto RNC: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
+                        return await compressImageForFirestore(file);
+                    } catch (error) {
+                        console.error(`Erro ao comprimir ${file.name}:`, error);
+                        // Em caso de erro, usar o arquivo original
+                        return new Promise<string>((resolve) => {
+                            const reader = new FileReader();
+                            reader.onload = (e) => resolve(e.target?.result as string);
+                            reader.readAsDataURL(file);
+                        });
+                    }
+                })
+            );
+            
+            const updatedPhotos = [...currentPhotos, ...compressedPhotos];
+            form.setValue("photos", updatedPhotos, { shouldValidate: true });
+            
+            toast({
+                title: "Fotos adicionadas",
+                description: `${validFiles.length} foto(s) processada(s) com sucesso.`,
+            });
+            
+        } catch (error) {
+            console.error('Erro ao processar fotos:', error);
+            toast({
+                title: "Erro ao processar fotos",
+                description: "Tente novamente ou entre em contato com o suporte.",
+                variant: "destructive",
+            });
+        }
+    };
+
+    const removePhoto = (index: number) => {
+        const currentPhotos = form.getValues("photos") || [];
+        const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+        form.setValue("photos", updatedPhotos, { shouldValidate: true });
+    };
+
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                    📷 Registro Fotográfico
+                    <Badge variant="secondary">{watchedPhotos?.length || 0}/4</Badge>
+                </CardTitle>
+                <CardDescription>
+                    Anexe fotos da não conformidade para documentar o problema identificado.
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <FormItem>
+                    <FormLabel>Selecionar Fotos</FormLabel>
+                    <FormControl>
+                        <div className="flex items-center justify-center w-full">
+                            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                    <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                                        <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                                    </svg>
+                                    <p className="mb-2 text-sm text-gray-500">
+                                        <span className="font-semibold">Clique para selecionar</span> ou arraste as imagens
+                                    </p>
+                                    <p className="text-xs text-gray-500">PNG, JPG, JPEG (máx. 5MB cada)</p>
+                                </div>
+                                <Input 
+                                    type="file" 
+                                    multiple 
+                                    accept="image/jpeg,image/jpg,image/png" 
+                                    onChange={handlePhotoUpload} 
+                                    className="hidden"
+                                />
+                            </label>
+                        </div>
+                    </FormControl>
+                    <FormDescription className="text-xs">
+                        • Máximo 4 fotos por relatório de não conformidade<br/>
+                        • Tamanho máximo: 5MB por imagem<br/>
+                        • Formatos aceitos: JPEG, PNG<br/>
+                        • Dica: Fotos que mostram claramente o problema são mais úteis
+                    </FormDescription>
+                </FormItem>
+
+                {watchedPhotos && watchedPhotos.length > 0 && (
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h4 className="font-medium text-sm">Fotos Anexadas</h4>
+                            <Button 
+                                type="button" 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => form.setValue("photos", [], { shouldValidate: true })}
+                            >
+                                Remover Todas
+                            </Button>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {watchedPhotos.map((photo, index) => (
+                                <div key={index} className="relative group">
+                                    <div className="relative overflow-hidden rounded-lg border">
+                                        <Image 
+                                            src={photo} 
+                                            alt={`RNC ${index + 1}`} 
+                                            width={150} 
+                                            height={150} 
+                                            className="object-cover w-full aspect-square transition-transform group-hover:scale-105" 
+                                        />
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+                                        <Button 
+                                            type="button" 
+                                            size="icon" 
+                                            variant="destructive" 
+                                            className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={() => removePhoto(index)}
+                                        >
+                                            <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                    <p className="text-xs text-center mt-1 text-muted-foreground">
+                                        Foto {index + 1}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Indicador de tamanho do relatório */}
+                <div className="pt-2 border-t">
+                    <DataSizeIndicator data={form.getValues()} maxSizeKB={500} />
+                </div>
+            </CardContent>
+        </Card>
+    );
 }
+
 
 
     
