@@ -245,11 +245,16 @@ export default function OrderEngineeringTickets({
       title: "",
       description: "",
       orderId: selectedOrder?.id || "",
+      itemId: "",
       priority: "Média",
       category: "Esclarecimento Técnico",
       status: "Aberto",
-      requestedBy: user?.displayName || "",
+      requestedBy: user?.displayName || user?.email || "",
+      assignedTo: "",
       createdDate: new Date(),
+      dueDate: null,
+      resolvedDate: null,
+      resolution: "",
       comments: [],
     },
   });
@@ -345,6 +350,34 @@ export default function OrderEngineeringTickets({
     }
   }, [selectedOrder?.id, parentLoading]);
 
+  // 🔧 DEBUG: Função para testar permissões do Firebase
+  const testFirebaseConnection = async () => {
+    try {
+      console.log("🔍 Testando conexão com Firebase...");
+      console.log("👤 Usuário atual:", user);
+      
+      // Teste de leitura
+      const testQuery = query(
+        collection(db, "companies", "mecald", "engineeringTickets"),
+        where("orderId", "==", "test")
+      );
+      const testSnapshot = await getDocs(testQuery);
+      console.log("✅ Leitura OK - Documentos encontrados:", testSnapshot.docs.length);
+      
+      return true;
+    } catch (error) {
+      console.error("❌ Erro na conexão Firebase:", error);
+      return false;
+    }
+  };
+
+  // Executar teste na inicialização (apenas para debug)
+  useEffect(() => {
+    if (user && selectedOrder) {
+      testFirebaseConnection();
+    }
+  }, [user, selectedOrder]);
+
   // === SUBMIT HANDLERS ===
   const onSubmit = async (values: z.infer<typeof engineeringTicketSchema>) => {
     console.log("🚀 === INICIANDO onSubmit ===");
@@ -416,12 +449,24 @@ export default function OrderEngineeringTickets({
       if (selectedTicket) {
         console.log("📝 Atualizando ticket existente...");
 
-        // Mark resolution date if status changed to resolved/closed
+        // 🔧 CORREÇÃO: Atualizar data de resolução quando status muda para Resolvido/Fechado
+        const statusChanged = selectedTicket.status !== values.status;
         if (
-          (values.status === "Resolvido" || values.status === "Fechado") &&
-          !selectedTicket.resolvedDate
+          statusChanged &&
+          (values.status === "Resolvido" || values.status === "Fechado")
         ) {
           dataToSave.resolvedDate = Timestamp.fromDate(new Date());
+          console.log("📅 Data de resolução atualizada:", new Date());
+        }
+        
+        // Se o status mudou de Resolvido/Fechado para outro, limpar data de resolução
+        if (
+          statusChanged &&
+          (selectedTicket.status === "Resolvido" || selectedTicket.status === "Fechado") &&
+          values.status !== "Resolvido" && values.status !== "Fechado"
+        ) {
+          dataToSave.resolvedDate = null;
+          console.log("📅 Data de resolução removida");
         }
 
         const changeComment = {
@@ -446,63 +491,75 @@ export default function OrderEngineeringTickets({
       } else {
         console.log("🆕 Criando novo ticket...");
 
-        // Generate ticket number
-        const currentYear = new Date().getFullYear();
-        console.log("📊 Buscando tickets existentes...");
+        try {
+          // Generate ticket number
+          const currentYear = new Date().getFullYear();
+          console.log("📊 Buscando tickets existentes...");
 
-        const allTicketsSnapshot = await getDocs(
-          collection(db, "companies", "mecald", "engineeringTickets")
-        );
-        console.log("📋 Tickets encontrados:", allTicketsSnapshot.docs.length);
+          const allTicketsSnapshot = await getDocs(
+            collection(db, "companies", "mecald", "engineeringTickets")
+          );
+          console.log("📋 Tickets encontrados:", allTicketsSnapshot.docs.length);
 
-        const existingTickets = allTicketsSnapshot.docs
-          .map((doc) => doc.data().ticketNumber)
-          .filter((num) => num && num.startsWith(`ENG-${currentYear}`));
+          const existingTickets = allTicketsSnapshot.docs
+            .map((doc) => doc.data().ticketNumber)
+            .filter((num) => num && num.startsWith(`ENG-${currentYear}`));
 
-        const ticketCount = existingTickets.length;
-        const ticketNumber = `ENG-${currentYear}-${(ticketCount + 1)
-          .toString()
-          .padStart(3, "0")}`;
-        console.log("🎫 Número gerado:", ticketNumber);
+          const ticketCount = existingTickets.length;
+          const ticketNumber = `ENG-${currentYear}-${(ticketCount + 1)
+            .toString()
+            .padStart(3, "0")}`;
+          console.log("🎫 Número gerado:", ticketNumber);
 
-        dataToSave.ticketNumber = ticketNumber;
+          dataToSave.ticketNumber = ticketNumber;
 
-        // Initial comment
-        const initialComment = {
-          id: Date.now().toString(),
-          author: user?.displayName || "Sistema",
-          content: `Chamado criado para o pedido ${selectedOrder.number}`,
-          timestamp: Timestamp.fromDate(new Date()),
-          type: "comment",
-        };
+          // 🔧 CORREÇÃO: Garantir que campos obrigatórios estejam presentes
+          if (!dataToSave.requestedBy) {
+            dataToSave.requestedBy = user?.displayName || user?.email || "Usuário";
+          }
 
-        dataToSave.comments = [initialComment];
+          // Initial comment
+          const initialComment = {
+            id: Date.now().toString(),
+            author: user?.displayName || user?.email || "Sistema",
+            content: `Chamado criado para o pedido ${selectedOrder.number}`,
+            timestamp: Timestamp.fromDate(new Date()),
+            type: "comment",
+          };
 
-        console.log("💾 Salvando no Firebase...");
-        console.log("💾 Dados finais:", dataToSave);
+          dataToSave.comments = [initialComment];
 
-        const docRef = await addDoc(
-          collection(db, "companies", "mecald", "engineeringTickets"),
-          dataToSave
-        );
-        console.log("✅ Documento criado com ID:", docRef.id);
-        toast({ title: "Chamado de engenharia criado com sucesso!" });
+          console.log("💾 Salvando no Firebase...");
+          console.log("💾 Dados finais:", dataToSave);
+
+          const docRef = await addDoc(
+            collection(db, "companies", "mecald", "engineeringTickets"),
+            dataToSave
+          );
+          console.log("✅ Documento criado com ID:", docRef.id);
+          toast({ title: "Chamado de engenharia criado com sucesso!" });
+        } catch (createError) {
+          console.error("💥 Erro específico na criação:", createError);
+          throw createError;
+        }
       }
 
       console.log("🔄 Fechando modal e atualizando lista...");
       setIsFormOpen(false);
       setSelectedTicket(null);
+      form.reset();
       await fetchTicketsForOrder();
       console.log("✅ Processo concluído!");
     } catch (error) {
       console.error("💥 Erro ao salvar ticket:", error);
+      console.error("💥 Stack trace:", error);
       toast({
         variant: "destructive",
         title: "Erro ao salvar chamado",
         description:
           typeof error === "object" && error !== null && "message" in error
             ? (error as Error).message
-            : "Erro desconhecido",
+            : "Erro desconhecido. Verifique o console para detalhes.",
       });
     }
   };
@@ -821,9 +878,17 @@ export default function OrderEngineeringTickets({
 
       // Tickets table with more columns
       const tableData = tickets.map((ticket) => {
+        // 🔧 CORREÇÃO: Usar a data de resolução real quando disponível
         const daysToClose = ticket.resolvedDate
           ? differenceInDays(ticket.resolvedDate, ticket.createdDate)
           : differenceInDays(new Date(), ticket.createdDate);
+        
+        // 🔧 CORREÇÃO: Mostrar data de conclusão correta
+        const conclusionDate = ticket.resolvedDate 
+          ? format(ticket.resolvedDate, "dd/MM/yy")
+          : (ticket.status === "Resolvido" || ticket.status === "Fechado") 
+            ? format(new Date(), "dd/MM/yy") 
+            : "-";
 
         return [
           ticket.ticketNumber,
@@ -836,7 +901,7 @@ export default function OrderEngineeringTickets({
           ticket.assignedTo?.substring(0, 15) || "Não atribuído",
           format(ticket.createdDate, "dd/MM/yy"),
           ticket.dueDate ? format(ticket.dueDate, "dd/MM/yy") : "-",
-          ticket.resolvedDate ? format(ticket.resolvedDate, "dd/MM/yy") : "-",
+          conclusionDate,
           daysToClose.toString(),
         ];
       });
@@ -942,25 +1007,32 @@ export default function OrderEngineeringTickets({
       "Resolução",
     ];
 
-    const rows = tickets.map((ticket) => ({
-      Número: ticket.ticketNumber,
-      Título: ticket.title,
-      Categoria: ticket.category,
-      Item: ticket.itemName,
-      Prioridade: ticket.priority,
-      Status: ticket.status,
-      Solicitante: ticket.requestedBy,
-      Responsável: ticket.assignedTo || "Não atribuído",
-      "Data de Abertura": format(ticket.createdDate, "dd/MM/yyyy HH:mm"),
-      Prazo: ticket.dueDate
-        ? format(ticket.dueDate, "dd/MM/yyyy")
-        : "Não definido",
-      "Data de Resolução": ticket.resolvedDate
+    const rows = tickets.map((ticket) => {
+      // 🔧 CORREÇÃO: Usar data de resolução real quando disponível
+      const resolutionDate = ticket.resolvedDate
         ? format(ticket.resolvedDate, "dd/MM/yyyy")
-        : "Não resolvido",
-      Descrição: ticket.description,
-      Resolução: ticket.resolution || "Não resolvido",
-    }));
+        : (ticket.status === "Resolvido" || ticket.status === "Fechado")
+          ? "Resolvido sem data registrada"
+          : "Não resolvido";
+
+      return {
+        Número: ticket.ticketNumber,
+        Título: ticket.title,
+        Categoria: ticket.category,
+        Item: ticket.itemName,
+        Prioridade: ticket.priority,
+        Status: ticket.status,
+        Solicitante: ticket.requestedBy,
+        Responsável: ticket.assignedTo || "Não atribuído",
+        "Data de Abertura": format(ticket.createdDate, "dd/MM/yyyy HH:mm"),
+        Prazo: ticket.dueDate
+          ? format(ticket.dueDate, "dd/MM/yyyy")
+          : "Não definido",
+        "Data de Resolução": resolutionDate,
+        Descrição: ticket.description,
+        Resolução: ticket.resolution || "Não resolvido",
+      };
+    });
 
     return [
       headers.join(","),
@@ -1060,17 +1132,27 @@ export default function OrderEngineeringTickets({
     if (!selectedOrder) return;
 
     setSelectedTicket(null);
-    form.reset({
+    
+    // 🔧 CORREÇÃO: Reset mais completo do formulário
+    const defaultValues = {
       title: "",
       description: "",
       orderId: selectedOrder.id,
-      priority: "Média",
-      category: "Esclarecimento Técnico",
-      status: "Aberto",
-      requestedBy: user?.displayName || "",
+      itemId: "",
+      priority: "Média" as const,
+      category: "Esclarecimento Técnico" as const,
+      status: "Aberto" as const,
+      requestedBy: user?.displayName || user?.email || "",
+      assignedTo: "",
       createdDate: new Date(),
+      dueDate: null,
+      resolvedDate: null,
+      resolution: "",
       comments: [],
-    });
+    };
+    
+    form.reset(defaultValues);
+    console.log("🔄 Formulário resetado com valores:", defaultValues);
     setIsFormOpen(true);
   };
 
