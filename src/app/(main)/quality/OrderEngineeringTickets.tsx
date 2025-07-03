@@ -9,7 +9,6 @@ import { db } from "@/lib/firebase";
 import { format } from "date-fns";
 import { jsPDF } from "jspdf";
 import 'jspdf-autotable';
-import { CSVLink } from "react-csv";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,6 +89,33 @@ const engineeringTicketSchema = z.object({
 type EngineeringTicket = z.infer<typeof engineeringTicketSchema> & { 
     id: string; 
     itemName?: string;
+};
+
+// === FUNÇÃO PARA EXPORTAR CSV ===
+const downloadCSV = (data: any[], filename: string) => {
+    const csvContent = "\uFEFF" + data.map(row => 
+        Object.values(row).map(field => {
+            // Escape aspas duplas e envolver em aspas se necessário
+            const stringField = String(field || '');
+            if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
+                return `"${stringField.replace(/"/g, '""')}"`;
+            }
+            return stringField;
+        }).join(',')
+    ).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
 };
 
 // === COMPONENTE PRINCIPAL ===
@@ -363,42 +389,60 @@ export default function OrderEngineeringTickets({
         }
     };
 
-    // === NOVAS FUNCIONALIDADES: EXPORTAÇÃO E RELATÓRIOS ===
-    // Preparar dados para exportação CSV
+    // === EXPORTAÇÃO CSV NATIVA ===
     const csvData = useMemo(() => {
-        return tickets.map(ticket => ({
-            Número: ticket.ticketNumber,
-            Título: ticket.title,
-            Categoria: ticket.category,
-            Item: ticket.itemName,
-            Prioridade: ticket.priority,
-            Status: ticket.status,
-            Solicitante: ticket.requestedBy,
-            Responsável: ticket.assignedTo || 'Não atribuído',
+        const headers = ['Número', 'Título', 'Categoria', 'Item', 'Prioridade', 'Status', 'Solicitante', 'Responsável', 'Data de Abertura', 'Prazo', 'Data de Resolução', 'Descrição', 'Resolução'];
+        
+        const rows = tickets.map(ticket => ({
+            'Número': ticket.ticketNumber,
+            'Título': ticket.title,
+            'Categoria': ticket.category,
+            'Item': ticket.itemName,
+            'Prioridade': ticket.priority,
+            'Status': ticket.status,
+            'Solicitante': ticket.requestedBy,
+            'Responsável': ticket.assignedTo || 'Não atribuído',
             'Data de Abertura': format(ticket.createdDate, 'dd/MM/yyyy HH:mm'),
             'Prazo': ticket.dueDate ? format(ticket.dueDate, 'dd/MM/yyyy') : 'Não definido',
             'Data de Resolução': ticket.resolvedDate ? format(ticket.resolvedDate, 'dd/MM/yyyy') : 'Não resolvido',
-            Descrição: ticket.description,
-            Resolução: ticket.resolution || 'Não resolvido'
+            'Descrição': ticket.description,
+            'Resolução': ticket.resolution || 'Não resolvido'
         }));
+
+        return [headers.join(','), ...rows.map(row => 
+            headers.map(header => {
+                const value = row[header as keyof typeof row] || '';
+                // Escape aspas duplas e envolver em aspas se necessário
+                const stringValue = String(value);
+                if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+                    return `"${stringValue.replace(/"/g, '""')}"`;
+                }
+                return stringValue;
+            }).join(',')
+        )].join('\n');
     }, [tickets]);
 
-    // Configuração para CSV
-    const csvHeaders = [
-        { label: 'Número', key: 'Número' },
-        { label: 'Título', key: 'Título' },
-        { label: 'Categoria', key: 'Categoria' },
-        { label: 'Item', key: 'Item' },
-        { label: 'Prioridade', key: 'Prioridade' },
-        { label: 'Status', key: 'Status' },
-        { label: 'Solicitante', key: 'Solicitante' },
-        { label: 'Responsável', key: 'Responsável' },
-        { label: 'Data de Abertura', key: 'Data de Abertura' },
-        { label: 'Prazo', key: 'Prazo' },
-        { label: 'Data de Resolução', key: 'Data de Resolução' },
-        { label: 'Descrição', key: 'Descrição' },
-        { label: 'Resolução', key: 'Resolução' }
-    ];
+    const handleExportCSV = () => {
+        if (!selectedOrder) return;
+        
+        const blob = new Blob(['\uFEFF' + csvData], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `chamados-pedido-${selectedOrder.number}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            toast({ 
+                title: "CSV exportado com sucesso",
+                description: "O download foi iniciado"
+            });
+        }
+    };
 
     // Gerar relatório PDF
     const generatePdfReport = () => {
@@ -570,16 +614,9 @@ export default function OrderEngineeringTickets({
                             <DropdownMenuLabel>Opções de Exportação</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <DropdownMenuGroup>
-                                <DropdownMenuItem asChild>
-                                    <CSVLink 
-                                        data={csvData}
-                                        headers={csvHeaders}
-                                        filename={`chamados-pedido-${selectedOrder.number}.csv`}
-                                        className="flex items-center cursor-pointer w-full"
-                                    >
-                                        <FileDown className="mr-2 h-4 w-4" />
-                                        <span>Exportar para CSV</span>
-                                    </CSVLink>
+                                <DropdownMenuItem onClick={handleExportCSV}>
+                                    <FileDown className="mr-2 h-4 w-4" />
+                                    <span>Exportar para CSV</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={generatePdfReport}>
                                     <Printer className="mr-2 h-4 w-4" />
