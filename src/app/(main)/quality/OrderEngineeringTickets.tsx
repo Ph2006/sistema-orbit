@@ -4,9 +4,9 @@ import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, query, where, orderBy } from "firebase/firestore";
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, query, where, orderBy, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format } from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import { jsPDF } from "jspdf";
 import 'jspdf-autotable';
 
@@ -49,6 +49,11 @@ type OrderInfo = {
 type TeamMember = { 
     id: string; 
     name: string 
+};
+
+type CompanyData = {
+    nomeFantasia?: string;
+    logo?: { preview?: string };
 };
 
 // === SCHEMAS ===
@@ -95,7 +100,6 @@ type EngineeringTicket = z.infer<typeof engineeringTicketSchema> & {
 const downloadCSV = (data: any[], filename: string) => {
     const csvContent = "\uFEFF" + data.map(row => 
         Object.values(row).map(field => {
-            // Escape aspas duplas e envolver em aspas se necessário
             const stringField = String(field || '');
             if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n')) {
                 return `"${stringField.replace(/"/g, '""')}"`;
@@ -173,7 +177,6 @@ export default function OrderEngineeringTickets({
         setIsLoading(true);
         
         try {
-            // Query simples sem orderBy
             const ticketsQuery = query(
                 collection(db, "companies", "mecald", "engineeringTickets"),
                 where("orderId", "==", selectedOrder.id)
@@ -189,7 +192,6 @@ export default function OrderEngineeringTickets({
                 return;
             }
             
-            // Processar documentos
             const ticketsList = snapshot.docs.map(doc => {
                 const data = doc.data();
                 const item = selectedOrder.items.find(i => i.id === data.itemId);
@@ -220,7 +222,6 @@ export default function OrderEngineeringTickets({
                 } as EngineeringTicket;
             });
             
-            // Ordenar por data
             ticketsList.sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
             
             console.log(`✅ ${ticketsList.length} chamados processados`);
@@ -247,106 +248,352 @@ export default function OrderEngineeringTickets({
 
     // === SUBMIT HANDLERS ===
     const onSubmit = async (values: z.infer<typeof engineeringTicketSchema>) => {
-    console.log("🚀 === INICIANDO onSubmit ===");
-    console.log("📝 Valores do formulário:", values);
-    console.log("📋 Pedido selecionado:", selectedOrder);
-    console.log("👤 Usuário:", user);
-    console.log("⏳ Estado loading:", isLoading);
+        console.log("🚀 === INICIANDO onSubmit ===");
+        console.log("📝 Valores do formulário:", values);
+        console.log("📋 Pedido selecionado:", selectedOrder);
+        console.log("👤 Usuário:", user);
 
-    // Verificar se a função está sendo chamada
-    alert("Função onSubmit foi chamada!");
+        try {
+            if (!selectedOrder) {
+                console.error("❌ Erro: Nenhum pedido selecionado");
+                toast({ variant: "destructive", title: "Erro: Nenhum pedido selecionado" });
+                return;
+            }
 
-    try {
-        if (!selectedOrder) {
-            console.error("❌ Erro: Nenhum pedido selecionado");
-            alert("Erro: Nenhum pedido selecionado");
-            toast({ variant: "destructive", title: "Erro: Nenhum pedido selecionado" });
-            return;
-        }
+            console.log("✅ Pedido OK, preparando dados...");
 
-        console.log("✅ Pedido OK, preparando dados...");
-        alert("Preparando dados para salvar...");
-
-        const dataToSave = {
-            ...values,
-            orderId: selectedOrder.id,
-            createdDate: Timestamp.fromDate(values.createdDate),
-            dueDate: values.dueDate ? Timestamp.fromDate(values.dueDate) : null,
-            resolvedDate: values.resolvedDate ? Timestamp.fromDate(values.resolvedDate) : null,
-            comments: values.comments || [],
-        };
-
-        console.log("💾 Dados preparados:", dataToSave);
-
-        if (selectedTicket) {
-            console.log("📝 Atualizando ticket existente...");
-            alert("Atualizando ticket existente...");
-            
-            const changeComment = {
-                id: Date.now().toString(),
-                author: user?.displayName || "Sistema",
-                content: `Chamado atualizado`,
-                timestamp: Timestamp.fromDate(new Date()),
-                type: "status_change",
+            const dataToSave = {
+                ...values,
+                orderId: selectedOrder.id,
+                createdDate: Timestamp.fromDate(values.createdDate),
+                dueDate: values.dueDate ? Timestamp.fromDate(values.dueDate) : null,
+                resolvedDate: values.resolvedDate ? Timestamp.fromDate(values.resolvedDate) : null,
+                comments: values.comments || [],
             };
+
+            console.log("💾 Dados preparados:", dataToSave);
+
+            if (selectedTicket) {
+                console.log("📝 Atualizando ticket existente...");
+                
+                const changeComment = {
+                    id: Date.now().toString(),
+                    author: user?.displayName || "Sistema",
+                    content: `Chamado atualizado`,
+                    timestamp: Timestamp.fromDate(new Date()),
+                    type: "status_change",
+                };
+                
+                dataToSave.comments = [...(selectedTicket.comments || []), changeComment];
+                
+                await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedTicket.id), dataToSave);
+                console.log("✅ Ticket atualizado com sucesso");
+                toast({ title: "Chamado atualizado com sucesso!" });
+            } else {
+                console.log("🆕 Criando novo ticket...");
+                
+                // Gerar número do ticket
+                const currentYear = new Date().getFullYear();
+                console.log("📊 Buscando tickets existentes...");
+                
+                const allTicketsSnapshot = await getDocs(collection(db, "companies", "mecald", "engineeringTickets"));
+                console.log("📋 Tickets encontrados:", allTicketsSnapshot.docs.length);
+                
+                const ticketCount = allTicketsSnapshot.docs.filter(doc => 
+                    doc.data().ticketNumber?.startsWith(`ENG-${currentYear}`)
+                ).length;
+                
+                const ticketNumber = `ENG-${currentYear}-${(ticketCount + 1).toString().padStart(4, '0')}`;
+                console.log("🎫 Número gerado:", ticketNumber);
+                
+                dataToSave.ticketNumber = ticketNumber;
+                
+                // Comentário inicial
+                const initialComment = {
+                    id: Date.now().toString(),
+                    author: user?.displayName || "Sistema",
+                    content: `Chamado criado para o pedido ${selectedOrder.number}`,
+                    timestamp: Timestamp.fromDate(new Date()),
+                    type: "comment",
+                };
+                
+                dataToSave.comments = [initialComment];
+                
+                console.log("💾 Salvando no Firebase...");
+                
+                const docRef = await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), dataToSave);
+                console.log("✅ Documento criado com ID:", docRef.id);
+                toast({ title: "Chamado de engenharia criado!" });
+            }
             
-            dataToSave.comments = [...(selectedTicket.comments || []), changeComment];
+            console.log("🔄 Fechando modal e atualizando lista...");
+            setIsFormOpen(false);
+            await fetchTicketsForOrder();
+            console.log("✅ Processo concluído!");
             
-            await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedTicket.id), dataToSave);
-            console.log("✅ Ticket atualizado com sucesso");
-            alert("Ticket atualizado!");
-            toast({ title: "Chamado atualizado com sucesso!" });
-        } else {
-            console.log("🆕 Criando novo ticket...");
-            alert("Criando novo ticket...");
-            
-            // Gerar número do ticket
-            const currentYear = new Date().getFullYear();
-            console.log("📊 Buscando tickets existentes...");
-            
-            const allTicketsSnapshot = await getDocs(collection(db, "companies", "mecald", "engineeringTickets"));
-            console.log("📋 Tickets encontrados:", allTicketsSnapshot.docs.length);
-            
-            const ticketCount = allTicketsSnapshot.docs.filter(doc => 
-                doc.data().ticketNumber?.startsWith(`ENG-${currentYear}`)
-            ).length;
-            
-            const ticketNumber = `ENG-${currentYear}-${(ticketCount + 1).toString().padStart(4, '0')}`;
-            console.log("🎫 Número gerado:", ticketNumber);
-            
-            dataToSave.ticketNumber = ticketNumber;
-            
-            // Comentário inicial
-            const initialComment = {
-                id: Date.now().toString(),
-                author: user?.displayName || "Sistema",
-                content: `Chamado criado para o pedido ${selectedOrder.number}`,
-                timestamp: Timestamp.fromDate(new Date()),
-                type: "comment",
-            };
-            
-            dataToSave.comments = [initialComment];
-            
-            console.log("💾 Salvando no Firebase...");
-            alert("Salvando no Firebase...");
-            
-            const docRef = await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), dataToSave);
-            console.log("✅ Documento criado com ID:", docRef.id);
-            alert("Chamado criado com sucesso!");
-            toast({ title: "Chamado de engenharia criado!" });
+        } catch (error) {
+            console.error("💥 Erro ao salvar ticket:", error);
+            toast({ variant: "destructive", title: "Erro ao salvar chamado", description: error.message });
         }
-        
-        console.log("🔄 Fechando modal e atualizando lista...");
-        setIsFormOpen(false);
-        await fetchTicketsForOrder();
-        console.log("✅ Processo concluído!");
-        
-    } catch (error) {
-        console.error("💥 Erro ao salvar ticket:", error);
-        alert(`Erro: ${error.message}`);
-        toast({ variant: "destructive", title: "Erro ao salvar chamado", description: error.message });
-    }
-};
+    };
+
+    // === EXPORT FUNCTIONS ===
+    const generateTicketPDF = async (ticket: EngineeringTicket) => {
+        try {
+            // Buscar dados da empresa
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const companySnap = await getDoc(companyRef);
+            const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let y = 15;
+
+            // Header com logo
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15);
+                } catch(e) {
+                    console.error("Erro ao adicionar logo:", e);
+                }
+            }
+
+            // Título
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text(`Chamado de Engenharia Nº ${ticket.ticketNumber}`, pageWidth / 2, y + 8, { align: 'center' });
+            y += 25;
+
+            // Informações gerais
+            const generalInfo = [
+                ['Pedido:', selectedOrder?.number || 'N/A', 'Data de Abertura:', format(ticket.createdDate, 'dd/MM/yyyy HH:mm')],
+                ['Cliente:', selectedOrder?.customerName || 'N/A', 'Categoria:', ticket.category],
+                ['Item:', ticket.itemName || 'N/A', 'Prioridade:', ticket.priority],
+                ['Solicitante:', ticket.requestedBy, 'Status:', ticket.status],
+                ['Responsável:', ticket.assignedTo || 'Não atribuído', 'Prazo:', ticket.dueDate ? format(ticket.dueDate, 'dd/MM/yyyy') : 'Não definido']
+            ];
+
+            (docPdf as any).autoTable({
+                startY: y,
+                theme: 'plain',
+                styles: { fontSize: 10 },
+                body: generalInfo,
+            });
+
+            y = (docPdf as any).lastAutoTable.finalY + 10;
+
+            // Título do problema
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Título do Problema:', 15, y);
+            y += 7;
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            const titleLines = docPdf.splitTextToSize(ticket.title, pageWidth - 30);
+            docPdf.text(titleLines, 15, y);
+            y += titleLines.length * 5 + 10;
+
+            // Descrição
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Descrição Detalhada:', 15, y);
+            y += 7;
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            const descLines = docPdf.splitTextToSize(ticket.description, pageWidth - 30);
+            docPdf.text(descLines, 15, y);
+            y += descLines.length * 5 + 10;
+
+            // Resolução (se houver)
+            if (ticket.resolution) {
+                if (y > pageHeight - 40) {
+                    docPdf.addPage();
+                    y = 20;
+                }
+                docPdf.setFontSize(12).setFont(undefined, 'bold');
+                docPdf.text('Resolução:', 15, y);
+                y += 7;
+                docPdf.setFontSize(10).setFont(undefined, 'normal');
+                const resLines = docPdf.splitTextToSize(ticket.resolution, pageWidth - 30);
+                docPdf.text(resLines, 15, y);
+                y += resLines.length * 5 + 10;
+            }
+
+            // Comentários
+            if (ticket.comments && ticket.comments.length > 0) {
+                if (y > pageHeight - 60) {
+                    docPdf.addPage();
+                    y = 20;
+                }
+                docPdf.setFontSize(12).setFont(undefined, 'bold');
+                docPdf.text('Histórico de Comentários:', 15, y);
+                y += 10;
+
+                ticket.comments.forEach((comment) => {
+                    if (y > pageHeight - 30) {
+                        docPdf.addPage();
+                        y = 20;
+                    }
+                    docPdf.setFontSize(9).setFont(undefined, 'bold');
+                    docPdf.text(`${comment.author} - ${format(comment.timestamp, 'dd/MM/yyyy HH:mm')}:`, 15, y);
+                    y += 5;
+                    docPdf.setFont(undefined, 'normal');
+                    const commentLines = docPdf.splitTextToSize(comment.content, pageWidth - 30);
+                    docPdf.text(commentLines, 15, y);
+                    y += commentLines.length * 4 + 8;
+                });
+            }
+
+            // Footer
+            const pageCount = docPdf.internal.getNumberOfPages();
+            for(let i = 1; i <= pageCount; i++) {
+                docPdf.setPage(i);
+                docPdf.setFontSize(8).setFont(undefined, 'normal');
+                docPdf.text('ENG-TICKET-001.REV0', 15, pageHeight - 10);
+                docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+            }
+
+            docPdf.save(`Chamado_${ticket.ticketNumber}.pdf`);
+            toast({ title: "PDF do chamado gerado com sucesso!" });
+
+        } catch (error) {
+            console.error("Erro ao gerar PDF:", error);
+            toast({ variant: "destructive", title: "Erro ao gerar PDF do chamado" });
+        }
+    };
+
+    const generatePdfReport = async () => {
+        try {
+            if (!selectedOrder) return;
+
+            // Buscar dados da empresa
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const companySnap = await getDoc(companyRef);
+            const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+
+            const doc = new jsPDF('landscape'); // Formato paisagem
+            const pageWidth = doc.internal.pageSize.width;
+            const pageHeight = doc.internal.pageSize.height;
+            
+            // Header com logo
+            if (companyData.logo?.preview) {
+                try {
+                    doc.addImage(companyData.logo.preview, 'PNG', 15, 15, 30, 15);
+                } catch(e) {
+                    console.error("Erro ao adicionar logo:", e);
+                }
+            }
+            
+            // Título
+            doc.setFontSize(18);
+            doc.text('Relatório de Chamados de Engenharia', pageWidth / 2, 23, { align: 'center' });
+            
+            // Informações do pedido
+            doc.setFontSize(12);
+            doc.text(`Pedido: ${selectedOrder.number}`, 15, 40);
+            doc.text(`Cliente: ${selectedOrder.customerName}`, 15, 47);
+            doc.text(`Data do relatório: ${format(new Date(), 'dd/MM/yyyy')}`, 15, 54);
+            
+            // Estatísticas
+            const openTickets = tickets.filter(t => t.status === "Aberto").length;
+            const inProgressTickets = tickets.filter(t => t.status === "Em Análise").length;
+            const resolvedTickets = tickets.filter(t => t.status === "Resolvido").length;
+            const closedTickets = tickets.filter(t => t.status === "Fechado").length;
+            const waitingTickets = tickets.filter(t => t.status === "Aguardando Cliente").length;
+            
+            doc.text('Resumo:', 15, 65);
+            doc.text(`Total de chamados: ${tickets.length}`, 20, 72);
+            doc.text(`Abertos: ${openTickets}`, 20, 79);
+            doc.text(`Em análise: ${inProgressTickets}`, 20, 86);
+            doc.text(`Aguardando cliente: ${waitingTickets}`, 20, 93);
+            doc.text(`Resolvidos: ${resolvedTickets}`, 20, 100);
+            doc.text(`Fechados: ${closedTickets}`, 20, 107);
+            
+            // Tempo médio de resolução
+            const resolvedOrClosedTickets = tickets.filter(
+                t => (t.status === "Resolvido" || t.status === "Fechado") && t.resolvedDate
+            );
+            
+            if (resolvedOrClosedTickets.length > 0) {
+                const totalDays = resolvedOrClosedTickets.reduce((acc, ticket) => {
+                    if (ticket.resolvedDate) {
+                        const diffDays = differenceInDays(ticket.resolvedDate, ticket.createdDate);
+                        return acc + diffDays;
+                    }
+                    return acc;
+                }, 0);
+                
+                const avgResolutionTime = totalDays / resolvedOrClosedTickets.length;
+                doc.text(`Tempo médio de resolução: ${avgResolutionTime.toFixed(1)} dias`, 20, 114);
+            }
+            
+            // Tabela de chamados com mais colunas
+            const tableData = tickets.map(ticket => {
+                const daysToClose = ticket.resolvedDate 
+                    ? differenceInDays(ticket.resolvedDate, ticket.createdDate)
+                    : ticket.dueDate 
+                        ? differenceInDays(new Date(), ticket.createdDate)
+                        : '-';
+                
+                return [
+                    ticket.ticketNumber,
+                    ticket.title.substring(0, 30) + (ticket.title.length > 30 ? '...' : ''),
+                    ticket.category.substring(0, 15),
+                    ticket.status,
+                    ticket.priority,
+                    ticket.requestedBy.substring(0, 15),
+                    ticket.assignedTo?.substring(0, 15) || 'Não atribuído',
+                    format(ticket.createdDate, 'dd/MM/yy'),
+                    ticket.dueDate ? format(ticket.dueDate, 'dd/MM/yy') : '-',
+                    ticket.resolvedDate ? format(ticket.resolvedDate, 'dd/MM/yy') : '-',
+                    daysToClose.toString()
+                ];
+            });
+            
+            // Configuração da tabela
+            (doc as any).autoTable({
+                startY: 125,
+                head: [['Número', 'Título', 'Categoria', 'Status', 'Prioridade', 'Solicitante', 'Responsável', 'Abertura', 'Prazo', 'Encerramento', 'Dias']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { fillColor: [66, 66, 66], textColor: 255 },
+                alternateRowStyles: { fillColor: [240, 240, 240] },
+                styles: { fontSize: 8 },
+                columnStyles: {
+                    0: { cellWidth: 25 }, // Número
+                    1: { cellWidth: 35 }, // Título
+                    2: { cellWidth: 25 }, // Categoria
+                    3: { cellWidth: 20 }, // Status
+                    4: { cellWidth: 20 }, // Prioridade
+                    5: { cellWidth: 25 }, // Solicitante
+                    6: { cellWidth: 25 }, // Responsável
+                    7: { cellWidth: 20 }, // Abertura
+                    8: { cellWidth: 20 }, // Prazo
+                    9: { cellWidth: 20 }, // Encerramento
+                    10: { cellWidth: 15 }, // Dias
+                },
+            });
+            
+            // Footer
+            const pageCount = doc.internal.getNumberOfPages();
+            for(let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFontSize(8).setFont(undefined, 'normal');
+                doc.text('ENG-REP-001.REV0', 15, pageHeight - 10);
+                doc.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+            }
+            
+            doc.save(`Relatório-Chamados-Pedido-${selectedOrder.number}.pdf`);
+            
+            toast({ 
+                title: "Relatório gerado com sucesso",
+                description: "O download do PDF foi iniciado"
+            });
+        } catch (error) {
+            console.error("Erro ao gerar relatório:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao gerar relatório",
+                description: "Verifique o console para detalhes"
+            });
+        }
+    };
 
     // === UTILITY FUNCTIONS ===
     const getPriorityColor = (priority: string) => {
@@ -450,7 +697,6 @@ export default function OrderEngineeringTickets({
         return [headers.join(','), ...rows.map(row => 
             headers.map(header => {
                 const value = row[header as keyof typeof row] || '';
-                // Escape aspas duplas e envolver em aspas se necessário
                 const stringValue = String(value);
                 if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
                     return `"${stringValue.replace(/"/g, '""')}"`;
@@ -478,137 +724,6 @@ export default function OrderEngineeringTickets({
             toast({ 
                 title: "CSV exportado com sucesso",
                 description: "O download foi iniciado"
-            });
-        }
-    };
-
-    // Gerar relatório PDF
-    const generatePdfReport = () => {
-        try {
-            if (!selectedOrder) return;
-
-            const doc = new jsPDF();
-            
-            // Configuração do título
-            doc.setFontSize(18);
-            doc.text('Relatório de Chamados de Engenharia', 14, 20);
-            
-            // Informações do pedido
-            doc.setFontSize(12);
-            doc.text(`Pedido: ${selectedOrder.number}`, 14, 30);
-            doc.text(`Cliente: ${selectedOrder.customerName}`, 14, 37);
-            doc.text(`Data do relatório: ${format(new Date(), 'dd/MM/yyyy')}`, 14, 44);
-            
-            // Estatísticas
-            const openTickets = tickets.filter(t => t.status === "Aberto").length;
-            const inProgressTickets = tickets.filter(t => t.status === "Em Análise").length;
-            const resolvedTickets = tickets.filter(t => t.status === "Resolvido").length;
-            const closedTickets = tickets.filter(t => t.status === "Fechado").length;
-            const waitingTickets = tickets.filter(t => t.status === "Aguardando Cliente").length;
-            
-            doc.text('Resumo:', 14, 55);
-            doc.text(`Total de chamados: ${tickets.length}`, 20, 62);
-            doc.text(`Abertos: ${openTickets}`, 20, 69);
-            doc.text(`Em análise: ${inProgressTickets}`, 20, 76);
-            doc.text(`Aguardando cliente: ${waitingTickets}`, 20, 83);
-            doc.text(`Resolvidos: ${resolvedTickets}`, 20, 90);
-            doc.text(`Fechados: ${closedTickets}`, 20, 97);
-            
-            // Cálculo do tempo médio de resolução para tickets resolvidos/fechados
-            const resolvedOrClosedTickets = tickets.filter(
-                t => (t.status === "Resolvido" || t.status === "Fechado") && t.resolvedDate
-            );
-            
-            let avgResolutionTime = 0;
-            if (resolvedOrClosedTickets.length > 0) {
-                const totalDays = resolvedOrClosedTickets.reduce((acc, ticket) => {
-                    if (ticket.resolvedDate) {
-                        const diffTime = Math.abs(ticket.resolvedDate.getTime() - ticket.createdDate.getTime());
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                        return acc + diffDays;
-                    }
-                    return acc;
-                }, 0);
-                
-                avgResolutionTime = totalDays / resolvedOrClosedTickets.length;
-                doc.text(`Tempo médio de resolução: ${avgResolutionTime.toFixed(1)} dias`, 20, 104);
-            }
-            
-            // Tabela de chamados
-            const tableData = tickets.map(ticket => [
-                ticket.ticketNumber,
-                ticket.title.substring(0, 25) + (ticket.title.length > 25 ? '...' : ''),
-                ticket.status,
-                ticket.priority,
-                format(ticket.createdDate, 'dd/MM/yy'),
-                ticket.resolvedDate ? format(ticket.resolvedDate, 'dd/MM/yy') : '-'
-            ]);
-            
-            // Configuração da tabela
-            (doc as any).autoTable({
-                startY: 115,
-                head: [['Número', 'Título', 'Status', 'Prioridade', 'Abertura', 'Resolução']],
-                body: tableData,
-                theme: 'grid',
-                headStyles: { fillColor: [66, 66, 66], textColor: 255 },
-                alternateRowStyles: { fillColor: [240, 240, 240] },
-                margin: { top: 115 },
-            });
-            
-            // Detalhes dos chamados abertos (não resolvidos)
-            const openTicketsList = tickets.filter(t => t.status !== "Resolvido" && t.status !== "Fechado");
-            
-            if (openTicketsList.length > 0) {
-                const currentY = (doc as any).lastAutoTable.finalY + 15;
-                
-                doc.text('Detalhes dos Chamados Abertos:', 14, currentY);
-                
-                let y = currentY + 10;
-                openTicketsList.forEach((ticket, index) => {
-                    // Adicionar nova página se necessário
-                    if (y > 270) {
-                        doc.addPage();
-                        y = 20;
-                    }
-                    
-                    doc.setFontSize(11);
-                    doc.text(`${index + 1}. ${ticket.ticketNumber} - ${ticket.title}`, 14, y);
-                    y += 7;
-                    
-                    doc.setFontSize(10);
-                    doc.text(`Status: ${ticket.status} | Prioridade: ${ticket.priority} | Categoria: ${ticket.category}`, 18, y);
-                    y += 7;
-                    
-                    doc.text(`Abertura: ${format(ticket.createdDate, 'dd/MM/yyyy')} | Responsável: ${ticket.assignedTo || 'Não atribuído'}`, 18, y);
-                    y += 7;
-                    
-                    // Descrição (truncada)
-                    const descriptionLines = doc.splitTextToSize(`Descrição: ${ticket.description}`, 180);
-                    if (descriptionLines.length > 2) {
-                        // Limitar a 2 linhas
-                        doc.text(descriptionLines.slice(0, 2), 18, y);
-                        doc.text('...', 18, y + 14);
-                    } else {
-                        doc.text(descriptionLines, 18, y);
-                    }
-                    
-                    y += Math.min(descriptionLines.length, 2) * 7 + 12;
-                });
-            }
-            
-            // Salvar o PDF
-            doc.save(`Relatório-Chamados-Pedido-${selectedOrder.number}.pdf`);
-            
-            toast({ 
-                title: "Relatório gerado com sucesso",
-                description: "O download do PDF foi iniciado"
-            });
-        } catch (error) {
-            console.error("Erro ao gerar relatório:", error);
-            toast({ 
-                variant: "destructive", 
-                title: "Erro ao gerar relatório",
-                description: "Verifique o console para detalhes"
             });
         }
     };
@@ -754,7 +869,16 @@ export default function OrderEngineeringTickets({
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
+                                                    onClick={() => generateTicketPDF(ticket)}
+                                                    title="Exportar PDF"
+                                                >
+                                                    <FileDown className="h-4 w-4" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
                                                     onClick={() => handleEditTicket(ticket)}
+                                                    title="Editar"
                                                 >
                                                     <Pencil className="h-4 w-4" />
                                                 </Button>
@@ -763,6 +887,7 @@ export default function OrderEngineeringTickets({
                                                     size="icon"
                                                     className="text-destructive"
                                                     onClick={() => handleDeleteTicket(ticket)}
+                                                    title="Excluir"
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
