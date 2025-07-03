@@ -1,120 +1,218 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarFooter, SidebarInset } from "@/components/ui/sidebar";
+import { OrbitLogo } from "@/components/logo"; // Caminho correto
+import Link from "next/link";
+import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { logoutUser } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
-import { OrbitLogo } from "@/components/orbit-logo";
-import { loginUser } from "@/lib/auth";
-import { Eye, EyeOff } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+const AuthContext = createContext<{
+  user: User | null;
+  loading: boolean;
+  error: string | null;
+}>({
+  user: null,
+  loading: true,
+  error: null,
+});
+
+export const useAuth = () => useContext(AuthContext);
+
+const navItems = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/orders", label: "Pedidos", icon: Package },
+  { href: "/customers", label: "Clientes", icon: Users },
+  { href: "/quality", label: "Qualidade", icon: ClipboardCheck },
+  { href: "/materials", label: "Materiais", icon: Wrench },
+  { href: "/costs", label: "Custos", icon: DollarSign },
+  { href: "/quotations", label: "Orçamentos", icon: FileText },
+  { href: "/company", label: "Empresa", icon: Building },
+];
+
+function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  const { toast } = useToast();
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setLoading(true);
+      setError(null);
+      
+      if (currentUser) {
+        // Verificar se é um usuário real (não anônimo)
+        if (currentUser.isAnonymous) {
+          setError("Acesso não autorizado. Por favor, faça login com suas credenciais.");
+          setUser(null);
+          router.push('/');
+        } else {
+          setUser(currentUser);
+        }
+      } else {
+        setUser(null);
+        router.push('/');
+      }
+      
+      setLoading(false);
+    });
     
-    if (!email || !password) {
-      toast({
-        variant: "destructive",
-        title: "Campos obrigatórios",
-        description: "Por favor, preencha email e senha",
-      });
-      return;
-    }
+    return () => unsubscribe();
+  }, [router]);
 
-    setIsLoading(true);
+  return (
+    <AuthContext.Provider value={{ user, loading, error }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
 
+function LogoutButton() {
+  const { toast } = useToast();
+  const router = useRouter();
+
+  const handleLogout = async () => {
     try {
-      await loginUser(email, password);
-      router.push("/dashboard");
+      await logoutUser();
+      router.push('/');
       toast({
-        title: "Login realizado com sucesso!",
-        description: "Bem-vindo ao Sistema OrbIT",
+        title: "Logout realizado com sucesso",
       });
-    } catch (error: any) {
+    } catch (error) {
       toast({
         variant: "destructive",
-        title: "Erro no login",
-        description: error.message || "Credenciais inválidas",
+        title: "Erro ao fazer logout",
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
   return (
-    <main className="flex items-center justify-center min-h-screen bg-background p-4">
-      <div className="absolute inset-0 -z-10 h-full w-full bg-background bg-[radial-gradient(theme(colors.border)_1px,transparent_1px)] [background-size:16px_16px]"></div>
-      <Card className="w-full max-w-md mx-auto shadow-2xl animate-in fade-in-50 zoom-in-95 duration-500 bg-card/95 backdrop-blur-sm">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <OrbitLogo className="h-16 w-16" />
-          </div>
-          <CardTitle className="text-3xl font-headline text-primary">Sistema OrbIT</CardTitle>
-          <CardDescription className="text-lg">
-            Monitoramento de produção inteligente
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input 
-                id="email" 
-                type="email" 
-                placeholder="seu@email.com" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required 
-                disabled={isLoading}
-              />
+    <Button 
+      variant="ghost" 
+      onClick={handleLogout}
+      className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
+    >
+      <LogOut className="mr-2 h-4 w-4" />
+      Sair
+    </Button>
+  );
+}
+
+function AuthWrapper({ children, pathname }: { children: React.ReactNode; pathname: string; }) {
+  const { error, loading, user } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <div className="text-center space-y-4">
+          <OrbitLogo className="w-24 h-24 mx-auto animate-pulse" />
+          <p className="text-muted-foreground">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="flex items-center justify-center min-h-screen bg-background p-4">
+        <Card className="w-full max-w-lg mx-auto shadow-2xl">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-4">
+              <AlertTriangle className="h-16 w-16 text-destructive" />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
-              <div className="relative">
-                <Input 
-                  id="password" 
-                  type={showPassword ? "text" : "password"}
-                  placeholder="********"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required 
-                  disabled={isLoading}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-            </div>
-            <Button 
-              type="submit" 
-              className="w-full text-lg h-12 mt-4 font-bold"
-              disabled={isLoading}
-            >
-              {isLoading ? "Entrando..." : "Entrar"}
+            <CardTitle className="text-2xl font-headline text-destructive">Erro de Autenticação</CardTitle>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-muted-foreground">
+              {error}
+            </p>
+            <Button onClick={() => window.location.href = '/'}>
+              Ir para Login
             </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </main>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return null; // Redirecionamento já foi feito no AuthProvider
+  }
+
+  return (
+    <SidebarProvider>
+      <Sidebar>
+        <SidebarHeader>
+          <div className="flex items-center gap-2">
+            <OrbitLogo className="w-8 h-8" />
+            <div>
+              <h1 className="text-xl font-headline font-semibold text-primary">
+                Sistema OrbIT
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                {user.email}
+              </p>
+            </div>
+          </div>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarMenu>
+            {navItems.map((item) => (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname === item.href}
+                  tooltip={{ children: item.label }}
+                >
+                  <Link href={item.href}>
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+            <SidebarMenuItem>
+              <LogoutButton />
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarContent>
+        <SidebarFooter className="mt-auto p-4 text-center text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+          <p>© 2025 Sistema OrbIT — Versão 1.0 — Todos os direitos reservados.</p>
+          <p className="mt-2">Desenvolvido por Paulo Henrique Nascimento Ribeiro.</p>
+        </SidebarFooter>
+      </Sidebar>
+      <SidebarInset>
+        <header className="flex items-center justify-start p-2 border-b">
+          <SidebarTrigger />
+        </header>
+        {children}
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
+
+export default function MainLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+
+  return (
+    <AuthProvider>
+      <AuthWrapper pathname={pathname}>
+        {children}
+      </AuthWrapper>
+    </AuthProvider>
   );
 }
