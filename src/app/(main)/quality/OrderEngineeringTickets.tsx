@@ -247,68 +247,106 @@ export default function OrderEngineeringTickets({
 
     // === SUBMIT HANDLERS ===
     const onSubmit = async (values: z.infer<typeof engineeringTicketSchema>) => {
-        try {
-            if (!selectedOrder) {
-                toast({ variant: "destructive", title: "Erro: Nenhum pedido selecionado" });
-                return;
-            }
+    console.log("🚀 === INICIANDO onSubmit ===");
+    console.log("📝 Valores do formulário:", values);
+    console.log("📋 Pedido selecionado:", selectedOrder);
+    console.log("👤 Usuário:", user);
+    console.log("⏳ Estado loading:", isLoading);
 
-            const dataToSave = {
-                ...values,
-                orderId: selectedOrder.id, // Força o ID do pedido atual
-                createdDate: Timestamp.fromDate(values.createdDate),
-                dueDate: values.dueDate ? Timestamp.fromDate(values.dueDate) : null,
-                resolvedDate: values.resolvedDate ? Timestamp.fromDate(values.resolvedDate) : null,
-                comments: values.comments || [],
-            };
+    // Verificar se a função está sendo chamada
+    alert("Função onSubmit foi chamada!");
 
-            if (selectedTicket) {
-                // Adicionar comentário de alteração
-                const changeComment = {
-                    id: Date.now().toString(),
-                    author: user?.displayName || "Sistema",
-                    content: `Chamado atualizado`,
-                    timestamp: Timestamp.fromDate(new Date()),
-                    type: "status_change",
-                };
-                
-                dataToSave.comments = [...(selectedTicket.comments || []), changeComment];
-                
-                await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedTicket.id), dataToSave);
-                toast({ title: "Chamado atualizado com sucesso!" });
-            } else {
-                // Gerar número do ticket
-                const currentYear = new Date().getFullYear();
-                const allTicketsSnapshot = await getDocs(collection(db, "companies", "mecald", "engineeringTickets"));
-                const ticketCount = allTicketsSnapshot.docs.filter(doc => 
-                    doc.data().ticketNumber?.startsWith(`ENG-${currentYear}`)
-                ).length;
-                const ticketNumber = `ENG-${currentYear}-${(ticketCount + 1).toString().padStart(4, '0')}`;
-                
-                dataToSave.ticketNumber = ticketNumber;
-                
-                // Comentário inicial
-                const initialComment = {
-                    id: Date.now().toString(),
-                    author: user?.displayName || "Sistema",
-                    content: `Chamado criado para o pedido ${selectedOrder.number}`,
-                    timestamp: Timestamp.fromDate(new Date()),
-                    type: "comment",
-                };
-                
-                dataToSave.comments = [initialComment];
-                
-                await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), dataToSave);
-                toast({ title: "Chamado de engenharia criado!" });
-            }
-            
-            setIsFormOpen(false);
-            await fetchTicketsForOrder();
-        } catch (error) {
-            console.error("Error saving ticket:", error);
-            toast({ variant: "destructive", title: "Erro ao salvar chamado" });
+    try {
+        if (!selectedOrder) {
+            console.error("❌ Erro: Nenhum pedido selecionado");
+            alert("Erro: Nenhum pedido selecionado");
+            toast({ variant: "destructive", title: "Erro: Nenhum pedido selecionado" });
+            return;
         }
-    };
+
+        console.log("✅ Pedido OK, preparando dados...");
+        alert("Preparando dados para salvar...");
+
+        const dataToSave = {
+            ...values,
+            orderId: selectedOrder.id,
+            createdDate: Timestamp.fromDate(values.createdDate),
+            dueDate: values.dueDate ? Timestamp.fromDate(values.dueDate) : null,
+            resolvedDate: values.resolvedDate ? Timestamp.fromDate(values.resolvedDate) : null,
+            comments: values.comments || [],
+        };
+
+        console.log("💾 Dados preparados:", dataToSave);
+
+        if (selectedTicket) {
+            console.log("📝 Atualizando ticket existente...");
+            alert("Atualizando ticket existente...");
+            
+            const changeComment = {
+                id: Date.now().toString(),
+                author: user?.displayName || "Sistema",
+                content: `Chamado atualizado`,
+                timestamp: Timestamp.fromDate(new Date()),
+                type: "status_change",
+            };
+            
+            dataToSave.comments = [...(selectedTicket.comments || []), changeComment];
+            
+            await updateDoc(doc(db, "companies", "mecald", "engineeringTickets", selectedTicket.id), dataToSave);
+            console.log("✅ Ticket atualizado com sucesso");
+            alert("Ticket atualizado!");
+            toast({ title: "Chamado atualizado com sucesso!" });
+        } else {
+            console.log("🆕 Criando novo ticket...");
+            alert("Criando novo ticket...");
+            
+            // Gerar número do ticket
+            const currentYear = new Date().getFullYear();
+            console.log("📊 Buscando tickets existentes...");
+            
+            const allTicketsSnapshot = await getDocs(collection(db, "companies", "mecald", "engineeringTickets"));
+            console.log("📋 Tickets encontrados:", allTicketsSnapshot.docs.length);
+            
+            const ticketCount = allTicketsSnapshot.docs.filter(doc => 
+                doc.data().ticketNumber?.startsWith(`ENG-${currentYear}`)
+            ).length;
+            
+            const ticketNumber = `ENG-${currentYear}-${(ticketCount + 1).toString().padStart(4, '0')}`;
+            console.log("🎫 Número gerado:", ticketNumber);
+            
+            dataToSave.ticketNumber = ticketNumber;
+            
+            // Comentário inicial
+            const initialComment = {
+                id: Date.now().toString(),
+                author: user?.displayName || "Sistema",
+                content: `Chamado criado para o pedido ${selectedOrder.number}`,
+                timestamp: Timestamp.fromDate(new Date()),
+                type: "comment",
+            };
+            
+            dataToSave.comments = [initialComment];
+            
+            console.log("💾 Salvando no Firebase...");
+            alert("Salvando no Firebase...");
+            
+            const docRef = await addDoc(collection(db, "companies", "mecald", "engineeringTickets"), dataToSave);
+            console.log("✅ Documento criado com ID:", docRef.id);
+            alert("Chamado criado com sucesso!");
+            toast({ title: "Chamado de engenharia criado!" });
+        }
+        
+        console.log("🔄 Fechando modal e atualizando lista...");
+        setIsFormOpen(false);
+        await fetchTicketsForOrder();
+        console.log("✅ Processo concluído!");
+        
+    } catch (error) {
+        console.error("💥 Erro ao salvar ticket:", error);
+        alert(`Erro: ${error.message}`);
+        toast({ variant: "destructive", title: "Erro ao salvar chamado", description: error.message });
+    }
+};
 
     // === UTILITY FUNCTIONS ===
     const getPriorityColor = (priority: string) => {
