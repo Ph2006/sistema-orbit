@@ -204,8 +204,21 @@ const nonConformanceSchema = z.object({
   description: z.string().min(10, "A descrição detalhada é obrigatória (mín. 10 caracteres)."),
   type: z.enum(["Interna", "Reclamação de Cliente"], { required_error: "Selecione o tipo de não conformidade." }),
   status: z.enum(["Aberta", "Em Análise", "Concluída"]),
+  
+  // ✅ NOVOS CAMPOS ADICIONADOS PARA FOTOS
+  photos: z.array(z.string()).optional(),
+  
+  // ✅ NOVOS CAMPOS PARA PLANO DE AÇÕES
+  actionPlan: z.object({
+    rootCause: z.string().optional(),
+    correctiveActions: z.string().optional(),
+    preventiveActions: z.string().optional(),
+    responsible: z.string().optional(),
+    deadline: z.date().optional().nullable(),
+    actionStatus: z.enum(["Não Iniciado", "Em Andamento", "Concluído"]).optional(),
+    implementationNotes: z.string().optional(),
+  }).optional(),
 });
-
 const calibrationSchema = z.object({
   id: z.string().optional(),
   internalCode: z.string().min(1, "O código interno é obrigatório."),
@@ -513,6 +526,18 @@ const lessonsLearnedSchema = z.object({
 
 // --- TYPES ---
 type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string };
+  // ✅ NOVOS CAMPOS TIPADOS
+  photos?: string[],
+  actionPlan?: {
+    rootCause?: string,
+    correctiveActions?: string,
+    preventiveActions?: string,
+    responsible?: string,
+    deadline?: Date | null,
+    actionStatus?: "Não Iniciado" | "Em Andamento" | "Concluído",
+    implementationNotes?: string,
+  } | null
+};
 type OrderInfo = { id: string; number: string; customerId: string; customerName: string, projectName?: string, items: { id: string, description: string, code?: string, quantity?: number }[] };
 type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id: string, orderNumber: string, itemName: string };
@@ -528,11 +553,6 @@ type CompanyData = {
     nomeFantasia?: string;
     logo?: { preview?: string };
 };
-
-
-
-// --- HELPER FUNCTIONS ---
-
 
 // --- HELPER FUNCTIONS ---
 const getCalibrationStatus = (calibration: Calibration) => {
@@ -580,6 +600,382 @@ const PlaceholderCard = ({ title, description, icon: Icon }: { title: string; de
     </Card>
 );
 
+// 2.1 ADICIONAR ESTE COMPONENTE APÓS AS FUNÇÕES HELPER
+
+// Componente para upload e gerenciamento de fotos
+function PhotoUploadSection({ form, toast }: { form: any, toast: any }) {
+  const watchedPhotos = form.watch("photos", []);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    
+    const currentPhotos = form.getValues("photos") || [];
+    
+    // Verificar limite de fotos (máximo 6 por RNC)
+    if (currentPhotos.length + files.length > 6) {
+        toast({
+            title: "Muitas fotos",
+            description: `Máximo de 6 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`,
+            variant: "destructive",
+        });
+        return;
+    }
+    
+    const validFiles = Array.from(files).filter(file => {
+        // Verificar tipo de arquivo
+        if (!file.type.startsWith('image/')) {
+            toast({
+                title: "Tipo de arquivo inválido",
+                description: `O arquivo ${file.name} não é uma imagem válida.`,
+                variant: "destructive",
+            });
+            return false;
+        }
+        
+        // Verificar tamanho (máximo 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+            toast({
+                title: "Arquivo muito grande",
+                description: `O arquivo ${file.name} é muito grande (máximo 10MB).`,
+                variant: "destructive",
+            });
+            return false;
+        }
+        
+        return true;
+    });
+    
+    if (validFiles.length === 0) return;
+    
+    try {
+        toast({ title: "Processando fotos...", description: "Aguarde enquanto comprimimos as imagens." });
+        
+        const compressedPhotos = await Promise.all(
+            validFiles.map(async (file) => {
+                try {
+                    console.log(`Processando foto RNC: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
+                    return await compressImageForFirestore(file, 600, 0.7); // Menor resolução para RNC
+                } catch (error) {
+                    console.error(`Erro ao comprimir ${file.name}:`, error);
+                    // Em caso de erro, usar o arquivo original comprimido
+                    return new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target?.result as string);
+                        reader.readAsDataURL(file);
+                    });
+                }
+            })
+        );
+        
+        const updatedPhotos = [...currentPhotos, ...compressedPhotos];
+        form.setValue("photos", updatedPhotos, { shouldValidate: true });
+        
+        toast({
+            title: "Fotos adicionadas",
+            description: `${validFiles.length} foto(s) processada(s) com sucesso.`,
+        });
+        
+    } catch (error) {
+        console.error('Erro ao processar fotos:', error);
+        toast({
+            title: "Erro ao processar fotos",
+            description: "Tente novamente ou entre em contato com o suporte.",
+            variant: "destructive",
+        });
+    }
+    
+    // Limpar o input para permitir selecionar os mesmos arquivos novamente
+    e.target.value = '';
+  };
+
+  const removePhoto = (index: number) => {
+      const currentPhotos = form.getValues("photos") || [];
+      const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+      form.setValue("photos", updatedPhotos, { shouldValidate: true });
+      
+      toast({
+          title: "Foto removida",
+          description: `Foto ${index + 1} foi removida da RNC.`,
+      });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          📷 Registro Fotográfico da Não Conformidade
+          <Badge variant="secondary">{watchedPhotos?.length || 0}/6</Badge>
+        </CardTitle>
+        <CardDescription>
+          Anexe fotos que evidenciem a não conformidade encontrada. As imagens serão comprimidas automaticamente.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <FormItem>
+          <FormLabel>Selecionar Fotos</FormLabel>
+          <FormControl>
+            <div className="flex items-center justify-center w-full">
+              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                  <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                  </svg>
+                  <p className="mb-2 text-sm text-gray-500">
+                    <span className="font-semibold">Clique para selecionar</span> ou arraste as imagens
+                  </p>
+                  <p className="text-xs text-gray-500">PNG, JPG, JPEG (máx. 10MB cada)</p>
+                </div>
+                <Input 
+                  type="file" 
+                  multiple 
+                  accept="image/jpeg,image/jpg,image/png" 
+                  onChange={handlePhotoUpload} 
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </FormControl>
+          <FormDescription className="text-xs">
+            • Máximo 6 fotos por RNC<br/>
+            • Tamanho máximo: 10MB por imagem<br/>
+            • Formatos aceitos: JPEG, PNG<br/>
+            • Dica: Fotos nítidas ajudam na análise
+          </FormDescription>
+        </FormItem>
+
+        {watchedPhotos && watchedPhotos.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-sm">Fotos da Não Conformidade</h4>
+              <Button 
+                type="button" 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  form.setValue("photos", [], { shouldValidate: true });
+                  toast({ title: "Todas as fotos foram removidas" });
+                }}
+              >
+                Remover Todas
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {watchedPhotos.map((photo, index) => (
+                <div key={index} className="relative group">
+                  <div className="relative overflow-hidden rounded-lg border">
+                    <Image 
+                      src={photo} 
+                      alt={`RNC ${index + 1}`} 
+                      width={200} 
+                      height={200} 
+                      className="object-cover w-full aspect-square transition-transform group-hover:scale-105" 
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+                    <Button 
+                      type="button" 
+                      size="icon" 
+                      variant="destructive" 
+                      className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => removePhoto(index)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-center mt-1 text-muted-foreground">
+                    Foto {index + 1}
+                  </p>
+                  <p className="text-xs text-center text-muted-foreground">
+                    {Math.round((photo.length * 0.75) / 1024)}KB
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <FormMessage />
+      </CardContent>
+    </Card>
+  );
+}
+
+// 3.1 ADICIONAR ESTE COMPONENTE APÓS O PhotoUploadSection
+
+// Componente para plano de ações corretivas
+function ActionPlanSection({ form, teamMembers }: { form: any, teamMembers: TeamMember[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          🎯 Plano de Ações Corretivas
+          <Badge variant="outline">Opcional</Badge>
+        </CardTitle>
+        <CardDescription>
+          Defina as ações necessárias para tratar esta não conformidade e evitar reincidências.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <FormField control={form.control} name="actionPlan.rootCause" render={({ field }) => ( 
+          <FormItem>
+            <FormLabel>Causa Raiz</FormLabel>
+            <FormControl>
+              <Textarea 
+                placeholder="Qual foi a causa raiz identificada para esta não conformidade? Use técnicas como 5 Porquês, Ishikawa, etc." 
+                {...field} 
+                value={field.value ?? ''}
+                className="min-h-[80px]"
+              />
+            </FormControl>
+            <FormDescription>
+              Identifique a origem do problema para que as ações sejam efetivas.
+            </FormDescription>
+            <FormMessage />
+          </FormItem> 
+        )}/>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField control={form.control} name="actionPlan.correctiveActions" render={({ field }) => ( 
+            <FormItem>
+              <FormLabel>Ações Corretivas</FormLabel>
+              <FormControl>
+                <Textarea 
+                  placeholder="O que será feito para corrigir esta não conformidade específica?" 
+                  {...field} 
+                  value={field.value ?? ''}
+                  className="min-h-[100px]"
+                />
+              </FormControl>
+              <FormDescription>
+                Ações imediatas para resolver o problema atual.
+              </FormDescription>
+              <FormMessage />
+            </FormItem> 
+          )}/>
+
+          <FormField control={form.control} name="actionPlan.preventiveActions" render={({ field }) => ( 
+            <FormItem>
+              <FormLabel>Ações Preventivas</FormLabel>
+              <FormControl>
+                <Textarea 
+                  placeholder="O que será feito para prevenir que esta não conformidade aconteça novamente?" 
+                  {...field} 
+                  value={field.value ?? ''}
+                  className="min-h-[100px]"
+                />
+              </FormControl>
+              <FormDescription>
+                Ações sistêmicas para evitar reincidências.
+              </FormDescription>
+              <FormMessage />
+            </FormItem> 
+          )}/>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField control={form.control} name="actionPlan.responsible" render={({ field }) => ( 
+            <FormItem>
+              <FormLabel>Responsável pelas Ações</FormLabel>
+              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um responsável" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {teamMembers.map(m => 
+                    <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              <FormDescription>
+                Pessoa responsável por executar as ações definidas.
+              </FormDescription>
+              <FormMessage />
+            </FormItem> 
+          )} />
+
+          <FormField control={form.control} name="actionPlan.deadline" render={({ field }) => ( 
+            <FormItem className="flex flex-col">
+              <FormLabel>Prazo para Implementação</FormLabel>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <FormControl>
+                    <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                      {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}
+                      <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                    </Button>
+                  </FormControl>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                </PopoverContent>
+              </Popover>
+              <FormDescription>
+                Data limite para completar todas as ações.
+              </FormDescription>
+              <FormMessage />
+            </FormItem> 
+          )}/>
+        </div>
+
+        <FormField control={form.control} name="actionPlan.actionStatus" render={({ field }) => ( 
+          <FormItem>
+            <FormLabel>Status das Ações</FormLabel>
+            <Select onValueChange={field.onChange} defaultValue={field.value}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o status" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value="Não Iniciado">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-gray-500"></div>
+                    Não Iniciado
+                  </div>
+                </SelectItem>
+                <SelectItem value="Em Andamento">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                    Em Andamento
+                  </div>
+                </SelectItem>
+                <SelectItem value="Concluído">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                    Concluído
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <FormDescription>
+              Status atual da implementação das ações definidas.
+            </FormDescription>
+            <FormMessage />
+          </FormItem> 
+        )} />
+
+        <FormField control={form.control} name="actionPlan.implementationNotes" render={({ field }) => ( 
+          <FormItem>
+            <FormLabel>Observações da Implementação</FormLabel>
+            <FormControl>
+              <Textarea 
+                placeholder="Anote aqui o progresso, dificuldades encontradas, resultados obtidos, etc." 
+                {...field} 
+                value={field.value ?? ''}
+                className="min-h-[80px]"
+              />
+            </FormControl>
+            <FormDescription>
+              Registre o progresso e observações sobre a execução das ações.
+            </FormDescription>
+            <FormMessage />
+          </FormItem> 
+        )}/>
+      </CardContent>
+    </Card>
+  );
+}
 
 // --- MAIN COMPONENT ---
 export default function QualityPage() {
@@ -852,15 +1248,57 @@ export default function QualityPage() {
       setOrders(ordersList);
 
       const reportsList = reportsSnapshot.docs.map(doc => {
-        const data = doc.data();
-        const order = ordersList.find(o => o.id === data.orderId);
-        return {
-          id: doc.id, date: data.date.toDate(), orderId: data.orderId, orderNumber: order?.number || 'N/A',
-          item: { id: data.itemId, description: data.itemDescription }, customerName: order?.customerName || 'N/A',
-          description: data.description, type: data.type, status: data.status,
-        } as NonConformance;
-      });
-      setReports(reportsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
+  const data = doc.data();
+  const order = ordersList.find(o => o.id === data.orderId);
+  
+  console.log(`Carregando RNC ${doc.id}:`, {
+    hasPhotos: !!(data.photos && data.photos.length > 0),
+    photosCount: data.photos?.length || 0,
+    hasActionPlan: !!(data.actionPlan && data.actionPlan.correctiveActions),
+    actionStatus: data.actionPlan?.actionStatus || 'N/A'
+  });
+  
+  return {
+    id: doc.id, 
+    date: data.date.toDate(), 
+    orderId: data.orderId, 
+    orderNumber: order?.number || 'N/A',
+    item: { id: data.itemId, description: data.itemDescription }, 
+    customerName: order?.customerName || 'N/A',
+    description: data.description, 
+    type: data.type, 
+    status: data.status,
+    
+    // ✅ NOVOS CAMPOS CARREGADOS DO FIRESTORE
+    photos: data.photos || [],
+    actionPlan: data.actionPlan ? {
+      rootCause: data.actionPlan.rootCause || '',
+      correctiveActions: data.actionPlan.correctiveActions || '',
+      preventiveActions: data.actionPlan.preventiveActions || '',
+      responsible: data.actionPlan.responsible || '',
+      deadline: data.actionPlan.deadline ? data.actionPlan.deadline.toDate() : null,
+      actionStatus: data.actionPlan.actionStatus || 'Não Iniciado',
+      implementationNotes: data.actionPlan.implementationNotes || '',
+    } : null,
+    
+    // Metadados
+    lastModified: data.lastModified ? data.lastModified.toDate() : data.date.toDate(),
+    modifiedBy: data.modifiedBy || 'N/A',
+  } as NonConformance;
+});
+
+// Ordenar por data (mais recentes primeiro) e depois por última modificação
+setReports(reportsList.sort((a, b) => {
+  const dateA = (a as any).lastModified || a.date;
+  const dateB = (b as any).lastModified || b.date;
+  return dateB.getTime() - dateA.getTime();
+}));
+
+console.log(`✓ ${reportsList.length} RNCs carregadas:`, {
+  comFotos: reportsList.filter(r => (r as any).photos && (r as any).photos.length > 0).length,
+  comPlanoAcao: reportsList.filter(r => (r as any).actionPlan && (r as any).actionPlan.correctiveActions).length,
+  totalFotos: reportsList.reduce((total, r) => total + ((r as any).photos?.length || 0), 0)
+});
 
       const calibrationsList = calibrationsSnapshot.docs.map(doc => {
         const data = doc.data();
@@ -1027,43 +1465,98 @@ export default function QualityPage() {
 
   // --- RNC HANDLERS ---
   const onRncSubmit = async (values: z.infer<typeof nonConformanceSchema>) => {
-    try {
-      const order = orders.find(o => o.id === values.orderId);
-      if (!order) throw new Error("Pedido selecionado não encontrado.");
-      const dataToSave: any = {
-        date: Timestamp.fromDate(values.date), orderId: values.orderId, itemId: values.item.id, itemDescription: values.item.description,
-        customerId: order.customerId, customerName: order.customerName, description: values.description, type: values.type, status: values.status,
-      };
+  try {
+    console.log("=== SALVANDO RNC COM FOTOS E PLANO DE AÇÕES ===");
+    console.log("Dados recebidos:", values);
+    console.log("Fotos recebidas:", values.photos?.length || 0);
+    console.log("Plano de ações:", values.actionPlan ? "Sim" : "Não");
 
-      if (selectedReport) {
-        await updateDoc(doc(db, "companies", "mecald", "qualityReports", selectedReport.id), dataToSave);
-        toast({ title: "Relatório atualizado com sucesso!" });
-      } else {
-        await addDoc(collection(db, "companies", "mecald", "qualityReports"), dataToSave);
-        toast({ title: "Relatório de não conformidade criado!" });
-      }
-      setIsRncFormOpen(false);
-      await fetchAllData();
-    } catch (error) {
-      console.error("Error saving report:", error);
-      toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+    const order = orders.find(o => o.id === values.orderId);
+    if (!order) throw new Error("Pedido selecionado não encontrado.");
+    
+    const dataToSave: any = {
+      date: Timestamp.fromDate(values.date), 
+      orderId: values.orderId, 
+      itemId: values.item.id, 
+      itemDescription: values.item.description,
+      customerId: order.customerId, 
+      customerName: order.customerName, 
+      description: values.description, 
+      type: values.type, 
+      status: values.status,
+      
+      // ✅ NOVOS CAMPOS - FOTOS
+      photos: values.photos || [],
+      
+      // ✅ NOVOS CAMPOS - PLANO DE AÇÕES
+      actionPlan: values.actionPlan ? {
+        rootCause: values.actionPlan.rootCause || null,
+        correctiveActions: values.actionPlan.correctiveActions || null,
+        preventiveActions: values.actionPlan.preventiveActions || null,
+        responsible: values.actionPlan.responsible || null,
+        deadline: values.actionPlan.deadline ? Timestamp.fromDate(values.actionPlan.deadline) : null,
+        actionStatus: values.actionPlan.actionStatus || "Não Iniciado",
+        implementationNotes: values.actionPlan.implementationNotes || null,
+      } : null,
+      
+      // Metadados para auditoria
+      lastModified: Timestamp.now(),
+      modifiedBy: user?.email || 'Usuário desconhecido',
+    };
+
+    // ✅ VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
+    if (!validateDataSizeBeforeSave(dataToSave)) {
+        toast({
+            variant: "destructive",
+            title: "RNC muito grande para salvar",
+            description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+        });
+        return;
     }
-  };
-  const handleAddRncClick = () => { setSelectedReport(null); rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } }); setIsRncFormOpen(true); };
-  const handleEditRncClick = (report: NonConformance) => { setSelectedReport(report); rncForm.reset({ ...report, item: { id: report.item.id, description: report.item.description } }); setIsRncFormOpen(true); };
-  const handleDeleteRncClick = (report: NonConformance) => { setReportToDelete(report); setIsRncDeleting(true); };
-  const handleConfirmRncDelete = async () => {
-    if (!reportToDelete) return;
-    try {
-      await deleteDoc(doc(db, "companies", "mecald", "qualityReports", reportToDelete.id));
-      toast({ title: "Relatório excluído!" });
-      setIsRncDeleting(false); await fetchAllData();
-    } catch (error) { toast({ variant: "destructive", title: "Erro ao excluir relatório" }); }
-  };
-  const watchedRncOrderId = rncForm.watch("orderId");
-  const availableRncItems = useMemo(() => { if (!watchedRncOrderId) return []; return orders.find(o => o.id === watchedRncOrderId)?.items || []; }, [watchedRncOrderId, orders]);
-  useEffect(() => { rncForm.setValue('item', {id: '', description: ''}); }, [watchedRncOrderId, rncForm]);
 
+    console.log(`✓ Fotos incluídas: ${dataToSave.photos?.length || 0}`);
+    console.log(`✓ Tamanho total: ${(JSON.stringify(dataToSave).length / 1024).toFixed(1)}KB`);
+    console.log(`✓ Plano de ações: ${dataToSave.actionPlan ? 'Configurado' : 'Não configurado'}`);
+
+    if (selectedReport) {
+      await updateDoc(doc(db, "companies", "mecald", "qualityReports", selectedReport.id), dataToSave);
+      console.log("✓ RNC atualizada no Firestore com sucesso!");
+      toast({ 
+        title: "RNC atualizada com sucesso!", 
+        description: `${values.photos?.length || 0} fotos salvas. Plano de ações ${values.actionPlan?.correctiveActions ? 'configurado' : 'não configurado'}.`
+      });
+    } else {
+      await addDoc(collection(db, "companies", "mecald", "qualityReports"), dataToSave);
+      console.log("✓ Nova RNC salva no Firestore com sucesso!");
+      toast({ 
+        title: "RNC registrada com sucesso!", 
+        description: `Não conformidade registrada com ${values.photos?.length || 0} fotos. ${values.actionPlan?.correctiveActions ? 'Plano de ações definido.' : ''}`
+      });
+    }
+    
+    setIsRncFormOpen(false);
+    await fetchAllData();
+    
+  } catch (error) {
+    console.error("❌ Erro ao salvar RNC:", error);
+    
+    // Verificar se é erro de tamanho do Firestore
+    if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
+        (error as any)?.message?.includes('Document exceeds maximum size')) {
+        toast({ 
+            variant: "destructive", 
+            title: "RNC muito grande", 
+            description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
+        });
+    } else {
+        toast({ 
+          variant: "destructive", 
+          title: "Erro ao salvar RNC",
+          description: "Tente novamente. Se o problema persistir, contate o suporte."
+        });
+    }
+  }
+};
   // --- CALIBRATION HANDLERS ---
   const onCalibrationSubmit = async (values: z.infer<typeof calibrationSchema>) => {
     try {
@@ -2757,21 +3250,167 @@ export default function QualityPage() {
                 </CardHeader>
                 <CardContent>
                   {isLoading ? <Skeleton className="h-64 w-full" /> :
-                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Cliente</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {reports.length > 0 ? (
-                        reports.map((report) => (<TableRow key={report.id}>
-                            <TableCell>{format(report.date, 'dd/MM/yyyy')}</TableCell><TableCell>{report.orderNumber}</TableCell><TableCell>{report.customerName}</TableCell>
-                            <TableCell>{report.item.description}</TableCell><TableCell>{report.type}</TableCell>
-                            <TableCell><Badge variant={getStatusVariant(report.status)}>{report.status}</Badge></TableCell>
-                            <TableCell className="text-right">
-                              <Button variant="ghost" size="icon" onClick={() => handleEditRncClick(report)}><Pencil className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRncClick(report)}><Trash2 className="h-4 w-4" /></Button>
-                            </TableCell></TableRow>))
-                      ) : ( <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de não conformidade encontrado.</TableCell></TableRow> )}
-                    </TableBody></Table> }
-                </CardContent></Card>
-            </TabsContent>
+                  <Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Data</TableHead>
+      <TableHead>Pedido</TableHead>
+      <TableHead>Cliente</TableHead>
+      <TableHead>Item</TableHead>
+      <TableHead>Tipo</TableHead>
+      <TableHead>Status</TableHead>
+      <TableHead className="text-center">📷 Fotos</TableHead>
+      <TableHead className="text-center">🎯 Ações</TableHead>
+      <TableHead className="text-right">Opções</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    {reports.length > 0 ? (
+      reports.map((report) => {
+        const photos = (report as any).photos || [];
+        const actionPlan = (report as any).actionPlan;
+        const hasActionPlan = !!(actionPlan && actionPlan.correctiveActions);
+        
+        return (
+          <TableRow key={report.id} className="hover:bg-muted/50">
+            <TableCell className="font-medium">
+              {format(report.date, 'dd/MM/yyyy')}
+            </TableCell>
+            <TableCell>
+              <div className="flex flex-col">
+                <span className="font-medium">{report.orderNumber}</span>
+                {(report as any).lastModified && (
+                  <span className="text-xs text-muted-foreground">
+                    Mod: {format((report as any).lastModified, 'dd/MM HH:mm')}
+                  </span>
+                )}
+              </div>
+            </TableCell>
+            <TableCell>{report.customerName}</TableCell>
+            <TableCell>
+              <div className="max-w-[200px] truncate" title={report.item.description}>
+                {report.item.description}
+              </div>
+            </TableCell>
+            <TableCell>
+              <Badge variant={report.type === "Reclamação de Cliente" ? "destructive" : "secondary"} className="text-xs">
+                {report.type === "Reclamação de Cliente" ? "Cliente" : "Interna"}
+              </Badge>
+            </TableCell>
+            <TableCell>
+              <Badge variant={getStatusVariant(report.status)}>{report.status}</Badge>
+            </TableCell>
+            
+            {/* COLUNA DE FOTOS */}
+            <TableCell className="text-center">
+              {photos.length > 0 ? (
+                <div className="flex items-center justify-center gap-1">
+                  <Badge variant="secondary" className="text-xs px-2">
+                    {photos.length}
+                  </Badge>
+                  <div className="flex -space-x-1">
+                    {photos.slice(0, 3).map((photo, idx) => (
+                      <div 
+                        key={idx} 
+                        className="w-6 h-6 rounded-full border-2 border-white bg-muted overflow-hidden"
+                        title={`Foto ${idx + 1}`}
+                      >
+                        <Image 
+                          src={photo} 
+                          alt={`Preview ${idx + 1}`} 
+                          width={24} 
+                          height={24} 
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ))}
+                    {photos.length > 3 && (
+                      <div className="w-6 h-6 rounded-full border-2 border-white bg-muted flex items-center justify-center text-xs">
+                        +{photos.length - 3}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <span className="text-muted-foreground text-xs">-</span>
+              )}
+            </TableCell>
+            
+            {/* COLUNA DE PLANO DE AÇÕES */}
+            <TableCell className="text-center">
+              {hasActionPlan ? (
+                <div className="flex flex-col items-center gap-1">
+                  <Badge 
+                    variant={
+                      actionPlan.actionStatus === "Concluído" ? "default" : 
+                      actionPlan.actionStatus === "Em Andamento" ? "secondary" : 
+                      "destructive"
+                    }
+                    className="text-xs"
+                  >
+                    {actionPlan.actionStatus || "Não Iniciado"}
+                  </Badge>
+                  {actionPlan.deadline && (
+                    <span className="text-xs text-muted-foreground">
+                      {format(actionPlan.deadline, 'dd/MM')}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span className="text-muted-foreground text-xs">-</span>
+              )}
+            </TableCell>
+            
+            {/* COLUNA DE AÇÕES */}
+            <TableCell className="text-right">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => {
+                    // Função de visualização rápida (implementar depois)
+                    toast({ title: "Visualização rápida", description: "Funcionalidade em desenvolvimento" });
+                  }}>
+                    <Search className="mr-2 h-4 w-4" />
+                    Visualizar
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => handleEditRncClick(report)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Editar
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    onClick={() => handleDeleteRncClick(report)}
+                    className="text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Excluir
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TableCell>
+          </TableRow>
+        );
+      })
+    ) : ( 
+      <TableRow>
+        <TableCell colSpan={9} className="h-24 text-center">
+          <div className="flex flex-col items-center gap-2">
+            <AlertCircle className="h-8 w-8 text-muted-foreground" />
+            <span>Nenhuma não conformidade registrada.</span>
+            <Button variant="outline" size="sm" onClick={handleAddRncClick}>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Registrar primeira RNC
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow> 
+    )}
+  </TableBody>
+</Table>
 
             <TabsContent value="calibrations">
                 <Card><CardHeader className="flex flex-row items-center justify-between">
@@ -2856,19 +3495,221 @@ export default function QualityPage() {
         </Tabs>
       </div>
 
-      <Dialog open={isRncFormOpen} onOpenChange={setIsRncFormOpen}><DialogContent><DialogHeader><DialogTitle>{selectedReport ? "Editar Relatório" : "Registrar Não Conformidade"}</DialogTitle><DialogDescription>Preencha os detalhes para registrar o ocorrido.</DialogDescription></DialogHeader>
-        <Form {...rncForm}><form onSubmit={rncForm.handleSubmit(onRncSubmit)} className="space-y-4 pt-4">
-          <FormField control={rncForm.control} name="date" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-          <FormField control={rncForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="item" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={value => { const selectedItem = availableRncItems.find(i => i.id === value); if (selectedItem) field.onChange(selectedItem); }} value={field.value?.id || ""}>{/* @ts-ignore */}
-              <FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="type" render={({ field }) => ( <FormItem><FormLabel>Tipo de Não Conformidade</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Interna">Interna</SelectItem><SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
-          <FormField control={rncForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Aberta">Aberta</SelectItem><SelectItem value="Em Análise">Em Análise</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-          <DialogFooter><Button type="submit">Salvar</Button></DialogFooter>
-      </form></Form></DialogContent></Dialog>
-      <AlertDialog open={isRncDeleting} onOpenChange={setIsRncDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o relatório de não conformidade.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmRncDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <Dialog open={isRncFormOpen} onOpenChange={setIsRncFormOpen}>
+  <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
+    <DialogHeader>
+      <DialogTitle>
+        {selectedReport ? "Editar Relatório de Não Conformidade" : "Registrar Nova Não Conformidade"}
+      </DialogTitle>
+      <DialogDescription>
+        Preencha os detalhes para registrar o ocorrido e definir plano de ações. As fotos ajudam na documentação.
+      </DialogDescription>
+    </DialogHeader>
+    
+    <Form {...rncForm}>
+      <form onSubmit={rncForm.handleSubmit(onRncSubmit)} className="flex-1 flex flex-col min-h-0">
+        <ScrollArea className="flex-1 p-1 pr-4">
+          <div className="space-y-6 p-2">
+            
+            {/* SEÇÃO 1: Informações Básicas */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Informações Básicas</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField control={rncForm.control} name="date" render={({ field }) => ( 
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Data da Ocorrência</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                              {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem> 
+                  )}/>
+                  
+                  <FormField control={rncForm.control} name="type" render={({ field }) => ( 
+                    <FormItem>
+                      <FormLabel>Tipo de Não Conformidade</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o tipo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Interna">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4 text-orange-500" />
+                              Interna
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="Reclamação de Cliente">
+                            <div className="flex items-center gap-2">
+                              <Phone className="h-4 w-4 text-red-500" />
+                              Reclamação de Cliente
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem> 
+                  )} />
+                </div>
 
+                <FormField control={rncForm.control} name="orderId" render={({ field }) => ( 
+                  <FormItem>
+                    <FormLabel>Pedido Relacionado</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione um pedido" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {orders.map(o => 
+                          <SelectItem key={o.id} value={o.id}>
+                            <div className="flex flex-col">
+                              <span className="font-medium">Nº {o.number}</span>
+                              <span className="text-sm text-muted-foreground">{o.customerName}</span>
+                            </div>
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem> 
+                )} />
+
+                <FormField control={rncForm.control} name="item" render={({ field }) => ( 
+                  <FormItem>
+                    <FormLabel>Item Afetado</FormLabel>
+                    <Select 
+                      onValueChange={value => { 
+                        const selectedItem = availableRncItems.find(i => i.id === value); 
+                        if (selectedItem) field.onChange(selectedItem); 
+                      }} 
+                      value={field.value?.id || ""}
+                    >
+                      <FormControl>
+                        <SelectTrigger disabled={!watchedRncOrderId}>
+                          <SelectValue placeholder="Selecione um item do pedido" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {availableRncItems.map(i => 
+                          <SelectItem key={i.id} value={i.id}>
+                            <div className="flex flex-col">
+                              <span className="font-medium">
+                                {i.code ? `[${i.code}] ` : ''}{i.description}
+                              </span>
+                              {i.quantity && (
+                                <span className="text-sm text-muted-foreground">Qtd: {i.quantity}</span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem> 
+                )} />
+
+                <FormField control={rncForm.control} name="description" render={({ field }) => ( 
+                  <FormItem>
+                    <FormLabel>Descrição Detalhada da Não Conformidade</FormLabel>
+                    <FormControl>
+                      <Textarea 
+                        placeholder="Detalhe o que aconteceu, como foi identificado, qual o impacto, etc. Seja específico para facilitar a análise." 
+                        {...field} 
+                        value={field.value ?? ''}
+                        className="min-h-[120px]"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Mínimo 10 caracteres. Quanto mais detalhado, melhor para a análise.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem> 
+                )}/>
+
+                <FormField control={rncForm.control} name="status" render={({ field }) => ( 
+                  <FormItem>
+                    <FormLabel>Status da RNC</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Aberta">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                            Aberta
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="Em Análise">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                            Em Análise
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="Concluída">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            Concluída
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem> 
+                )} />
+              </CardContent>
+            </Card>
+
+            {/* SEÇÃO 2: Registro Fotográfico */}
+            <PhotoUploadSection form={rncForm} toast={toast} />
+
+            {/* SEÇÃO 3: Plano de Ações */}
+            <ActionPlanSection form={rncForm} teamMembers={teamMembers} />
+
+            {/* SEÇÃO 4: Indicador de Tamanho */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Monitoramento de Tamanho do Relatório</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DataSizeIndicator data={rncForm.getValues()} />
+              </CardContent>
+            </Card>
+
+          </div>
+        </ScrollArea>
+        
+        <DialogFooter className="pt-4 mt-4 border-t flex-shrink-0">
+          <Button type="button" variant="outline" onClick={() => setIsRncFormOpen(false)}>
+            Cancelar
+          </Button>
+          <Button type="submit" className="min-w-[120px]">
+            {selectedReport ? "Atualizar RNC" : "Salvar RNC"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </Form>
+  </DialogContent>
+</Dialog>
       <Dialog open={isCalibrationFormOpen} onOpenChange={setIsCalibrationFormOpen}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>{selectedCalibration ? "Editar Calibração" : "Adicionar Equipamento para Calibração"}</DialogTitle><DialogDescription>Preencha os dados do equipamento e seu plano de calibração.</DialogDescription></DialogHeader>
           <Form {...calibrationForm}><form onSubmit={calibrationForm.handleSubmit(onCalibrationSubmit)} className="space-y-4 pt-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
