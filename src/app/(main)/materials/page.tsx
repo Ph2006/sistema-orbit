@@ -339,68 +339,118 @@ export default function MaterialsPage() {
     };
     
     const onRequisitionSubmit = async (data: Requisition) => {
-        try {
-            const newHistoryEntry = { timestamp: new Date(), user: user?.email || "Sistema", action: selectedRequisition ? "Edição" : "Criação", details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` };
-            const finalHistory = [...(data.history || []), newHistoryEntry];
-            
-            const dataToSave: any = { 
-                ...data, 
-                history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), 
-                date: Timestamp.fromDate(data.date), 
-                items: data.items.map(item => ({ 
-                    ...item, 
-                    deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, 
-                    deliveryReceiptDate: item.deliveryReceiptDate ? Timestamp.fromDate(new Date(item.deliveryReceiptDate)) : null
-                })) 
-            };
-            
-            // Limpar campos undefined para evitar erro no Firestore
-            if (data.generalNotes === undefined || data.generalNotes === null || data.generalNotes === '') {
-                delete dataToSave.generalNotes;
-            }
-            
-            if (data.approval) { 
-                dataToSave.approval = { ...data.approval, approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null } 
-            } else { 
-                dataToSave.approval = null; 
-            }
-
-            if (selectedRequisition) {
-                await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave);
-            } else {
-                const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
-                const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
-                dataToSave.requisitionNumber = (highestNumber + 1).toString().padStart(5, '0');
-                await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), dataToSave);
-            }
-            toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
-            setIsRequisitionFormOpen(false);
-            await fetchRequisitions();
-        } catch (error) {
-            console.error("Error saving requisition:", error);
-            toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar a requisição." });
+    try {
+        const newHistoryEntry = { 
+            timestamp: new Date(), 
+            user: user?.email || "Sistema", 
+            action: selectedRequisition ? "Edição" : "Criação", 
+            details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` 
+        };
+        const finalHistory = [...(data.history || []), newHistoryEntry];
+        
+        const dataToSave: any = { 
+            ...data, 
+            history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), 
+            date: Timestamp.fromDate(data.date), 
+            items: data.items.map(item => ({ 
+                ...item, 
+                deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, 
+                deliveryReceiptDate: item.deliveryReceiptDate ? Timestamp.fromDate(new Date(item.deliveryReceiptDate)) : null
+            })) 
+        };
+        
+        // Limpar campos undefined para evitar erro no Firestore
+        if (data.generalNotes === undefined || data.generalNotes === null || data.generalNotes === '') {
+            delete dataToSave.generalNotes;
         }
-    };
+        
+        // Corrigir o problema do campo customer
+        if (data.customer && data.customer.id && data.customer.name) {
+            dataToSave.customer = {
+                id: data.customer.id,
+                name: data.customer.name
+            };
+        } else {
+            // Se customer não tem dados válidos, remover do objeto
+            delete dataToSave.customer;
+        }
+        
+        if (data.approval && data.approval.approvedBy) { 
+            dataToSave.approval = { 
+                ...data.approval, 
+                approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null 
+            };
+        } else { 
+            delete dataToSave.approval;
+        }
+
+        // Limpar outros campos que podem ser undefined
+        Object.keys(dataToSave).forEach(key => {
+            if (dataToSave[key] === undefined) {
+                delete dataToSave[key];
+            }
+        });
+
+        if (selectedRequisition) {
+            await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave);
+        } else {
+            const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
+            const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
+            dataToSave.requisitionNumber = (highestNumber + 1).toString().padStart(5, '0');
+            await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), dataToSave);
+        }
+        
+        toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
+        setIsRequisitionFormOpen(false);
+        await fetchRequisitions();
+    } catch (error) {
+        console.error("Error saving requisition:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar a requisição." });
+    }
+};
 
     const onCuttingPlanSubmit = async (data: CuttingPlan) => {
-        try {
-            const dataToSave: any = { ...data, createdAt: Timestamp.fromDate(data.createdAt), deliveryDate: data.deliveryDate ? Timestamp.fromDate(new Date(data.deliveryDate)) : null };
-            if (selectedCuttingPlan) {
-                await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), dataToSave);
-            } else {
-                const planNumbers = cuttingPlansList.map(p => parseInt(p.planNumber || "0", 10)).filter(n => !isNaN(n));
-                const highestNumber = planNumbers.length > 0 ? Math.max(...planNumbers) : 0;
-                dataToSave.planNumber = (highestNumber + 1).toString().padStart(5, '0');
-                await addDoc(collection(db, "companies", "mecald", "cuttingPlans"), dataToSave);
-            }
-            toast({ title: selectedCuttingPlan ? "Plano atualizado!" : "Plano de Corte criado!" });
-            setIsCuttingPlanFormOpen(false);
-            await fetchRequisitions();
-        } catch (error) {
-            console.error("Error saving cutting plan:", error);
-            toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar o plano de corte." });
+    try {
+        const dataToSave: any = { 
+            ...data, 
+            createdAt: Timestamp.fromDate(data.createdAt), 
+            deliveryDate: data.deliveryDate ? Timestamp.fromDate(new Date(data.deliveryDate)) : null 
+        };
+        
+        // Tratar o campo customer
+        if (data.customer && data.customer.id && data.customer.name) {
+            dataToSave.customer = {
+                id: data.customer.id,
+                name: data.customer.name
+            };
+        } else {
+            delete dataToSave.customer;
         }
-    };
+        
+        // Limpar campos undefined
+        Object.keys(dataToSave).forEach(key => {
+            if (dataToSave[key] === undefined) {
+                delete dataToSave[key];
+            }
+        });
+        
+        if (selectedCuttingPlan) {
+            await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), dataToSave);
+        } else {
+            const planNumbers = cuttingPlansList.map(p => parseInt(p.planNumber || "0", 10)).filter(n => !isNaN(n));
+            const highestNumber = planNumbers.length > 0 ? Math.max(...planNumbers) : 0;
+            dataToSave.planNumber = (highestNumber + 1).toString().padStart(5, '0');
+            await addDoc(collection(db, "companies", "mecald", "cuttingPlans"), dataToSave);
+        }
+        
+        toast({ title: selectedCuttingPlan ? "Plano atualizado!" : "Plano de Corte criado!" });
+        setIsCuttingPlanFormOpen(false);
+        await fetchRequisitions();
+    } catch (error) {
+        console.error("Error saving cutting plan:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar o plano de corte." });
+    }
+};
 
     const handleExportPDF = async (requisitionToExport: Requisition) => {
         toast({ title: "Gerando PDF...", description: "Aguarde enquanto o arquivo é preparado." });
