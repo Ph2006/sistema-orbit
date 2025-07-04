@@ -3,7 +3,7 @@ import path from 'path';
 
 const nextConfig: NextConfig = {
   /* config options here */
-  output: 'export',
+  // output: 'export', // Commented out to allow middleware for authentication
   trailingSlash: true,
   skipTrailingSlashRedirect: true,
   distDir: 'out',
