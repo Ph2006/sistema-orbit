@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { OrbitLogo } from "@/components/logo"; // Caminho correto
+import { OrbitLogo } from "@/components/logo";
 import { loginUser } from "@/lib/auth";
 import { Eye, EyeOff } from "lucide-react";
 
