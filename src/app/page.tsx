@@ -34,8 +34,15 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      await loginUser(email, password);
-      router.push("/dashboard");
+      const user = await loginUser(email, password);
+      
+      // If we got a mock user, we need to navigate manually since Firebase auth state won't change
+      if (process.env.NODE_ENV === 'development' && user && localStorage.getItem('mockUser')) {
+        window.location.href = '/dashboard';
+      } else {
+        router.push("/dashboard");
+      }
+      
       toast({
         title: "Login realizado com sucesso!",
         description: "Bem-vindo ao Sistema OrbIT",
@@ -112,6 +119,13 @@ export default function LoginPage() {
             >
               {isLoading ? "Entrando..." : "Entrar"}
             </Button>
+            {process.env.NODE_ENV === 'development' && (
+              <div className="text-center text-sm text-muted-foreground mt-4 p-3 bg-muted/50 rounded-md">
+                <p className="font-medium">Demonstração:</p>
+                <p>Use <code className="px-1 py-0.5 bg-background rounded">demo@sistema-orbit.com</code> com qualquer senha</p>
+                <p>ou qualquer email em caso de erro de conexão</p>
+              </div>
+            )}
           </form>
         </CardContent>
       </Card>

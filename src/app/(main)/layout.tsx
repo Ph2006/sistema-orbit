@@ -69,13 +69,35 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
+    setLoading(true);
+    
+    // Check for mock user in development mode first
+    if (process.env.NODE_ENV === 'development') {
+      const mockUser = localStorage.getItem('mockUser');
+      if (mockUser) {
+        try {
+          const parsedUser = JSON.parse(mockUser);
+          console.log('Mock user found:', parsedUser);
+          setUser(parsedUser as User);
+          setLoading(false);
+          return;
+        } catch (e) {
+          console.error('Error parsing mock user:', e);
+          localStorage.removeItem('mockUser');
+        }
+      }
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setLoading(true);
+      console.log('Firebase auth state changed:', currentUser);
       setError(null);
       
       if (currentUser) {
-        // Verificar se é um usuário real (não anônimo)
-        if (currentUser.isAnonymous) {
+        // In development mode, allow anonymous users for demo purposes
+        if (currentUser.isAnonymous && process.env.NODE_ENV === 'development') {
+          console.log('Usuário anônimo autorizado para demonstração');
+          setUser(currentUser);
+        } else if (currentUser.isAnonymous) {
           setError("Acesso não autorizado. Por favor, faça login com suas credenciais.");
           setUser(null);
           router.push('/');
@@ -83,7 +105,11 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(currentUser);
         }
       } else {
-        // Se não há usuário, redirecionar para login
+        // Se não há usuário, redirecionar para login apenas se não há mock user
+        if (process.env.NODE_ENV === 'development' && localStorage.getItem('mockUser')) {
+          // Mock user exists, don't redirect
+          return;
+        }
         setUser(null);
         router.push('/');
       }
@@ -108,7 +134,14 @@ function LogoutButton() {
   const handleLogout = async () => {
     try {
       await logoutUser();
-      router.push('/');
+      
+      // Force reload to clear state completely
+      if (process.env.NODE_ENV === 'development') {
+        window.location.href = '/';
+      } else {
+        router.push('/');
+      }
+      
       toast({
         title: "Logout realizado com sucesso",
       });
@@ -185,7 +218,7 @@ function AuthWrapper({ children, pathname }: { children: React.ReactNode; pathna
                 Sistema OrbIT
               </h1>
               <p className="text-xs text-muted-foreground">
-                {user.email}
+                {user.email || 'Usuário Demo'}
               </p>
             </div>
           </div>
