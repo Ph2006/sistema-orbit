@@ -36,12 +36,11 @@ export default function LoginPage() {
     try {
       const user = await loginUser(email, password);
       
-      // If we got a mock user, we need to navigate manually since Firebase auth state won't change
-      if (process.env.NODE_ENV === 'development' && user && localStorage.getItem('mockUser')) {
-        window.location.href = '/dashboard';
-      } else {
+      // For non-dev users, redirect normally
+      if (!user || user.providerId !== 'dev-auth') {
         router.push("/dashboard");
       }
+      // Dev users will be redirected by the setTimeout in loginUser
       
       toast({
         title: "Login realizado com sucesso!",

@@ -3,6 +3,7 @@
 import React, { useEffect, useState, createContext, useContext } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { getDevUser, isDevMode, clearDevUser } from "@/lib/dev-auth";
 import {
   SidebarProvider,
   Sidebar,
@@ -71,20 +72,17 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setLoading(true);
     
-    // Check for mock user in development mode first
-    if (process.env.NODE_ENV === 'development') {
-      const mockUser = localStorage.getItem('mockUser');
-      if (mockUser) {
-        try {
-          const parsedUser = JSON.parse(mockUser);
-          console.log('Mock user found:', parsedUser);
-          setUser(parsedUser as User);
-          setLoading(false);
-          return;
-        } catch (e) {
-          console.error('Error parsing mock user:', e);
-          localStorage.removeItem('mockUser');
-        }
+    // In development mode, check for dev user first
+    if (isDevMode()) {
+      console.log('Checking for development user...');
+      const devUser = getDevUser();
+      if (devUser) {
+        console.log('Development user found:', devUser);
+        setUser(devUser as User);
+        setLoading(false);
+        return;
+      } else {
+        console.log('No development user found');
       }
     }
 
@@ -94,7 +92,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (currentUser) {
         // In development mode, allow anonymous users for demo purposes
-        if (currentUser.isAnonymous && process.env.NODE_ENV === 'development') {
+        if (currentUser.isAnonymous && isDevMode()) {
           console.log('Usuário anônimo autorizado para demonstração');
           setUser(currentUser);
         } else if (currentUser.isAnonymous) {
@@ -105,11 +103,17 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(currentUser);
         }
       } else {
-        // Se não há usuário, redirecionar para login apenas se não há mock user
-        if (process.env.NODE_ENV === 'development' && localStorage.getItem('mockUser')) {
-          // Mock user exists, don't redirect
-          return;
+        // Check for dev user again before redirecting
+        if (isDevMode()) {
+          const devUser = getDevUser();
+          if (devUser) {
+            setUser(devUser as User);
+            setLoading(false);
+            return;
+          }
         }
+        
+        // Se não há usuário, redirecionar para login
         setUser(null);
         router.push('/');
       }
@@ -136,7 +140,7 @@ function LogoutButton() {
       await logoutUser();
       
       // Force reload to clear state completely
-      if (process.env.NODE_ENV === 'development') {
+      if (isDevMode()) {
         window.location.href = '/';
       } else {
         router.push('/');

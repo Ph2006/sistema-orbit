@@ -6,18 +6,7 @@ import {
   User
 } from 'firebase/auth';
 import { auth } from './firebase';
-
-// Mock user for development when Firebase is unavailable
-const createMockUser = (email: string): Partial<User> => ({
-  uid: 'demo-user-' + Date.now(),
-  email: email,
-  emailVerified: true,
-  isAnonymous: false,
-  displayName: email.includes('demo') ? 'Usuário Demo' : email,
-  photoURL: null,
-  phoneNumber: null,
-  providerId: 'mock'
-});
+import { createDevUser, setDevUser, clearDevUser, isDevMode } from './dev-auth';
 
 export const loginUser = async (email: string, password: string) => {
   try {
@@ -30,7 +19,7 @@ export const loginUser = async (email: string, password: string) => {
     // If login fails due to network issues or demo purposes, try anonymous auth
     if (error.code === 'auth/network-request-failed' || 
         email === 'demo@sistema-orbit.com' || 
-        process.env.NODE_ENV === 'development') {
+        isDevMode()) {
       try {
         console.log('Tentando autenticação anônima para demonstração...');
         const anonCredential = await signInAnonymously(auth);
@@ -38,16 +27,18 @@ export const loginUser = async (email: string, password: string) => {
       } catch (anonError: any) {
         console.error("Erro na autenticação anônima:", anonError);
         
-        // If even anonymous auth fails (like in sandboxed environments), use mock auth for development
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Firebase indisponível, usando autenticação local para desenvolvimento...');
-          const mockUser = createMockUser(email);
+        // If even anonymous auth fails (like in sandboxed environments), use dev auth
+        if (isDevMode()) {
+          console.log('Firebase indisponível, usando autenticação de desenvolvimento...');
+          const devUser = createDevUser(email);
+          setDevUser(devUser);
           
-          // Store mock user in localStorage for persistence
-          localStorage.setItem('mockUser', JSON.stringify(mockUser));
+          // Trigger a page reload to ensure the new auth state is picked up
+          setTimeout(() => {
+            window.location.href = '/dashboard';
+          }, 100);
           
-          // Simulate Firebase auth user object
-          return mockUser as User;
+          return devUser as User;
         }
       }
     }
@@ -95,16 +86,16 @@ export const registerUser = async (email: string, password: string) => {
 
 export const logoutUser = async () => {
   try {
-    // Clear mock user if in development mode
-    if (process.env.NODE_ENV === 'development') {
-      localStorage.removeItem('mockUser');
+    // Clear dev user if in development mode
+    if (isDevMode()) {
+      clearDevUser();
     }
     
     await signOut(auth);
   } catch (error: any) {
-    // If Firebase signOut fails but we're in development, just clear localStorage
-    if (process.env.NODE_ENV === 'development') {
-      localStorage.removeItem('mockUser');
+    // If Firebase signOut fails but we're in development, just clear dev user
+    if (isDevMode()) {
+      clearDevUser();
       return;
     }
     throw new Error(error.message);
