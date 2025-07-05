@@ -604,23 +604,6 @@ const getCalibrationStatus = (calibration: Calibration) => {
     return { text: "Em dia", variant: "default", icon: CheckCircle };
 };
 
-const getStatusVariant = (status?: string): 'default' | 'secondary' | 'destructive' | 'outline' => {
-    if (!status) return 'outline';
-    switch (status) {
-        case 'Aberta': return 'destructive';
-        case 'Em Análise': return 'secondary';
-        case 'Em andamento': return 'secondary';
-        case 'Concluída': return 'default';
-        case 'Aprovado': return 'default';
-        case 'Aprovado com ressalva': return 'secondary';
-        case 'Reprovado': return 'destructive';
-        case 'Conforme': return 'default';
-        case 'Não Conforme': return 'destructive';
-        case 'Pendente': return 'secondary';
-        default: return 'outline';
-    }
-};
-
 const PlaceholderCard = ({ title, description, icon: Icon }: { title: string; description: string; icon: React.ElementType }) => (
     <Card className="text-center bg-muted/30">
       <CardHeader>
@@ -5157,1184 +5140,470 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
     );
 }
 
-// ===== COMPONENTES PARA PLANOS DE AÇÃO =====
+// ===== COMPONENTES PARA PLANOS DE AÇÃO - VERSÃO CORRIGIDA =====
 
 function ActionPlansTab() {
-    const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
-    const [selectedOccurrence, setSelectedOccurrence] = useState<Occurrence | null>(null);
-    const [isOccurrenceFormOpen, setIsOccurrenceFormOpen] = useState(false);
-    const [isOccurrenceDetailOpen, setIsOccurrenceDetailOpen] = useState(false);
-    const [occurrenceSearchQuery, setOccurrenceSearchQuery] = useState("");
-    const [occurrenceTypeFilter, setOccurrenceTypeFilter] = useState<string>("all");
-    const [occurrenceStatusFilter, setOccurrenceStatusFilter] = useState<string>("all");
-    const [orders, setOrders] = useState<OrderInfo[]>([]);
-    const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [selectedOccurrence, setSelectedOccurrence] = useState<Occurrence | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  
+  const { toast } = useToast();
 
-    // Dashboard metrics
-    const dashboardMetrics = useMemo(() => {
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-        
-        const thisMonthOccurrences = occurrences.filter(occ => {
-            const occDate = new Date(occ.openingDate);
-            return occDate.getMonth() === currentMonth && occDate.getFullYear() === currentYear;
-        });
-
-        const rncCount = occurrences.filter(occ => occ.type === "RNC").length;
-        const delayCount = occurrences.filter(occ => occ.type === "Atraso de Entrega").length;
-
-        const completedOccurrences = occurrences.filter(occ => occ.status === "Concluída");
-        const avgResolutionTime = completedOccurrences.length > 0 
-            ? completedOccurrences.reduce((acc, occ) => {
-                if (!occ.createdAt) return acc;
-                return acc + differenceInDays(new Date(), new Date(occ.createdAt));
-            }, 0) / completedOccurrences.length 
-            : 0;
-
-        const totalActions = occurrences.reduce((acc, occ) => acc + (occ.actionPlan?.length || 0), 0);
-        const completedActions = occurrences.reduce((acc, occ) => 
-            acc + (occ.actionPlan?.filter(action => action.status === "Concluída").length || 0), 0);
-        const actionCompletionRate = totalActions > 0 ? (completedActions / totalActions) * 100 : 0;
-
-        const openOccurrences = occurrences.filter(occ => occ.status !== "Concluída").length;
-
-        return {
-            totalThisMonth: thisMonthOccurrences.length,
-            rncCount,
-            delayCount,
-            avgResolutionTime: Math.round(avgResolutionTime),
-            actionCompletionRate: Math.round(actionCompletionRate),
-            openOccurrences
-        };
-    }, [occurrences]);
-
-    // Filtered occurrences
-    const filteredOccurrences = useMemo(() => {
-        return occurrences.filter(occ => {
-            const matchesSearch = !occurrenceSearchQuery || 
-                occ.number.toLowerCase().includes(occurrenceSearchQuery.toLowerCase()) ||
-                occ.customerName?.toLowerCase().includes(occurrenceSearchQuery.toLowerCase()) ||
-                occ.description.toLowerCase().includes(occurrenceSearchQuery.toLowerCase());
-            
-            const matchesType = occurrenceTypeFilter === "all" || occ.type === occurrenceTypeFilter;
-            const matchesStatus = occurrenceStatusFilter === "all" || occ.status === occurrenceStatusFilter;
-            
-            return matchesSearch && matchesType && matchesStatus;
-        });
-    }, [occurrences, occurrenceSearchQuery, occurrenceTypeFilter, occurrenceStatusFilter]);
-
-    const getStatusBadgeVariant = (status: string) => {
-        switch (status) {
-            case "Aberta": return "destructive";
-            case "Em Análise": return "secondary";
-            case "Em Execução": return "default";
-            case "Concluída": return "default";
-            default: return "outline";
-        }
-    };
-
-    const getTypeBadgeVariant = (type: string) => {
-        return type === "RNC" ? "destructive" : "secondary";
-    };
-
-    return (
-        <div className="space-y-6">
-            {/* Dashboard Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total do Mês</CardTitle>
-                        <Calendar className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{dashboardMetrics.totalThisMonth}</div>
-                        <p className="text-xs text-muted-foreground">Ocorrências abertas</p>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">RNCs</CardTitle>
-                        <AlertCircle className="h-4 w-4 text-red-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-red-600">{dashboardMetrics.rncCount}</div>
-                        <p className="text-xs text-muted-foreground">Não conformidades</p>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Atrasos</CardTitle>
-                        <Clock className="h-4 w-4 text-orange-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-orange-600">{dashboardMetrics.delayCount}</div>
-                        <p className="text-xs text-muted-foreground">Atrasos de entrega</p>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Tempo Médio</CardTitle>
-                        <TicketCheck className="h-4 w-4 text-blue-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-blue-600">{dashboardMetrics.avgResolutionTime}</div>
-                        <p className="text-xs text-muted-foreground">Dias para resolução</p>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Ações</CardTitle>
-                        <Play className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-green-600">{dashboardMetrics.actionCompletionRate}%</div>
-                        <p className="text-xs text-muted-foreground">Ações concluídas</p>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Em Aberto</CardTitle>
-                        <BrainCircuit className="h-4 w-4 text-purple-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-purple-600">{dashboardMetrics.openOccurrences}</div>
-                        <p className="text-xs text-muted-foreground">Total de pendências</p>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Controls */}
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                <div className="flex flex-col sm:flex-row gap-2 flex-1">
-                    <div className="relative flex-1 max-w-sm">
-                        <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input 
-                            placeholder="Buscar por número, cliente ou descrição..." 
-                            value={occurrenceSearchQuery}
-                            onChange={(e) => setOccurrenceSearchQuery(e.target.value)}
-                            className="pl-8"
-                        />
-                    </div>
-                    <Select value={occurrenceTypeFilter} onValueChange={setOccurrenceTypeFilter}>
-                        <SelectTrigger className="w-[140px]">
-                            <SelectValue placeholder="Tipo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Todos os tipos</SelectItem>
-                            <SelectItem value="RNC">RNC</SelectItem>
-                            <SelectItem value="Atraso de Entrega">Atraso</SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <Select value={occurrenceStatusFilter} onValueChange={setOccurrenceStatusFilter}>
-                        <SelectTrigger className="w-[140px]">
-                            <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Todos os status</SelectItem>
-                            <SelectItem value="Aberta">Aberta</SelectItem>
-                            <SelectItem value="Em Análise">Em Análise</SelectItem>
-                            <SelectItem value="Em Execução">Em Execução</SelectItem>
-                            <SelectItem value="Concluída">Concluída</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-                <Button onClick={() => setIsOccurrenceFormOpen(true)} className="shrink-0">
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Nova Ocorrência
-                </Button>
-            </div>
-
-            {/* Occurrences Table */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Ocorrências Registradas</CardTitle>
-                    <CardDescription>
-                        {filteredOccurrences.length} de {occurrences.length} ocorrências
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Número</TableHead>
-                                <TableHead>Tipo</TableHead>
-                                <TableHead>Cliente</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead>Data Abertura</TableHead>
-                                <TableHead>Prazo</TableHead>
-                                <TableHead>Responsável</TableHead>
-                                <TableHead className="text-right">Ações</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {filteredOccurrences.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                                        Nenhuma ocorrência encontrada
-                                    </TableCell>
-                                </TableRow>
-                            ) : (
-                                filteredOccurrences.map((occurrence) => (
-                                    <TableRow key={occurrence.id}>
-                                        <TableCell className="font-medium">{occurrence.number}</TableCell>
-                                        <TableCell>
-                                            <Badge variant={getTypeBadgeVariant(occurrence.type)}>
-                                                {occurrence.type}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell>{occurrence.customerName || "-"}</TableCell>
-                                        <TableCell>
-                                            <Badge variant={getStatusBadgeVariant(occurrence.status)}>
-                                                {occurrence.status}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                            {format(new Date(occurrence.openingDate), "dd/MM/yyyy")}
-                                        </TableCell>
-                                        <TableCell>
-                                            {occurrence.deadline ? format(new Date(occurrence.deadline), "dd/MM/yyyy") : "-"}
-                                        </TableCell>
-                                        <TableCell>{occurrence.responsibleAnalyst}</TableCell>
-                                        <TableCell className="text-right">
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button variant="ghost" className="h-8 w-8 p-0">
-                                                        <MoreVertical className="h-4 w-4" />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem onClick={() => {
-                                                        setSelectedOccurrence(occurrence);
-                                                        setIsOccurrenceDetailOpen(true);
-                                                    }}>
-                                                        <FilePen className="mr-2 h-4 w-4" />
-                                                        Ver detalhes
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => {
-                                                        setSelectedOccurrence(occurrence);
-                                                        setIsOccurrenceFormOpen(true);
-                                                    }}>
-                                                        <Pencil className="mr-2 h-4 w-4" />
-                                                        Editar
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuSeparator />
-                                                    <DropdownMenuItem>
-                                                        <FileDown className="mr-2 h-4 w-4" />
-                                                        Exportar PDF
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-                                        </TableCell>
-                                    </TableRow>
-                                ))
-                            )}
-                        </TableBody>
-                    </Table>
-                </CardContent>
-            </Card>
-
-            {/* Dialogs */}
-            <OccurrenceFormDialog 
-                isOpen={isOccurrenceFormOpen}
-                onClose={() => {
-                    setIsOccurrenceFormOpen(false);
-                    setSelectedOccurrence(null);
-                }}
-                occurrence={selectedOccurrence}
-                orders={orders}
-                teamMembers={teamMembers}
-                onSave={(occurrence) => {
-                    // Simulate save
-                    console.log("Saving occurrence:", occurrence);
-                    setIsOccurrenceFormOpen(false);
-                    setSelectedOccurrence(null);
-                }}
-            />
-
-            <OccurrenceDetailDialog 
-                isOpen={isOccurrenceDetailOpen}
-                onClose={() => {
-                    setIsOccurrenceDetailOpen(false);
-                    setSelectedOccurrence(null);
-                }}
-                occurrence={selectedOccurrence}
-            />
-        </div>
-    );
-}
-
-function OccurrenceFormDialog({
-    isOpen,
-    onClose,
-    occurrence,
-    orders,
-    teamMembers,
-    onSave
-}: {
-    isOpen: boolean;
-    onClose: () => void;
-    occurrence?: Occurrence | null;
-    orders: OrderInfo[];
-    teamMembers: TeamMember[];
-    onSave: (occurrence: any) => void;
-}) {
-    const form = useForm<z.infer<typeof occurrenceSchema>>({
-        resolver: zodResolver(occurrenceSchema),
-        defaultValues: {
-            type: "RNC",
-            origin: "",
-            status: "Aberta",
-            openingDate: new Date(),
-            description: "",
-            responsibleAnalyst: "",
-            photos: []
-        },
-    });
-
-    const watchedOrderId = form.watch("orderId");
-    const availableItems = useMemo(() => {
-        if (!watchedOrderId) return [];
-        return orders.find(o => o.id === watchedOrderId)?.items || [];
-    }, [watchedOrderId, orders]);
-
-    useEffect(() => {
-        if (occurrence) {
-            form.reset({
-                ...occurrence,
-                openingDate: new Date(occurrence.openingDate),
-                deadline: occurrence.deadline ? new Date(occurrence.deadline) : undefined,
-            });
-        } else {
-            form.reset({
-                type: "RNC",
-                origin: "",
-                status: "Aberta",
-                openingDate: new Date(),
-                description: "",
-                responsibleAnalyst: "",
-                photos: []
-            });
-        }
-    }, [occurrence, form]);
-
-    const onSubmit = (data: z.infer<typeof occurrenceSchema>) => {
-        onSave(data);
-    };
-
-    return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle>
-                        {occurrence ? "Editar Ocorrência" : "Nova Ocorrência"}
-                    </DialogTitle>
-                    <DialogDescription>
-                        {occurrence ? "Edite os dados da ocorrência" : "Registre uma nova ocorrência (RNC ou Atraso de Entrega)"}
-                    </DialogDescription>
-                </DialogHeader>
-
-                <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <FormField
-                                control={form.control}
-                                name="type"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Tipo de Ocorrência</FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione o tipo" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="RNC">RNC - Relatório de Não Conformidade</SelectItem>
-                                                <SelectItem value="Atraso de Entrega">Atraso de Entrega</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="origin"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Origem</FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione a origem" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="Cliente">Cliente</SelectItem>
-                                                <SelectItem value="Qualidade">Qualidade</SelectItem>
-                                                <SelectItem value="Produção">Produção</SelectItem>
-                                                <SelectItem value="Logística">Logística</SelectItem>
-                                                <SelectItem value="Fornecedor">Fornecedor</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="orderId"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Pedido</FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione um pedido" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                {orders.map(order => (
-                                                    <SelectItem key={order.id} value={order.id}>
-                                                        Nº {order.number} - {order.customerName}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="itemId"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Item</FormLabel>
-                                        <Select onValueChange={field.onChange} value={field.value || ""}>
-                                            <FormControl>
-                                                <SelectTrigger disabled={!watchedOrderId}>
-                                                    <SelectValue placeholder="Selecione um item" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                {availableItems.map(item => (
-                                                    <SelectItem key={item.id} value={item.id}>
-                                                        {item.code ? `[${item.code}] ` : ''}{item.description}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="openingDate"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Data de Abertura</FormLabel>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <FormControl>
-                                                    <Button
-                                                        variant={"outline"}
-                                                        className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                                                    >
-                                                        {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                    </Button>
-                                                </FormControl>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={field.value}
-                                                    onSelect={field.onChange}
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="deadline"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Prazo para Resolução</FormLabel>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <FormControl>
-                                                    <Button
-                                                        variant={"outline"}
-                                                        className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
-                                                    >
-                                                        {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                    </Button>
-                                                </FormControl>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={field.value}
-                                                    onSelect={field.onChange}
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="responsibleAnalyst"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Responsável pela Análise</FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione um responsável" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                {teamMembers.map(member => (
-                                                    <SelectItem key={member.id} value={member.name}>
-                                                        {member.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-
-                            <FormField
-                                control={form.control}
-                                name="status"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Status</FormLabel>
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione o status" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                <SelectItem value="Aberta">Aberta</SelectItem>
-                                                <SelectItem value="Em Análise">Em Análise</SelectItem>
-                                                <SelectItem value="Em Execução">Em Execução</SelectItem>
-                                                <SelectItem value="Concluída">Concluída</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                        </div>
-
-                        <FormField
-                            control={form.control}
-                            name="description"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Descrição da Ocorrência</FormLabel>
-                                    <FormControl>
-                                        <Textarea 
-                                            placeholder="Descreva detalhadamente a ocorrência..."
-                                            className="min-h-[100px]"
-                                            {...field}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <DialogFooter>
-                            <Button type="button" variant="outline" onClick={onClose}>
-                                Cancelar
-                            </Button>
-                            <Button type="submit">
-                                {occurrence ? "Atualizar" : "Criar"} Ocorrência
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </Form>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-function OccurrenceDetailDialog({
-    isOpen,
-    onClose,
-    occurrence
-}: {
-    isOpen: boolean;
-    onClose: () => void;
-    occurrence?: Occurrence | null;
-}) {
-    if (!occurrence) return null;
-
-    return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle>Detalhes da Ocorrência - {occurrence.number}</DialogTitle>
-                    <DialogDescription>
-                        Visualização completa da ocorrência e análise
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-6">
-                    {/* Basic Info */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-base">Informações Básicas</CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Número</label>
-                                <p className="font-semibold">{occurrence.number}</p>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Tipo</label>
-                                <p><Badge variant={occurrence.type === "RNC" ? "destructive" : "secondary"}>{occurrence.type}</Badge></p>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Status</label>
-                                <p><Badge variant="outline">{occurrence.status}</Badge></p>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Origem</label>
-                                <p>{occurrence.origin}</p>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Cliente</label>
-                                <p>{occurrence.customerName || "-"}</p>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Responsável</label>
-                                <p>{occurrence.responsibleAnalyst}</p>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Data de Abertura</label>
-                                <p>{format(new Date(occurrence.openingDate), "dd/MM/yyyy")}</p>
-                            </div>
-                            <div>
-                                <label className="text-sm font-medium text-muted-foreground">Prazo</label>
-                                <p>{occurrence.deadline ? format(new Date(occurrence.deadline), "dd/MM/yyyy") : "-"}</p>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Description */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-base">Descrição da Ocorrência</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <p className="whitespace-pre-wrap">{occurrence.description}</p>
-                        </CardContent>
-                    </Card>
-
-                    {/* 5 Whys Analysis */}
-                    <FiveWhysAnalysis 
-                        occurrence={occurrence}
-                        onSave={(data) => {
-                            console.log("Saving 5 Whys:", data);
-                        }}
-                    />
-
-                    {/* Action Plan */}
-                    <ActionPlanSection 
-                        occurrence={occurrence}
-                        onSave={(data) => {
-                            console.log("Saving Action Plan:", data);
-                        }}
-                    />
-                </div>
-
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>
-                        Fechar
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-function FiveWhysAnalysis({ 
-    occurrence, 
-    onSave 
-}: { 
-    occurrence: Occurrence; 
-    onSave: (data: FiveWhysAnalysis) => void;
-}) {
-    const [isEditing, setIsEditing] = useState(false);
-    const [fiveWhys, setFiveWhys] = useState<FiveWhysAnalysis>(
-        occurrence.fiveWhys || {
-            why1: '',
-            why2: '',
-            why3: '',
-            why4: '',
-            why5: '',
-            rootCause: '',
-            selectedWhyIndex: undefined
-        }
-    );
-
-    const handleSave = () => {
-        onSave(fiveWhys);
-        setIsEditing(false);
-    };
-
-    const whyQuestions = [
-        { key: 'why1' as keyof FiveWhysAnalysis, label: '1º Por quê?', question: 'Por que o problema ocorreu?' },
-        { key: 'why2' as keyof FiveWhysAnalysis, label: '2º Por quê?', question: 'Por que esta causa aconteceu?' },
-        { key: 'why3' as keyof FiveWhysAnalysis, label: '3º Por quê?', question: 'Por que esta causa fundamental existe?' },
-        { key: 'why4' as keyof FiveWhysAnalysis, label: '4º Por quê?', question: 'Por que este fator contribuinte está presente?' },
-        { key: 'why5' as keyof FiveWhysAnalysis, label: '5º Por quê?', question: 'Por que este processo/sistema falhou?' }
+  // Mock data para demonstração (substitua pela busca real do Firestore)
+  useEffect(() => {
+    // Simular dados de exemplo
+    const mockData: Occurrence[] = [
+      {
+        id: "1",
+        number: "RNC-2025-001",
+        type: "RNC",
+        origin: "Qualidade",
+        customerName: "Haver Engenharia",
+        status: "Em Análise",
+        openingDate: new Date("2025-01-03"),
+        deadline: new Date("2025-01-10"),
+        description: "Material fora de especificação - espessura incorreta",
+        responsibleAnalyst: "João Silva",
+        itemName: "Chapa ASTM A36"
+      },
+      {
+        id: "2", 
+        number: "AE-2025-001",
+        type: "Atraso de Entrega",
+        origin: "Planejamento",
+        customerName: "Sandvik",
+        status: "Em Execução",
+        openingDate: new Date("2025-01-01"),
+        deadline: new Date("2025-01-09"),
+        description: "Atraso na entrega devido a problemas de fornecimento",
+        responsibleAnalyst: "Maria Santos",
+        itemName: "Conjunto Mecânico P0021"
+      }
     ];
+    setOccurrences(mockData);
+  }, []);
 
-    return (
-        <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                    <CardTitle className="text-base">Análise dos 5 Porquês</CardTitle>
-                    <CardDescription>
-                        Metodologia para identificação da causa raiz do problema
-                    </CardDescription>
-                </div>
-                <Button
-                    variant={isEditing ? "destructive" : "outline"}
-                    size="sm"
-                    onClick={() => setIsEditing(!isEditing)}
-                >
-                    {isEditing ? "Cancelar" : "Editar"}
-                </Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                {whyQuestions.map((why, index) => (
-                    <div key={why.key} className="space-y-2">
-                        <div className="flex items-center gap-2">
-                            <div className={cn(
-                                "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold",
-                                fiveWhys.selectedWhyIndex === index 
-                                    ? "bg-red-100 text-red-700 border-2 border-red-300" 
-                                    : "bg-gray-100 text-gray-600"
-                            )}>
-                                {index + 1}
-                            </div>
-                            <label className="text-sm font-medium">{why.label}</label>
-                            {fiveWhys.selectedWhyIndex === index && (
-                                <Badge variant="destructive" className="text-xs">Causa Raiz</Badge>
-                            )}
-                        </div>
-                        <p className="text-xs text-muted-foreground ml-8">{why.question}</p>
-                        {isEditing ? (
-                            <div className="ml-8 space-y-2">
-                                <Textarea
-                                    value={fiveWhys[why.key] as string || ''}
-                                    onChange={(e) => setFiveWhys(prev => ({
-                                        ...prev,
-                                        [why.key]: e.target.value
-                                    }))}
-                                    placeholder="Digite a resposta..."
-                                    className="min-h-[60px]"
-                                />
-                                {fiveWhys[why.key] && (
-                                    <Button
-                                        type="button"
-                                        variant={fiveWhys.selectedWhyIndex === index ? "destructive" : "outline"}
-                                        size="sm"
-                                        onClick={() => {
-                                            if (fiveWhys.selectedWhyIndex === index) {
-                                                setFiveWhys(prev => ({
-                                                    ...prev,
-                                                    selectedWhyIndex: undefined,
-                                                    rootCause: ''
-                                                }));
-                                            } else {
-                                                setFiveWhys(prev => ({
-                                                    ...prev,
-                                                    selectedWhyIndex: index,
-                                                    rootCause: prev[why.key] as string
-                                                }));
-                                            }
-                                        }}
-                                    >
-                                        {fiveWhys.selectedWhyIndex === index 
-                                            ? "Remover como Causa Raiz" 
-                                            : "Definir como Causa Raiz"
-                                        }
-                                    </Button>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="ml-8">
-                                {fiveWhys[why.key] ? (
-                                    <p className={cn(
-                                        "p-3 rounded-md border",
-                                        fiveWhys.selectedWhyIndex === index 
-                                            ? "bg-red-50 border-red-200" 
-                                            : "bg-gray-50 border-gray-200"
-                                    )}>
-                                        {fiveWhys[why.key] as string}
-                                    </p>
-                                ) : (
-                                    <p className="text-muted-foreground italic">Não respondido</p>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                ))}
+  // Filtros
+  const filteredOccurrences = useMemo(() => {
+    return occurrences.filter(occ => {
+      const matchesSearch = searchQuery === "" || 
+        occ.number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        occ.customerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        occ.description.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesStatus = statusFilter === "all" || occ.status === statusFilter;
+      const matchesType = typeFilter === "all" || occ.type === typeFilter;
+      
+      return matchesSearch && matchesStatus && matchesType;
+    });
+  }, [occurrences, searchQuery, statusFilter, typeFilter]);
 
-                {fiveWhys.rootCause && (
-                    <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-md">
-                        <h4 className="font-semibold text-red-800 mb-2">🎯 Causa Raiz Identificada:</h4>
-                        <p className="text-red-700">{fiveWhys.rootCause}</p>
-                    </div>
-                )}
-
-                {isEditing && (
-                    <div className="flex justify-end pt-4">
-                        <Button onClick={handleSave}>
-                            Salvar Análise
-                        </Button>
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    );
-}
-
-function ActionPlanSection({ 
-    occurrence, 
-    onSave 
-}: { 
-    occurrence: Occurrence; 
-    onSave: (data: ActionPlanItem[]) => void;
-}) {
-    const [isEditing, setIsEditing] = useState(false);
-    const [isAddingAction, setIsAddingAction] = useState(false);
-    const [actions, setActions] = useState<ActionPlanItem[]>(occurrence.actionPlan || []);
-    const [newAction, setNewAction] = useState<Partial<ActionPlanItem>>({
-        action: '',
-        type: 'Corretiva',
-        responsible: '',
-        deadline: new Date(),
-        status: 'Pendente',
-        evidence: '',
-        notes: ''
+  // Dashboard stats
+  const dashboardStats = useMemo(() => {
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    
+    const thisMonthOccurrences = occurrences.filter(occ => {
+      const occDate = occ.openingDate;
+      return occDate.getMonth() === currentMonth && occDate.getFullYear() === currentYear;
     });
 
-    const handleSave = () => {
-        onSave(actions);
-        setIsEditing(false);
-    };
+    const rncCount = thisMonthOccurrences.filter(occ => occ.type === "RNC").length;
+    const delayCount = thisMonthOccurrences.filter(occ => occ.type === "Atraso de Entrega").length;
+    const openOccurrences = occurrences.filter(occ => occ.status !== "Concluída").length;
 
-    const handleAddAction = () => {
-        if (newAction.action && newAction.responsible) {
-            const actionToAdd: ActionPlanItem = {
-                id: Date.now().toString(),
-                action: newAction.action,
-                type: newAction.type as "Corretiva" | "Preventiva",
-                responsible: newAction.responsible,
-                deadline: newAction.deadline || new Date(),
-                status: newAction.status as "Pendente" | "Em Andamento" | "Concluída" | "Atrasada",
-                evidence: newAction.evidence,
-                notes: newAction.notes
-            };
-            
-            setActions(prev => [...prev, actionToAdd]);
-            setNewAction({
-                action: '',
-                type: 'Corretiva',
-                responsible: '',
-                deadline: new Date(),
-                status: 'Pendente',
-                evidence: '',
-                notes: ''
-            });
-            setIsAddingAction(false);
-        }
+    return {
+      totalThisMonth: thisMonthOccurrences.length,
+      rncCount,
+      delayCount,
+      avgResolutionTime: 5, // Mock
+      actionsCompletionRate: 75, // Mock
+      openOccurrences,
     };
+  }, [occurrences]);
 
-    const handleUpdateAction = (actionId: string, field: keyof ActionPlanItem, value: any) => {
-        setActions(prev => prev.map(action => 
-            action.id === actionId ? { ...action, [field]: value } : action
-        ));
-    };
+  const handleNewOccurrence = () => {
+    setSelectedOccurrence(null);
+    setIsFormOpen(true);
+  };
 
-    const handleRemoveAction = (actionId: string) => {
-        setActions(prev => prev.filter(action => action.id !== actionId));
-    };
+  const handleViewOccurrence = (occurrence: Occurrence) => {
+    setSelectedOccurrence(occurrence);
+    setIsDetailOpen(true);
+  };
 
-    const getStatusBadgeVariant = (status: string) => {
-        switch (status) {
-            case "Pendente": return "secondary";
-            case "Em Andamento": return "default";
-            case "Concluída": return "default";
-            case "Atrasada": return "destructive";
-            default: return "outline";
-        }
-    };
-
-    const getTypeBadgeVariant = (type: string) => {
-        return type === "Corretiva" ? "destructive" : "default";
-    };
-
-    return (
+  return (
+    <div className="space-y-6">
+      {/* Dashboard Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                    <CardTitle className="text-base">Plano de Ação</CardTitle>
-                    <CardDescription>
-                        Ações corretivas e preventivas para resolução da ocorrência
-                    </CardDescription>
-                </div>
-                <div className="flex gap-2">
-                    {isEditing && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setIsAddingAction(true)}
-                        >
-                            <PlusCircle className="mr-2 h-4 w-4" />
-                            Adicionar Ação
-                        </Button>
-                    )}
-                    <Button
-                        variant={isEditing ? "destructive" : "outline"}
-                        size="sm"
-                        onClick={() => setIsEditing(!isEditing)}
-                    >
-                        {isEditing ? "Cancelar" : "Editar"}
-                    </Button>
-                </div>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total do Mês</CardTitle>
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{dashboardStats.totalThisMonth}</div>
+            <p className="text-xs text-muted-foreground">Ocorrências abertas</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">RNCs</CardTitle>
+            <XCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{dashboardStats.rncCount}</div>
+            <p className="text-xs text-muted-foreground">Não conformidades</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Atrasos</CardTitle>
+            <Clock className="h-4 w-4 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{dashboardStats.delayCount}</div>
+            <p className="text-xs text-muted-foreground">Entregas atrasadas</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tempo Médio</CardTitle>
+            <TicketCheck className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{dashboardStats.avgResolutionTime}</div>
+            <p className="text-xs text-muted-foreground">dias para resolução</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Ações</CardTitle>
+            <Play className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{dashboardStats.actionsCompletionRate}%</div>
+            <p className="text-xs text-muted-foreground">concluídas</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Em Aberto</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-600">{dashboardStats.openOccurrences}</div>
+            <p className="text-xs text-muted-foreground">pendentes</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filtros e Tabela */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <CardTitle>Planos de Ação</CardTitle>
+              <CardDescription>Gerencie não conformidades e atrasos de entrega</CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleNewOccurrence} className="gap-2">
+                <PlusCircle className="h-4 w-4" />
+                Nova Ocorrência
+              </Button>
+              <Button variant="outline" className="gap-2">
+                <FileDown className="h-4 w-4" />
+                Exportar
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {/* Filtros */}
+          <div className="flex flex-col md:flex-row gap-4 mb-6">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por número, cliente ou descrição..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filtrar por tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os tipos</SelectItem>
+                <SelectItem value="RNC">RNC</SelectItem>
+                <SelectItem value="Atraso de Entrega">Atraso de Entrega</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filtrar por status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os status</SelectItem>
+                <SelectItem value="Aberta">Aberta</SelectItem>
+                <SelectItem value="Em Análise">Em Análise</SelectItem>
+                <SelectItem value="Em Execução">Em Execução</SelectItem>
+                <SelectItem value="Concluída">Concluída</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Tabela */}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Número</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Origem</TableHead>
+                <TableHead>Cliente</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Data Abertura</TableHead>
+                <TableHead>Prazo</TableHead>
+                <TableHead>Responsável</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredOccurrences.length > 0 ? (
+                filteredOccurrences.map((occurrence) => (
+                  <TableRow key={occurrence.id}>
+                    <TableCell className="font-mono">{occurrence.number}</TableCell>
+                    <TableCell>
+                      <Badge variant={occurrence.type === "RNC" ? "destructive" : "secondary"}>
+                        {occurrence.type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{occurrence.origin}</TableCell>
+                    <TableCell>{occurrence.customerName || "N/A"}</TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusVariant(occurrence.status)}>
+                        {occurrence.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{format(occurrence.openingDate, 'dd/MM/yyyy')}</TableCell>
+                    <TableCell>{occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yyyy') : "N/A"}</TableCell>
+                    <TableCell>{occurrence.responsibleAnalyst}</TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleViewOccurrence(occurrence)}>
+                            <Search className="mr-2 h-4 w-4" />
+                            Ver Detalhes
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem>
+                            <FileDown className="mr-2 h-4 w-4" />
+                            Exportar PDF
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={9} className="h-24 text-center">
+                    Nenhuma ocorrência encontrada.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Dialogs Simplificados */}
+      <SimpleOccurrenceDialog 
+        open={isFormOpen}
+        onOpenChange={setIsFormOpen}
+        occurrence={selectedOccurrence}
+      />
+
+      <SimpleDetailDialog
+        open={isDetailOpen}
+        onOpenChange={setIsDetailOpen}
+        occurrence={selectedOccurrence}
+      />
+    </div>
+  );
+}
+
+// ===== DIALOGS SIMPLIFICADOS =====
+function SimpleOccurrenceDialog({ open, onOpenChange, occurrence }: any) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>
+            {occurrence ? "Editar Ocorrência" : "Nova Ocorrência"}
+          </DialogTitle>
+          <DialogDescription>
+            Registre uma nova não conformidade ou atraso de entrega
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="grid gap-4 py-4">
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="type" className="text-right">Tipo</Label>
+            <Select>
+              <SelectTrigger className="col-span-3">
+                <SelectValue placeholder="Selecione o tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="RNC">RNC - Não Conformidade</SelectItem>
+                <SelectItem value="Atraso de Entrega">Atraso de Entrega</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="description" className="text-right">Descrição</Label>
+            <Textarea placeholder="Descreva a ocorrência..." className="col-span-3" />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancelar
+          </Button>
+          <Button type="submit">
+            {occurrence ? 'Atualizar' : 'Salvar'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SimpleDetailDialog({ open, onOpenChange, occurrence }: any) {
+  if (!occurrence) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {occurrence.type === "RNC" ? (
+              <XCircle className="h-5 w-5 text-red-500" />
+            ) : (
+              <Clock className="h-5 w-5 text-orange-500" />
+            )}
+            {occurrence.type} - {occurrence.number}
+          </DialogTitle>
+          <DialogDescription>
+            Aberto em {format(occurrence.openingDate, 'dd/MM/yyyy')} - {occurrence.origin}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Informações Gerais</CardTitle>
             </CardHeader>
             <CardContent>
-                {actions.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                        <BrainCircuit className="mx-auto h-12 w-12 mb-4 opacity-50" />
-                        <p>Nenhuma ação definida ainda</p>
-                        {isEditing && (
-                            <Button 
-                                variant="outline" 
-                                className="mt-4"
-                                onClick={() => setIsAddingAction(true)}
-                            >
-                                <PlusCircle className="mr-2 h-4 w-4" />
-                                Adicionar Primeira Ação
-                            </Button>
-                        )}
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        {actions.map((action, index) => (
-                            <div key={action.id} className="border rounded-lg p-4 space-y-3">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex-1 space-y-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-medium text-sm">Ação {index + 1}</span>
-                                            <Badge variant={getTypeBadgeVariant(action.type)}>
-                                                {action.type}
-                                            </Badge>
-                                            <Badge variant={getStatusBadgeVariant(action.status)}>
-                                                {action.status}
-                                            </Badge>
-                                        </div>
-                                        
-                                        {isEditing ? (
-                                            <div className="space-y-3">
-                                                <Textarea
-                                                    value={action.action}
-                                                    onChange={(e) => handleUpdateAction(action.id, 'action', e.target.value)}
-                                                    placeholder="Descrição da ação..."
-                                                />
-                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                                    <Select 
-                                                        value={action.type} 
-                                                        onValueChange={(value) => handleUpdateAction(action.id, 'type', value)}
-                                                    >
-                                                        <SelectTrigger>
-                                                            <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Corretiva">Corretiva</SelectItem>
-                                                            <SelectItem value="Preventiva">Preventiva</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                    
-                                                    <Input
-                                                        value={action.responsible}
-                                                        onChange={(e) => handleUpdateAction(action.id, 'responsible', e.target.value)}
-                                                        placeholder="Responsável"
-                                                    />
-                                                    
-                                                    <Select 
-                                                        value={action.status} 
-                                                        onValueChange={(value) => handleUpdateAction(action.id, 'status', value)}
-                                                    >
-                                                        <SelectTrigger>
-                                                            <SelectValue />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Pendente">Pendente</SelectItem>
-                                                            <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                                                            <SelectItem value="Concluída">Concluída</SelectItem>
-                                                            <SelectItem value="Atrasada">Atrasada</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                    <Input
-                                                        type="date"
-                                                        value={format(new Date(action.deadline), 'yyyy-MM-dd')}
-                                                        onChange={(e) => handleUpdateAction(action.id, 'deadline', new Date(e.target.value))}
-                                                    />
-                                                    <Input
-                                                        value={action.evidence || ''}
-                                                        onChange={(e) => handleUpdateAction(action.id, 'evidence', e.target.value)}
-                                                        placeholder="Evidência/Comprovante"
-                                                    />
-                                                </div>
-                                                <Textarea
-                                                    value={action.notes || ''}
-                                                    onChange={(e) => handleUpdateAction(action.id, 'notes', e.target.value)}
-                                                    placeholder="Observações adicionais..."
-                                                />
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                <p>{action.action}</p>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-muted-foreground">
-                                                    <div><strong>Responsável:</strong> {action.responsible}</div>
-                                                    <div><strong>Prazo:</strong> {format(new Date(action.deadline), 'dd/MM/yyyy')}</div>
-                                                    {action.evidence && (
-                                                        <div><strong>Evidência:</strong> {action.evidence}</div>
-                                                    )}
-                                                    {action.completionDate && (
-                                                        <div><strong>Concluída em:</strong> {format(new Date(action.completionDate), 'dd/MM/yyyy')}</div>
-                                                    )}
-                                                </div>
-                                                {action.notes && (
-                                                    <div className="text-sm">
-                                                        <strong>Observações:</strong> {action.notes}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    {isEditing && (
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleRemoveAction(action.id)}
-                                            className="text-red-600 hover:text-red-700"
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Add New Action Dialog */}
-                <Dialog open={isAddingAction} onOpenChange={setIsAddingAction}>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Adicionar Nova Ação</DialogTitle>
-                            <DialogDescription>
-                                Defina uma nova ação corretiva ou preventiva
-                            </DialogDescription>
-                        </DialogHeader>
-                        
-                        <div className="space-y-4">
-                            <Textarea
-                                value={newAction.action || ''}
-                                onChange={(e) => setNewAction(prev => ({ ...prev, action: e.target.value }))}
-                                placeholder="Descrição da ação..."
-                            />
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <Select 
-                                    value={newAction.type} 
-                                    onValueChange={(value) => setNewAction(prev => ({ ...prev, type: value as "Corretiva" | "Preventiva" }))}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Tipo de ação" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Corretiva">Corretiva</SelectItem>
-                                        <SelectItem value="Preventiva">Preventiva</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                
-                                <Input
-                                    value={newAction.responsible || ''}
-                                    onChange={(e) => setNewAction(prev => ({ ...prev, responsible: e.target.value }))}
-                                    placeholder="Responsável"
-                                />
-                            </div>
-                            
-                            <Input
-                                type="date"
-                                value={newAction.deadline ? format(new Date(newAction.deadline), 'yyyy-MM-dd') : ''}
-                                onChange={(e) => setNewAction(prev => ({ ...prev, deadline: new Date(e.target.value) }))}
-                            />
-                            
-                            <Textarea
-                                value={newAction.notes || ''}
-                                onChange={(e) => setNewAction(prev => ({ ...prev, notes: e.target.value }))}
-                                placeholder="Observações adicionais..."
-                            />
-                        </div>
-                        
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setIsAddingAction(false)}>
-                                Cancelar
-                            </Button>
-                            <Button onClick={handleAddAction}>
-                                Adicionar Ação
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-
-                {isEditing && actions.length > 0 && (
-                    <div className="flex justify-end pt-4">
-                        <Button onClick={handleSave}>
-                            Salvar Plano de Ação
-                        </Button>
-                    </div>
-                )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium">Status</Label>
+                  <div className="mt-1">
+                    <Badge variant={getStatusVariant(occurrence.status)}>
+                      {occurrence.status}
+                    </Badge>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Responsável</Label>
+                  <p className="mt-1 text-sm">{occurrence.responsibleAnalyst}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Cliente</Label>
+                  <p className="mt-1 text-sm">{occurrence.customerName || "N/A"}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium">Prazo</Label>
+                  <p className="mt-1 text-sm">
+                    {occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yyyy') : "Não definido"}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <Label className="text-sm font-medium">Descrição</Label>
+                <p className="mt-1 text-sm text-muted-foreground">{occurrence.description}</p>
+              </div>
             </CardContent>
-        </Card>
-    );
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Análise dos 5 Porquês</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                A análise de causa raiz será implementada aqui.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Plano de Ação</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                As ações corretivas e preventivas serão listadas aqui.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Fechar
+          </Button>
+          <Button>
+            <Pencil className="h-4 w-4 mr-1" />
+            Editar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ===== FUNÇÃO HELPER PARA STATUS =====
+function getStatusVariant(status?: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+    if (!status) return 'outline';
+    switch (status) {
+        case 'Aberta': return 'destructive';
+        case 'Em Análise': return 'secondary'; 
+        case 'Em Execução': return 'secondary';
+        case 'Concluída': return 'default';
+        case 'Atrasada': return 'destructive';
+        default: return 'outline';
+    }
 }
 
 
