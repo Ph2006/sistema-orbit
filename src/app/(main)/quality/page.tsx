@@ -3071,86 +3071,251 @@ export default function QualityPage() {
         </Tabs>
       </div>
 
-      <Dialog open={isRncFormOpen} onOpenChange={setIsRncFormOpen}><DialogContent><DialogHeader><DialogTitle>{selectedReport ? "Editar Relatório" : "Registrar Não Conformidade"}</DialogTitle><DialogDescription>Preencha os detalhes para registrar o ocorrido.</DialogDescription></DialogHeader>
-        <Form {...rncForm}><form onSubmit={rncForm.handleSubmit(onRncSubmit)} className="space-y-4 pt-4">
-          <FormField control={rncForm.control} name="date" render={({ field }) => ( <FormItem className="flex flex-col"><FormLabel>Data da Ocorrência</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent></Popover><FormMessage /></FormItem> )}/>
-          <FormField control={rncForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="item" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={value => { const selectedItem = availableRncItems.find(i => i.id === value); if (selectedItem) field.onChange(selectedItem); }} value={field.value?.id || ""}>{/* @ts-ignore */}
-              <FormControl><SelectTrigger disabled={!watchedRncOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="type" render={({ field }) => ( <FormItem><FormLabel>Tipo de Não Conformidade</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Interna">Interna</SelectItem><SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-          <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
-          <FormField control={rncForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Aberta">Aberta</SelectItem><SelectItem value="Em Análise">Em Análise</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+      <Dialog open={isRncFormOpen} onOpenChange={setIsRncFormOpen}>
+        <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>{selectedReport ? "Editar Relatório" : "Registrar Não Conformidade"}</DialogTitle>
+            <DialogDescription>Preencha os detalhes para registrar o ocorrido.</DialogDescription>
+          </DialogHeader>
           
-          {/* Registro Fotográfico */}
-          <FormItem>
-            <FormLabel>Registro Fotográfico</FormLabel>
-            <FormControl>
-                <Input 
-                    type="file" 
-                    multiple 
-                    accept="image/*" 
-                    onChange={handleRncPhotoUpload} 
-                />
-            </FormControl>
-            <FormDescription>
-                Selecione uma ou mais imagens para anexar ao relatório.
-            </FormDescription>
-            {rncForm.watch("photos") && rncForm.watch("photos").length > 0 && (
-                <div className="space-y-2">
-                    <div className="flex justify-between items-center text-sm text-muted-foreground">
-                        <span>{rncForm.watch("photos").length} de 6 fotos</span>
-                        <span>Compressão aplicada automaticamente</span>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {rncForm.watch("photos").map((photo: string, index: number) => (
-                            <div key={index} className="relative group">
-                                <div className="aspect-square overflow-hidden rounded-lg border border-border">
-                                    <Image 
-                                        src={photo} 
-                                        alt={`Foto ${index + 1}`} 
-                                        width={200} 
-                                        height={200} 
-                                        className="w-full h-full object-cover transition-transform group-hover:scale-105" 
-                                    />
+          <Form {...rncForm}>
+            <form onSubmit={rncForm.handleSubmit(onRncSubmit)} className="flex-1 flex flex-col min-h-0">
+              {/* ✅ ÁREA COM SCROLL */}
+              <ScrollArea className="flex-1 pr-4">
+                <div className="space-y-4 p-2">
+                  
+                  {/* Data da Ocorrência */}
+                  <FormField control={rncForm.control} name="date" render={({ field }) => ( 
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Data da Ocorrência</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                              {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha uma data</span>}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem> 
+                  )}/>
+
+                  {/* Pedido */}
+                  <FormField control={rncForm.control} name="orderId" render={({ field }) => ( 
+                    <FormItem>
+                      <FormLabel>Pedido</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione um pedido" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem> 
+                  )} />
+
+                  {/* Item Afetado */}
+                  <FormField control={rncForm.control} name="item" render={({ field }) => ( 
+                    <FormItem>
+                      <FormLabel>Item Afetado</FormLabel>
+                      <Select onValueChange={value => { 
+                        const selectedItem = availableRncItems.find(i => i.id === value); 
+                        if (selectedItem) field.onChange(selectedItem); 
+                      }} value={field.value?.id || ""}>
+                        <FormControl>
+                          <SelectTrigger disabled={!watchedRncOrderId}>
+                            <SelectValue placeholder="Selecione um item do pedido" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {availableRncItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem> 
+                  )} />
+
+                  {/* Tipo de Não Conformidade */}
+                  <FormField control={rncForm.control} name="type" render={({ field }) => ( 
+                    <FormItem>
+                      <FormLabel>Tipo de Não Conformidade</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o tipo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Interna">Interna</SelectItem>
+                          <SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem> 
+                  )} />
+
+                  {/* Descrição */}
+                  <FormField control={rncForm.control} name="description" render={({ field }) => ( 
+                    <FormItem>
+                      <FormLabel>Descrição da Ocorrência</FormLabel>
+                      <FormControl>
+                        <Textarea 
+                          placeholder="Detalhe o que aconteceu, peças envolvidas, etc." 
+                          {...field} 
+                          value={field.value ?? ''} 
+                          className="min-h-[100px]"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem> 
+                  )}/>
+
+                  {/* Status */}
+                  <FormField control={rncForm.control} name="status" render={({ field }) => ( 
+                    <FormItem>
+                      <FormLabel>Status</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o status" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Aberta">Aberta</SelectItem>
+                          <SelectItem value="Em Análise">Em Análise</SelectItem>
+                          <SelectItem value="Concluída">Concluída</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem> 
+                  )} />
+
+                  {/* ✅ SEÇÃO DE FOTOS */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        📷 Registro Fotográfico
+                        <Badge variant="secondary">{rncForm.watch("photos")?.length || 0}/6</Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        Anexe fotos relacionadas à não conformidade para documentar a ocorrência.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <FormItem>
+                        <FormLabel>Selecionar Fotos</FormLabel>
+                        <FormControl>
+                          <div className="flex items-center justify-center w-full">
+                            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                              <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                                <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                                  <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                                </svg>
+                                <p className="mb-2 text-sm text-gray-500">
+                                  <span className="font-semibold">Clique para selecionar</span> ou arraste as imagens
+                                </p>
+                                <p className="text-xs text-gray-500">PNG, JPG, JPEG, WebP (máx. 5MB cada)</p>
+                              </div>
+                              <Input 
+                                type="file" 
+                                multiple 
+                                accept="image/jpeg,image/jpg,image/png,image/webp" 
+                                onChange={handleRncPhotoUpload} 
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                        </FormControl>
+                        <FormDescription className="text-xs">
+                          • Máximo 6 fotos por relatório<br/>
+                          • Tamanho máximo: 5MB por imagem<br/>
+                          • Formatos aceitos: JPEG, PNG, WebP<br/>
+                          • Dica: Fotos menores carregam mais rápido
+                        </FormDescription>
+                      </FormItem>
+
+                      {rncForm.watch("photos") && rncForm.watch("photos").length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-medium text-sm">Fotos Anexadas</h4>
+                            <Button 
+                              type="button" 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => rncForm.setValue("photos", [], { shouldValidate: true })}
+                            >
+                              Remover Todas
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {rncForm.watch("photos").map((photo, index) => (
+                              <div key={index} className="relative group">
+                                <div className="relative overflow-hidden rounded-lg border">
+                                  <Image 
+                                    src={photo} 
+                                    alt={`RNC ${index + 1}`} 
+                                    width={200} 
+                                    height={200} 
+                                    className="object-cover w-full aspect-square transition-transform group-hover:scale-105" 
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+                                  <Button 
+                                    type="button" 
+                                    size="icon" 
+                                    variant="destructive" 
+                                    className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onClick={() => removeRncPhoto(index)}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
                                 </div>
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={() => removeRncPhoto(index)}
-                                        className="shadow-lg"
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-1" />
-                                        Remover
-                                    </Button>
-                                </div>
-                                <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                                    {index + 1}
-                                </div>
-                                <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                                    {Math.round((photo.length * 0.75) / 1024)}KB
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                                <p className="text-xs text-center mt-1 text-muted-foreground">
+                                  Foto {index + 1}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <FormMessage />
+                    </CardContent>
+                  </Card>
+
+                  {/* ✅ INDICADOR DE TAMANHO */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <DataSizeIndicator data={rncForm.getValues()} />
+                    </CardContent>
+                  </Card>
+
                 </div>
-            )}
-            <FormMessage />
-          </FormItem>
-
-          {/* Indicador de Tamanho */}
-          <Card>
-            <CardHeader>
-                <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <DataSizeIndicator data={rncForm.getValues()} />
-            </CardContent>
-          </Card>
-
-          <DialogFooter><Button type="submit">Salvar</Button></DialogFooter>
-      </form></Form></DialogContent></Dialog>
+              </ScrollArea>
+              
+              {/* ✅ FOOTER FIXO COM BOTÕES */}
+              <DialogFooter className="pt-4 mt-4 border-t flex-shrink-0">
+                <Button type="button" variant="outline" onClick={() => setIsRncFormOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit">
+                  {selectedReport ? 'Atualizar Relatório' : 'Salvar Relatório'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
       <AlertDialog open={isRncDeleting} onOpenChange={setIsRncDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o relatório de não conformidade.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmRncDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <Dialog open={isCalibrationFormOpen} onOpenChange={setIsCalibrationFormOpen}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>{selectedCalibration ? "Editar Calibração" : "Adicionar Equipamento para Calibração"}</DialogTitle><DialogDescription>Preencha os dados do equipamento e seu plano de calibração.</DialogDescription></DialogHeader>
