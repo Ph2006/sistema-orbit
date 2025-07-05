@@ -193,6 +193,22 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 
 
+// ===== SCHEMAS AUXILIARES PARA PLANOS DE AÇÃO =====
+// (Removido: duplicidade do fiveWhysSchema e actionPlanItemSchema, já definidos abaixo)
+
+// Definições auxiliares
+const fiveWhysSchema = z.object({
+  question: z.string(),
+  answer: z.string(),
+});
+
+const actionPlanItemSchema = z.object({
+  description: z.string(),
+  responsible: z.string(),
+  deadline: z.date(),
+  status: z.enum(["Pendente", "Em andamento", "Concluída"]).optional(),
+});
+
 // --- SCHEMAS ---
 const nonConformanceSchema = z.object({
   id: z.string().optional(),
@@ -206,6 +222,32 @@ const nonConformanceSchema = z.object({
   type: z.enum(["Interna", "Reclamação de Cliente"], { required_error: "Selecione o tipo de não conformidade." }),
   status: z.enum(["Aberta", "Em Análise", "Concluída"]),
   photos: z.array(z.string()).optional(),
+  responsibleNc: z.string().optional(), // ✅ NOVO CAMPO
+});
+
+const occurrenceSchema = z.object({
+  id: z.string().optional(),
+  number: z.string().optional(),
+  type: z.enum(["RNC", "Atraso de Entrega"]),
+  origin: z.string().min(1, "A origem é obrigatória"),
+  orderId: z.string().optional(),
+  itemId: z.string().optional(),
+  customerId: z.string().optional(),
+  customerName: z.string().optional(),
+  status: z.enum(["Aberta", "Em Análise", "Em Execução", "Concluída"]),
+  openingDate: z.date(),
+  deadline: z.date().optional(),
+  description: z.string().min(10, "A descrição deve ter pelo menos 10 caracteres"),
+  responsibleAnalyst: z.string().min(1, "O responsável pela análise é obrigatório"),
+  priority: z.enum(["Baixa", "Média", "Alta", "Crítica"]).optional(),
+  linkedRncId: z.string().optional(),
+  responsibleActionPlan: z.string().optional(), // ✅ NOVO CAMPO
+  fiveWhys: fiveWhysSchema.optional(),
+  actionPlan: z.array(actionPlanItemSchema).optional(),
+  photos: z.array(z.string()).optional(),
+  createdBy: z.string().optional(),
+  createdAt: z.date().optional(),
+  updatedAt: z.date().optional(),
 });
 
 const calibrationSchema = z.object({
@@ -510,59 +552,25 @@ const lessonsLearnedSchema = z.object({
 });
 
 // ===== SCHEMAS PARA PLANOS DE AÇÃO =====
-const fiveWhysSchema = z.object({
-  why1: z.string().optional(),
-  why2: z.string().optional(), 
-  why3: z.string().optional(),
-  why4: z.string().optional(),
-  why5: z.string().optional(),
-  rootCause: z.string().optional(),
-  selectedWhyIndex: z.number().optional(),
-});
-
-const actionPlanItemSchema = z.object({
-  id: z.string(),
-  action: z.string().min(5, "A ação deve ter pelo menos 5 caracteres"),
-  type: z.enum(["Corretiva", "Preventiva"]),
-  responsible: z.string().min(1, "O responsável é obrigatório"),
-  deadline: z.date(),
-  status: z.enum(["Pendente", "Em Andamento", "Concluída", "Atrasada"]),
-  evidence: z.string().optional(),
-  evidenceUrl: z.string().optional(),
-  completionDate: z.date().optional(),
-  notes: z.string().optional(),
-});
-
-const occurrenceSchema = z.object({
-  id: z.string().optional(),
-  number: z.string().optional(),
-  type: z.enum(["RNC", "Atraso de Entrega"]),
-  origin: z.string().min(1, "A origem é obrigatória"),
-  orderId: z.string().optional(),
-  itemId: z.string().optional(),
-  customerId: z.string().optional(),
-  customerName: z.string().optional(),
-  status: z.enum(["Aberta", "Em Análise", "Em Execução", "Concluída"]),
-  openingDate: z.date(),
-  deadline: z.date().optional(),
-  description: z.string().min(10, "A descrição deve ter pelo menos 10 caracteres"),
-  responsibleAnalyst: z.string().min(1, "O responsável pela análise é obrigatório"),
-  priority: z.enum(["Baixa", "Média", "Alta", "Crítica"]).optional(),
-  linkedRncId: z.string().optional(), // ✅ RNC vinculada
-  fiveWhys: fiveWhysSchema.optional(),
-  actionPlan: z.array(actionPlanItemSchema).optional(),
-  photos: z.array(z.string()).optional(),
-  createdBy: z.string().optional(),
-  createdAt: z.date().optional(),
-  updatedAt: z.date().optional(),
-});
+// (Removido: duplicidade do fiveWhysSchema e actionPlanItemSchema, já definidos acima)
+// (Removido: duplicidade do occurrenceSchema, já definido acima)
 
 
 
 
 
 // --- TYPES ---
-type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string, photos?: string[] };
+type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string, photos?: string[], responsibleNc?: string };
+
+type Occurrence = z.infer<typeof occurrenceSchema> & { 
+  id: string, 
+  number: string,
+  orderNumber?: string,
+  itemName?: string,
+  itemCode?: string,
+  linkedRncId?: string,
+  responsibleActionPlan?: string, // ✅ NOVO CAMPO
+};
 type OrderInfo = { id: string; number: string; customerId: string; customerName: string, projectName?: string, items: { id: string, description: string, code?: string, quantity?: number }[] };
 type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id: string, orderNumber: string, itemName: string };
@@ -577,14 +585,6 @@ type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
     logo?: { preview?: string };
-};
-type Occurrence = z.infer<typeof occurrenceSchema> & { 
-  id: string, 
-  number: string,
-  orderNumber?: string,
-  itemName?: string,
-  itemCode?: string,
-  linkedRncId?: string, // ✅ RNC vinculada
 };
 type ActionPlanItem = z.infer<typeof actionPlanItemSchema>;
 type FiveWhysAnalysis = z.infer<typeof fiveWhysSchema>;
@@ -874,7 +874,8 @@ export default function QualityPage() {
       const [
         ordersSnapshot, reportsSnapshot, calibrationsSnapshot, teamSnapshot, 
         materialInspectionsSnapshot, dimensionalReportsSnapshot, weldingInspectionsSnapshot, paintingReportsSnapshot,
-        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot
+        liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot,
+        occurrencesSnapshot // ✅ ADICIONAR ESTA LINHA
       ] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "orders")),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
@@ -887,7 +888,7 @@ export default function QualityPage() {
         getDocs(collection(db, "companies", "mecald", "liquidPenetrantReports")),
         getDocs(collection(db, "companies", "mecald", "ultrasoundReports")),
         getDocs(collection(db, "companies", "mecald", "lessonsLearned")),
-
+        getDocs(collection(db, "companies", "mecald", "actionPlans")) // ✅ NOVA LINHA
       ]);
 
       const ordersList: OrderInfo[] = ordersSnapshot.docs.map(doc => {
@@ -910,9 +911,27 @@ export default function QualityPage() {
           id: doc.id, date: data.date.toDate(), orderId: data.orderId, orderNumber: order?.number || 'N/A',
           item: { id: data.itemId, description: data.itemDescription }, customerName: order?.customerName || 'N/A',
           description: data.description, type: data.type, status: data.status, photos: data.photos || [],
+          responsibleNc: data.responsibleNc || 'N/A', // ✅ ADICIONAR ESTA LINHA
         } as NonConformance;
       });
       setReports(reportsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
+
+      // ✅ BUSCAR OCORRÊNCIAS DO FIRESTORE
+      const occurrencesList = occurrencesSnapshot.docs.map(doc => {
+        const data = doc.data();
+        const order = ordersList.find(o => o.id === data.orderId);
+        const item = order?.items.find(i => i.id === data.itemId);
+        return {
+          id: doc.id,
+          ...data,
+          openingDate: data.openingDate.toDate(),
+          deadline: data.deadline?.toDate() || null,
+          orderNumber: order?.number || 'N/A',
+          itemName: item?.description || 'N/A',
+          itemCode: item?.code || 'N/A',
+        } as Occurrence;
+      });
+      setOccurrences(occurrencesList.sort((a, b) => b.openingDate.getTime() - a.openingDate.getTime()));
 
       const calibrationsList = calibrationsSnapshot.docs.map(doc => {
         const data = doc.data();
@@ -3254,6 +3273,28 @@ export default function QualityPage() {
                           <SelectItem value="Aberta">Aberta</SelectItem>
                           <SelectItem value="Em Análise">Em Análise</SelectItem>
                           <SelectItem value="Concluída">Concluída</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem> 
+                  )} />
+
+                  {/* Responsável pela NC */}
+                  <FormField control={rncForm.control} name="responsibleNc" render={({ field }) => ( 
+                    <FormItem>
+                      <FormLabel>Responsável pela NC</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o responsável" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {teamMembers.map(member => (
+                            <SelectItem key={member.id} value={member.id}>
+                              {member.name} - {member.role}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
