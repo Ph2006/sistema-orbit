@@ -27,7 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, TicketCheck, Plus } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, TicketCheck, Plus, Link } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -548,6 +548,7 @@ const occurrenceSchema = z.object({
   description: z.string().min(10, "A descrição deve ter pelo menos 10 caracteres"),
   responsibleAnalyst: z.string().min(1, "O responsável pela análise é obrigatório"),
   priority: z.enum(["Baixa", "Média", "Alta", "Crítica"]).optional(),
+  linkedRncId: z.string().optional(), // ✅ RNC vinculada
   fiveWhys: fiveWhysSchema.optional(),
   actionPlan: z.array(actionPlanItemSchema).optional(),
   photos: z.array(z.string()).optional(),
@@ -582,6 +583,8 @@ type Occurrence = z.infer<typeof occurrenceSchema> & {
   number: string,
   orderNumber?: string,
   itemName?: string,
+  itemCode?: string,
+  linkedRncId?: string, // ✅ RNC vinculada
 };
 type ActionPlanItem = z.infer<typeof actionPlanItemSchema>;
 type FiveWhysAnalysis = z.infer<typeof fiveWhysSchema>;
@@ -3123,6 +3126,7 @@ export default function QualityPage() {
                     teamMembers={teamMembers} 
                     toast={toast}
                     user={user}
+                    reports={reports}
                 />
             </TabsContent>
         </Tabs>
@@ -5148,11 +5152,12 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
 
 // ===== COMPONENTES PARA PLANOS DE AÇÃO - VERSÃO CORRIGIDA =====
 
-function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
+function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = [] }: {
   orders?: any[];
   teamMembers?: any[];
   toast?: any;
   user?: any;
+  reports?: any[]; // ✅ RNCs disponíveis
 }) {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -5180,8 +5185,14 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
       responsibleAnalyst: "",
       priority: "Média",
       photos: [],
+      linkedRncId: "", // ✅ RNC vinculada
     },
   });
+
+  // ✅ FILTRAR RNCs ABERTAS PARA SELEÇÃO
+  const openRncs = useMemo(() => {
+    return reports.filter(rnc => rnc.status !== "Concluída");
+  }, [reports]);
 
   // Mock data inicial (substituir pela busca real do Firestore)
   useEffect(() => {
@@ -5202,6 +5213,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
           itemCode: "P0001",
           orderNumber: "OS-2025-001",
           priority: "Alta",
+          linkedRncId: "rnc-1", // ✅ Vinculado a uma RNC existente
         },
         {
           id: "2", 
@@ -5228,7 +5240,27 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
     setTimeout(loadMockData, 500);
   }, []);
 
-  // Filtros
+  // ✅ FUNÇÃO PARA CRIAR PLANO DE AÇÃO BASEADO EM RNC EXISTENTE
+  const handleCreateFromRnc = (rnc: any) => {
+    setSelectedOccurrence(null);
+    occurrenceForm.reset({
+      type: "RNC",
+      status: "Em Análise", // Já em análise pois vem de RNC
+      openingDate: rnc.date, // Data da RNC original
+      description: `Plano de ação para RNC: ${rnc.description}`,
+      origin: "Qualidade",
+      responsibleAnalyst: "",
+      priority: "Alta", // RNCs já abertas são prioritárias
+      photos: rnc.photos || [],
+      linkedRncId: rnc.id, // ✅ VINCULAR À RNC ORIGINAL
+      orderId: rnc.orderId,
+      itemId: rnc.item?.id,
+      customerName: rnc.customerName,
+    });
+    setIsFormOpen(true);
+  };
+
+  // ===== HANDLERS =====
   const filteredOccurrences = useMemo(() => {
     return occurrences.filter(occ => {
       const matchesSearch = searchQuery === "" || 
@@ -5282,6 +5314,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
       responsibleAnalyst: "",
       priority: "Média",
       photos: [],
+      linkedRncId: "",
     });
     setIsFormOpen(true);
   };
@@ -5342,18 +5375,18 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
         const newOccurrence: Occurrence = {
           ...values,
           id: Date.now().toString(),
-          number: `${values.type === "RNC" ? "RNC" : "AE"}-2025-${String(occurrences.length + 1).padStart(3, '0')}`,
+          number: `${values.type === "RNC" ? "PA-RNC" : "PA-AE"}-2025-${String(occurrences.length + 1).padStart(3, '0')}`,
         };
         
         setOccurrences(prev => [newOccurrence, ...prev]);
-        showToast({ title: "Nova ocorrência criada com sucesso!" });
+        showToast({ title: "Plano de ação criado com sucesso!" });
       }
       
       setIsFormOpen(false);
       setSelectedOccurrence(null);
     } catch (error) {
       console.error("Erro ao salvar:", error);
-      showToast({ variant: "destructive", title: "Erro ao salvar ocorrência" });
+      showToast({ variant: "destructive", title: "Erro ao salvar plano de ação" });
     }
   };
 
@@ -5380,7 +5413,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{dashboardStats.totalThisMonth}</div>
-            <p className="text-xs text-muted-foreground">Ocorrências abertas</p>
+            <p className="text-xs text-muted-foreground">Planos criados</p>
           </CardContent>
         </Card>
 
@@ -5391,7 +5424,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{dashboardStats.rncCount}</div>
-            <p className="text-xs text-muted-foreground">Não conformidades</p>
+            <p className="text-xs text-muted-foreground">Planos para RNCs</p>
           </CardContent>
         </Card>
 
@@ -5402,7 +5435,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{dashboardStats.delayCount}</div>
-            <p className="text-xs text-muted-foreground">Entregas atrasadas</p>
+            <p className="text-xs text-muted-foreground">Planos para atrasos</p>
           </CardContent>
         </Card>
 
@@ -5429,19 +5462,76 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
         </Card>
       </div>
 
-      {/* Filtros e Tabela */}
+      {/* ✅ NOVA SEÇÃO: RNCs ABERTAS PARA PLANO DE AÇÃO */}
+      {openRncs.length > 0 && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-orange-600" />
+                  RNCs Aguardando Plano de Ação
+                </CardTitle>
+                <CardDescription>
+                  {openRncs.length} não conformidade(s) aberta(s) que podem precisar de plano de ação
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {openRncs.slice(0, 3).map((rnc) => (
+                <div key={rnc.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-orange-200">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="destructive" className="text-xs">RNC</Badge>
+                      <span className="font-medium text-sm">{rnc.orderNumber || 'N/A'}</span>
+                      <Badge variant={getStatusVariant(rnc.status)} className="text-xs">
+                        {rnc.status}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      <strong>{rnc.customerName}:</strong> {rnc.description}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Aberta em {format(rnc.date, 'dd/MM/yyyy')} - {rnc.item?.description}
+                    </p>
+                  </div>
+                  <Button 
+                    size="sm" 
+                    onClick={() => handleCreateFromRnc(rnc)}
+                    className="ml-4"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Criar Plano
+                  </Button>
+                </div>
+              ))}
+              
+              {openRncs.length > 3 && (
+                <div className="text-center pt-2">
+                  <Button variant="outline" size="sm">
+                    Ver todas as {openRncs.length} RNCs abertas
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Filtros e Tabela Principal */}
       <Card>
         <CardHeader>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <CardTitle>Planos de Ação</CardTitle>
-              <CardDescription>Gerencie não conformidades e atrasos de entrega</CardDescription>
+              <CardDescription>Gerencie planos de ação para não conformidades e atrasos de entrega</CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={handleNewOccurrence} className="gap-2">
-                <PlusCircle className="h-4 w-4" />
-                Nova Ocorrência
-              </Button>
+            <div className="flex gap-2">                <Button onClick={handleNewOccurrence} className="gap-2">
+                  <PlusCircle className="h-4 w-4" />
+                  Novo Plano de Ação
+                </Button>
               <Button variant="outline" className="gap-2">
                 <FileDown className="h-4 w-4" />
                 Exportar
@@ -5503,6 +5593,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
                   <TableHead>Cliente</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Prioridade</TableHead>
+                  <TableHead>RNC Vinculada</TableHead>
                   <TableHead>Data Abertura</TableHead>
                   <TableHead>Prazo</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
@@ -5510,8 +5601,13 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
               </TableHeader>
               <TableBody>
                 {filteredOccurrences.length > 0 ? (
-                  filteredOccurrences.map((occurrence) => (
-                    <TableRow key={occurrence.id}>
+                  filteredOccurrences.map((occurrence) => {
+                    // ✅ BUSCAR RNC VINCULADA
+                    const linkedRnc = occurrence.linkedRncId ? 
+                      reports.find(r => r.id === occurrence.linkedRncId) : null;
+                    
+                    return (
+                      <TableRow key={occurrence.id}>
                       <TableCell className="font-mono font-medium">{occurrence.number}</TableCell>
                       <TableCell>
                         <Badge variant={occurrence.type === "RNC" ? "destructive" : "secondary"}>
@@ -5532,16 +5628,29 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
                         <Badge variant={getStatusVariant(occurrence.status)}>
                           {occurrence.status}
                         </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={getPriorityColor(occurrence.priority)}>
-                          {occurrence.priority || "Média"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{format(occurrence.openingDate, 'dd/MM/yy')}</TableCell>
-                      <TableCell>
-                        {occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yy') : "-"}
-                      </TableCell>
+                      </TableCell>                        <TableCell>
+                          <Badge className={getPriorityColor(occurrence.priority)}>
+                            {occurrence.priority || "Média"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {linkedRnc ? (
+                            <div className="text-xs">
+                              <Badge variant="outline" className="mb-1">
+                                RNC Vinculada
+                              </Badge>
+                              <p className="text-muted-foreground">
+                                {linkedRnc.orderNumber || 'N/A'}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>{format(occurrence.openingDate, 'dd/MM/yy')}</TableCell>
+                        <TableCell>
+                          {occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yy') : "-"}
+                        </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -5575,13 +5684,14 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  ))
-                ) : (
+                      );
+                    })
+                  ) : (
                   <TableRow>
                     <TableCell colSpan={10} className="h-24 text-center">
                       {searchQuery || statusFilter !== "all" || typeFilter !== "all" 
-                        ? "Nenhuma ocorrência encontrada com os filtros aplicados."
-                        : "Nenhuma ocorrência cadastrada ainda."
+                        ? "Nenhum plano de ação encontrado com os filtros aplicados."
+                        : "Nenhum plano de ação cadastrado ainda."
                       }
                     </TableCell>
                   </TableRow>
@@ -5603,6 +5713,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
         occurrence={selectedOccurrence}
         orders={orders}
         teamMembers={teamMembers}
+        reports={reports}
       />
 
       {/* Dialog de Detalhes */}
@@ -5611,6 +5722,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
         onOpenChange={setIsDetailOpen}
         occurrence={selectedOccurrence}
         onEdit={handleEditOccurrence}
+        reports={reports}
       />
 
       {/* Dialog de Confirmação de Exclusão */}
@@ -5641,7 +5753,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
 
 // ===== COMPONENTES DE FORMULÁRIO E DETALHES =====
 
-function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, orders = [], teamMembers = [] }: {
+function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, orders = [], teamMembers = [], reports = [] }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   form: any;
@@ -5649,17 +5761,42 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
   occurrence: any;
   orders?: any[];
   teamMembers?: any[];
+  reports?: any[]; // ✅ RNCs disponíveis
 }) {
   const watchedOrderId = form.watch("orderId");
+  const watchedLinkedRncId = form.watch("linkedRncId");
+  const watchedType = form.watch("type");
   
   const availableItems = useMemo(() => {
     if (!watchedOrderId || !orders.length) return [];
     return orders.find((o: any) => o.id === watchedOrderId)?.items || [];
   }, [watchedOrderId, orders]);
 
+  // ✅ FILTRAR RNCs ABERTAS
+  const availableRncs = useMemo(() => {
+    return reports.filter(rnc => rnc.status !== "Concluída");
+  }, [reports]);
+
   useEffect(() => {
     form.setValue('itemId', '');
   }, [watchedOrderId, form]);
+
+  // ✅ QUANDO SELECIONAR RNC, PREENCHER CAMPOS AUTOMATICAMENTE
+  useEffect(() => {
+    if (watchedLinkedRncId && watchedLinkedRncId !== "none") {
+      const selectedRnc = reports.find(rnc => rnc.id === watchedLinkedRncId);
+      if (selectedRnc) {
+        form.setValue('orderId', selectedRnc.orderId || '');
+        form.setValue('itemId', selectedRnc.item?.id || '');
+        form.setValue('customerName', selectedRnc.customerName || '');
+        form.setValue('openingDate', selectedRnc.date);
+        form.setValue('description', `Plano de ação para RNC: ${selectedRnc.description}`);
+        form.setValue('origin', 'Qualidade');
+        form.setValue('priority', 'Alta');
+        form.setValue('status', 'Em Análise');
+      }
+    }
+  }, [watchedLinkedRncId, reports, form]);
 
   const handleOrderChange = (orderId: string) => {
     if (orderId === "none") {
@@ -5689,15 +5826,24 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
     }
   };
 
+  const handleRncChange = (rncId: string) => {
+    if (rncId === "none") {
+      form.setValue('linkedRncId', '');
+      return;
+    }
+    
+    form.setValue('linkedRncId', rncId);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>
-            {occurrence ? "Editar Ocorrência" : "Nova Ocorrência"}
+            {occurrence ? "Editar Plano de Ação" : "Novo Plano de Ação"}
           </DialogTitle>
           <DialogDescription>
-            {occurrence ? "Atualize as informações da ocorrência" : "Registre uma nova não conformidade ou atraso de entrega"}
+            {occurrence ? "Atualize as informações do plano de ação" : "Crie um novo plano de ação para não conformidades ou atrasos de entrega"}
           </DialogDescription>
         </DialogHeader>
 
@@ -5706,11 +5852,80 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
             <ScrollArea className="flex-1 pr-4">
               <div className="space-y-4 p-2">
                 
+                {/* ✅ NOVA SEÇÃO: VINCULAÇÃO COM RNC EXISTENTE */}
+                {watchedType === "RNC" && (
+                  <Card className="border-blue-200 bg-blue-50">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Link className="h-5 w-5 text-blue-600" />
+                        Vincular a RNC Existente
+                      </CardTitle>
+                      <CardDescription>
+                        Selecione uma RNC já aberta para criar um plano de ação específico
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <FormField control={form.control} name="linkedRncId" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>RNC para Plano de Ação</FormLabel>
+                          <Select onValueChange={handleRncChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione uma RNC existente (opcional)" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="none">
+                                <div className="flex items-center gap-2">
+                                  <PlusCircle className="h-4 w-4" />
+                                  Nova ocorrência independente
+                                </div>
+                              </SelectItem>
+                              {availableRncs.length > 0 ? (
+                                availableRncs.map((rnc) => (
+                                  <SelectItem key={rnc.id} value={rnc.id}>
+                                    <div className="flex flex-col">
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant="destructive" className="text-xs">RNC</Badge>
+                                        <span className="font-medium">{rnc.orderNumber || 'N/A'}</span>
+                                        <Badge variant={getStatusVariant(rnc.status)} className="text-xs">
+                                          {rnc.status}
+                                        </Badge>
+                                      </div>
+                                      <p className="text-sm text-muted-foreground line-clamp-1 mt-1">
+                                        {rnc.customerName} - {rnc.description}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        Aberta em {format(rnc.date, 'dd/MM/yyyy')}
+                                      </p>
+                                    </div>
+                                  </SelectItem>
+                                ))
+                              ) : (
+                                <SelectItem value="no-rncs" disabled>
+                                  Nenhuma RNC aberta encontrada
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            {watchedLinkedRncId && watchedLinkedRncId !== "none" 
+                              ? "✅ Campos serão preenchidos automaticamente com dados da RNC selecionada"
+                              : "Ao selecionar uma RNC, os campos relevantes serão preenchidos automaticamente"
+                            }
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Tipo, Status e Prioridade */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <FormField control={form.control} name="type" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Tipo de Ocorrência</FormLabel>
+                      <FormLabel>Tipo de Plano de Ação</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -5718,8 +5933,8 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="RNC">RNC - Não Conformidade</SelectItem>
-                          <SelectItem value="Atraso de Entrega">Atraso de Entrega</SelectItem>
+                          <SelectItem value="RNC">Para RNC - Não Conformidade</SelectItem>
+                          <SelectItem value="Atraso de Entrega">Para Atraso de Entrega</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -5728,7 +5943,7 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
 
                   <FormField control={form.control} name="status" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Status</FormLabel>
+                      <FormLabel>Status do Plano</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -5826,10 +6041,10 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField control={form.control} name="orderId" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Pedido (Opcional)</FormLabel>
+                      <FormLabel>Pedido {watchedLinkedRncId && watchedLinkedRncId !== "none" && "(Auto-preenchido)"}</FormLabel>
                       <Select onValueChange={handleOrderChange} defaultValue={field.value}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger disabled={watchedLinkedRncId && watchedLinkedRncId !== "none"}>
                             <SelectValue placeholder="Selecione um pedido" />
                           </SelectTrigger>
                         </FormControl>
@@ -5855,10 +6070,10 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
 
                   <FormField control={form.control} name="itemId" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Item (Opcional)</FormLabel>
+                      <FormLabel>Item {watchedLinkedRncId && watchedLinkedRncId !== "none" && "(Auto-preenchido)"}</FormLabel>
                       <Select onValueChange={handleItemChange} value={field.value || ""}>
                         <FormControl>
-                          <SelectTrigger disabled={!watchedOrderId}>
+                          <SelectTrigger disabled={!watchedOrderId || (watchedLinkedRncId && watchedLinkedRncId !== "none")}>
                             <SelectValue placeholder={watchedOrderId ? "Selecione um item" : "Selecione um pedido primeiro"} />
                           </SelectTrigger>
                         </FormControl>
@@ -5872,10 +6087,10 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                             ))
                           ) : watchedOrderId ? (
                             <SelectItem value="">Nenhum item disponível para este pedido</SelectItem>
-                          ) : (
+                          ) : watchedOrderId && (
                             <>
-                              <SelectItem value="mock-item-1">Chapa ASTM A36</SelectItem>
-                              <SelectItem value="mock-item-2">Conjunto Mecânico</SelectItem>
+                              <SelectItem value="item-1">Chapa ASTM A36 - 12.7mm</SelectItem>
+                              <SelectItem value="item-2">Conjunto Mecânico P0021</SelectItem>
                             </>
                           )}
                         </SelectContent>
@@ -5889,12 +6104,13 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                 {!watchedOrderId && (
                   <FormField control={form.control} name="customerName" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Cliente</FormLabel>
+                      <FormLabel>Cliente {watchedLinkedRncId && watchedLinkedRncId !== "none" && "(Auto-preenchido)"}</FormLabel>
                       <FormControl>
                         <Input 
                           placeholder="Nome do cliente afetado" 
                           {...field} 
                           value={field.value || ''} 
+                          disabled={watchedLinkedRncId && watchedLinkedRncId !== "none"}
                         />
                       </FormControl>
                       <FormMessage />
@@ -5906,11 +6122,15 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormField control={form.control} name="openingDate" render={({ field }) => (
                     <FormItem className="flex flex-col">
-                      <FormLabel>Data de Abertura</FormLabel>
+                      <FormLabel>Data de Abertura {watchedLinkedRncId && watchedLinkedRncId !== "none" && "(Auto-preenchido)"}</FormLabel>
                       <Popover>
                         <PopoverTrigger asChild>
                           <FormControl>
-                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                            <Button 
+                              variant={"outline"} 
+                              className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}
+                              disabled={watchedLinkedRncId && watchedLinkedRncId !== "none"}
+                            >
                               {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
                               <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                             </Button>
@@ -5948,17 +6168,17 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                 {/* Descrição */}
                 <FormField control={form.control} name="description" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descrição da Ocorrência</FormLabel>
+                    <FormLabel>Descrição do Plano de Ação {watchedLinkedRncId && watchedLinkedRncId !== "none" && "(Auto-preenchido baseado na RNC)"}</FormLabel>
                     <FormControl>
                       <Textarea 
-                        placeholder="Descreva detalhadamente o que aconteceu, incluindo evidências, impacto e contexto..." 
+                        placeholder="Descreva o plano de ação, incluindo objetivos, metodologia e resultados esperados..." 
                         {...field} 
                         value={field.value || ''} 
                         className="min-h-[120px]"
                       />
                     </FormControl>
                     <FormDescription>
-                      Mínimo de 10 caracteres. Seja específico sobre o problema identificado.
+                      Mínimo de 10 caracteres. Detalhe as ações que serão tomadas para resolver a ocorrência.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -5967,15 +6187,15 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                 {/* Upload de Fotos */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Evidências Fotográficas</CardTitle>
+                    <CardTitle className="text-base">Evidências e Anexos</CardTitle>
                     <CardDescription>
-                      Anexe fotos que documentem a ocorrência (opcional)
+                      Anexe documentos, fotos ou evidências relacionadas ao plano de ação
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="text-center py-4 border-2 border-dashed border-gray-300 rounded-lg">
                       <p className="text-sm text-muted-foreground">
-                        Upload de fotos será implementado em breve
+                        Upload de anexos será implementado em breve
                       </p>
                     </div>
                   </CardContent>
@@ -5989,7 +6209,7 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                 Cancelar
               </Button>
               <Button type="submit">
-                {occurrence ? 'Atualizar Ocorrência' : 'Criar Ocorrência'}
+                {occurrence ? 'Atualizar Plano' : 'Criar Plano de Ação'}
               </Button>
             </DialogFooter>
           </form>
@@ -5999,7 +6219,7 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
   );
 }
 
-function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit }: any) {
+function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, reports = [] }: any) {
   if (!occurrence) return null;
 
   const getPriorityColor = (priority?: string) => {
@@ -6111,6 +6331,56 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit }: any)
                 </div>
               </CardContent>
             </Card>
+
+            {/* ✅ RNC VINCULADA */}
+            {occurrence.linkedRncId && (
+              <Card className="border-blue-200 bg-blue-50">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Link className="h-5 w-5 text-blue-600" />
+                    RNC Vinculada
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {(() => {
+                    const linkedRnc = reports.find((r: any) => r.id === occurrence.linkedRncId);
+                    if (linkedRnc) {
+                      return (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="destructive" className="text-xs">RNC</Badge>
+                            <span className="font-medium">{linkedRnc.orderNumber || 'N/A'}</span>
+                            <Badge variant={getStatusVariant(linkedRnc.status)} className="text-xs">
+                              {linkedRnc.status}
+                            </Badge>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Cliente</Label>
+                            <p className="mt-1">{linkedRnc.customerName}</p>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Descrição da RNC</Label>
+                            <div className="mt-2 p-3 bg-white rounded-lg border">
+                              <p className="text-sm leading-relaxed">{linkedRnc.description}</p>
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-sm font-medium text-muted-foreground">Data de Abertura da RNC</Label>
+                            <p className="mt-1">{format(linkedRnc.date, 'dd/MM/yyyy')}</p>
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <p className="text-sm text-muted-foreground">
+                          RNC vinculada não encontrada (ID: {occurrence.linkedRncId})
+                        </p>
+                      );
+                    }
+                  })()}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Análise dos 5 Porquês */}
             <Card>
