@@ -3118,7 +3118,12 @@ export default function QualityPage() {
             </TabsContent>
 
             <TabsContent value="action-plans">
-                <ActionPlansTab />
+                <ActionPlansTab 
+                    orders={orders} 
+                    teamMembers={teamMembers} 
+                    toast={toast}
+                    user={user}
+                />
             </TabsContent>
         </Tabs>
       </div>
@@ -5143,7 +5148,12 @@ function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: 
 
 // ===== COMPONENTES PARA PLANOS DE AÇÃO - VERSÃO CORRIGIDA =====
 
-function ActionPlansTab() {
+function ActionPlansTab({ orders = [], teamMembers = [], toast, user }: {
+  orders?: any[];
+  teamMembers?: any[];
+  toast?: any;
+  user?: any;
+}) {
   const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -5154,8 +5164,9 @@ function ActionPlansTab() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(true);
-  
-  const { toast } = useToast();
+
+  // Fallback para toast se não for passado
+  const showToast = toast || ((props: any) => console.log('Toast:', props));
 
   // Form para nova ocorrência
   const occurrenceForm = useForm<z.infer<typeof occurrenceSchema>>({
@@ -5294,13 +5305,12 @@ function ActionPlansTab() {
     if (!occurrenceToDelete) return;
     
     try {
-      // Simular exclusão (implementar com Firestore)
       setOccurrences(prev => prev.filter(occ => occ.id !== occurrenceToDelete.id));
-      toast({ title: "Ocorrência excluída com sucesso!" });
+      showToast({ title: "Ocorrência excluída com sucesso!" });
       setIsDeleteDialogOpen(false);
       setOccurrenceToDelete(null);
     } catch (error) {
-      toast({ variant: "destructive", title: "Erro ao excluir ocorrência" });
+      showToast({ variant: "destructive", title: "Erro ao excluir ocorrência" });
     }
   };
 
@@ -5326,7 +5336,7 @@ function ActionPlansTab() {
           occ.id === selectedOccurrence.id ? updatedOccurrence : occ
         ));
         
-        toast({ title: "Ocorrência atualizada com sucesso!" });
+        showToast({ title: "Ocorrência atualizada com sucesso!" });
       } else {
         // Criar nova ocorrência
         const newOccurrence: Occurrence = {
@@ -5336,14 +5346,14 @@ function ActionPlansTab() {
         };
         
         setOccurrences(prev => [newOccurrence, ...prev]);
-        toast({ title: "Nova ocorrência criada com sucesso!" });
+        showToast({ title: "Nova ocorrência criada com sucesso!" });
       }
       
       setIsFormOpen(false);
       setSelectedOccurrence(null);
     } catch (error) {
       console.error("Erro ao salvar:", error);
-      toast({ variant: "destructive", title: "Erro ao salvar ocorrência" });
+      showToast({ variant: "destructive", title: "Erro ao salvar ocorrência" });
     }
   };
 
@@ -5631,10 +5641,19 @@ function ActionPlansTab() {
 
 // ===== COMPONENTES DE FORMULÁRIO E DETALHES =====
 
-function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, orders, teamMembers }: any) {
+function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, orders = [], teamMembers = [] }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: any;
+  onSubmit: any;
+  occurrence: any;
+  orders?: any[];
+  teamMembers?: any[];
+}) {
   const watchedOrderId = form.watch("orderId");
+  
   const availableItems = useMemo(() => {
-    if (!watchedOrderId || !orders) return [];
+    if (!watchedOrderId || !orders.length) return [];
     return orders.find((o: any) => o.id === watchedOrderId)?.items || [];
   }, [watchedOrderId, orders]);
 
@@ -5643,15 +5662,27 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
   }, [watchedOrderId, form]);
 
   const handleOrderChange = (orderId: string) => {
-    const selectedOrder = orders?.find((o: any) => o.id === orderId);
+    if (orderId === "none") {
+      form.setValue('orderId', '');
+      form.setValue('customerName', '');
+      form.setValue('itemId', '');
+      return;
+    }
+    
+    const selectedOrder = orders.find((o: any) => o.id === orderId);
     if (selectedOrder) {
       form.setValue('orderId', orderId);
       form.setValue('customerName', selectedOrder.customerName);
-      form.setValue('itemId', ''); // Reset item selection
+      form.setValue('itemId', '');
     }
   };
 
   const handleItemChange = (itemId: string) => {
+    if (itemId === "none") {
+      form.setValue('itemId', '');
+      return;
+    }
+    
     const selectedItem = availableItems.find((i: any) => i.id === itemId);
     if (selectedItem) {
       form.setValue('itemId', itemId);
@@ -5781,7 +5812,7 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                             <>
                               <SelectItem value="João Silva">João Silva</SelectItem>
                               <SelectItem value="Maria Santos">Maria Santos</SelectItem>
-                              <SelectItem value="Pedro Oliveira">Pedro Oliveira</SelectItem>
+                              <SelectItem value="Carlos Oliveira">Carlos Oliveira</SelectItem>
                             </>
                           )}
                         </SelectContent>
@@ -5803,7 +5834,7 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">Nenhum pedido específico</SelectItem>
+                          <SelectItem value="none">Nenhum pedido específico</SelectItem>
                           {orders && orders.length > 0 ? (
                             orders.map((order: any) => (
                               <SelectItem key={order.id} value={order.id}>
@@ -5811,7 +5842,10 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                               </SelectItem>
                             ))
                           ) : (
-                            <SelectItem value="mock-order">OS-2025-001 - Exemplo Cliente</SelectItem>
+                            <>
+                              <SelectItem value="mock-1">OS-2025-001 - Haver Engenharia</SelectItem>
+                              <SelectItem value="mock-2">OS-2025-002 - Sandvik Brasil</SelectItem>
+                            </>
                           )}
                         </SelectContent>
                       </Select>
@@ -5829,14 +5863,20 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value="none">Nenhum item específico</SelectItem>
                           {availableItems.length > 0 ? (
                             availableItems.map((item: any) => (
                               <SelectItem key={item.id} value={item.id}>
                                 {item.code ? `[${item.code}] ` : ''}{item.description}
                               </SelectItem>
                             ))
+                          ) : watchedOrderId ? (
+                            <SelectItem value="">Nenhum item disponível para este pedido</SelectItem>
                           ) : (
-                            <SelectItem value="">Nenhum item disponível</SelectItem>
+                            <>
+                              <SelectItem value="mock-item-1">Chapa ASTM A36</SelectItem>
+                              <SelectItem value="mock-item-2">Conjunto Mecânico</SelectItem>
+                            </>
                           )}
                         </SelectContent>
                       </Select>
