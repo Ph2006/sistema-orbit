@@ -27,7 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, TicketCheck } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, TicketCheck, Plus } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -547,6 +547,7 @@ const occurrenceSchema = z.object({
   deadline: z.date().optional(),
   description: z.string().min(10, "A descrição deve ter pelo menos 10 caracteres"),
   responsibleAnalyst: z.string().min(1, "O responsável pela análise é obrigatório"),
+  priority: z.enum(["Baixa", "Média", "Alta", "Crítica"]).optional(),
   fiveWhys: fiveWhysSchema.optional(),
   actionPlan: z.array(actionPlanItemSchema).optional(),
   photos: z.array(z.string()).optional(),
@@ -5147,44 +5148,73 @@ function ActionPlansTab() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedOccurrence, setSelectedOccurrence] = useState<Occurrence | null>(null);
+  const [occurrenceToDelete, setOccurrenceToDelete] = useState<Occurrence | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [isLoading, setIsLoading] = useState(true);
   
   const { toast } = useToast();
 
-  // Mock data para demonstração (substitua pela busca real do Firestore)
+  // Form para nova ocorrência
+  const occurrenceForm = useForm<z.infer<typeof occurrenceSchema>>({
+    resolver: zodResolver(occurrenceSchema),
+    defaultValues: {
+      type: "RNC",
+      status: "Aberta",
+      openingDate: new Date(),
+      description: "",
+      origin: "",
+      responsibleAnalyst: "",
+      priority: "Média",
+      photos: [],
+    },
+  });
+
+  // Mock data inicial (substituir pela busca real do Firestore)
   useEffect(() => {
-    // Simular dados de exemplo
-    const mockData: Occurrence[] = [
-      {
-        id: "1",
-        number: "RNC-2025-001",
-        type: "RNC",
-        origin: "Qualidade",
-        customerName: "Haver Engenharia",
-        status: "Em Análise",
-        openingDate: new Date("2025-01-03"),
-        deadline: new Date("2025-01-10"),
-        description: "Material fora de especificação - espessura incorreta",
-        responsibleAnalyst: "João Silva",
-        itemName: "Chapa ASTM A36"
-      },
-      {
-        id: "2", 
-        number: "AE-2025-001",
-        type: "Atraso de Entrega",
-        origin: "Planejamento",
-        customerName: "Sandvik",
-        status: "Em Execução",
-        openingDate: new Date("2025-01-01"),
-        deadline: new Date("2025-01-09"),
-        description: "Atraso na entrega devido a problemas de fornecimento",
-        responsibleAnalyst: "Maria Santos",
-        itemName: "Conjunto Mecânico P0021"
-      }
-    ];
-    setOccurrences(mockData);
+    const loadMockData = () => {
+      const mockData: Occurrence[] = [
+        {
+          id: "1",
+          number: "RNC-2025-001",
+          type: "RNC",
+          origin: "Qualidade",
+          customerName: "Haver Engenharia",
+          status: "Em Análise",
+          openingDate: new Date("2025-01-03"),
+          deadline: new Date("2025-01-10"),
+          description: "Material fora de especificação - espessura da chapa incorreta conforme desenho técnico",
+          responsibleAnalyst: "João Silva",
+          itemName: "Chapa ASTM A36",
+          itemCode: "P0001",
+          orderNumber: "OS-2025-001",
+          priority: "Alta",
+        },
+        {
+          id: "2", 
+          number: "AE-2025-001",
+          type: "Atraso de Entrega",
+          origin: "Planejamento",
+          customerName: "Sandvik",
+          status: "Em Execução",
+          openingDate: new Date("2025-01-01"),
+          deadline: new Date("2025-01-09"),
+          description: "Atraso na entrega do conjunto mecânico devido a problemas de fornecimento de componentes críticos",
+          responsibleAnalyst: "Maria Santos",
+          itemName: "Conjunto Mecânico",
+          itemCode: "P0021",
+          orderNumber: "OS-2025-002",
+          priority: "Crítica",
+        }
+      ];
+      setOccurrences(mockData);
+      setIsLoading(false);
+    };
+
+    // Simular delay de carregamento
+    setTimeout(loadMockData, 500);
   }, []);
 
   // Filtros
@@ -5193,7 +5223,8 @@ function ActionPlansTab() {
       const matchesSearch = searchQuery === "" || 
         occ.number.toLowerCase().includes(searchQuery.toLowerCase()) ||
         occ.customerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        occ.description.toLowerCase().includes(searchQuery.toLowerCase());
+        occ.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        occ.itemName?.toLowerCase().includes(searchQuery.toLowerCase());
       
       const matchesStatus = statusFilter === "all" || occ.status === statusFilter;
       const matchesType = typeFilter === "all" || occ.type === typeFilter;
@@ -5215,20 +5246,62 @@ function ActionPlansTab() {
     const rncCount = thisMonthOccurrences.filter(occ => occ.type === "RNC").length;
     const delayCount = thisMonthOccurrences.filter(occ => occ.type === "Atraso de Entrega").length;
     const openOccurrences = occurrences.filter(occ => occ.status !== "Concluída").length;
+    const criticalCount = occurrences.filter(occ => occ.priority === "Crítica" && occ.status !== "Concluída").length;
 
     return {
       totalThisMonth: thisMonthOccurrences.length,
       rncCount,
       delayCount,
-      avgResolutionTime: 5, // Mock
-      actionsCompletionRate: 75, // Mock
       openOccurrences,
+      criticalCount,
+      avgResolutionTime: 5, // Mock
     };
   }, [occurrences]);
 
+  // ===== HANDLERS =====
+  
   const handleNewOccurrence = () => {
     setSelectedOccurrence(null);
+    occurrenceForm.reset({
+      type: "RNC",
+      status: "Aberta",
+      openingDate: new Date(),
+      description: "",
+      origin: "",
+      responsibleAnalyst: "",
+      priority: "Média",
+      photos: [],
+    });
     setIsFormOpen(true);
+  };
+
+  const handleEditOccurrence = (occurrence: Occurrence) => {
+    setSelectedOccurrence(occurrence);
+    occurrenceForm.reset({
+      ...occurrence,
+      openingDate: new Date(occurrence.openingDate),
+      deadline: occurrence.deadline ? new Date(occurrence.deadline) : undefined,
+    });
+    setIsFormOpen(true);
+  };
+
+  const handleDeleteClick = (occurrence: Occurrence) => {
+    setOccurrenceToDelete(occurrence);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!occurrenceToDelete) return;
+    
+    try {
+      // Simular exclusão (implementar com Firestore)
+      setOccurrences(prev => prev.filter(occ => occ.id !== occurrenceToDelete.id));
+      toast({ title: "Ocorrência excluída com sucesso!" });
+      setIsDeleteDialogOpen(false);
+      setOccurrenceToDelete(null);
+    } catch (error) {
+      toast({ variant: "destructive", title: "Erro ao excluir ocorrência" });
+    }
   };
 
   const handleViewOccurrence = (occurrence: Occurrence) => {
@@ -5236,10 +5309,60 @@ function ActionPlansTab() {
     setIsDetailOpen(true);
   };
 
+  const onSubmitOccurrence = async (values: z.infer<typeof occurrenceSchema>) => {
+    try {
+      console.log("Dados do formulário:", values);
+      
+      if (selectedOccurrence) {
+        // Atualizar ocorrência existente
+        const updatedOccurrence: Occurrence = {
+          ...selectedOccurrence,
+          ...values,
+          id: selectedOccurrence.id,
+          number: selectedOccurrence.number,
+        };
+        
+        setOccurrences(prev => prev.map(occ => 
+          occ.id === selectedOccurrence.id ? updatedOccurrence : occ
+        ));
+        
+        toast({ title: "Ocorrência atualizada com sucesso!" });
+      } else {
+        // Criar nova ocorrência
+        const newOccurrence: Occurrence = {
+          ...values,
+          id: Date.now().toString(),
+          number: `${values.type === "RNC" ? "RNC" : "AE"}-2025-${String(occurrences.length + 1).padStart(3, '0')}`,
+        };
+        
+        setOccurrences(prev => [newOccurrence, ...prev]);
+        toast({ title: "Nova ocorrência criada com sucesso!" });
+      }
+      
+      setIsFormOpen(false);
+      setSelectedOccurrence(null);
+    } catch (error) {
+      console.error("Erro ao salvar:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar ocorrência" });
+    }
+  };
+
+  const getPriorityColor = (priority?: string) => {
+    switch (priority) {
+      case "Crítica": return "text-red-600 bg-red-100";
+      case "Alta": return "text-orange-600 bg-orange-100";
+      case "Média": return "text-yellow-600 bg-yellow-100";
+      case "Baixa": return "text-green-600 bg-green-100";
+      default: return "text-gray-600 bg-gray-100";
+    }
+  };
+
+  // ===== RENDER =====
+
   return (
     <div className="space-y-6">
       {/* Dashboard Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total do Mês</CardTitle>
@@ -5275,34 +5398,23 @@ function ActionPlansTab() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tempo Médio</CardTitle>
-            <TicketCheck className="h-4 w-4 text-blue-500" />
+            <CardTitle className="text-sm font-medium">Críticas</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dashboardStats.avgResolutionTime}</div>
-            <p className="text-xs text-muted-foreground">dias para resolução</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Ações</CardTitle>
-            <Play className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{dashboardStats.actionsCompletionRate}%</div>
-            <p className="text-xs text-muted-foreground">concluídas</p>
+            <div className="text-2xl font-bold text-red-600">{dashboardStats.criticalCount}</div>
+            <p className="text-xs text-muted-foreground">Prioridade crítica</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Em Aberto</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+            <Play className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{dashboardStats.openOccurrences}</div>
-            <p className="text-xs text-muted-foreground">pendentes</p>
+            <div className="text-2xl font-bold text-blue-600">{dashboardStats.openOccurrences}</div>
+            <p className="text-xs text-muted-foreground">Pendentes</p>
           </CardContent>
         </Card>
       </div>
@@ -5333,7 +5445,7 @@ function ActionPlansTab() {
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar por número, cliente ou descrição..."
+                placeholder="Buscar por número, cliente, item ou descrição..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
@@ -5341,7 +5453,7 @@ function ActionPlansTab() {
             </div>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filtrar por tipo" />
+                <SelectValue placeholder="Tipo" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os tipos</SelectItem>
@@ -5351,7 +5463,7 @@ function ActionPlansTab() {
             </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filtrar por status" />
+                <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os status</SelectItem>
@@ -5364,230 +5476,673 @@ function ActionPlansTab() {
           </div>
 
           {/* Tabela */}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Número</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Origem</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Data Abertura</TableHead>
-                <TableHead>Prazo</TableHead>
-                <TableHead>Responsável</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredOccurrences.length > 0 ? (
-                filteredOccurrences.map((occurrence) => (
-                  <TableRow key={occurrence.id}>
-                    <TableCell className="font-mono">{occurrence.number}</TableCell>
-                    <TableCell>
-                      <Badge variant={occurrence.type === "RNC" ? "destructive" : "secondary"}>
-                        {occurrence.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{occurrence.origin}</TableCell>
-                    <TableCell>{occurrence.customerName || "N/A"}</TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusVariant(occurrence.status)}>
-                        {occurrence.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{format(occurrence.openingDate, 'dd/MM/yyyy')}</TableCell>
-                    <TableCell>{occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yyyy') : "N/A"}</TableCell>
-                    <TableCell>{occurrence.responsibleAnalyst}</TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleViewOccurrence(occurrence)}>
-                            <Search className="mr-2 h-4 w-4" />
-                            Ver Detalhes
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem>
-                            <FileDown className="mr-2 h-4 w-4" />
-                            Exportar PDF
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+          {isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Número</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Origem</TableHead>
+                  <TableHead>Item</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Prioridade</TableHead>
+                  <TableHead>Data Abertura</TableHead>
+                  <TableHead>Prazo</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredOccurrences.length > 0 ? (
+                  filteredOccurrences.map((occurrence) => (
+                    <TableRow key={occurrence.id}>
+                      <TableCell className="font-mono font-medium">{occurrence.number}</TableCell>
+                      <TableCell>
+                        <Badge variant={occurrence.type === "RNC" ? "destructive" : "secondary"}>
+                          {occurrence.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{occurrence.origin}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium text-sm">{occurrence.itemName || "N/A"}</p>
+                          {occurrence.itemCode && (
+                            <p className="text-xs text-muted-foreground">{occurrence.itemCode}</p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>{occurrence.customerName || "N/A"}</TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusVariant(occurrence.status)}>
+                          {occurrence.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={getPriorityColor(occurrence.priority)}>
+                          {occurrence.priority || "Média"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{format(occurrence.openingDate, 'dd/MM/yy')}</TableCell>
+                      <TableCell>
+                        {occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yy') : "-"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleViewOccurrence(occurrence)}>
+                              <Search className="mr-2 h-4 w-4" />
+                              Ver Detalhes
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleEditOccurrence(occurrence)}>
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem>
+                              <FileDown className="mr-2 h-4 w-4" />
+                              Exportar PDF
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              onClick={() => handleDeleteClick(occurrence)}
+                              className="text-red-600"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={10} className="h-24 text-center">
+                      {searchQuery || statusFilter !== "all" || typeFilter !== "all" 
+                        ? "Nenhuma ocorrência encontrada com os filtros aplicados."
+                        : "Nenhuma ocorrência cadastrada ainda."
+                      }
                     </TableCell>
                   </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={9} className="h-24 text-center">
-                    Nenhuma ocorrência encontrada.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
-      {/* Dialogs Simplificados */}
-      <SimpleOccurrenceDialog 
+      {/* ===== DIALOGS ===== */}
+      
+      {/* Dialog de Formulário */}
+      <OccurrenceFormDialog 
         open={isFormOpen}
         onOpenChange={setIsFormOpen}
+        form={occurrenceForm}
+        onSubmit={onSubmitOccurrence}
         occurrence={selectedOccurrence}
+        orders={orders}
+        teamMembers={teamMembers}
       />
 
-      <SimpleDetailDialog
+      {/* Dialog de Detalhes */}
+      <OccurrenceDetailDialog
         open={isDetailOpen}
         onOpenChange={setIsDetailOpen}
         occurrence={selectedOccurrence}
+        onEdit={handleEditOccurrence}
       />
+
+      {/* Dialog de Confirmação de Exclusão */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir a ocorrência <strong>{occurrenceToDelete?.number}</strong>?
+              <br />
+              Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDelete}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              Sim, Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-// ===== DIALOGS SIMPLIFICADOS =====
-function SimpleOccurrenceDialog({ open, onOpenChange, occurrence }: any) {
+// ===== COMPONENTES DE FORMULÁRIO E DETALHES =====
+
+function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, orders, teamMembers }: any) {
+  const watchedOrderId = form.watch("orderId");
+  const availableItems = useMemo(() => {
+    if (!watchedOrderId || !orders) return [];
+    return orders.find((o: any) => o.id === watchedOrderId)?.items || [];
+  }, [watchedOrderId, orders]);
+
+  useEffect(() => {
+    form.setValue('itemId', '');
+  }, [watchedOrderId, form]);
+
+  const handleOrderChange = (orderId: string) => {
+    const selectedOrder = orders?.find((o: any) => o.id === orderId);
+    if (selectedOrder) {
+      form.setValue('orderId', orderId);
+      form.setValue('customerName', selectedOrder.customerName);
+      form.setValue('itemId', ''); // Reset item selection
+    }
+  };
+
+  const handleItemChange = (itemId: string) => {
+    const selectedItem = availableItems.find((i: any) => i.id === itemId);
+    if (selectedItem) {
+      form.setValue('itemId', itemId);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
+      <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>
             {occurrence ? "Editar Ocorrência" : "Nova Ocorrência"}
           </DialogTitle>
           <DialogDescription>
-            Registre uma nova não conformidade ou atraso de entrega
+            {occurrence ? "Atualize as informações da ocorrência" : "Registre uma nova não conformidade ou atraso de entrega"}
           </DialogDescription>
         </DialogHeader>
-        
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="type" className="text-right">Tipo</Label>
-            <Select>
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Selecione o tipo" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="RNC">RNC - Não Conformidade</SelectItem>
-                <SelectItem value="Atraso de Entrega">Atraso de Entrega</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="description" className="text-right">Descrição</Label>
-            <Textarea placeholder="Descreva a ocorrência..." className="col-span-3" />
-          </div>
-        </div>
 
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button type="submit">
-            {occurrence ? 'Atualizar' : 'Salvar'}
-          </Button>
-        </DialogFooter>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex-1 flex flex-col min-h-0">
+            <ScrollArea className="flex-1 pr-4">
+              <div className="space-y-4 p-2">
+                
+                {/* Tipo, Status e Prioridade */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <FormField control={form.control} name="type" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo de Ocorrência</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o tipo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="RNC">RNC - Não Conformidade</SelectItem>
+                          <SelectItem value="Atraso de Entrega">Atraso de Entrega</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="status" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Status</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o status" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Aberta">Aberta</SelectItem>
+                          <SelectItem value="Em Análise">Em Análise</SelectItem>
+                          <SelectItem value="Em Execução">Em Execução</SelectItem>
+                          <SelectItem value="Concluída">Concluída</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="priority" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Prioridade</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a prioridade" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Baixa">Baixa</SelectItem>
+                          <SelectItem value="Média">Média</SelectItem>
+                          <SelectItem value="Alta">Alta</SelectItem>
+                          <SelectItem value="Crítica">Crítica</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+
+                {/* Origem e Responsável */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField control={form.control} name="origin" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Origem/Setor</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a origem" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Qualidade">Qualidade</SelectItem>
+                          <SelectItem value="Planejamento">Planejamento</SelectItem>
+                          <SelectItem value="Produção">Produção</SelectItem>
+                          <SelectItem value="Comercial">Comercial</SelectItem>
+                          <SelectItem value="Engenharia">Engenharia</SelectItem>
+                          <SelectItem value="Cliente">Cliente</SelectItem>
+                          <SelectItem value="Fornecedor">Fornecedor</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="responsibleAnalyst" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Responsável pela Análise</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o responsável" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {teamMembers && teamMembers.length > 0 ? (
+                            teamMembers.map((member: any) => (
+                              <SelectItem key={member.id} value={member.name}>
+                                {member.name}
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <>
+                              <SelectItem value="João Silva">João Silva</SelectItem>
+                              <SelectItem value="Maria Santos">Maria Santos</SelectItem>
+                              <SelectItem value="Pedro Oliveira">Pedro Oliveira</SelectItem>
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+
+                {/* Pedido e Item */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField control={form.control} name="orderId" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Pedido (Opcional)</FormLabel>
+                      <Select onValueChange={handleOrderChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione um pedido" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="">Nenhum pedido específico</SelectItem>
+                          {orders && orders.length > 0 ? (
+                            orders.map((order: any) => (
+                              <SelectItem key={order.id} value={order.id}>
+                                Nº {order.number} - {order.customerName}
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="mock-order">OS-2025-001 - Exemplo Cliente</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="itemId" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Item (Opcional)</FormLabel>
+                      <Select onValueChange={handleItemChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger disabled={!watchedOrderId}>
+                            <SelectValue placeholder={watchedOrderId ? "Selecione um item" : "Selecione um pedido primeiro"} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {availableItems.length > 0 ? (
+                            availableItems.map((item: any) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.code ? `[${item.code}] ` : ''}{item.description}
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="">Nenhum item disponível</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+
+                {/* Cliente (se não vinculado a pedido) */}
+                {!watchedOrderId && (
+                  <FormField control={form.control} name="customerName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cliente</FormLabel>
+                      <FormControl>
+                        <Input 
+                          placeholder="Nome do cliente afetado" 
+                          {...field} 
+                          value={field.value || ''} 
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                )}
+
+                {/* Datas */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField control={form.control} name="openingDate" render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Data de Abertura</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                              {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="deadline" render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Prazo para Resolução</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                              {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+
+                {/* Descrição */}
+                <FormField control={form.control} name="description" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Descrição da Ocorrência</FormLabel>
+                    <FormControl>
+                      <Textarea 
+                        placeholder="Descreva detalhadamente o que aconteceu, incluindo evidências, impacto e contexto..." 
+                        {...field} 
+                        value={field.value || ''} 
+                        className="min-h-[120px]"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Mínimo de 10 caracteres. Seja específico sobre o problema identificado.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                {/* Upload de Fotos */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Evidências Fotográficas</CardTitle>
+                    <CardDescription>
+                      Anexe fotos que documentem a ocorrência (opcional)
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-center py-4 border-2 border-dashed border-gray-300 rounded-lg">
+                      <p className="text-sm text-muted-foreground">
+                        Upload de fotos será implementado em breve
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+              </div>
+            </ScrollArea>
+
+            <DialogFooter className="pt-4 mt-4 border-t flex-shrink-0">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit">
+                {occurrence ? 'Atualizar Ocorrência' : 'Criar Ocorrência'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );
 }
 
-function SimpleDetailDialog({ open, onOpenChange, occurrence }: any) {
+function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit }: any) {
   if (!occurrence) return null;
+
+  const getPriorityColor = (priority?: string) => {
+    switch (priority) {
+      case "Crítica": return "text-red-600 bg-red-100";
+      case "Alta": return "text-orange-600 bg-orange-100";
+      case "Média": return "text-yellow-600 bg-yellow-100";
+      case "Baixa": return "text-green-600 bg-green-100";
+      default: return "text-gray-600 bg-gray-100";
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {occurrence.type === "RNC" ? (
-              <XCircle className="h-5 w-5 text-red-500" />
-            ) : (
-              <Clock className="h-5 w-5 text-orange-500" />
-            )}
-            {occurrence.type} - {occurrence.number}
-          </DialogTitle>
-          <DialogDescription>
-            Aberto em {format(occurrence.openingDate, 'dd/MM/yyyy')} - {occurrence.origin}
-          </DialogDescription>
+      <DialogContent className="max-w-5xl h-[90vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
+          <div className="flex justify-between items-start">
+            <div>
+              <DialogTitle className="flex items-center gap-2">
+                {occurrence.type === "RNC" ? (
+                  <XCircle className="h-5 w-5 text-red-500" />
+                ) : (
+                  <Clock className="h-5 w-5 text-orange-500" />
+                )}
+                {occurrence.type} - {occurrence.number}
+                <Badge variant={getStatusVariant(occurrence.status)} className="ml-2">
+                  {occurrence.status}
+                </Badge>
+              </DialogTitle>
+              <DialogDescription className="mt-1">
+                Aberto em {format(occurrence.openingDate, 'dd/MM/yyyy')} pelo setor {occurrence.origin}
+                {occurrence.deadline && (
+                  <span> • Prazo: {format(occurrence.deadline, 'dd/MM/yyyy')}</span>
+                )}
+              </DialogDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => onEdit(occurrence)}>
+                <Pencil className="h-4 w-4 mr-1" />
+                Editar
+              </Button>
+              <Button variant="outline" size="sm">
+                <FileDown className="h-4 w-4 mr-1" />
+                PDF
+              </Button>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Informações Gerais</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium">Status</Label>
-                  <div className="mt-1">
-                    <Badge variant={getStatusVariant(occurrence.status)}>
-                      {occurrence.status}
-                    </Badge>
+        <ScrollArea className="flex-1 pr-4">
+          <div className="space-y-6 p-2">
+            
+            {/* Informações Gerais */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Informações Gerais</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-muted-foreground">Tipo</Label>
+                    <p className="mt-1 font-medium">{occurrence.type}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-muted-foreground">Origem</Label>
+                    <p className="mt-1">{occurrence.origin}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-muted-foreground">Responsável</Label>
+                    <p className="mt-1">{occurrence.responsibleAnalyst}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-muted-foreground">Prioridade</Label>
+                    <div className="mt-1">
+                      <Badge className={getPriorityColor(occurrence.priority)}>
+                        {occurrence.priority || "Média"}
+                      </Badge>
+                    </div>
+                  </div>
+                  {occurrence.customerName && (
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Cliente</Label>
+                      <p className="mt-1">{occurrence.customerName}</p>
+                    </div>
+                  )}
+                  {occurrence.itemName && (
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Item</Label>
+                      <div className="mt-1">
+                        <p className="font-medium">{occurrence.itemName}</p>
+                        {occurrence.itemCode && (
+                          <p className="text-sm text-muted-foreground">{occurrence.itemCode}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {occurrence.orderNumber && (
+                    <div>
+                      <Label className="text-sm font-medium text-muted-foreground">Pedido</Label>
+                      <p className="mt-1">{occurrence.orderNumber}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-6">
+                  <Label className="text-sm font-medium text-muted-foreground">Descrição</Label>
+                  <div className="mt-2 p-3 bg-muted rounded-lg">
+                    <p className="text-sm leading-relaxed">{occurrence.description}</p>
                   </div>
                 </div>
-                <div>
-                  <Label className="text-sm font-medium">Responsável</Label>
-                  <p className="mt-1 text-sm">{occurrence.responsibleAnalyst}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Cliente</Label>
-                  <p className="mt-1 text-sm">{occurrence.customerName || "N/A"}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Prazo</Label>
-                  <p className="mt-1 text-sm">
-                    {occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yyyy') : "Não definido"}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4">
-                <Label className="text-sm font-medium">Descrição</Label>
-                <p className="mt-1 text-sm text-muted-foreground">{occurrence.description}</p>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Análise dos 5 Porquês</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                A análise de causa raiz será implementada aqui.
-              </p>
-            </CardContent>
-          </Card>
+            {/* Análise dos 5 Porquês */}
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BrainCircuit className="h-5 w-5 text-blue-500" />
+                    Análise de Causa - Método dos 5 Porquês
+                  </CardTitle>
+                  <Button variant="outline" size="sm">
+                    <PlusCircle className="h-4 w-4 mr-1" />
+                    Iniciar Análise
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center py-8 text-muted-foreground">
+                  <BrainCircuit className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="font-medium">Análise de causa raiz não iniciada</p>
+                  <p className="text-sm">Use o método dos 5 Porquês para identificar a causa raiz do problema</p>
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Plano de Ação</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                As ações corretivas e preventivas serão listadas aqui.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+            {/* Plano de Ação */}
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-500" />
+                    Plano de Ação
+                  </CardTitle>
+                  <Button variant="outline" size="sm">
+                    <PlusCircle className="h-4 w-4 mr-1" />
+                    Adicionar Ação
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="font-medium">Nenhuma ação definida ainda</p>
+                  <p className="text-sm">Defina ações corretivas e preventivas para resolver a ocorrência</p>
+                </div>
+              </CardContent>
+            </Card>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Fechar
-          </Button>
-          <Button>
-            <Pencil className="h-4 w-4 mr-1" />
-            Editar
-          </Button>
-        </DialogFooter>
+            {/* Timeline */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-blue-500" />
+                  Histórico de Alterações
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
+                    <div>
+                      <p className="text-sm font-medium">Ocorrência criada</p>
+                      <p className="text-xs text-muted-foreground">
+                        {format(occurrence.openingDate, 'dd/MM/yyyy HH:mm')} por {occurrence.origin}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+          </div>
+        </ScrollArea>
       </DialogContent>
     </Dialog>
   );
