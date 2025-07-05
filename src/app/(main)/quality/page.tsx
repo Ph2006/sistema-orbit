@@ -1,6 +1,7 @@
 
 "use client";
 
+import React from "react";
 import OrderEngineeringTickets from './OrderEngineeringTickets';
 import { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -204,6 +205,7 @@ const nonConformanceSchema = z.object({
   description: z.string().min(10, "A descrição detalhada é obrigatória (mín. 10 caracteres)."),
   type: z.enum(["Interna", "Reclamação de Cliente"], { required_error: "Selecione o tipo de não conformidade." }),
   status: z.enum(["Aberta", "Em Análise", "Concluída"]),
+  photos: z.array(z.string()).optional(),
 });
 
 const calibrationSchema = z.object({
@@ -512,7 +514,7 @@ const lessonsLearnedSchema = z.object({
 
 
 // --- TYPES ---
-type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string };
+type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string, photos?: string[] };
 type OrderInfo = { id: string; number: string; customerId: string; customerName: string, projectName?: string, items: { id: string, description: string, code?: string, quantity?: number }[] };
 type Calibration = z.infer<typeof calibrationSchema> & { id: string };
 type RawMaterialInspection = z.infer<typeof rawMaterialInspectionSchema> & { id: string, orderNumber: string, itemName: string };
@@ -624,7 +626,7 @@ export default function QualityPage() {
   // --- FORMS ---
   const rncForm = useForm<z.infer<typeof nonConformanceSchema>>({
     resolver: zodResolver(nonConformanceSchema),
-    defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } },
+    defaultValues: { date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' }, photos: [] },
   });
 
 
@@ -857,7 +859,7 @@ export default function QualityPage() {
         return {
           id: doc.id, date: data.date.toDate(), orderId: data.orderId, orderNumber: order?.number || 'N/A',
           item: { id: data.itemId, description: data.itemDescription }, customerName: order?.customerName || 'N/A',
-          description: data.description, type: data.type, status: data.status,
+          description: data.description, type: data.type, status: data.status, photos: data.photos || [],
         } as NonConformance;
       });
       setReports(reportsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
@@ -1030,10 +1032,29 @@ export default function QualityPage() {
     try {
       const order = orders.find(o => o.id === values.orderId);
       if (!order) throw new Error("Pedido selecionado não encontrado.");
+      
       const dataToSave: any = {
-        date: Timestamp.fromDate(values.date), orderId: values.orderId, itemId: values.item.id, itemDescription: values.item.description,
-        customerId: order.customerId, customerName: order.customerName, description: values.description, type: values.type, status: values.status,
+        date: Timestamp.fromDate(values.date), 
+        orderId: values.orderId, 
+        itemId: values.item.id, 
+        itemDescription: values.item.description,
+        customerId: order.customerId, 
+        customerName: order.customerName, 
+        description: values.description, 
+        type: values.type, 
+        status: values.status,
+        photos: values.photos || [],
       };
+
+      // Validação de tamanho
+      if (!validateDataSizeBeforeSave(dataToSave)) {
+          toast({
+              variant: "destructive",
+              title: "Relatório muito grande para salvar",
+              description: `O relatório excede o limite do banco de dados (900KB). Remova algumas fotos e tente novamente.`,
+          });
+          return;
+      }
 
       if (selectedReport) {
         await updateDoc(doc(db, "companies", "mecald", "qualityReports", selectedReport.id), dataToSave);
@@ -1046,11 +1067,22 @@ export default function QualityPage() {
       await fetchAllData();
     } catch (error) {
       console.error("Error saving report:", error);
-      toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+      
+      // Verificação de erro de tamanho
+      if ((error as any)?.message?.includes('exceeds the maximum allowed size') || 
+          (error as any)?.message?.includes('Document exceeds maximum size')) {
+          toast({ 
+              variant: "destructive", 
+              title: "Relatório muito grande", 
+              description: "O relatório excede o limite do banco de dados. Remova algumas fotos e tente novamente." 
+          });
+      } else {
+          toast({ variant: "destructive", title: "Erro ao salvar relatório" });
+      }
     }
   };
-  const handleAddRncClick = () => { setSelectedReport(null); rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' } }); setIsRncFormOpen(true); };
-  const handleEditRncClick = (report: NonConformance) => { setSelectedReport(report); rncForm.reset({ ...report, item: { id: report.item.id, description: report.item.description } }); setIsRncFormOpen(true); };
+  const handleAddRncClick = () => { setSelectedReport(null); rncForm.reset({ date: new Date(), status: "Aberta", type: "Interna", description: '', orderId: undefined, item: { id: '', description: '' }, photos: [] }); setIsRncFormOpen(true); };
+  const handleEditRncClick = (report: NonConformance) => { setSelectedReport(report); rncForm.reset({ ...report, item: { id: report.item.id, description: report.item.description }, photos: report.photos || [] }); setIsRncFormOpen(true); };
   const handleDeleteRncClick = (report: NonConformance) => { setReportToDelete(report); setIsRncDeleting(true); };
   const handleConfirmRncDelete = async () => {
     if (!reportToDelete) return;
@@ -1063,6 +1095,186 @@ export default function QualityPage() {
   const watchedRncOrderId = rncForm.watch("orderId");
   const availableRncItems = useMemo(() => { if (!watchedRncOrderId) return []; return orders.find(o => o.id === watchedRncOrderId)?.items || []; }, [watchedRncOrderId, orders]);
   useEffect(() => { rncForm.setValue('item', {id: '', description: ''}); }, [watchedRncOrderId, rncForm]);
+
+  // --- RNC PHOTO HANDLERS ---
+  const handleRncPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    
+    const currentPhotos = rncForm.getValues("photos") || [];
+    
+    // Verificar limite de fotos (máximo 6 por RNC)
+    if (currentPhotos.length + files.length > 6) {
+        toast({
+            title: "Muitas fotos",
+            description: `Máximo de 6 fotos permitidas. Você tem ${currentPhotos.length} e está tentando adicionar ${files.length}.`,
+            variant: "destructive",
+        });
+        return;
+    }
+    
+    const validFiles = Array.from(files).filter(file => {
+        // Verificar tipo de arquivo
+        if (!file.type.startsWith('image/')) {
+            toast({
+                title: "Tipo de arquivo inválido",
+                description: `O arquivo ${file.name} não é uma imagem válida.`,
+                variant: "destructive",
+            });
+            return false;
+        }
+        
+        // Verificar tamanho (máximo 20MB)
+        if (file.size > 20 * 1024 * 1024) {
+            toast({
+                title: "Arquivo muito grande",
+                description: `O arquivo ${file.name} é muito grande (máximo 20MB).`,
+                variant: "destructive",
+            });
+            return false;
+        }
+        
+        return true;
+    });
+    
+    if (validFiles.length === 0) return;
+    
+    try {
+        const compressedPhotos = await Promise.all(
+            validFiles.map(async (file) => {
+                try {
+                    console.log(`Processando foto RNC: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
+                    return await compressImageForFirestore(file);
+                } catch (error) {
+                    console.error(`Erro ao comprimir ${file.name}:`, error);
+                    // Em caso de erro, usar o arquivo original
+                    return new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target?.result as string);
+                        reader.readAsDataURL(file);
+                    });
+                }
+            })
+        );
+        
+        const updatedPhotos = [...currentPhotos, ...compressedPhotos];
+        rncForm.setValue("photos", updatedPhotos, { shouldValidate: true });
+        
+        toast({
+            title: "Fotos adicionadas",
+            description: `${validFiles.length} foto(s) processada(s) com sucesso.`,
+        });
+        
+    } catch (error) {
+        console.error('Erro ao processar fotos:', error);
+        toast({
+            title: "Erro ao processar fotos",
+            description: "Tente novamente ou entre em contato com o suporte.",
+            variant: "destructive",
+        });
+    }
+  };
+
+  const removeRncPhoto = (index: number) => {
+    const currentPhotos = rncForm.getValues("photos") || [];
+    const updatedPhotos = currentPhotos.filter((_, i) => i !== index);
+    rncForm.setValue("photos", updatedPhotos, { shouldValidate: true });
+  };
+
+  // --- RNC PDF EXPORT ---
+  const handleRncPDF = async (report: NonConformance) => {
+    toast({ title: "Gerando PDF..." });
+    try {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+        const orderInfo = orders.find(o => o.id === report.orderId);
+        const itemInfo = orderInfo?.items.find(i => i.id === report.item.id);
+
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let y = 15;
+        
+        // Header
+        if (companyData.logo?.preview) { 
+            try { 
+                docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); 
+            } catch(e) { 
+                console.error("Error adding image to PDF:", e) 
+            } 
+        }
+        docPdf.setFontSize(16).setFont(undefined, 'bold');
+        docPdf.text(`Relatório de Não Conformidade`, pageWidth / 2, y + 8, { align: 'center' });
+        y += 25;
+
+        // Informações principais
+        autoTable(docPdf, {
+            startY: y,
+            theme: 'plain',
+            styles: { fontSize: 9 },
+            body: [
+                ['Data da Ocorrência', format(report.date, 'dd/MM/yyyy'), 'Tipo', report.type],
+                ['Pedido', `${orderInfo?.number || 'N/A'}`, 'Status', report.status],
+                ['Cliente', `${orderInfo?.customerName || 'N/A'}`, 'Item Afetado', report.item.description],
+            ],
+        });
+        y = (docPdf as any).lastAutoTable.finalY + 10;
+
+        // Descrição
+        if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+        docPdf.setFontSize(12).setFont(undefined, 'bold');
+        docPdf.text('Descrição da Não Conformidade', 15, y);
+        y += 7;
+        
+        const splitDescription = docPdf.splitTextToSize(report.description, pageWidth - 30);
+        docPdf.setFontSize(10).setFont(undefined, 'normal');
+        docPdf.text(splitDescription, 15, y);
+        y += (splitDescription.length * 5) + 10;
+
+        // Fotos (se existirem)
+        if (report.photos && report.photos.length > 0) {
+            if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text('Registro Fotográfico', 15, y);
+            y += 7;
+
+            const photoWidth = (pageWidth - 45) / 2;
+            const photoHeight = photoWidth * (3/4);
+            let x = 15;
+
+            for (const photoDataUri of report.photos) {
+                if (y + photoHeight > pageHeight - 45) {
+                    docPdf.addPage();
+                    y = 20;
+                    x = 15;
+                }
+                try {
+                    docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight);
+                } catch(e) { 
+                    docPdf.text("Erro ao carregar imagem", x, y + 10); 
+                }
+                x = (x === 15) ? (15 + photoWidth + 15) : 15;
+                if (x === 15) y += photoHeight + 5;
+            }
+        }
+
+        // Footer
+        const pageCount = docPdf.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            docPdf.setPage(i);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text('RNC-MEC-202501.REV0', 15, pageHeight - 10);
+            docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+        }
+        
+        docPdf.save(`RNC_${report.id}_${format(report.date, 'ddMMyyyy')}.pdf`);
+        toast({ title: "PDF gerado com sucesso!" });
+    } catch (error) {
+        console.error("Error exporting RNC PDF:", error);
+        toast({ variant: "destructive", title: "Erro ao gerar PDF." });
+    }
+  };
 
   // --- CALIBRATION HANDLERS ---
   const onCalibrationSubmit = async (values: z.infer<typeof calibrationSchema>) => {
@@ -2765,6 +2977,9 @@ export default function QualityPage() {
                             <TableCell>{report.item.description}</TableCell><TableCell>{report.type}</TableCell>
                             <TableCell><Badge variant={getStatusVariant(report.status)}>{report.status}</Badge></TableCell>
                             <TableCell className="text-right">
+                              <Button variant="ghost" size="icon" onClick={() => handleRncPDF(report)}>
+                                <FileDown className="h-4 w-4" />
+                              </Button>
                               <Button variant="ghost" size="icon" onClick={() => handleEditRncClick(report)}><Pencil className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRncClick(report)}><Trash2 className="h-4 w-4" /></Button>
                             </TableCell></TableRow>))
@@ -2865,6 +3080,75 @@ export default function QualityPage() {
           <FormField control={rncForm.control} name="type" render={({ field }) => ( <FormItem><FormLabel>Tipo de Não Conformidade</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Interna">Interna</SelectItem><SelectItem value="Reclamação de Cliente">Reclamação de Cliente</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
           <FormField control={rncForm.control} name="description" render={({ field }) => ( <FormItem><FormLabel>Descrição da Ocorrência</FormLabel><FormControl><Textarea placeholder="Detalhe o que aconteceu, peças envolvidas, etc." {...field} value={field.value ?? ''}/></FormControl><FormMessage /></FormItem> )}/>
           <FormField control={rncForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o status" /></SelectTrigger></FormControl><SelectContent><SelectItem value="Aberta">Aberta</SelectItem><SelectItem value="Em Análise">Em Análise</SelectItem><SelectItem value="Concluída">Concluída</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
+          
+          {/* Registro Fotográfico */}
+          <FormItem>
+            <FormLabel>Registro Fotográfico</FormLabel>
+            <FormControl>
+                <Input 
+                    type="file" 
+                    multiple 
+                    accept="image/*" 
+                    onChange={handleRncPhotoUpload} 
+                />
+            </FormControl>
+            <FormDescription>
+                Selecione uma ou mais imagens para anexar ao relatório.
+            </FormDescription>
+            {rncForm.watch("photos") && rncForm.watch("photos").length > 0 && (
+                <div className="space-y-2">
+                    <div className="flex justify-between items-center text-sm text-muted-foreground">
+                        <span>{rncForm.watch("photos").length} de 6 fotos</span>
+                        <span>Compressão aplicada automaticamente</span>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {rncForm.watch("photos").map((photo: string, index: number) => (
+                            <div key={index} className="relative group">
+                                <div className="aspect-square overflow-hidden rounded-lg border border-border">
+                                    <Image 
+                                        src={photo} 
+                                        alt={`Foto ${index + 1}`} 
+                                        width={200} 
+                                        height={200} 
+                                        className="w-full h-full object-cover transition-transform group-hover:scale-105" 
+                                    />
+                                </div>
+                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={() => removeRncPhoto(index)}
+                                        className="shadow-lg"
+                                    >
+                                        <Trash2 className="h-4 w-4 mr-1" />
+                                        Remover
+                                    </Button>
+                                </div>
+                                <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                                    {index + 1}
+                                </div>
+                                <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                                    {Math.round((photo.length * 0.75) / 1024)}KB
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            <FormMessage />
+          </FormItem>
+
+          {/* Indicador de Tamanho */}
+          <Card>
+            <CardHeader>
+                <CardTitle className="text-sm">Monitoramento de Tamanho</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <DataSizeIndicator data={rncForm.getValues()} />
+            </CardContent>
+          </Card>
+
           <DialogFooter><Button type="submit">Salvar</Button></DialogFooter>
       </form></Form></DialogContent></Dialog>
       <AlertDialog open={isRncDeleting} onOpenChange={setIsRncDeleting}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Você tem certeza?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o relatório de não conformidade.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleConfirmRncDelete} className="bg-destructive hover:bg-destructive/90">Sim, excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
