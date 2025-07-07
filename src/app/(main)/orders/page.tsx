@@ -1690,52 +1690,11 @@ export default function OrdersPage() {
                                                 </Card>
                                             </div>
                                         </ScrollArea>
-                                        <SheetFooter className="pt-4 pr-6 border-t flex flex-wrap gap-2 sm:justify-between items-center">
-                                            <div className="flex gap-2 flex-wrap">
-                                                <Button 
-                                                    onClick={handleGeneratePackingSlip} 
-                                                    disabled={selectedItems.size === 0}
-
-                                                >
-                                                    <FileText className="mr-2 h-4 w-4" />
-                                                    Emitir Romaneio ({selectedItems.size})
-                                                </Button>
-                                                <Button 
-                                                    onClick={handleExportSchedule}
-                                                    variant="outline"
-                                                >
-                                                    <GanttChart className="mr-2 h-4 w-4" />
-                                                    Exportar Cronograma
-                                                </Button>
-                                                <Button 
-                                                    onClick={handleGeneratePublicLink}
-                                                    variant="outline"
-                                                    disabled={isGeneratingLink}
-                                                >
-                                                    <Share className="mr-2 h-4 w-4" />
-                                                    {isGeneratingLink ? "Gerando..." : "Link Público"}
-                                                </Button>
-                                                {publicScheduleId && (
-                                                    <Button 
-                                                        onClick={handleUpdatePublicSchedule}
-                                                        variant="ghost"
-                                                        size="sm"
-                                                    >
-                                                        <ExternalLink className="mr-2 h-4 w-4" />
-                                                        Atualizar Link
-                                                    </Button>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <Button onClick={() => setIsEditing(true)}>
-                                                    <Edit className="mr-2 h-4 w-4" />
-                                                    Editar Pedido
-                                                </Button>
-                                                <Button variant="destructive" onClick={() => selectedOrder && handleDeleteClick(selectedOrder)}>
-                                                    <Trash2 className="mr-2 h-4 w-4" />
-                                                    Excluir
-                                                </Button>
-                                            </div>
+                                        <SheetFooter className="py-4 border-t">
+                                            <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
+                                            <Button type="submit" disabled={form.formState.isSubmitting}>
+                                                {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                                            </Button>
                                         </SheetFooter>
                                     </form>
                                 </Form>
@@ -1937,31 +1896,13 @@ export default function OrdersPage() {
                                                 <FileText className="mr-2 h-4 w-4" />
                                                 Emitir Romaneio ({selectedItems.size})
                                             </Button>
-                                            <Button 
+                                             <Button 
                                                 onClick={handleExportSchedule}
                                                 variant="outline"
                                             >
                                                 <GanttChart className="mr-2 h-4 w-4" />
                                                 Exportar Cronograma
                                             </Button>
-                                            <Button 
-                                                onClick={handleGeneratePublicLink}
-                                                variant="outline"
-                                                disabled={isGeneratingLink}
-                                            >
-                                                <Share className="mr-2 h-4 w-4" />
-                                                {isGeneratingLink ? "Gerando..." : "Link Público"}
-                                            </Button>
-                                            {publicScheduleId && (
-                                                <Button 
-                                                    onClick={handleUpdatePublicSchedule}
-                                                    variant="ghost"
-                                                    size="sm"
-                                                >
-                                                    <ExternalLink className="mr-2 h-4 w-4" />
-                                                    Atualizar Link
-                                                </Button>
-                                            )}
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <Button onClick={() => setIsEditing(true)}>
