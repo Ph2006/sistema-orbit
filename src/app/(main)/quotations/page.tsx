@@ -451,6 +451,42 @@ export default function QuotationsPage() {
         setEditIndex(null);
         setIsFormOpen(true);
     };
+
+    const handleDuplicateQuotation = async (quotation: Quotation) => {
+        try {
+            // Create a copy of the quotation with modified details
+            const duplicatedQuotation = {
+                ...quotation,
+                status: "Aguardando Aprovação" as const,
+                validity: new Date(new Date().setDate(new Date().getDate() + 15)), // Set validity to 15 days from now
+                notes: quotation.notes ? `${quotation.notes}\n\n[Baseado no orçamento Nº ${quotation.number}]` : `Baseado no orçamento Nº ${quotation.number}`,
+            };
+
+            // Remove fields that shouldn't be copied
+            delete (duplicatedQuotation as any).id;
+            delete (duplicatedQuotation as any).createdAt;
+            delete (duplicatedQuotation as any).number;
+
+            // Open form with the duplicated data
+            setSelectedQuotation(null); // Ensure it's treated as a new quotation
+            form.reset(duplicatedQuotation);
+            setCurrentItem(emptyItem);
+            setEditIndex(null);
+            setIsFormOpen(true);
+
+            toast({
+                title: "Orçamento duplicado!",
+                description: `Os dados do orçamento Nº ${quotation.number} foram copiados. Ajuste conforme necessário antes de salvar.`,
+            });
+        } catch (error) {
+            console.error("Error duplicating quotation:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao duplicar orçamento",
+                description: "Ocorreu um erro ao duplicar o orçamento. Tente novamente.",
+            });
+        }
+    };
     
     const handleDeleteClick = (quotation: Quotation) => {
         setQuotationToDelete(quotation);
@@ -845,7 +881,7 @@ export default function QuotationsPage() {
                                         <TableHead className="w-[120px]">Criação</TableHead>
                                         <TableHead className="w-[150px]">Valor Total</TableHead>
                                         <TableHead className="w-[180px]">Status</TableHead>
-                                        <TableHead className="w-[100px] text-right">Ações</TableHead>
+                                        <TableHead className="w-[140px] text-right">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -862,7 +898,18 @@ export default function QuotationsPage() {
                                                     <Badge variant={getStatusVariant(q.status)} className={cn((q.status === 'Aprovado' || q.status === 'Pedido Gerado') && 'bg-green-600 hover:bg-green-700 text-primary-foreground')}>{q.status}</Badge>
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                    <div className="flex items-center justify-end gap-2">
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        <Button 
+                                                            variant="ghost" 
+                                                            size="icon" 
+                                                            onClick={(e) => { 
+                                                                e.stopPropagation(); 
+                                                                handleDuplicateQuotation(q); 
+                                                            }}
+                                                            title="Duplicar orçamento"
+                                                        >
+                                                            <Copy className="h-4 w-4" />
+                                                        </Button>
                                                         <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleEditClick(q); }}>
                                                             <Pencil className="h-4 w-4" />
                                                         </Button>
@@ -929,228 +976,6 @@ export default function QuotationsPage() {
                                     </div>
                                     
                                     <Card>
-                                        <CardHeader>
-                                            <CardTitle>Item do Orçamento</CardTitle>
-                                            <CardDescription>
-                                                {editIndex !== null ? 'Edite os dados do item selecionado.' : 'Preencha os dados e adicione um novo item.'}
-                                            </CardDescription>
-                                        </CardHeader>
-                                        <CardContent className="space-y-4">
-                                            <div>
-                                                <FormLabel>Descrição do Item</FormLabel>
-                                                <Textarea 
-                                                    placeholder="Descrição detalhada do produto ou serviço" 
-                                                    value={currentItem.description}
-                                                    onChange={e => handleCurrentItemChange('description', e.target.value)}
-                                                />
-                                            </div>
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-                                                <div>
-                                                    <FormLabel>Código</FormLabel>
-                                                    <Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} />
-                                                </div>
-                                                <div>
-                                                    <FormLabel>Quantidade</FormLabel>
-                                                    <Input type="number" placeholder="1" value={currentItem.quantity} onChange={e => handleCurrentItemChange('quantity', e.target.value)} />
-                                                </div>
-                                                <div>
-                                                    <FormLabel>Preço Unitário s/ Imposto (R$)</FormLabel>
-                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitPrice} onChange={e => handleCurrentItemChange('unitPrice', e.target.value)} />
-                                                </div>
-                                                <div>
-                                                    <FormLabel>Imposto (%)</FormLabel>
-                                                    <Input type="number" step="0.01" placeholder="0" value={currentItem.taxRate || ''} onChange={e => handleCurrentItemChange('taxRate', e.target.value)} />
-                                                </div>
-                                                <div>
-                                                    <FormLabel>Peso Unit. (kg)</FormLabel>
-                                                    <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitWeight || ''} onChange={e => handleCurrentItemChange('unitWeight', e.target.value)} />
-                                                </div>
-                                            </div>
-                                            <div className="flex justify-end gap-2">
-                                                {editIndex !== null && (
-                                                    <Button type="button" variant="outline" onClick={handleCancelEdit}>Cancelar Edição</Button>
-                                                )}
-                                                <Button type="button" onClick={editIndex !== null ? handleUpdateItem : handleAddItem}>
-                                                    {editIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}
-                                                </Button>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-
-                                    {watchedItems.length > 0 && (
-                                        <Card>
-                                            <CardHeader>
-                                                <CardTitle>Itens Adicionados</CardTitle>
-                                                <CardDescription>
-                                                    Use o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
-                                                </CardDescription>
-                                            </CardHeader>
-                                            <CardContent>
-                                                <Table>
-                                                    <TableHeader>
-                                                        <TableRow>
-                                                            <TableHead>Código</TableHead>
-                                                            <TableHead>Descrição</TableHead>
-                                                            <TableHead className="w-[80px]">Qtd.</TableHead>
-                                                            <TableHead className="w-[120px]">Preço Unit. s/ Imp.</TableHead>
-                                                            <TableHead className="w-[80px]">Imposto (%)</TableHead>
-                                                            <TableHead className="w-[150px]">Total c/ Imp.</TableHead>
-                                                            <TableHead className="w-[120px] text-right">Ações</TableHead>
-                                                        </TableRow>
-                                                    </TableHeader>
-                                                    <TableBody>
-                                                        {watchedItems.map((item, index) => {
-                                                            const { totalWithTax } = calculateItemTotals(item);
-                                                            return (
-                                                                <TableRow key={index} className={cn(editIndex === index && "bg-secondary")}>
-                                                                    <TableCell className="font-mono text-sm">{item.code || '-'}</TableCell>
-                                                                    <TableCell className="font-medium">{item.description}</TableCell>
-                                                                    <TableCell>{item.quantity}</TableCell>
-                                                                    <TableCell>{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
-                                                                    <TableCell>{item.taxRate || 0}%</TableCell>
-                                                                    <TableCell>{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
-                                                                    <TableCell className="text-right">
-                                                                        <div className="flex items-center gap-1">
-                                                                            <Button 
-                                                                                type="button" 
-                                                                                variant="ghost" 
-                                                                                size="icon"
-                                                                                onClick={() => handleDuplicateItem(index)}
-                                                                                title="Duplicar item"
-                                                                            >
-                                                                                <Copy className="h-4 w-4" />
-                                                                            </Button>
-                                                                            <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}>
-                                                                                <Pencil className="h-4 w-4" />
-                                                                            </Button>
-                                                                            <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => remove(index)}>
-                                                                                <Trash2 className="h-4 w-4" />
-                                                                            </Button>
-                                                                        </div>
-                                                                    </TableCell>
-                                                                </TableRow>
-                                                            )
-                                                        })}
-                                                    </TableBody>
-                                                </Table>
-                                                <Separator className="my-4" />
-                                                <div className="flex justify-end items-center gap-4 text-lg font-bold pr-4">
-                                                    <span>Total Geral:</span>
-                                                    <span className="text-primary">
-                                                        {grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                    </span>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    )}
-
-                                    <Card>
-                                        <CardHeader><CardTitle>Serviços Inclusos</CardTitle></CardHeader>
-                                        <CardContent>
-                                            <FormField
-                                                control={form.control}
-                                                name="includedServices"
-                                                render={() => (
-                                                    <FormItem>
-                                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                                            {serviceOptions.map((item) => (
-                                                                <FormField
-                                                                    key={item.id}
-                                                                    control={form.control}
-                                                                    name="includedServices"
-                                                                    render={({ field }) => {
-                                                                        return (
-                                                                            <FormItem
-                                                                                key={item.id}
-                                                                                className="flex flex-row items-start space-x-3 space-y-0"
-                                                                            >
-                                                                                <FormControl>
-                                                                                    <Checkbox
-                                                                                        checked={field.value?.includes(item.id)}
-                                                                                        onCheckedChange={(checked) => {
-                                                                                            return checked
-                                                                                                ? field.onChange([...(field.value || []), item.id])
-                                                                                                : field.onChange(
-                                                                                                    field.value?.filter(
-                                                                                                        (value) => value !== item.id
-                                                                                                    )
-                                                                                                )
-                                                                                        }}
-                                                                                    />
-                                                                                </FormControl>
-                                                                                <FormLabel className="font-normal">
-                                                                                    {item.label}
-                                                                                </FormLabel>
-                                                                            </FormItem>
-                                                                        )
-                                                                    }}
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                )}
-                                            />
-                                        </CardContent>
-                                    </Card>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <FormField control={form.control} name="paymentTerms" render={({ field }) => (
-                                            <FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                        )}/>
-                                        <FormField control={form.control} name="deliveryTime" render={({ field }) => (
-                                            <FormItem><FormLabel>Prazo de Entrega</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                        )}/>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <FormField control={form.control} name="validity" render={({ field }) => (
-                                            <FormItem className="flex flex-col"><FormLabel>Validade da Proposta</FormLabel>
-                                                <Popover>
-                                                    <PopoverTrigger asChild>
-                                                        <FormControl>
-                                                            <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
-                                                                {field.value ? format(field.value, "PPP", { locale: ptBR }) : <span>Escolha uma data</span>}
-                                                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                            </Button>
-                                                        </FormControl>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0" align="start">
-                                                        <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
-                                                    </PopoverContent>
-                                                </Popover><FormMessage />
-                                            </FormItem>
-                                        )} />
-                                    </div>
-                                     <FormField control={form.control} name="notes" render={({ field }) => (
-                                        <FormItem><FormLabel>Observações Gerais</FormLabel><FormControl><Textarea placeholder="Observações adicionais, detalhes técnicos, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                                    )}/>
-                                </div>
-                            </ScrollArea>
-                            <DialogFooter className="pt-6 border-t">
-                                <Button type="submit" disabled={form.formState.isSubmitting}>
-                                    {form.formState.isSubmitting ? "Salvando..." : "Salvar Orçamento"}
-                                </Button>
-                            </DialogFooter>
-                        </form>
-                    </Form>
-                </DialogContent>
-            </Dialog>
-
-            <Sheet open={isViewSheetOpen} onOpenChange={setIsViewSheetOpen}>
-                <SheetContent className="w-full sm:max-w-3xl">
-                    {selectedQuotation && (
-                        <>
-                        <SheetHeader>
-                            <SheetTitle className="font-headline text-2xl">Orçamento Nº {selectedQuotation.number}</SheetTitle>
-                            <SheetDescription>
-                                Cliente: <span className="font-medium text-foreground">{selectedQuotation.customer.name}</span>
-                                {selectedQuotation.buyerName && ` | Comprador: `}
-                                {selectedQuotation.buyerName && <span className="font-medium text-foreground">{selectedQuotation.buyerName}</span>}
-                            </SheetDescription>
-                        </SheetHeader>
-                        <ScrollArea className="h-[calc(100vh-12rem)]">
-                            <div className="space-y-6 py-6 pr-6">
-                                <Card>
                                     <CardHeader><CardTitle>Detalhes do Orçamento</CardTitle></CardHeader>
                                     <CardContent className="space-y-3 text-sm">
                                         <div className="flex justify-between items-center">
@@ -1247,6 +1072,14 @@ export default function QuotationsPage() {
                                     Gerar Pedido
                                 </Button>
                             )}
+                            <Button 
+                                variant="outline" 
+                                onClick={() => handleDuplicateQuotation(selectedQuotation)} 
+                                className="w-full sm:w-auto"
+                            >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Duplicar
+                            </Button>
                              <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <Button variant="outline" className="w-full sm:w-auto">
