@@ -6,8 +6,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown, Clock } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown, Clock, CalendarIcon } from "lucide-react";
 import { useAuth } from "../layout";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +28,9 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 const planStageSchema = z.object({
   stageName: z.string(),
@@ -80,6 +85,55 @@ export default function ProductsPage() {
   const [isLoadingStages, setIsLoadingStages] = useState(true);
   const [newStageName, setNewStageName] = useState("");
   const [activeTab, setActiveTab] = useState("catalog");
+
+  // Estados da calculadora de prazos
+  const [calculatorItems, setCalculatorItems] = useState<Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productDescription: string;
+    quantity: number;
+    leadTime: number;
+    stages: Array<{ stageName: string; durationDays: number }>;
+  }>>([]);
+  const [selectedProductForCalculator, setSelectedProductForCalculator] = useState<string>("");
+  const [calculatorQuantity, setCalculatorQuantity] = useState<number>(1);
+  const [requestedDeliveryDate, setRequestedDeliveryDate] = useState<Date>(
+    new Date(new Date().setDate(new Date().getDate() + 30))
+  );
+  const [calculatorResults, setCalculatorResults] = useState<{
+    isViable: boolean;
+    suggestedDate: Date;
+    analysis: Array<{
+      stageName: string;
+      originalDuration: number;
+      adjustedDuration: number;
+      workload: number;
+      bottleneck: boolean;
+    }>;
+    totalAdjustedLeadTime: number;
+    confidence: number;
+  } | null>(null);
+  
+  // Simulação de carga de trabalho por setor (em uma implementação real, isso viria do banco de dados)
+  const [sectorWorkload, setSectorWorkload] = useState<Record<string, number>>({});
+
+  // Função para simular carga de trabalho dos setores
+  const simulateSectorWorkload = useCallback(() => {
+    const workload: Record<string, number> = {};
+    manufacturingStages.forEach(stage => {
+      // Simula uma carga entre 0% e 95% para cada setor
+      workload[stage] = Math.random() * 0.95;
+    });
+    setSectorWorkload(workload);
+  }, [manufacturingStages]);
+
+  // Gera carga de trabalho inicial
+  useEffect(() => {
+    if (manufacturingStages.length > 0) {
+      simulateSectorWorkload();
+    }
+  }, [manufacturingStages, simulateSectorWorkload]);
 
   const [isCopyPopoverOpen, setIsCopyPopoverOpen] = useState(false);
   const [copyFromSearch, setCopyFromSearch] = useState("");
@@ -512,6 +566,129 @@ export default function ProductsPage() {
     };
   }, [products]);
 
+  // Função para adicionar item à calculadora
+  const addItemToCalculator = () => {
+    if (!selectedProductForCalculator || calculatorQuantity <= 0) {
+      toast({
+        variant: "destructive",
+        title: "Dados inválidos",
+        description: "Selecione um produto e informe uma quantidade válida."
+      });
+      return;
+    }
+
+    const product = products.find(p => p.id === selectedProductForCalculator);
+    if (!product) return;
+
+    const newItem = {
+      id: Date.now().toString(),
+      productId: product.id,
+      productCode: product.code,
+      productDescription: product.description,
+      quantity: calculatorQuantity,
+      leadTime: calculateLeadTime(product),
+      stages: product.productionPlanTemplate || []
+    };
+
+    setCalculatorItems(prev => [...prev, newItem]);
+    setSelectedProductForCalculator("");
+    setCalculatorQuantity(1);
+  };
+
+  // Função para remover item da calculadora
+  const removeItemFromCalculator = (id: string) => {
+    setCalculatorItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  // Algoritmo inteligente de cálculo de viabilidade
+  const calculateFeasibility = () => {
+    if (calculatorItems.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Lista vazia",
+        description: "Adicione pelo menos um item para calcular."
+      });
+      return;
+    }
+
+    // Consolida todas as etapas de todos os itens
+    const consolidatedStages: Record<string, number> = {};
+    
+    calculatorItems.forEach(item => {
+      item.stages.forEach(stage => {
+        const totalDaysForStage = (stage.durationDays || 0) * item.quantity;
+        consolidatedStages[stage.stageName] = (consolidatedStages[stage.stageName] || 0) + totalDaysForStage;
+      });
+    });
+
+    // Analisa cada etapa considerando a carga atual
+    const analysis = Object.entries(consolidatedStages).map(([stageName, totalDays]) => {
+      const currentWorkload = sectorWorkload[stageName] || 0;
+      const capacityFactor = 1 - currentWorkload; // Capacidade disponível (0 a 1)
+      
+      // Fator de ajuste baseado na carga:
+      // Se capacidade é baixa (setor sobrecarregado), tempo aumenta
+      // Se capacidade é alta (setor livre), tempo pode ser mantido ou reduzido
+      let adjustmentFactor = 1;
+      if (capacityFactor < 0.3) {
+        // Setor muito carregado - aumenta tempo em 50-100%
+        adjustmentFactor = 1.5 + (0.3 - capacityFactor) * 1.67;
+      } else if (capacityFactor < 0.6) {
+        // Setor moderadamente carregado - aumenta tempo em 10-50%
+        adjustmentFactor = 1.1 + (0.6 - capacityFactor) * 1.33;
+      } else {
+        // Setor com boa capacidade - mantém tempo ou reduz até 10%
+        adjustmentFactor = 0.9 + (1 - capacityFactor) * 0.25;
+      }
+
+      const adjustedDuration = Math.ceil(totalDays * adjustmentFactor);
+      const isBottleneck = currentWorkload > 0.8 || adjustedDuration > totalDays * 1.3;
+
+      return {
+        stageName,
+        originalDuration: totalDays,
+        adjustedDuration,
+        workload: currentWorkload,
+        bottleneck: isBottleneck
+      };
+    });
+
+    // Calcula o lead time total ajustado (considera paralelismo parcial)
+    // Em uma implementação real, isso seria mais sofisticado baseado no fluxo real de produção
+    const totalAdjustedLeadTime = Math.max(...analysis.map(a => a.adjustedDuration));
+    
+    // Data sugerida baseada no lead time ajustado
+    const suggestedDate = new Date();
+    suggestedDate.setDate(suggestedDate.getDate() + totalAdjustedLeadTime);
+
+    // Verifica se é viável para a data solicitada
+    const daysUntilRequested = Math.ceil((requestedDeliveryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+    const isViable = daysUntilRequested >= totalAdjustedLeadTime;
+
+    // Calcula confiança baseada na carga dos setores e margem de tempo
+    const avgWorkload = analysis.reduce((sum, a) => sum + a.workload, 0) / analysis.length;
+    const timeMargin = Math.max(0, daysUntilRequested - totalAdjustedLeadTime) / totalAdjustedLeadTime;
+    const confidence = Math.min(95, Math.max(10, 
+      (1 - avgWorkload) * 60 + timeMargin * 35
+    ));
+
+    setCalculatorResults({
+      isViable,
+      suggestedDate,
+      analysis,
+      totalAdjustedLeadTime,
+      confidence: Math.round(confidence)
+    });
+  };
+
+  // Função para limpar a calculadora
+  const clearCalculator = () => {
+    setCalculatorItems([]);
+    setCalculatorResults(null);
+    setSelectedProductForCalculator("");
+    setCalculatorQuantity(1);
+  };
+
   return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -584,6 +761,7 @@ export default function ProductsPage() {
             <TabsList>
                 <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
                 <TabsTrigger value="stages">Etapas de Fabricação</TabsTrigger>
+                <TabsTrigger value="calculator">Calculadora de Prazos</TabsTrigger>
             </TabsList>
             <TabsContent value="catalog" className="mt-4">
                 <Card>
@@ -713,6 +891,259 @@ export default function ProductsPage() {
                         )}
                     </CardContent>
                 </Card>
+            </TabsContent>
+            <TabsContent value="calculator" className="mt-4">
+                <div className="grid gap-6 lg:grid-cols-2">
+                    {/* Painel de Entrada */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Calculadora de Viabilidade de Prazos</CardTitle>
+                            <CardDescription>
+                                Analise se é possível cumprir prazos considerando a carga atual dos setores de produção.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            {/* Carga Atual dos Setores */}
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Carga Atual dos Setores</h4>
+                                <div className="grid gap-2">
+                                    {manufacturingStages.map(stage => {
+                                        const workload = sectorWorkload[stage] || 0;
+                                        const percentage = Math.round(workload * 100);
+                                        let colorClass = "bg-green-500";
+                                        if (percentage > 80) colorClass = "bg-red-500";
+                                        else if (percentage > 60) colorClass = "bg-yellow-500";
+                                        
+                                        return (
+                                            <div key={stage} className="flex items-center gap-3">
+                                                <span className="text-sm font-medium w-24 truncate">{stage}</span>
+                                                <div className="flex-1 bg-muted rounded-full h-2">
+                                                    <div 
+                                                        className={`h-2 rounded-full transition-all ${colorClass}`}
+                                                        style={{ width: `${percentage}%` }}
+                                                    />
+                                                </div>
+                                                <span className="text-xs text-muted-foreground w-12 text-right">
+                                                    {percentage}%
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    onClick={simulateSectorWorkload}
+                                    className="mt-3"
+                                >
+                                    <RefreshCw className="mr-2 h-3 w-3" />
+                                    Atualizar Carga
+                                </Button>
+                            </div>
+
+                            <Separator />
+
+                            {/* Adicionar Produtos */}
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Adicionar Produtos à Análise</h4>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <Select value={selectedProductForCalculator} onValueChange={setSelectedProductForCalculator}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Selecione um produto" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {products.filter(p => calculateLeadTime(p) > 0).map(product => (
+                                                    <SelectItem key={product.id} value={product.id}>
+                                                        {product.code} - {product.description}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Input
+                                            type="number"
+                                            placeholder="Quantidade"
+                                            value={calculatorQuantity}
+                                            onChange={(e) => setCalculatorQuantity(Number(e.target.value))}
+                                            min="1"
+                                        />
+                                        <Button onClick={addItemToCalculator} className="w-full">
+                                            <PlusCircle className="mr-2 h-4 w-4" />
+                                            Adicionar
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Lista de Itens */}
+                            {calculatorItems.length > 0 && (
+                                <div>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="text-sm font-medium">Itens para Análise</h4>
+                                        <Button variant="outline" size="sm" onClick={clearCalculator}>
+                                            Limpar Lista
+                                        </Button>
+                                    </div>
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {calculatorItems.map(item => (
+                                            <div key={item.id} className="flex items-center justify-between p-3 border rounded-md">
+                                                <div className="flex-1">
+                                                    <div className="font-medium text-sm">{item.productCode}</div>
+                                                    <div className="text-xs text-muted-foreground">{item.productDescription}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        Qtd: {item.quantity} | Lead time: {item.leadTime} dias
+                                                    </div>
+                                                </div>
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon"
+                                                    onClick={() => removeItemFromCalculator(item.id)}
+                                                    className="text-destructive hover:text-destructive"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Data Solicitada */}
+                            <div>
+                                <Label className="text-sm font-medium">Data de Entrega Solicitada</Label>
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" className="w-full justify-start text-left mt-2">
+                                            {format(requestedDeliveryDate, "PPP", { locale: ptBR })}
+                                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0" align="start">
+                                        <Calendar 
+                                            mode="single" 
+                                            selected={requestedDeliveryDate} 
+                                            onSelect={(date) => date && setRequestedDeliveryDate(date)}
+                                            initialFocus 
+                                        />
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+
+                            {/* Botão de Calcular */}
+                            <Button 
+                                onClick={calculateFeasibility} 
+                                className="w-full"
+                                disabled={calculatorItems.length === 0}
+                            >
+                                <Clock className="mr-2 h-4 w-4" />
+                                Analisar Viabilidade
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    {/* Painel de Resultados */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Análise de Viabilidade</CardTitle>
+                            <CardDescription>
+                                Resultado da análise considerando capacidade de produção atual.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {calculatorResults ? (
+                                <div className="space-y-6">
+                                    {/* Resultado Principal */}
+                                    <div className="text-center p-6 border rounded-lg">
+                                        <div className={`text-3xl font-bold mb-2 ${calculatorResults.isViable ? 'text-green-600' : 'text-red-600'}`}>
+                                            {calculatorResults.isViable ? '✓ VIÁVEL' : '✗ INVIÁVEL'}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground mb-4">
+                                            Confiança: {calculatorResults.confidence}%
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="text-sm">
+                                                <span className="font-medium">Data solicitada:</span> {format(requestedDeliveryDate, "dd/MM/yyyy")}
+                                            </div>
+                                            <div className="text-sm">
+                                                <span className="font-medium">Data sugerida:</span> {format(calculatorResults.suggestedDate, "dd/MM/yyyy")}
+                                            </div>
+                                            <div className="text-sm">
+                                                <span className="font-medium">Lead time ajustado:</span> {calculatorResults.totalAdjustedLeadTime} dias
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Análise por Setor */}
+                                    <div>
+                                        <h4 className="text-sm font-medium mb-3">Análise por Setor</h4>
+                                        <div className="space-y-3">
+                                            {calculatorResults.analysis.map(analysis => (
+                                                <div key={analysis.stageName} className="p-3 border rounded-md">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-sm">{analysis.stageName}</span>
+                                                        {analysis.bottleneck && (
+                                                            <Badge variant="destructive">Gargalo</Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+                                                        <div>
+                                                            <div>Tempo original: {analysis.originalDuration} dias</div>
+                                                            <div>Tempo ajustado: {analysis.adjustedDuration} dias</div>
+                                                        </div>
+                                                        <div>
+                                                            <div>Carga atual: {Math.round(analysis.workload * 100)}%</div>
+                                                            <div>
+                                                                Impacto: {analysis.adjustedDuration > analysis.originalDuration ? '+' : ''}
+                                                                {analysis.adjustedDuration - analysis.originalDuration} dias
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Recomendações */}
+                                    <div>
+                                        <h4 className="text-sm font-medium mb-3">Recomendações</h4>
+                                        <div className="space-y-2 text-sm text-muted-foreground">
+                                            {!calculatorResults.isViable && (
+                                                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                                                    <div className="font-medium text-red-800 mb-1">Prazo Inviável</div>
+                                                    <div className="text-red-700">
+                                                        Considere reagendar para {format(calculatorResults.suggestedDate, "dd/MM/yyyy")} 
+                                                        ou redistribuir a carga de trabalho.
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {calculatorResults.confidence < 70 && (
+                                                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                                                    <div className="font-medium text-yellow-800 mb-1">Baixa Confiança</div>
+                                                    <div className="text-yellow-700">
+                                                        Setores com alta carga podem causar atrasos. Monitore de perto.
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {calculatorResults.analysis.some(a => a.bottleneck) && (
+                                                <div className="p-3 bg-orange-50 border border-orange-200 rounded-md">
+                                                    <div className="font-medium text-orange-800 mb-1">Gargalos Identificados</div>
+                                                    <div className="text-orange-700">
+                                                        Considere realocar recursos ou terceirizar algumas etapas.
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <Clock className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                                    <p>Adicione produtos e clique em "Analisar Viabilidade" para ver os resultados.</p>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
             </TabsContent>
         </Tabs>
       </div>
