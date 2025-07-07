@@ -1,11 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -58,18 +56,23 @@ const calculateProgress = (stages: any[]) => {
     return Math.round((completed / stages.length) * 100);
 };
 
-export default function PublicSchedulePage() {
-    const params = useParams();
-    const scheduleId = params?.scheduleId as string;
-    
+export default function SchedulePage() {
+    const [scheduleId, setScheduleId] = useState<string | null>(null);
     const [scheduleData, setScheduleData] = useState<PublicScheduleData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    // Extrair scheduleId da URL
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const id = urlParams.get('id');
+        setScheduleId(id);
+    }, []);
+
     useEffect(() => {
         const fetchScheduleData = async () => {
             if (!scheduleId) {
-                setError("ID do cronograma não encontrado");
+                setError("ID do cronograma não encontrado na URL");
                 setIsLoading(false);
                 return;
             }
@@ -120,7 +123,9 @@ export default function PublicSchedulePage() {
             }
         };
 
-        fetchScheduleData();
+        if (scheduleId) {
+            fetchScheduleData();
+        }
     }, [scheduleId]);
 
     const handleDownloadPDF = async () => {
