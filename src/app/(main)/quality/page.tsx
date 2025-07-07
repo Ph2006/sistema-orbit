@@ -3904,7 +3904,28 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
     </>);
 }
 
-function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, calibrations, toast }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], fieldArrayProps: any, calibrations: Calibration[], toast: any }) {
+function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, calibrations, toast }: any) {
+    // ✅ ADICIONAR ESTE DEBUG TEMPORÁRIO
+    useEffect(() => {
+        if (calibrations.length > 0) {
+            console.log("=== DEBUG CALIBRATIONS ===");
+            console.log("Total de calibrações:", calibrations.length);
+            
+            const trenaInstruments = calibrations.filter(cal => 
+                cal.equipmentName.toLowerCase().includes('trena')
+            );
+            
+            console.log("Trenas encontradas:", trenaInstruments.length);
+            trenaInstruments.forEach((trena, index) => {
+                console.log(`Trena ${index + 1}:`, {
+                    id: trena.id,
+                    name: trena.equipmentName,
+                    code: trena.internalCode
+                });
+            });
+        }
+    }, [calibrations]);
+    // ...existing code...
     const watchedOrderId = form.watch("orderId");
     const watchedItemId = form.watch("itemId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
@@ -3921,6 +3942,37 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     
     const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
     const [editMeasurementIndex, setEditMeasurementIndex] = useState<number | null>(null);
+    const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>('');
+
+    // PASSO 3: Modificar o handleInstrumentChange
+    const handleInstrumentChange = (instrumentId: string) => {
+        console.log("=== SELECIONANDO INSTRUMENTO ===");
+        console.log("ID recebido:", instrumentId);
+        
+        const selectedInstrument = calibrations.find(cal => cal.id === instrumentId);
+        
+        if (selectedInstrument) {
+            console.log("Instrumento encontrado:", {
+                id: selectedInstrument.id,
+                name: selectedInstrument.equipmentName,
+                code: selectedInstrument.internalCode
+            });
+            
+            const instrumentDisplay = `${selectedInstrument.equipmentName} (${selectedInstrument.internalCode})`;
+            console.log("Display gerado:", instrumentDisplay);
+            
+            setNewMeasurement(prev => ({
+                ...prev, 
+                instrumentUsed: instrumentDisplay
+            }));
+            setSelectedInstrumentId(instrumentId);
+            
+            console.log("✅ Estado atualizado com sucesso");
+        } else {
+            console.error("❌ Instrumento não encontrado para ID:", instrumentId);
+            console.log("IDs disponíveis:", calibrations.map(c => c.id));
+        }
+    };
 
     const watchedPhotos = form.watch("photos", []);
 
