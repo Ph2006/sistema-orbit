@@ -7,7 +7,7 @@ import { auth } from "@/lib/firebase";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarFooter, SidebarInset } from "@/components/ui/sidebar";
 import { OrbitLogo } from "@/components/logo";
 import Link from "next/link";
-import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut } from "lucide-react";
+import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -30,6 +30,7 @@ export const useAuth = () => useContext(AuthContext);
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/products", label: "Produtos", icon: ShoppingCart }, // ADICIONADO
   { href: "/orders", label: "Pedidos", icon: Package },
   { href: "/customers", label: "Clientes", icon: Users },
   { href: "/quality", label: "Qualidade", icon: ClipboardCheck },
