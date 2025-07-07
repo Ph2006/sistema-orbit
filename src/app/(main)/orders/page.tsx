@@ -1087,18 +1087,15 @@ export default function OrdersPage() {
         }
         
         if ((field === 'startDate' && currentStage.startDate) || field === 'durationDays') {
-            // Obtém a data de conclusão da etapa anterior (se existir)
-            let lastCompletionDate: Date | null = null;
-            if (stageIndex > 0) {
-                lastCompletionDate = newPlan[stageIndex - 1].completedDate;
-            }
-            
+            // Para a primeira etapa, usa a data de início dela mesma
+            // Para etapas seguintes, obtém a data de conclusão da etapa anterior
             for (let i = stageIndex; i < newPlan.length; i++) {
                 const stage = newPlan[i];
                 
                 if (i > stageIndex) {
                     // Para etapas seguintes, a data de início é IGUAL à data de conclusão da etapa anterior
-                    stage.startDate = lastCompletionDate ? new Date(lastCompletionDate) : null;
+                    const previousStage = newPlan[i - 1];
+                    stage.startDate = previousStage.completedDate ? new Date(previousStage.completedDate) : null;
                 }
                 
                 if (stage.startDate) {
@@ -1110,19 +1107,16 @@ export default function OrdersPage() {
                 } else {
                     stage.completedDate = null;
                 }
-                
-                // Atualiza para a próxima iteração
-                lastCompletionDate = stage.completedDate;
             }
         }
         
         if (field === 'completedDate') {
             // Se alterou manualmente a data de conclusão, recalcula as próximas etapas
-            let lastCompletionDate = currentStage.completedDate;
             for (let i = stageIndex + 1; i < newPlan.length; i++) {
                 const stage = newPlan[i];
+                const previousStage = newPlan[i - 1];
                 // A próxima etapa inicia na MESMA data que a anterior terminou
-                stage.startDate = lastCompletionDate ? new Date(lastCompletionDate) : null;
+                stage.startDate = previousStage.completedDate ? new Date(previousStage.completedDate) : null;
                 if (stage.startDate) {
                     const duration = Math.max(0, Number(stage.durationDays) || 0);
                     const daysToAdd = Math.max(0, Math.ceil(duration) - 1);
@@ -1130,7 +1124,6 @@ export default function OrdersPage() {
                 } else {
                     stage.completedDate = null;
                 }
-                lastCompletionDate = stage.completedDate;
             }
         }
         
