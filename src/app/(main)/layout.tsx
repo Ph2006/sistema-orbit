@@ -7,7 +7,7 @@ import { auth } from "@/lib/firebase";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarFooter, SidebarInset } from "@/components/ui/sidebar";
 import { OrbitLogo } from "@/components/logo";
 import Link from "next/link";
-import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart } from "lucide-react";
+import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -37,6 +37,7 @@ const navItems = [
   { href: "/materials", label: "Materiais", icon: Wrench },
   { href: "/costs", label: "Custos", icon: DollarSign },
   { href: "/quotations", label: "Orçamentos", icon: FileText },
+  { href: "/finance", label: "Financeiro", icon: TrendingUp }, // ADICIONADO
   { href: "/company", label: "Empresa", icon: Building },
 ];
 
