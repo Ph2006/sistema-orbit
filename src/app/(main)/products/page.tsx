@@ -53,9 +53,11 @@ const calculateLeadTime = (product: Product): number => {
     return 0;
   }
   
-  return product.productionPlanTemplate.reduce((total, stage) => {
+  const totalDays = product.productionPlanTemplate.reduce((total, stage) => {
     return total + (stage.durationDays || 0);
   }, 0);
+  
+  return Math.round(totalDays); // Arredonda para número inteiro
 };
 
 // Função para obter badge de lead time com cor baseada na duração
