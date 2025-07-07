@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -7,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown, Clock } from "lucide-react";
 import { useAuth } from "../layout";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
 
 const planStageSchema = z.object({
   stageName: z.string(),
@@ -41,6 +41,30 @@ const productSchema = z.object({
 });
 
 type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
+
+// Função para calcular o lead time total de um produto
+const calculateLeadTime = (product: Product): number => {
+  if (!product.productionPlanTemplate || product.productionPlanTemplate.length === 0) {
+    return 0;
+  }
+  
+  return product.productionPlanTemplate.reduce((total, stage) => {
+    return total + (stage.durationDays || 0);
+  }, 0);
+};
+
+// Função para obter badge de lead time com cor baseada na duração
+const getLeadTimeBadge = (leadTime: number) => {
+  if (leadTime === 0) {
+    return { variant: "outline" as const, text: "Não definido", color: "text-muted-foreground" };
+  } else if (leadTime <= 7) {
+    return { variant: "default" as const, text: `${leadTime} dias`, color: "bg-green-600 hover:bg-green-700" };
+  } else if (leadTime <= 21) {
+    return { variant: "secondary" as const, text: `${leadTime} dias`, color: "bg-yellow-600 hover:bg-yellow-700" };
+  } else {
+    return { variant: "destructive" as const, text: `${leadTime} dias`, color: "bg-red-600 hover:bg-red-700" };
+  }
+};
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -471,6 +495,22 @@ export default function ProductsPage() {
     }
   };
 
+  // Estatísticas do lead time para o dashboard
+  const leadTimeStats = useMemo(() => {
+    if (products.length === 0) return { avgLeadTime: 0, maxLeadTime: 0, productsWithLeadTime: 0 };
+    
+    const productsWithValidLeadTime = products.filter(p => calculateLeadTime(p) > 0);
+    const leadTimes = productsWithValidLeadTime.map(p => calculateLeadTime(p));
+    
+    const avgLeadTime = leadTimes.length > 0 ? leadTimes.reduce((sum, lt) => sum + lt, 0) / leadTimes.length : 0;
+    const maxLeadTime = leadTimes.length > 0 ? Math.max(...leadTimes) : 0;
+    
+    return {
+      avgLeadTime: Math.round(avgLeadTime * 10) / 10,
+      maxLeadTime,
+      productsWithLeadTime: productsWithValidLeadTime.length
+    };
+  }, [products]);
 
   return (
     <>
@@ -498,6 +538,48 @@ export default function ProductsPage() {
             </div>
         </div>
 
+        {/* Dashboard de Lead Time */}
+        {products.length > 0 && (
+          <div className="grid gap-4 md:grid-cols-3 mb-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Lead Time Médio</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{leadTimeStats.avgLeadTime} dias</div>
+                <p className="text-xs text-muted-foreground">
+                  Baseado em {leadTimeStats.productsWithLeadTime} produtos
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Maior Lead Time</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{leadTimeStats.maxLeadTime} dias</div>
+                <p className="text-xs text-muted-foreground">
+                  Produto com maior tempo de produção
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Produtos com Lead Time</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{leadTimeStats.productsWithLeadTime}</div>
+                <p className="text-xs text-muted-foreground">
+                  De {products.length} produtos cadastrados
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList>
                 <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
@@ -508,7 +590,7 @@ export default function ProductsPage() {
                     <CardHeader>
                         <CardTitle>Produtos Cadastrados</CardTitle>
                         <CardDescription>
-                        Gerencie os produtos e serviços que sua empresa oferece.
+                        Gerencie os produtos e serviços que sua empresa oferece. O lead time é calculado automaticamente com base nas etapas de fabricação configuradas.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -522,36 +604,50 @@ export default function ProductsPage() {
                             <Table>
                             <TableHeader>
                                 <TableRow>
-                                <TableHead className="w-[200px]">Código</TableHead>
+                                <TableHead className="w-[150px]">Código</TableHead>
                                 <TableHead>Descrição</TableHead>
-                                <TableHead className="w-[180px] text-right">Preço Unitário (R$)</TableHead>
+                                <TableHead className="w-[140px] text-right">Preço Unitário (R$)</TableHead>
+                                <TableHead className="w-[120px] text-center">Lead Time</TableHead>
                                 <TableHead className="w-[100px] text-center">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {filteredProducts.length > 0 ? (
-                                filteredProducts.map((product) => (
-                                    <TableRow key={product.id}>
-                                    <TableCell className="font-mono">{product.code}</TableCell>
-                                    <TableCell className="font-medium">{product.description}</TableCell>
-                                    <TableCell className="text-right">{product.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                                    <TableCell className="text-center">
-                                        <div className="flex items-center justify-center gap-2">
-                                            <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
-                                                <Pencil className="h-4 w-4" />
-                                                <span className="sr-only">Editar</span>
-                                            </Button>
-                                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteClick(product)}>
-                                                <Trash2 className="h-4 w-4" />
-                                                <span className="sr-only">Excluir</span>
-                                            </Button>
-                                        </div>
-                                    </TableCell>
-                                    </TableRow>
-                                ))
+                                filteredProducts.map((product) => {
+                                    const leadTime = calculateLeadTime(product);
+                                    const leadTimeBadge = getLeadTimeBadge(leadTime);
+                                    
+                                    return (
+                                        <TableRow key={product.id}>
+                                        <TableCell className="font-mono">{product.code}</TableCell>
+                                        <TableCell className="font-medium">{product.description}</TableCell>
+                                        <TableCell className="text-right">{product.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                        <TableCell className="text-center">
+                                            <Badge 
+                                                variant={leadTimeBadge.variant}
+                                                className={leadTime > 0 && leadTime <= 7 ? leadTimeBadge.color : ''}
+                                            >
+                                                {leadTimeBadge.text}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-center">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
+                                                    <Pencil className="h-4 w-4" />
+                                                    <span className="sr-only">Editar</span>
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteClick(product)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                    <span className="sr-only">Excluir</span>
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                        </TableRow>
+                                    )
+                                })
                                 ) : (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="text-center h-24">
+                                    <TableCell colSpan={5} className="text-center h-24">
                                     Nenhum produto encontrado.
                                     </TableCell>
                                 </TableRow>
@@ -567,7 +663,7 @@ export default function ProductsPage() {
                     <CardHeader>
                         <CardTitle>Etapas de Fabricação</CardTitle>
                         <CardDescription>
-                            Cadastre e gerencie as etapas do seu processo produtivo. Elas serão usadas para planejar o lead time dos produtos.
+                            Cadastre e gerencie as etapas do seu processo produtivo. Elas serão usadas para calcular o lead time dos produtos.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
@@ -677,7 +773,7 @@ export default function ProductsPage() {
                                     <div>
                                         <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
                                         <FormDescription>
-                                            Selecione as etapas e defina a duração em dias para cada uma.
+                                            Selecione as etapas e defina a duração em dias para cada uma. O lead time total será calculado automaticamente.
                                         </FormDescription>
                                     </div>
                                     <Popover open={isCopyPopoverOpen} onOpenChange={setIsCopyPopoverOpen}>
@@ -708,8 +804,14 @@ export default function ProductsPage() {
                                                                 className="w-full justify-start h-auto py-2 px-2 text-left"
                                                                 onClick={() => handleCopySteps(product)}
                                                             >
-                                                                <span className="font-medium">{product.description}</span>
-                                                                <span className="text-xs text-muted-foreground ml-2">({product.code})</span>
+                                                                <div className="flex flex-col items-start">
+                                                                    <span className="font-medium">{product.description}</span>
+                                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                                        <span>({product.code})</span>
+                                                                        <span>•</span>
+                                                                        <span>{calculateLeadTime(product)} dias</span>
+                                                                    </div>
+                                                                </div>
                                                             </Button>
                                                         ))
                                                     ) : (
@@ -721,6 +823,20 @@ export default function ProductsPage() {
                                     </Popover>
                                 </div>
                             </div>
+                            
+                            {/* Preview do lead time atual */}
+                            {field.value && field.value.length > 0 && (
+                                <div className="mb-4 p-3 bg-muted rounded-md">
+                                    <div className="flex items-center gap-2 text-sm">
+                                        <Clock className="h-4 w-4" />
+                                        <span className="font-medium">Lead Time Total:</span>
+                                        <Badge variant="secondary">
+                                            {field.value.reduce((total, stage) => total + (stage.durationDays || 0), 0)} dias
+                                        </Badge>
+                                    </div>
+                                </div>
+                            )}
+                            
                             <div className="space-y-3">
                                 {manufacturingStages.map((stageName) => {
                                     const currentStage = field.value?.find(p => p.stageName === stageName);
