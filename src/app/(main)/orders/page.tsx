@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -865,7 +864,7 @@ export default function OrdersPage() {
             const pageWidth = docPdf.internal.pageSize.width;
             let yPos = 15;
 
-            // Header
+            // Header com logo e informações da empresa
             if (companyData.logo?.preview) {
                 try {
                     docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
@@ -873,19 +872,90 @@ export default function OrdersPage() {
                     console.error("Error adding logo to PDF:", e);
                 }
             }
-            docPdf.setFontSize(18).setFont(undefined, 'bold');
-            docPdf.text(`Cronograma de Produção - Pedido Nº ${selectedOrder.quotationNumber}`, pageWidth / 2, yPos + 10, { align: 'center' });
-            yPos += 30;
 
-            docPdf.setFontSize(11).setFont(undefined, 'normal');
-            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
-            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 10;
+            // Informações da empresa ao lado da logo
+            let companyInfoX = 65;
+            let companyInfoY = yPos + 5;
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', companyInfoX, companyInfoY);
+            companyInfoY += 6;
             
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - companyInfoX - 15);
+                docPdf.text(addressLines, companyInfoX, companyInfoY);
+                companyInfoY += (addressLines.length * 3);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, companyInfoX, companyInfoY);
+                companyInfoY += 4;
+            }
+            if (companyData.email) {
+                docPdf.text(`Email: ${companyData.email}`, companyInfoX, companyInfoY);
+                companyInfoY += 4;
+            }
+            if (companyData.celular) {
+                docPdf.text(`Telefone: ${companyData.celular}`, companyInfoX, companyInfoY);
+            }
+
+            yPos = 45;
+
+            // Título do documento
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+
+            // Informações do pedido em duas colunas
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            
+            // Coluna esquerda
+            const leftColumnX = 15;
+            let leftColumnY = yPos;
+            docPdf.setFont(undefined, 'bold');
+            docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+            leftColumnY += 6;
+            docPdf.setFont(undefined, 'normal');
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            if (selectedOrder.projectName) {
+                docPdf.text(`Projeto: ${selectedOrder.projectName}`, leftColumnX, leftColumnY);
+                leftColumnY += 5;
+            }
+            
+            // Coluna direita
+            const rightColumnX = pageWidth / 2 + 10;
+            let rightColumnY = yPos + 6; // Alinha com o início dos dados
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            if (selectedOrder.deliveryDate) {
+                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+                rightColumnY += 5;
+            }
+            docPdf.text(`Status: ${selectedOrder.status}`, rightColumnX, rightColumnY);
+            
+            yPos = Math.max(leftColumnY, rightColumnY) + 10;
+
+            // Tabela do cronograma
             const tableBody: any[][] = [];
             selectedOrder.items.forEach(item => {
                 if (item.productionPlan && item.productionPlan.length > 0) {
-                    tableBody.push([{ content: `Item: ${item.description} (Qtd: ${item.quantity})`, colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#f0f0f0' } }]);
+                    // Cabeçalho do item com código, descrição e quantidade na mesma linha
+                    const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
+                    tableBody.push([{ 
+                        content: itemHeader, 
+                        colSpan: 5, 
+                        styles: { 
+                            fontStyle: 'bold', 
+                            fillColor: '#f0f0f0',
+                            fontSize: 9
+                        } 
+                    }]);
+                    
+                    // Etapas do item
                     item.productionPlan.forEach(stage => {
                         tableBody.push([
                             `  • ${stage.stageName}`,
@@ -895,6 +965,9 @@ export default function OrdersPage() {
                             stage.status,
                         ]);
                     });
+                    
+                    // Linha em branco para separar itens
+                    tableBody.push([{ content: '', colSpan: 5, styles: { minCellHeight: 3 } }]);
                 }
             });
             
@@ -902,16 +975,47 @@ export default function OrdersPage() {
                 startY: yPos,
                 head: [['Etapa', 'Início Previsto', 'Fim Previsto', 'Duração', 'Status']],
                 body: tableBody,
-                styles: { fontSize: 8 },
-                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+                styles: { 
+                    fontSize: 8,
+                    cellPadding: 2
+                },
+                headStyles: { 
+                    fillColor: [37, 99, 235], 
+                    fontSize: 9, 
+                    textColor: 255,
+                    fontStyle: 'bold'
+                },
+                columnStyles: {
+                    0: { cellWidth: 60 }, // Etapa
+                    1: { cellWidth: 25, halign: 'center' }, // Início
+                    2: { cellWidth: 25, halign: 'center' }, // Fim
+                    3: { cellWidth: 20, halign: 'center' }, // Duração
+                    4: { cellWidth: 25, halign: 'center' }, // Status
+                },
                 didParseCell: (data) => {
                     if (data.cell.raw && (data.cell.raw as any).colSpan) {
-                         data.cell.styles.halign = 'left';
+                        data.cell.styles.halign = 'left';
                     }
-                }
+                },
+                margin: { left: 15, right: 15 }
             });
 
-            docPdf.save(`Cronograma_Pedido_${selectedOrder.quotationNumber}.pdf`);
+            // Rodapé com informações adicionais
+            const finalY = (docPdf as any).lastAutoTable.finalY;
+            const pageHeight = docPdf.internal.pageSize.height;
+            
+            if (finalY + 30 < pageHeight - 20) {
+                yPos = finalY + 15;
+                docPdf.setFontSize(8).setFont(undefined, 'italic');
+                docPdf.text(
+                    `Documento gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    yPos,
+                    { align: 'center' }
+                );
+            }
+
+            docPdf.save(`Cronograma_Pedido_${selectedOrder.quotationNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
 
         } catch (error) {
             console.error("Error generating schedule PDF:", error);
@@ -983,35 +1087,45 @@ export default function OrdersPage() {
         }
         
         if ((field === 'startDate' && currentStage.startDate) || field === 'durationDays') {
-            let lastCompletionDate: Date | null = currentStage.startDate ? addDays(new Date(currentStage.startDate), -1) : null;
+            // Obtém a data de conclusão da etapa anterior (se existir)
+            let lastCompletionDate: Date | null = null;
+            if (stageIndex > 0) {
+                lastCompletionDate = newPlan[stageIndex - 1].completedDate;
+            }
             
             for (let i = stageIndex; i < newPlan.length; i++) {
                 const stage = newPlan[i];
                 
                 if (i > stageIndex) {
-                    stage.startDate = lastCompletionDate ? addDays(new Date(lastCompletionDate), 1) : null;
+                    // Para etapas seguintes, a data de início é IGUAL à data de conclusão da etapa anterior
+                    stage.startDate = lastCompletionDate ? new Date(lastCompletionDate) : null;
                 }
                 
                 if (stage.startDate) {
                     const duration = Math.max(0, Number(stage.durationDays) || 0);
-                    const daysToAdd = Math.ceil(duration) > 0 ? Math.ceil(duration) - 1 : 0;
+                    // A data de conclusão é calculada somando a duração à data de início
+                    // Se duração for 1 dia, começa e termina no mesmo dia
+                    const daysToAdd = Math.max(0, Math.ceil(duration) - 1);
                     stage.completedDate = addDays(new Date(stage.startDate), daysToAdd);
                 } else {
                     stage.completedDate = null;
                 }
                 
+                // Atualiza para a próxima iteração
                 lastCompletionDate = stage.completedDate;
             }
         }
         
         if (field === 'completedDate') {
+            // Se alterou manualmente a data de conclusão, recalcula as próximas etapas
             let lastCompletionDate = currentStage.completedDate;
             for (let i = stageIndex + 1; i < newPlan.length; i++) {
                 const stage = newPlan[i];
-                stage.startDate = lastCompletionDate ? addDays(new Date(lastCompletionDate), 1) : null;
+                // A próxima etapa inicia na MESMA data que a anterior terminou
+                stage.startDate = lastCompletionDate ? new Date(lastCompletionDate) : null;
                 if (stage.startDate) {
                     const duration = Math.max(0, Number(stage.durationDays) || 0);
-                    const daysToAdd = Math.ceil(duration) > 0 ? Math.ceil(duration) - 1 : 0;
+                    const daysToAdd = Math.max(0, Math.ceil(duration) - 1);
                     stage.completedDate = addDays(new Date(stage.startDate), daysToAdd);
                 } else {
                     stage.completedDate = null;
@@ -1021,6 +1135,7 @@ export default function OrdersPage() {
         }
         
         if (field === 'startDate' && !value) {
+            // Se removeu a data de início, limpa todas as datas seguintes
             for (let i = stageIndex; i < newPlan.length; i++) {
                 newPlan[i].startDate = null;
                 newPlan[i].completedDate = null;
@@ -1654,7 +1769,7 @@ export default function OrdersPage() {
                                                     <div className="flex items-center justify-between">
                                                         <Label htmlFor="drawings-view" className="flex items-center gap-2 text-sm font-normal"><File className="h-4 w-4" />Desenhos Técnicos</Label>
                                                         <Checkbox id="drawings-view" checked={selectedOrder.documents?.drawings} disabled />
-                                                    </div>
+                                                                                                       </div>
                                                     <div className="flex items-center justify-between">
                                                         <Label htmlFor="inspection-view" className="flex items-center gap-2 text-sm font-normal"><ClipboardCheck className="h-4 w-4" />Plano de Inspeção e Testes (PIT)</Label>
                                                         <Checkbox id="inspection-view" checked={selectedOrder.documents?.inspectionTestPlan} disabled />
