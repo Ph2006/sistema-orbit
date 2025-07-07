@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CalendarDays, Download, AlertTriangle, CheckCircle, Clock, Building } from "lucide-react";
+import { CalendarDays, Download, AlertTriangle, CheckCircle, Clock, Building, Truck, Calendar } from "lucide-react";
 
 type PublicScheduleData = {
     orderId: string;
@@ -22,7 +22,9 @@ type PublicScheduleData = {
     projectName?: string;
     internalOS?: string;
     deliveryDate?: Date;
+    estimatedCompletionDate?: Date;
     createdAt: Date;
+    lastUpdated: Date;
     companyName: string;
     expiresAt: Date;
     items: Array<{
@@ -78,7 +80,7 @@ export default function SchedulePage() {
             }
 
             try {
-                const scheduleRef = doc(db, "public", "schedules", scheduleId);
+                const scheduleRef = doc(db, "public_schedules", scheduleId);
                 const scheduleSnap = await getDoc(scheduleRef);
 
                 if (!scheduleSnap.exists()) {
@@ -102,7 +104,9 @@ export default function SchedulePage() {
                 const processedData: PublicScheduleData = {
                     ...data,
                     deliveryDate: data.deliveryDate?.toDate(),
+                    estimatedCompletionDate: data.estimatedCompletionDate?.toDate(),
                     createdAt: data.createdAt?.toDate() || new Date(),
+                    lastUpdated: data.lastUpdated?.toDate() || new Date(),
                     expiresAt: expiresAt || new Date(),
                     items: data.items.map((item: any) => ({
                         ...item,
@@ -136,40 +140,76 @@ export default function SchedulePage() {
             const pageWidth = docPdf.internal.pageSize.width;
             let yPos = 20;
 
-            // Header
+            // Header da empresa
             docPdf.setFontSize(18).setFont(undefined, 'bold');
             docPdf.text(scheduleData.companyName, 15, yPos);
-            docPdf.setFontSize(14).setFont(undefined, 'normal');
-            docPdf.text(`Cronograma de Produção - Pedido Nº ${scheduleData.orderNumber}`, pageWidth / 2, yPos + 10, { align: 'center' });
+            
+            // Título
+            docPdf.setFontSize(14).setFont(undefined, 'bold');
+            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos + 15, { align: 'center' });
             yPos += 25;
 
-            // Informações do pedido
-            docPdf.setFontSize(11).setFont(undefined, 'normal');
-            docPdf.text(`Cliente: ${scheduleData.customerName}`, 15, yPos);
+            // Informações do pedido em duas colunas
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            
+            // Coluna esquerda
+            const leftColumnX = 15;
+            let leftColumnY = yPos;
+            docPdf.setFont(undefined, 'bold');
+            docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+            leftColumnY += 6;
+            docPdf.setFont(undefined, 'normal');
+            docPdf.text(`Pedido Nº: ${scheduleData.orderNumber}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            docPdf.text(`Cliente: ${scheduleData.customerName}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
             if (scheduleData.projectName) {
-                docPdf.text(`Projeto: ${scheduleData.projectName}`, 15, yPos + 5);
-                yPos += 5;
+                docPdf.text(`Projeto: ${scheduleData.projectName}`, leftColumnX, leftColumnY);
+                leftColumnY += 5;
             }
+            
+            // Coluna direita
+            const rightColumnX = pageWidth / 2 + 10;
+            let rightColumnY = yPos + 6;
             if (scheduleData.internalOS) {
-                docPdf.text(`OS Interna: ${scheduleData.internalOS}`, pageWidth - 15, yPos, { align: 'right' });
+                docPdf.text(`OS Interna: ${scheduleData.internalOS}`, rightColumnX, rightColumnY);
+                rightColumnY += 5;
             }
-            yPos += 10;
-
             if (scheduleData.deliveryDate) {
-                docPdf.text(`Data de Entrega: ${format(scheduleData.deliveryDate, 'dd/MM/yyyy')}`, 15, yPos);
-                yPos += 5;
+                docPdf.text(`Data de Entrega: ${format(scheduleData.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+                rightColumnY += 5;
             }
-            docPdf.text(`Atualizado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 15;
+            if (scheduleData.estimatedCompletionDate) {
+                docPdf.text(`Previsão de Embarque: ${format(scheduleData.estimatedCompletionDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+                rightColumnY += 5;
+            }
+            
+            yPos = Math.max(leftColumnY, rightColumnY) + 10;
+
+            // Progresso geral
+            const overallProgress = scheduleData.items.reduce((acc, item) => 
+                acc + calculateProgress(item.productionPlan), 0
+            ) / scheduleData.items.length;
+
+            docPdf.setFont(undefined, 'bold');
+            docPdf.text(`PROGRESSO GERAL: ${Math.round(overallProgress)}%`, leftColumnX, yPos);
+            yPos += 10;
 
             // Tabela do cronograma
             const tableBody: any[][] = [];
             scheduleData.items.forEach(item => {
                 if (item.productionPlan && item.productionPlan.length > 0) {
                     // Cabeçalho do item
-                    tableBody.push([
-                        { content: `${item.description} (Qtd: ${item.quantity})`, colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#f0f0f0' } }
-                    ]);
+                    const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
+                    tableBody.push([{ 
+                        content: itemHeader, 
+                        colSpan: 5, 
+                        styles: { 
+                            fontStyle: 'bold', 
+                            fillColor: '#f0f0f0',
+                            fontSize: 9
+                        } 
+                    }]);
                     
                     // Etapas do item
                     item.productionPlan.forEach(stage => {
@@ -181,28 +221,77 @@ export default function SchedulePage() {
                             stage.status,
                         ]);
                     });
+                    
+                    // Linha em branco para separar itens
+                    tableBody.push([{ content: '', colSpan: 5, styles: { minCellHeight: 3 } }]);
                 }
             });
 
             autoTable(docPdf, {
                 startY: yPos,
-                head: [['Etapa', 'Início', 'Conclusão', 'Duração', 'Status']],
+                head: [['Etapa', 'Início Previsto', 'Fim Previsto', 'Duração', 'Status']],
                 body: tableBody,
-                styles: { fontSize: 8 },
-                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+                styles: { 
+                    fontSize: 8,
+                    cellPadding: 2
+                },
+                headStyles: { 
+                    fillColor: [37, 99, 235], 
+                    fontSize: 9, 
+                    textColor: 255,
+                    fontStyle: 'bold'
+                },
+                columnStyles: {
+                    0: { cellWidth: 60 },
+                    1: { cellWidth: 25, halign: 'center' },
+                    2: { cellWidth: 25, halign: 'center' },
+                    3: { cellWidth: 20, halign: 'center' },
+                    4: { cellWidth: 25, halign: 'center' },
+                },
                 didParseCell: (data) => {
                     if (data.cell.raw && (data.cell.raw as any).colSpan) {
                         data.cell.styles.halign = 'left';
                     }
-                }
+                },
+                didDrawCell: (data) => {
+                    // Colorir linha de verde suave se o status for "Concluído"
+                    if (data.column.index >= 0 && data.row.index > 0) {
+                        const rowData = tableBody[data.row.index - 1];
+                        if (Array.isArray(rowData) && rowData.length === 5) {
+                            const status = rowData[4];
+                            if (status === 'Concluído') {
+                                data.cell.styles.fillColor = [220, 255, 220]; // Verde claro
+                            } else if (status === 'Em Andamento') {
+                                data.cell.styles.fillColor = [255, 255, 220]; // Amarelo claro
+                            }
+                        }
+                    }
+                },
+                margin: { left: 15, right: 15 }
             });
 
-            // Footer
+            // Rodapé
             const finalY = (docPdf as any).lastAutoTable.finalY + 10;
-            docPdf.setFontSize(8).setFont(undefined, 'italic');
-            docPdf.text('Cronograma sujeito a alterações. Documento gerado automaticamente.', pageWidth / 2, finalY, { align: 'center' });
+            const pageHeight = docPdf.internal.pageSize.height;
+            
+            if (finalY + 30 < pageHeight - 20) {
+                docPdf.setFontSize(8).setFont(undefined, 'italic');
+                docPdf.text('Cronograma sujeito a alterações.', pageWidth / 2, finalY, { align: 'center' });
+                docPdf.text(
+                    `Última atualização: ${format(scheduleData.lastUpdated, 'dd/MM/yyyy HH:mm')}`,
+                    pageWidth / 2,
+                    finalY + 5,
+                    { align: 'center' }
+                );
+                docPdf.text(
+                    `Documento gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`,
+                    pageWidth / 2,
+                    finalY + 10,
+                    { align: 'center' }
+                );
+            }
 
-            docPdf.save(`Cronograma_Pedido_${scheduleData.orderNumber}.pdf`);
+            docPdf.save(`Cronograma_Pedido_${scheduleData.orderNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
         } catch (error) {
             console.error("Error generating PDF:", error);
         }
@@ -292,6 +381,16 @@ export default function SchedulePage() {
                             )}
                         </div>
                         
+                        {scheduleData.estimatedCompletionDate && (
+                            <div className="pt-2 border-t">
+                                <p className="text-sm text-muted-foreground">Previsão de Embarque</p>
+                                <p className="font-medium flex items-center gap-2 text-lg text-blue-600">
+                                    <Truck className="h-5 w-5" />
+                                    {format(scheduleData.estimatedCompletionDate, 'dd/MM/yyyy')}
+                                </p>
+                            </div>
+                        )}
+                        
                         <div className="pt-4 border-t">
                             <div className="flex items-center justify-between">
                                 <div>
@@ -349,7 +448,10 @@ export default function SchedulePage() {
                                             </TableHeader>
                                             <TableBody>
                                                 {item.productionPlan.map((stage, stageIndex) => (
-                                                    <TableRow key={stageIndex}>
+                                                    <TableRow key={stageIndex} className={
+                                                        stage.status === 'Concluído' ? 'bg-green-50' :
+                                                        stage.status === 'Em Andamento' ? 'bg-yellow-50' : ''
+                                                    }>
                                                         <TableCell className="font-medium">{stage.stageName}</TableCell>
                                                         <TableCell className="text-center">
                                                             {stage.durationDays || 0} dia(s)
@@ -381,7 +483,10 @@ export default function SchedulePage() {
                         </div>
                         
                         <div className="mt-6 pt-4 border-t text-center text-sm text-muted-foreground">
-                            <p>Última atualização: {format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
+                            <div className="flex items-center justify-center gap-2 mb-2">
+                                <Calendar className="h-4 w-4" />
+                                <p>Última atualização: {format(scheduleData.lastUpdated, 'dd/MM/yyyy HH:mm')}</p>
+                            </div>
                             <p>Cronograma sujeito a alterações.</p>
                         </div>
                     </CardContent>
