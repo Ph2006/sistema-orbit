@@ -1186,6 +1186,7 @@ export default function QuotationsPage() {
                                                     <TableHead>Descrição</TableHead>
                                                     <TableHead className="text-center w-[60px]">Qtd.</TableHead>
                                                     <TableHead className="text-right w-[120px]">Valor Unit. s/ Imp.</TableHead>
+                                                    <TableHead className="text-center w-[80px]">Imposto (%)</TableHead>
                                                     <TableHead className="text-right w-[150px]">Subtotal c/ Imp.</TableHead>
                                                 </TableRow>
                                             </TableHeader>
@@ -1201,7 +1202,7 @@ export default function QuotationsPage() {
                                                             <TableCell className="text-center">{item.taxRate || 0}%</TableCell>
                                                             <TableCell className="text-right font-semibold">{totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                                                         </TableRow>
-                                                    )
+                                                    );
                                                 })}
                                             </TableBody>
                                         </Table>
