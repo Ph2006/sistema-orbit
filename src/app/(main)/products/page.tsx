@@ -561,7 +561,7 @@ export default function ProductsPage() {
     
     return {
       avgLeadTime: Math.round(avgLeadTime * 10) / 10,
-      maxLeadTime,
+      maxLeadTime: Math.round(maxLeadTime), // Arredonda para número inteiro
       productsWithLeadTime: productsWithValidLeadTime.length
     };
   }, [products]);
