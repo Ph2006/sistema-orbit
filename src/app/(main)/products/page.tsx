@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown, Clock, CalendarIcon } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown, Clock, CalendarIcon, Download, FileText } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -71,6 +71,105 @@ const getLeadTimeBadge = (leadTime: number) => {
   } else {
     return { variant: "destructive" as const, text: `${leadTime} dias`, color: "bg-red-600 hover:bg-red-700" };
   }
+};
+
+// Função para exportar relatório da calculadora
+const exportCalculatorReport = (
+  calculatorItems: Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productDescription: string;
+    quantity: number;
+    leadTime: number;
+    stages: Array<{ stageName: string; durationDays: number }>;
+  }>,
+  calculatorResults: {
+    isViable: boolean;
+    suggestedDate: Date;
+    analysis: Array<{
+      stageName: string;
+      originalDuration: number;
+      adjustedDuration: number;
+      workload: number;
+      bottleneck: boolean;
+    }>;
+    totalAdjustedLeadTime: number;
+    confidence: number;
+  } | null,
+  requestedDeliveryDate: Date
+) => {
+  if (calculatorItems.length === 0) {
+    return;
+  }
+
+  // Gerar conteúdo do relatório
+  let reportContent = `RELATÓRIO DE ANÁLISE DE PRAZOS\n`;
+  reportContent += `Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}\n`;
+  reportContent += `===========================================\n\n`;
+
+  // Informações da solicitação
+  reportContent += `DADOS DA SOLICITAÇÃO:\n`;
+  reportContent += `Data de entrega solicitada: ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}\n`;
+  reportContent += `Quantidade de itens: ${calculatorItems.length}\n\n`;
+
+  // Lista de produtos
+  reportContent += `PRODUTOS ANALISADOS:\n`;
+  calculatorItems.forEach((item, index) => {
+    reportContent += `${index + 1}. ${item.productCode} - ${item.productDescription}\n`;
+    reportContent += `   Quantidade: ${item.quantity}\n`;
+    reportContent += `   Lead time base: ${item.leadTime} dias\n`;
+    if (item.stages.length > 0) {
+      reportContent += `   Etapas:\n`;
+      item.stages.forEach(stage => {
+        reportContent += `     • ${stage.stageName}: ${stage.durationDays || 0} dias\n`;
+      });
+    }
+    reportContent += `\n`;
+  });
+
+  // Resultados da análise
+  if (calculatorResults) {
+    reportContent += `RESULTADO DA ANÁLISE:\n`;
+    reportContent += `Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}\n`;
+    reportContent += `Confiança: ${calculatorResults.confidence}%\n`;
+    reportContent += `Data sugerida: ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}\n`;
+    reportContent += `Lead time ajustado: ${calculatorResults.totalAdjustedLeadTime} dias\n\n`;
+
+    reportContent += `ANÁLISE POR SETOR:\n`;
+    calculatorResults.analysis.forEach(analysis => {
+      reportContent += `• ${analysis.stageName}:\n`;
+      reportContent += `  Tempo original: ${analysis.originalDuration} dias\n`;
+      reportContent += `  Tempo ajustado: ${analysis.adjustedDuration} dias\n`;
+      reportContent += `  Carga atual: ${Math.round(analysis.workload * 100)}%\n`;
+      reportContent += `  Gargalo: ${analysis.bottleneck ? 'SIM' : 'NÃO'}\n\n`;
+    });
+
+    // Recomendações
+    reportContent += `RECOMENDAÇÕES:\n`;
+    if (!calculatorResults.isViable) {
+      reportContent += `• Prazo inviável para a data solicitada\n`;
+      reportContent += `• Considere reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}\n`;
+    }
+    if (calculatorResults.confidence < 70) {
+      reportContent += `• Baixa confiança devido à alta carga dos setores\n`;
+      reportContent += `• Monitore de perto a execução\n`;
+    }
+    if (calculatorResults.analysis.some(a => a.bottleneck)) {
+      reportContent += `• Gargalos identificados - considere realocação de recursos\n`;
+    }
+  }
+
+  // Criar arquivo e fazer download
+  const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `relatorio-prazos-${format(new Date(), "yyyyMMdd-HHmm")}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
 };
 
 export default function ProductsPage() {
@@ -691,21 +790,30 @@ export default function ProductsPage() {
     setCalculatorQuantity(1);
   };
 
+  // Função para exportar relatório
+  const handleExportReport = () => {
+    if (calculatorItems.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Lista vazia",
+        description: "Adicione produtos à análise antes de exportar o relatório."
+      });
+      return;
+    }
+
+    exportCalculatorReport(calculatorItems, calculatorResults, requestedDeliveryDate);
+    toast({
+      title: "Relatório exportado!",
+      description: "O arquivo foi baixado para seu computador."
+    });
+  };
+
   return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
           <h1 className="text-3xl font-bold tracking-tight font-headline">Produtos e Etapas</h1>
             <div className="flex items-center gap-2">
-                 <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                        placeholder="Buscar por código ou descrição..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-9 w-64"
-                    />
-                 </div>
                  <Button onClick={syncCatalog} variant="outline" disabled={isSyncing}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
                     {isSyncing ? "Sincronizando..." : "Sincronizar Catálogo"}
@@ -768,10 +876,23 @@ export default function ProductsPage() {
             <TabsContent value="catalog" className="mt-4">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Produtos Cadastrados</CardTitle>
-                        <CardDescription>
-                        Gerencie os produtos e serviços que sua empresa oferece. O lead time é calculado automaticamente com base nas etapas de fabricação configuradas.
-                        </CardDescription>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle>Produtos Cadastrados</CardTitle>
+                                <CardDescription>
+                                Gerencie os produtos e serviços que sua empresa oferece. O lead time é calculado automaticamente com base nas etapas de fabricação configuradas.
+                                </CardDescription>
+                            </div>
+                            <div className="relative w-64">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    placeholder="Buscar por código ou descrição..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="pl-9"
+                                />
+                            </div>
+                        </div>
                     </CardHeader>
                     <CardContent>
                         {isLoading ? (
@@ -828,7 +949,7 @@ export default function ProductsPage() {
                                 ) : (
                                 <TableRow>
                                     <TableCell colSpan={5} className="text-center h-24">
-                                    Nenhum produto encontrado.
+                                    {searchQuery ? "Nenhum produto encontrado para a busca." : "Nenhum produto encontrado."}
                                     </TableCell>
                                 </TableRow>
                                 )}
@@ -1046,10 +1167,20 @@ export default function ProductsPage() {
                     {/* Painel de Resultados */}
                     <Card>
                         <CardHeader>
-                            <CardTitle>Análise de Viabilidade</CardTitle>
-                            <CardDescription>
-                                Resultado da análise considerando capacidade de produção atual.
-                            </CardDescription>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Análise de Viabilidade</CardTitle>
+                                    <CardDescription>
+                                        Resultado da análise considerando capacidade de produção atual.
+                                    </CardDescription>
+                                </div>
+                                {calculatorItems.length > 0 && (
+                                    <Button onClick={handleExportReport} variant="outline" size="sm">
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Exportar Relatório
+                                    </Button>
+                                )}
+                            </div>
                         </CardHeader>
                         <CardContent>
                             {calculatorResults ? (
