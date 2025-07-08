@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy, Package } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -82,6 +82,19 @@ type CompanyData = {
     website?: string;
 };
 
+// Tipo para os produtos cadastrados
+type Product = {
+    id: string;
+    code: string;
+    description: string;
+    unitPrice: number;
+    unitWeight?: number;
+    productionPlanTemplate?: Array<{
+        stageName: string;
+        durationDays?: number;
+    }>;
+};
+
 const serviceOptions = [
     { id: 'materialSupply', label: 'Fornecimento de Material' },
     { id: 'machining', label: 'Usinagem' },
@@ -114,10 +127,23 @@ const calculateGrandTotal = (items: Item[] | any[]) => {
     }, 0);
 };
 
+// Função para calcular o lead time total de um produto
+const calculateLeadTime = (product: Product): number => {
+    if (!product.productionPlanTemplate || product.productionPlanTemplate.length === 0) {
+        return 0;
+    }
+    
+    const totalDays = product.productionPlanTemplate.reduce((total, stage) => {
+        return total + (stage.durationDays || 0);
+    }, 0);
+    
+    return Math.round(totalDays);
+};
 
 export default function QuotationsPage() {
     const [quotations, setQuotations] = useState<Quotation[]>([]);
     const [customers, setCustomers] = useState<Customer[]>([]);
+    const [products, setProducts] = useState<Product[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isViewSheetOpen, setIsViewSheetOpen] = useState(false);
@@ -134,6 +160,9 @@ export default function QuotationsPage() {
     const [currentItem, setCurrentItem] = useState<Item>(emptyItem);
     const [editIndex, setEditIndex] = useState<number | null>(null);
 
+    // Estados para busca de produtos
+    const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
+    const [productSearchQuery, setProductSearchQuery] = useState("");
 
     // Generate Order Dialog State
     const [isGenerateOrderDialogOpen, setIsGenerateOrderDialogOpen] = useState(false);
@@ -163,6 +192,14 @@ export default function QuotationsPage() {
     const watchedItems = form.watch("items");
     const grandTotal = useMemo(() => calculateGrandTotal(watchedItems), [watchedItems]);
 
+    // Busca produtos filtrados para o modal
+    const filteredProducts = useMemo(() => {
+        const query = productSearchQuery.toLowerCase();
+        return products.filter(product => 
+            product.code.toLowerCase().includes(query) ||
+            product.description.toLowerCase().includes(query)
+        );
+    }, [products, productSearchQuery]);
 
     const fetchCustomers = async () => {
         if (!user) return;
@@ -175,6 +212,33 @@ export default function QuotationsPage() {
           setCustomers(customersList);
         } catch (error) {
           console.error("Error fetching customers:", error);
+        }
+    };
+
+    // Função para buscar produtos cadastrados
+    const fetchProducts = async () => {
+        if (!user) return;
+        try {
+            const querySnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
+            const productsList = querySnapshot.docs.map((doc) => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    code: data.code || "",
+                    description: data.description || "",
+                    unitPrice: Number(data.unitPrice) || 0,
+                    unitWeight: Number(data.unitWeight) || 0,
+                    productionPlanTemplate: data.productionPlanTemplate || [],
+                } as Product;
+            });
+            setProducts(productsList);
+        } catch (error) {
+            console.error("Error fetching products:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao buscar produtos",
+                description: "Não foi possível carregar o catálogo de produtos.",
+            });
         }
     };
     
@@ -279,6 +343,7 @@ export default function QuotationsPage() {
     useEffect(() => {
         if (!authLoading && user) {
             fetchCustomers();
+            fetchProducts();
             fetchQuotations();
         }
     }, [user, authLoading]);
@@ -361,6 +426,27 @@ export default function QuotationsPage() {
 
     const handleCurrentItemChange = (field: keyof Item, value: any) => {
         setCurrentItem(prev => ({...prev, [field]: value}));
+    };
+
+    // Função para adicionar produto do catálogo ao item atual
+    const handleSelectProduct = (product: Product) => {
+        const leadTime = calculateLeadTime(product);
+        setCurrentItem({
+            code: product.code,
+            description: product.description,
+            quantity: currentItem.quantity || 1,
+            unitPrice: product.unitPrice,
+            unitWeight: product.unitWeight || 0,
+            taxRate: 0,
+            leadTimeDays: leadTime > 0 ? leadTime : undefined,
+            notes: ''
+        });
+        setIsProductSearchOpen(false);
+        setProductSearchQuery("");
+        toast({
+            title: "Produto adicionado!",
+            description: `${product.description} foi adicionado ao formulário.`,
+        });
     };
 
     const handleAddItem = () => {
@@ -983,6 +1069,22 @@ export default function QuotationsPage() {
                                             </CardDescription>
                                         </CardHeader>
                                         <CardContent className="space-y-4">
+                                            <div className="flex items-center gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    onClick={() => setIsProductSearchOpen(true)}
+                                                    className="mb-4"
+                                                >
+                                                    <Package className="mr-2 h-4 w-4" />
+                                                    Buscar no Catálogo
+                                                </Button>
+                                                {currentItem.code && (
+                                                    <Badge variant="secondary" className="mb-4">
+                                                        Produto: {currentItem.code}
+                                                    </Badge>
+                                                )}
+                                            </div>
                                             <div>
                                                 <FormLabel>Descrição do Item</FormLabel>
                                                 <Textarea 
@@ -991,7 +1093,7 @@ export default function QuotationsPage() {
                                                     onChange={e => handleCurrentItemChange('description', e.target.value)}
                                                 />
                                             </div>
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
                                                 <div>
                                                     <FormLabel>Código</FormLabel>
                                                     <Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} />
@@ -1011,6 +1113,10 @@ export default function QuotationsPage() {
                                                 <div>
                                                     <FormLabel>Peso Unit. (kg)</FormLabel>
                                                     <Input type="number" step="0.01" placeholder="0.00" value={currentItem.unitWeight || ''} onChange={e => handleCurrentItemChange('unitWeight', e.target.value)} />
+                                                </div>
+                                                <div>
+                                                    <FormLabel>Lead Time (dias)</FormLabel>
+                                                    <Input type="number" placeholder="0" value={currentItem.leadTimeDays || ''} onChange={e => handleCurrentItemChange('leadTimeDays', e.target.value)} />
                                                 </div>
                                             </div>
                                             <div className="flex justify-end gap-2">
@@ -1041,6 +1147,7 @@ export default function QuotationsPage() {
                                                             <TableHead className="w-[80px]">Qtd.</TableHead>
                                                             <TableHead className="w-[120px]">Preço Unit. s/ Imp.</TableHead>
                                                             <TableHead className="w-[80px]">Imposto (%)</TableHead>
+                                                            <TableHead className="w-[100px]">Lead Time</TableHead>
                                                             <TableHead className="w-[150px]">Total c/ Imp.</TableHead>
                                                             <TableHead className="w-[120px] text-right">Ações</TableHead>
                                                         </TableRow>
@@ -1055,6 +1162,13 @@ export default function QuotationsPage() {
                                                                     <TableCell>{item.quantity}</TableCell>
                                                                     <TableCell>{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
                                                                     <TableCell>{item.taxRate || 0}%</TableCell>
+                                                                    <TableCell>
+                                                                        {item.leadTimeDays ? (
+                                                                            <Badge variant="outline">{item.leadTimeDays} dias</Badge>
+                                                                        ) : (
+                                                                            <span className="text-muted-foreground text-xs">N/A</span>
+                                                                        )}
+                                                                    </TableCell>
                                                                     <TableCell>{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
                                                                     <TableCell className="text-right">
                                                                         <div className="flex items-center gap-1">
@@ -1183,6 +1297,81 @@ export default function QuotationsPage() {
                 </DialogContent>
             </Dialog>
 
+            {/* Modal de Busca de Produtos */}
+            <Dialog open={isProductSearchOpen} onOpenChange={setIsProductSearchOpen}>
+                <DialogContent className="max-w-4xl">
+                    <DialogHeader>
+                        <DialogTitle>Buscar Produto no Catálogo</DialogTitle>
+                        <DialogDescription>
+                            Selecione um produto cadastrado para preencher automaticamente os dados do item.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Buscar por código ou descrição..."
+                                value={productSearchQuery}
+                                onChange={(e) => setProductSearchQuery(e.target.value)}
+                                className="pl-9"
+                            />
+                        </div>
+                        <ScrollArea className="h-96">
+                            {filteredProducts.length > 0 ? (
+                                <div className="space-y-2">
+                                    {filteredProducts.map((product) => {
+                                        const leadTime = calculateLeadTime(product);
+                                        return (
+                                            <Card 
+                                                key={product.id} 
+                                                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                                                onClick={() => handleSelectProduct(product)}
+                                            >
+                                                <CardContent className="p-4">
+                                                    <div className="flex items-start justify-between">
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center gap-3">
+                                                                <Badge variant="outline">{product.code}</Badge>
+                                                                {leadTime > 0 && (
+                                                                    <Badge variant="secondary">{leadTime} dias</Badge>
+                                                                )}
+                                                            </div>
+                                                            <h4 className="font-medium">{product.description}</h4>
+                                                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                                                                <span>Preço: {product.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                                {product.unitWeight && product.unitWeight > 0 && (
+                                                                    <span>Peso: {product.unitWeight} kg</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <Button size="sm" variant="outline">
+                                                            Selecionar
+                                                        </Button>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8 text-muted-foreground">
+                                    <Package className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                                    <p>Nenhum produto encontrado.</p>
+                                    {productSearchQuery && (
+                                        <p className="text-sm">Tente buscar com outros termos.</p>
+                                    )}
+                                </div>
+                            )}
+                        </ScrollArea>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsProductSearchOpen(false)}>
+                            Cancelar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Sheet open={isViewSheetOpen} onOpenChange={setIsViewSheetOpen}>
                 <SheetContent className="w-full sm:max-w-3xl">
                     {selectedQuotation && (
@@ -1234,6 +1423,7 @@ export default function QuotationsPage() {
                                                     <TableHead className="text-center w-[60px]">Qtd.</TableHead>
                                                     <TableHead className="text-right w-[120px]">Valor Unit. s/ Imp.</TableHead>
                                                     <TableHead className="text-center w-[80px]">Imposto (%)</TableHead>
+                                                    <TableHead className="text-center w-[100px]">Lead Time</TableHead>
                                                     <TableHead className="text-right w-[150px]">Subtotal c/ Imp.</TableHead>
                                                 </TableRow>
                                             </TableHeader>
@@ -1247,6 +1437,13 @@ export default function QuotationsPage() {
                                                             <TableCell className="text-center">{item.quantity}</TableCell>
                                                             <TableCell className="text-right">{item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                                                             <TableCell className="text-center">{item.taxRate || 0}%</TableCell>
+                                                            <TableCell className="text-center">
+                                                                {item.leadTimeDays ? (
+                                                                    <Badge variant="outline">{item.leadTimeDays} dias</Badge>
+                                                                ) : (
+                                                                    <span className="text-muted-foreground text-xs">N/A</span>
+                                                                )}
+                                                            </TableCell>
                                                             <TableCell className="text-right font-semibold">{totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                                                         </TableRow>
                                                     );
