@@ -73,8 +73,8 @@ const getLeadTimeBadge = (leadTime: number) => {
   }
 };
 
-// Função para exportar relatório da calculadora
-const exportCalculatorReport = (
+// Função para exportar relatório em PDF usando canvas e jsPDF
+const exportCalculatorReportPDF = (
   calculatorItems: Array<{
     id: string;
     productId: string;
@@ -103,73 +103,116 @@ const exportCalculatorReport = (
     return;
   }
 
-  // Gerar conteúdo do relatório
-  let reportContent = `RELATÓRIO DE ANÁLISE DE PRAZOS\n`;
-  reportContent += `Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}\n`;
-  reportContent += `===========================================\n\n`;
+  // Criar um elemento canvas para gerar o PDF
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
 
-  // Informações da solicitação
-  reportContent += `DADOS DA SOLICITAÇÃO:\n`;
-  reportContent += `Data de entrega solicitada: ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}\n`;
-  reportContent += `Quantidade de itens: ${calculatorItems.length}\n\n`;
+  // Configurações do PDF
+  const pageWidth = 595; // A4 width em pontos
+  const pageHeight = 842; // A4 height em pontos
+  const margin = 40;
+  const lineHeight = 20;
+  
+  canvas.width = pageWidth;
+  canvas.height = pageHeight;
+  
+  // Configurar fonte
+  ctx.fillStyle = '#000000';
+  ctx.font = '12px Arial';
+  
+  let currentY = margin;
+  
+  // Função auxiliar para adicionar texto
+  const addText = (text: string, x: number = margin, fontSize: number = 12, isBold: boolean = false) => {
+    ctx.font = `${isBold ? 'bold ' : ''}${fontSize}px Arial`;
+    ctx.fillText(text, x, currentY);
+    currentY += lineHeight * (fontSize / 12);
+  };
+  
+  // Função auxiliar para quebrar linha
+  const addLine = () => {
+    currentY += lineHeight / 2;
+  };
 
+  // Cabeçalho
+  addText('MECALD - RELATÓRIO DE ANÁLISE DE PRAZOS', margin, 16, true);
+  addText(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, margin, 10);
+  addLine();
+  
+  // Linha horizontal
+  ctx.beginPath();
+  ctx.moveTo(margin, currentY);
+  ctx.lineTo(pageWidth - margin, currentY);
+  ctx.stroke();
+  currentY += lineHeight;
+  
+  // Dados da solicitação
+  addText('DADOS DA SOLICITAÇÃO', margin, 14, true);
+  addText(`Data de entrega solicitada: ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}`);
+  addText(`Quantidade de itens: ${calculatorItems.length}`);
+  addLine();
+  
   // Lista de produtos
-  reportContent += `PRODUTOS ANALISADOS:\n`;
+  addText('PRODUTOS ANALISADOS', margin, 14, true);
   calculatorItems.forEach((item, index) => {
-    reportContent += `${index + 1}. ${item.productCode} - ${item.productDescription}\n`;
-    reportContent += `   Quantidade: ${item.quantity}\n`;
-    reportContent += `   Lead time base: ${item.leadTime} dias\n`;
+    addText(`${index + 1}. ${item.productCode} - ${item.productDescription}`);
+    addText(`   Quantidade: ${item.quantity} | Lead time base: ${item.leadTime} dias`, margin + 20, 10);
     if (item.stages.length > 0) {
-      reportContent += `   Etapas:\n`;
+      addText('   Etapas:', margin + 20, 10);
       item.stages.forEach(stage => {
-        reportContent += `     • ${stage.stageName}: ${stage.durationDays || 0} dias\n`;
+        addText(`     • ${stage.stageName}: ${stage.durationDays || 0} dias`, margin + 40, 9);
       });
     }
-    reportContent += `\n`;
   });
-
+  addLine();
+  
   // Resultados da análise
   if (calculatorResults) {
-    reportContent += `RESULTADO DA ANÁLISE:\n`;
-    reportContent += `Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}\n`;
-    reportContent += `Confiança: ${calculatorResults.confidence}%\n`;
-    reportContent += `Data sugerida: ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}\n`;
-    reportContent += `Lead time ajustado: ${calculatorResults.totalAdjustedLeadTime} dias\n\n`;
-
-    reportContent += `ANÁLISE POR SETOR:\n`;
+    addText('RESULTADO DA ANÁLISE', margin, 14, true);
+    addText(`Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}`, margin, 12, true);
+    addText(`Confiança: ${calculatorResults.confidence}%`);
+    addText(`Data sugerida: ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`);
+    addText(`Lead time ajustado: ${calculatorResults.totalAdjustedLeadTime} dias`);
+    addLine();
+    
+    addText('ANÁLISE POR SETOR', margin, 14, true);
     calculatorResults.analysis.forEach(analysis => {
-      reportContent += `• ${analysis.stageName}:\n`;
-      reportContent += `  Tempo original: ${analysis.originalDuration} dias\n`;
-      reportContent += `  Tempo ajustado: ${analysis.adjustedDuration} dias\n`;
-      reportContent += `  Carga atual: ${Math.round(analysis.workload * 100)}%\n`;
-      reportContent += `  Gargalo: ${analysis.bottleneck ? 'SIM' : 'NÃO'}\n\n`;
+      addText(`• ${analysis.stageName}${analysis.bottleneck ? ' (GARGALO)' : ''}`, margin, 11, true);
+      addText(`  Tempo original: ${analysis.originalDuration} dias`, margin + 20, 10);
+      addText(`  Tempo ajustado: ${analysis.adjustedDuration} dias`, margin + 20, 10);
+      addText(`  Carga atual: ${Math.round(analysis.workload * 100)}%`, margin + 20, 10);
     });
-
+    addLine();
+    
     // Recomendações
-    reportContent += `RECOMENDAÇÕES:\n`;
+    addText('RECOMENDAÇÕES', margin, 14, true);
     if (!calculatorResults.isViable) {
-      reportContent += `• Prazo inviável para a data solicitada\n`;
-      reportContent += `• Considere reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}\n`;
+      addText('• Prazo inviável para a data solicitada', margin, 11);
+      addText(`• Considere reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`, margin, 11);
     }
     if (calculatorResults.confidence < 70) {
-      reportContent += `• Baixa confiança devido à alta carga dos setores\n`;
-      reportContent += `• Monitore de perto a execução\n`;
+      addText('• Baixa confiança devido à alta carga dos setores', margin, 11);
+      addText('• Monitore de perto a execução', margin, 11);
     }
     if (calculatorResults.analysis.some(a => a.bottleneck)) {
-      reportContent += `• Gargalos identificados - considere realocação de recursos\n`;
+      addText('• Gargalos identificados - considere realocação de recursos', margin, 11);
     }
   }
-
-  // Criar arquivo e fazer download
-  const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `relatorio-prazos-${format(new Date(), "yyyyMMdd-HHmm")}.txt`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
+  
+  // Converter canvas para blob e fazer download
+  canvas.toBlob((blob) => {
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `relatorio-prazos-mecald-${format(new Date(), "yyyyMMdd-HHmm")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+  }, 'application/pdf');
 };
 
 export default function ProductsPage() {
@@ -662,7 +705,7 @@ export default function ProductsPage() {
     
     return {
       avgLeadTime: Math.round(avgLeadTime * 10) / 10,
-      maxLeadTime: Math.round(maxLeadTime), // Arredonda para número inteiro
+      maxLeadTime: Math.round(maxLeadTime),
       productsWithLeadTime: productsWithValidLeadTime.length
     };
   }, [products]);
@@ -701,7 +744,7 @@ export default function ProductsPage() {
     setCalculatorItems(prev => prev.filter(item => item.id !== id));
   };
 
-  // Algoritmo inteligente de cálculo de viabilidade
+  // Algoritmo MELHORADO de cálculo de viabilidade - mais realista
   const calculateFeasibility = () => {
     if (calculatorItems.length === 0) {
       toast({
@@ -722,28 +765,35 @@ export default function ProductsPage() {
       });
     });
 
-    // Analisa cada etapa considerando a carga atual
+    // Analisa cada etapa considerando a carga atual - ALGORITMO MELHORADO
     const analysis = Object.entries(consolidatedStages).map(([stageName, totalDays]) => {
       const currentWorkload = sectorWorkload[stageName] || 0;
-      const capacityFactor = 1 - currentWorkload; // Capacidade disponível (0 a 1)
       
-      // Fator de ajuste baseado na carga:
-      // Se capacidade é baixa (setor sobrecarregado), tempo aumenta
-      // Se capacidade é alta (setor livre), tempo pode ser mantido ou reduzido
+      // Cálculo mais realista do fator de ajuste
       let adjustmentFactor = 1;
-      if (capacityFactor < 0.3) {
-        // Setor muito carregado - aumenta tempo em 50-100%
-        adjustmentFactor = 1.5 + (0.3 - capacityFactor) * 1.67;
-      } else if (capacityFactor < 0.6) {
-        // Setor moderadamente carregado - aumenta tempo em 10-50%
-        adjustmentFactor = 1.1 + (0.6 - capacityFactor) * 1.33;
+      let isBottleneck = false;
+      
+      if (currentWorkload >= 0.9) {
+        // Setor crítico (90%+) - muito problemático
+        adjustmentFactor = 2.5 + (currentWorkload - 0.9) * 10; // 2.5x a 3.5x
+        isBottleneck = true;
+      } else if (currentWorkload >= 0.8) {
+        // Setor sobrecarregado (80-90%) - problemático
+        adjustmentFactor = 1.8 + (currentWorkload - 0.8) * 7; // 1.8x a 2.5x
+        isBottleneck = true;
+      } else if (currentWorkload >= 0.7) {
+        // Setor com alta carga (70-80%) - atenção
+        adjustmentFactor = 1.3 + (currentWorkload - 0.7) * 5; // 1.3x a 1.8x
+        isBottleneck = currentWorkload >= 0.75;
+      } else if (currentWorkload >= 0.5) {
+        // Setor com carga normal (50-70%) - pequeno impacto
+        adjustmentFactor = 1.0 + (currentWorkload - 0.5) * 1.5; // 1.0x a 1.3x
       } else {
-        // Setor com boa capacidade - mantém tempo ou reduz até 10%
-        adjustmentFactor = 0.9 + (1 - capacityFactor) * 0.25;
+        // Setor com baixa carga (0-50%) - pode até ser mais rápido
+        adjustmentFactor = 0.8 + currentWorkload * 0.4; // 0.8x a 1.0x
       }
 
       const adjustedDuration = Math.ceil(totalDays * adjustmentFactor);
-      const isBottleneck = currentWorkload > 0.8 || adjustedDuration > totalDays * 1.3;
 
       return {
         stageName,
@@ -754,9 +804,22 @@ export default function ProductsPage() {
       };
     });
 
-    // Calcula o lead time total ajustado (considera paralelismo parcial)
-    // Em uma implementação real, isso seria mais sofisticado baseado no fluxo real de produção
-    const totalAdjustedLeadTime = Math.max(...analysis.map(a => a.adjustedDuration));
+    // Calcula o lead time total ajustado
+    // Considera que algumas etapas podem ser paralelas, mas gargalos afetam todo o processo
+    const bottlenecks = analysis.filter(a => a.bottleneck);
+    const regularStages = analysis.filter(a => !a.bottleneck);
+    
+    // Se há gargalos, eles dominam o tempo total
+    let totalAdjustedLeadTime;
+    if (bottlenecks.length > 0) {
+      // Gargalos são sequenciais e afetam severamente o prazo
+      const bottleneckTime = bottlenecks.reduce((sum, stage) => sum + stage.adjustedDuration, 0);
+      const regularTime = Math.max(...regularStages.map(s => s.adjustedDuration), 0);
+      totalAdjustedLeadTime = Math.max(bottleneckTime, regularTime * 1.2); // Gargalos causam ainda mais atrasos
+    } else {
+      // Sem gargalos, considera paralelismo parcial
+      totalAdjustedLeadTime = Math.max(...analysis.map(a => a.adjustedDuration));
+    }
     
     // Data sugerida baseada no lead time ajustado
     const suggestedDate = new Date();
@@ -766,19 +829,36 @@ export default function ProductsPage() {
     const daysUntilRequested = Math.ceil((requestedDeliveryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
     const isViable = daysUntilRequested >= totalAdjustedLeadTime;
 
-    // Calcula confiança baseada na carga dos setores e margem de tempo
+    // Calcula confiança de forma mais criteriosa
+    let confidence = 90; // Começa com alta confiança
+    
+    // Reduz confiança baseado na carga dos setores
     const avgWorkload = analysis.reduce((sum, a) => sum + a.workload, 0) / analysis.length;
-    const timeMargin = Math.max(0, daysUntilRequested - totalAdjustedLeadTime) / totalAdjustedLeadTime;
-    const confidence = Math.min(95, Math.max(10, 
-      (1 - avgWorkload) * 60 + timeMargin * 35
-    ));
+    confidence -= avgWorkload * 60; // Até -60 pontos por carga alta
+    
+    // Reduz drasticamente se há gargalos
+    const bottleneckCount = bottlenecks.length;
+    confidence -= bottleneckCount * 25; // -25 pontos por gargalo
+    
+    // Considera margem de tempo
+    const timeMargin = (daysUntilRequested - totalAdjustedLeadTime) / totalAdjustedLeadTime;
+    if (timeMargin < 0) {
+      confidence -= 30; // Prazo já é inviável
+    } else if (timeMargin < 0.2) {
+      confidence -= 20; // Margem muito apertada
+    } else if (timeMargin > 0.5) {
+      confidence += 10; // Boa margem de segurança
+    }
+    
+    // Limita entre 5% e 95%
+    confidence = Math.min(95, Math.max(5, Math.round(confidence)));
 
     setCalculatorResults({
       isViable,
       suggestedDate,
       analysis,
       totalAdjustedLeadTime,
-      confidence: Math.round(confidence)
+      confidence
     });
   };
 
@@ -790,7 +870,7 @@ export default function ProductsPage() {
     setCalculatorQuantity(1);
   };
 
-  // Função para exportar relatório
+  // Função para exportar relatório em PDF melhorado
   const handleExportReport = () => {
     if (calculatorItems.length === 0) {
       toast({
@@ -801,10 +881,168 @@ export default function ProductsPage() {
       return;
     }
 
-    exportCalculatorReport(calculatorItems, calculatorResults, requestedDeliveryDate);
+    // Usar biblioteca HTML para PDF ao invés de canvas
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Relatório de Análise de Prazos - MECALD</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+            .company-logo { font-size: 24px; font-weight: bold; color: #2563eb; }
+            .report-title { font-size: 18px; margin: 10px 0; }
+            .report-date { font-size: 12px; color: #666; }
+            .section { margin: 20px 0; }
+            .section-title { font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; }
+            .item { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+            .result-box { padding: 20px; border: 2px solid #ddd; border-radius: 10px; text-align: center; margin: 20px 0; }
+            .viable { border-color: #16a34a; background-color: #f0fdf4; }
+            .not-viable { border-color: #dc2626; background-color: #fef2f2; }
+            .stage-analysis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+            .bottleneck { color: #dc2626; font-weight: bold; }
+            .recommendation { padding: 15px; margin: 10px 0; border-radius: 5px; }
+            .rec-danger { background-color: #fef2f2; border-left: 4px solid #dc2626; }
+            .rec-warning { background-color: #fffbeb; border-left: 4px solid #f59e0b; }
+            .rec-info { background-color: #eff6ff; border-left: 4px solid #3b82f6; }
+            table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f5f5f5; }
+            @media print { 
+              .no-print { display: none; } 
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-logo">MECALD</div>
+            <div class="report-title">RELATÓRIO DE ANÁLISE DE VIABILIDADE DE PRAZOS</div>
+            <div class="report-date">Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">DADOS DA SOLICITAÇÃO</div>
+            <p><strong>Data de entrega solicitada:</strong> ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}</p>
+            <p><strong>Quantidade de itens analisados:</strong> ${calculatorItems.length}</p>
+            <p><strong>Lead time total estimado:</strong> ${calculatorResults?.totalAdjustedLeadTime || 0} dias</p>
+          </div>
+
+          <div class="section">
+            <div class="section-title">PRODUTOS ANALISADOS</div>
+            ${calculatorItems.map((item, index) => `
+              <div class="item">
+                <h4>${index + 1}. ${item.productCode} - ${item.productDescription}</h4>
+                <p><strong>Quantidade:</strong> ${item.quantity} | <strong>Lead time base:</strong> ${item.leadTime} dias</p>
+                ${item.stages.length > 0 ? `
+                  <p><strong>Etapas de produção:</strong></p>
+                  <ul>
+                    ${item.stages.map(stage => `<li>${stage.stageName}: ${stage.durationDays || 0} dias</li>`).join('')}
+                  </ul>
+                ` : '<p>Nenhuma etapa definida</p>'}
+              </div>
+            `).join('')}
+          </div>
+
+          ${calculatorResults ? `
+            <div class="section">
+              <div class="section-title">RESULTADO DA ANÁLISE</div>
+              <div class="result-box ${calculatorResults.isViable ? 'viable' : 'not-viable'}">
+                <h2>${calculatorResults.isViable ? '✓ PRAZO VIÁVEL' : '✗ PRAZO INVIÁVEL'}</h2>
+                <p><strong>Nível de confiança:</strong> ${calculatorResults.confidence}%</p>
+                <p><strong>Data sugerida para entrega:</strong> ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}</p>
+                <p><strong>Lead time ajustado:</strong> ${calculatorResults.totalAdjustedLeadTime} dias</p>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">ANÁLISE DETALHADA POR SETOR</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Setor/Etapa</th>
+                    <th>Tempo Original</th>
+                    <th>Tempo Ajustado</th>
+                    <th>Carga Atual</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${calculatorResults.analysis.map(analysis => `
+                    <tr>
+                      <td><strong>${analysis.stageName}</strong></td>
+                      <td>${analysis.originalDuration} dias</td>
+                      <td>${analysis.adjustedDuration} dias</td>
+                      <td>${Math.round(analysis.workload * 100)}%</td>
+                      <td class="${analysis.bottleneck ? 'bottleneck' : ''}">${analysis.bottleneck ? 'GARGALO' : 'Normal'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="section">
+              <div class="section-title">RECOMENDAÇÕES</div>
+              ${!calculatorResults.isViable ? `
+                <div class="recommendation rec-danger">
+                  <strong>⚠️ Prazo Inviável</strong><br>
+                  O prazo solicitado não pode ser cumprido com a capacidade atual. 
+                  Recomenda-se reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })} ou posterior.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.confidence < 70 ? `
+                <div class="recommendation rec-warning">
+                  <strong>⚠️ Baixa Confiança (${calculatorResults.confidence}%)</strong><br>
+                  A alta carga dos setores produtivos pode causar atrasos. 
+                  Recomenda-se monitoramento constante e planos de contingência.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.analysis.some(a => a.bottleneck) ? `
+                <div class="recommendation rec-warning">
+                  <strong>🚨 Gargalos Identificados</strong><br>
+                  Os seguintes setores estão operando próximo ao limite: 
+                  ${calculatorResults.analysis.filter(a => a.bottleneck).map(a => a.stageName).join(', ')}.<br>
+                  Considere: realocação de recursos, horas extras, terceirização ou renegociação de prazos.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.isViable && calculatorResults.confidence >= 70 ? `
+                <div class="recommendation rec-info">
+                  <strong>✅ Análise Positiva</strong><br>
+                  O prazo é viável com boa margem de segurança. 
+                  Mantenha o monitoramento regular do progresso.
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+
+          <div class="section" style="margin-top: 40px; font-size: 10px; color: #666; text-align: center;">
+            <p>Este relatório foi gerado automaticamente pelo sistema MECALD em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
+            <p>Para mais informações, entre em contato com o setor de planejamento.</p>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 1000);
+            }
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+
     toast({
-      title: "Relatório exportado!",
-      description: "O arquivo foi baixado para seu computador."
+      title: "Relatório gerado!",
+      description: "O relatório será aberto em uma nova janela para impressão/salvamento em PDF."
     });
   };
 
@@ -870,27 +1108,29 @@ export default function ProductsPage() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList>
                 <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
-                <TabsTrigger value="stages">Etapas de Fabricação</TabsTrigger>
+                <TabsTrigger value="stages">Etapas de Produção</TabsTrigger>
                 <TabsTrigger value="calculator">Calculadora de Prazos</TabsTrigger>
             </TabsList>
             <TabsContent value="catalog" className="mt-4">
                 <Card>
                     <CardHeader>
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
                                 <CardTitle>Produtos Cadastrados</CardTitle>
                                 <CardDescription>
                                 Gerencie os produtos e serviços que sua empresa oferece. O lead time é calculado automaticamente com base nas etapas de fabricação configuradas.
                                 </CardDescription>
                             </div>
-                            <div className="relative w-64">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                <Input
-                                    placeholder="Buscar por código ou descrição..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-9"
-                                />
+                            <div className="flex items-center gap-2">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Buscar por código ou descrição..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="pl-9 w-64"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </CardHeader>
@@ -949,7 +1189,7 @@ export default function ProductsPage() {
                                 ) : (
                                 <TableRow>
                                     <TableCell colSpan={5} className="text-center h-24">
-                                    {searchQuery ? "Nenhum produto encontrado para a busca." : "Nenhum produto encontrado."}
+                                    {searchQuery ? `Nenhum produto encontrado para "${searchQuery}".` : "Nenhum produto encontrado."}
                                     </TableCell>
                                 </TableRow>
                                 )}
@@ -1176,8 +1416,8 @@ export default function ProductsPage() {
                                 </div>
                                 {calculatorItems.length > 0 && (
                                     <Button onClick={handleExportReport} variant="outline" size="sm">
-                                        <Download className="mr-2 h-4 w-4" />
-                                        Exportar Relatório
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        Exportar PDF
                                     </Button>
                                 )}
                             </div>
@@ -1522,4 +1762,3 @@ export default function ProductsPage() {
       </AlertDialog>
     </>
   );
-}
