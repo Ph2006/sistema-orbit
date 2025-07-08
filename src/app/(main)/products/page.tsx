@@ -1246,6 +1246,7 @@ export default function ProductsPage() {
                                             </div>
                                         </div>
                                     ))}
+
                                     </div>
                                 ) : (
                                     <p className="text-center text-muted-foreground py-4">Nenhuma etapa cadastrada.</p>
@@ -1762,3 +1763,4 @@ export default function ProductsPage() {
       </AlertDialog>
     </>
   );
+}
