@@ -3944,36 +3944,6 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const [editMeasurementIndex, setEditMeasurementIndex] = useState<number | null>(null);
     const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>('');
 
-    // PASSO 3: Modificar o handleInstrumentChange
-    const handleInstrumentChange = (instrumentId: string) => {
-        console.log("=== SELECIONANDO INSTRUMENTO ===");
-        console.log("ID recebido:", instrumentId);
-        
-        const selectedInstrument = calibrations.find(cal => cal.id === instrumentId);
-        
-        if (selectedInstrument) {
-            console.log("Instrumento encontrado:", {
-                id: selectedInstrument.id,
-                name: selectedInstrument.equipmentName,
-                code: selectedInstrument.internalCode
-            });
-            
-            const instrumentDisplay = `${selectedInstrument.equipmentName} (${selectedInstrument.internalCode})`;
-            console.log("Display gerado:", instrumentDisplay);
-            
-            setNewMeasurement(prev => ({
-                ...prev, 
-                instrumentUsed: instrumentDisplay
-            }));
-            setSelectedInstrumentId(instrumentId);
-            
-            console.log("✅ Estado atualizado com sucesso");
-        } else {
-            console.error("❌ Instrumento não encontrado para ID:", instrumentId);
-            console.log("IDs disponíveis:", calibrations.map(c => c.id));
-        }
-    };
-
     const watchedPhotos = form.watch("photos", []);
 
     const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
