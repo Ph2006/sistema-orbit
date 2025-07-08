@@ -768,62 +768,57 @@ export default function ProductsPage() {
       });
     });
 
-    // Analisa cada etapa considerando a carga atual - ALGORITMO MELHORADO
-    const analysis = Object.entries(stageMaxDuration).map(([stageName, totalDays]) => {
-      const currentWorkload = sectorWorkload[stageName] || 0;
-      
-      // Cálculo mais realista do fator de ajuste
+    // NOVA LÓGICA: identifica o produto crítico (maior lead time individual)
+    const baseLeadTime = Math.max(...calculatorItems.map(item => {
+      return item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+    }));
+    const longestProductItem = calculatorItems.find(item => {
+      const itemLeadTime = item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+      return itemLeadTime === baseLeadTime;
+    });
+
+    // Se não houver produto, aborta
+    if (!longestProductItem) {
+      toast({
+        variant: "destructive",
+        title: "Erro de cálculo",
+        description: "Não foi possível identificar o produto crítico."
+      });
+      return;
+    }
+
+    // Analisa apenas as etapas do produto crítico
+    const analysis = longestProductItem.stages.map((stage) => {
+      const currentWorkload = sectorWorkload[stage.stageName] || 0;
       let adjustmentFactor = 1;
       let isBottleneck = false;
-      
       if (currentWorkload >= 0.9) {
-        // Setor crítico (90%+) - muito problemático
-        adjustmentFactor = 2.5 + (currentWorkload - 0.9) * 10; // 2.5x a 3.5x
+        adjustmentFactor = 2.5 + (currentWorkload - 0.9) * 10;
         isBottleneck = true;
       } else if (currentWorkload >= 0.8) {
-        // Setor sobrecarregado (80-90%) - problemático
-        adjustmentFactor = 1.8 + (currentWorkload - 0.8) * 7; // 1.8x a 2.5x
+        adjustmentFactor = 1.8 + (currentWorkload - 0.8) * 7;
         isBottleneck = true;
       } else if (currentWorkload >= 0.7) {
-        // Setor com alta carga (70-80%) - atenção
-        adjustmentFactor = 1.3 + (currentWorkload - 0.7) * 5; // 1.3x a 1.8x
+        adjustmentFactor = 1.3 + (currentWorkload - 0.7) * 5;
         isBottleneck = currentWorkload >= 0.75;
       } else if (currentWorkload >= 0.5) {
-        // Setor com carga normal (50-70%) - pequeno impacto
-        adjustmentFactor = 1.0 + (currentWorkload - 0.5) * 1.5; // 1.0x a 1.3x
+        adjustmentFactor = 1.0 + (currentWorkload - 0.5) * 1.5;
       } else {
-        // Setor com baixa carga (0-50%) - pode até ser mais rápido
-        adjustmentFactor = 0.8 + currentWorkload * 0.4; // 0.8x a 1.0x
+        adjustmentFactor = 0.8 + currentWorkload * 0.4;
       }
-
-      const adjustedDuration = Math.ceil(totalDays * adjustmentFactor);
-
+      const adjustedDuration = Math.ceil((stage.durationDays || 0) * adjustmentFactor);
       return {
-        stageName,
-        originalDuration: totalDays,
+        stageName: stage.stageName,
+        originalDuration: stage.durationDays || 0,
         adjustedDuration,
         workload: currentWorkload,
         bottleneck: isBottleneck
       };
     });
 
-    // Calcula o lead time total ajustado
-    // Considera que algumas etapas podem ser paralelas, mas gargalos afetam todo o processo
-    const bottlenecks = analysis.filter(a => a.bottleneck);
-    const regularStages = analysis.filter(a => !a.bottleneck);
-    
-    // Se há gargalos, eles dominam o tempo total
-    let totalAdjustedLeadTime;
-    if (bottlenecks.length > 0) {
-      // Gargalos são sequenciais e afetam severamente o prazo
-      const bottleneckTime = bottlenecks.reduce((sum, stage) => sum + stage.adjustedDuration, 0);
-      const regularTime = Math.max(...regularStages.map(s => s.adjustedDuration), 0);
-      totalAdjustedLeadTime = Math.max(bottleneckTime, regularTime * 1.2); // Gargalos causam ainda mais atrasos
-    } else {
-      // Sem gargalos, considera paralelismo parcial
-      totalAdjustedLeadTime = Math.max(...analysis.map(a => a.adjustedDuration));
-    }
-    
+    // Lead time ajustado = soma das etapas do produto crítico com ajustes
+    let totalAdjustedLeadTime = analysis.reduce((sum, stage) => sum + stage.adjustedDuration, 0);
+
     // Data sugerida baseada no lead time ajustado
     const suggestedDate = new Date();
     suggestedDate.setDate(suggestedDate.getDate() + totalAdjustedLeadTime);
@@ -833,27 +828,19 @@ export default function ProductsPage() {
     const isViable = daysUntilRequested >= totalAdjustedLeadTime;
 
     // Calcula confiança de forma mais criteriosa
-    let confidence = 90; // Começa com alta confiança
-    
-    // Reduz confiança baseado na carga dos setores
+    let confidence = 90;
     const avgWorkload = analysis.reduce((sum, a) => sum + a.workload, 0) / analysis.length;
-    confidence -= avgWorkload * 60; // Até -60 pontos por carga alta
-    
-    // Reduz drasticamente se há gargalos
-    const bottleneckCount = bottlenecks.length;
-    confidence -= bottleneckCount * 25; // -25 pontos por gargalo
-    
-    // Considera margem de tempo
+    confidence -= avgWorkload * 60;
+    const bottleneckCount = analysis.filter(a => a.bottleneck).length;
+    confidence -= bottleneckCount * 25;
     const timeMargin = (daysUntilRequested - totalAdjustedLeadTime) / totalAdjustedLeadTime;
     if (timeMargin < 0) {
-      confidence -= 30; // Prazo já é inviável
+      confidence -= 30;
     } else if (timeMargin < 0.2) {
-      confidence -= 20; // Margem muito apertada
+      confidence -= 20;
     } else if (timeMargin > 0.5) {
-      confidence += 10; // Boa margem de segurança
+      confidence += 10;
     }
-    
-    // Limita entre 5% e 95%
     confidence = Math.min(95, Math.max(5, Math.round(confidence)));
 
     setCalculatorResults({
@@ -1700,6 +1687,7 @@ export default function ProductsPage() {
               <DialogFooter className="pt-6 border-t mt-4">
                  <Button type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "Salvando..." : "Salvar Produto"}
+
                  </Button>
               </DialogFooter>
             </form>
