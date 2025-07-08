@@ -755,18 +755,21 @@ export default function ProductsPage() {
       return;
     }
 
-    // Consolida todas as etapas de todos os itens
-    const consolidatedStages: Record<string, number> = {};
+    // Consolida todas as etapas de todos os itens (corrigido para considerar paralelismo)
+    const stageMaxDuration: Record<string, number> = {};
     
     calculatorItems.forEach(item => {
       item.stages.forEach(stage => {
-        const totalDaysForStage = (stage.durationDays || 0) * item.quantity;
-        consolidatedStages[stage.stageName] = (consolidatedStages[stage.stageName] || 0) + totalDaysForStage;
+        const stageDuration = (stage.durationDays || 0) * item.quantity;
+        stageMaxDuration[stage.stageName] = Math.max(
+          stageMaxDuration[stage.stageName] || 0,
+          stageDuration
+        );
       });
     });
 
     // Analisa cada etapa considerando a carga atual - ALGORITMO MELHORADO
-    const analysis = Object.entries(consolidatedStages).map(([stageName, totalDays]) => {
+    const analysis = Object.entries(stageMaxDuration).map(([stageName, totalDays]) => {
       const currentWorkload = sectorWorkload[stageName] || 0;
       
       // Cálculo mais realista do fator de ajuste
@@ -1663,7 +1666,7 @@ export default function ProductsPage() {
                                                 {stageName}
                                             </Label>
                                             {isChecked && (
-                                                <div className="flex items-center gap-2">
+                                             <div className="flex items-center gap-2">
                                                     <Input
                                                         type="number"
                                                         step="any"
