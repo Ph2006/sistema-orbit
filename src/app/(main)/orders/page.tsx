@@ -7,7 +7,7 @@ import * as z from "zod";
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, isSameDay, addDays } from "date-fns";
+import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -33,7 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -685,6 +685,206 @@ export default function OrdersPage() {
         }
     };
 
+    // Feriados nacionais brasileiros para 2024-2025
+    const brazilianHolidays = [
+      // 2024
+      new Date(2024, 0, 1),   // Ano Novo
+      new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
+      new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
+      new Date(2024, 2, 29),  // Sexta-feira Santa
+      new Date(2024, 3, 21),  // Tiradentes
+      new Date(2024, 4, 1),   // Dia do Trabalho
+      new Date(2024, 4, 30),  // Corpus Christi
+      new Date(2024, 8, 7),   // Independência do Brasil
+      new Date(2024, 9, 12),  // Nossa Senhora Aparecida
+      new Date(2024, 10, 2),  // Finados
+      new Date(2024, 10, 15), // Proclamação da República
+      new Date(2024, 11, 25), // Natal
+      // 2025
+      new Date(2025, 0, 1),   // Ano Novo
+      new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
+      new Date(2025, 2, 4),   // Carnaval (Terça-feira)
+      new Date(2025, 3, 18),  // Sexta-feira Santa
+      new Date(2025, 3, 21),  // Tiradentes
+      new Date(2025, 4, 1),   // Dia do Trabalho
+      new Date(2025, 5, 19),  // Corpus Christi
+      new Date(2025, 8, 7),   // Independência do Brasil
+      new Date(2025, 9, 12),  // Nossa Senhora Aparecida
+      new Date(2025, 10, 2),  // Finados
+      new Date(2025, 10, 15), // Proclamação da República
+      new Date(2025, 11, 25), // Natal
+    ];
+    
+    const isHoliday = (date) => {
+      return brazilianHolidays.some(holiday => isSameDay(holiday, date));
+    };
+    
+    const isBusinessDay = (date) => {
+      return !isWeekend(date) && !isHoliday(date);
+    };
+    
+    const addBusinessDays = (startDate, days) => {
+      if (days === 0) return new Date(startDate);
+      
+      let currentDate = new Date(startDate);
+      let remainingDays = Math.abs(days);
+      const isAdding = days > 0;
+      
+      while (remainingDays > 0) {
+        currentDate = addDays(currentDate, isAdding ? 1 : -1);
+        if (isBusinessDay(currentDate)) {
+          remainingDays--;
+        }
+      }
+      return currentDate;
+    };
+    
+    const countBusinessDaysBetween = (startDate, endDate) => {
+      if (isSameDay(startDate, endDate)) return 1;
+      let count = 0;
+      let currentDate = new Date(startDate);
+      const end = new Date(endDate);
+      while (currentDate <= end) {
+        if (isBusinessDay(currentDate)) {
+          count++;
+        }
+        currentDate = addDays(currentDate, 1);
+      }
+      return count;
+    };
+    
+    const getNextBusinessDay = (fromDate) => {
+      let nextDay = addDays(fromDate, 1);
+      while (!isBusinessDay(nextDay)) {
+        nextDay = addDays(nextDay, 1);
+      }
+      return nextDay;
+    };
+    
+    function BusinessDayInfo({ startDate, endDate, expectedDuration }) {
+      if (!startDate || !endDate) return null;
+      const actualDuration = countBusinessDaysBetween(startDate, endDate);
+      const isCorrect = actualDuration === expectedDuration;
+      return (
+        <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+          <div className="flex items-center gap-2">
+            <span className="font-medium">Dias úteis:</span>
+            <span>{actualDuration}</span>
+            {expectedDuration && expectedDuration !== actualDuration && (
+              <span className="text-yellow-600">(esperado: {expectedDuration})</span>
+            )}
+          </div>
+          {!isCorrect && (
+            <p className="text-yellow-600 mt-1">
+              ⚠️ A duração atual não corresponde aos dias definidos
+            </p>
+          )}
+          {isBusinessDay(startDate) && isBusinessDay(endDate) && (
+            <p className="text-green-600 mt-1">
+              ✓ Datas em dias úteis
+            </p>
+          )}
+          {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
+            <p className="text-red-600 mt-1">
+              ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    const handlePlanChange = (stageIndex, field, value) => {
+      let newPlan = JSON.parse(JSON.stringify(editedPlan));
+      const currentStage = newPlan[stageIndex];
+      if (field === 'startDate' || field === 'completedDate') {
+        currentStage[field] = value ? new Date(value) : null;
+      } else if (field === 'durationDays') {
+        currentStage[field] = value === '' ? undefined : Number(value);
+      }
+      // Recalcular datas baseado no campo alterado
+      if (field === 'startDate' && currentStage.startDate) {
+        const duration = Math.max(1, Number(currentStage.durationDays) || 1);
+        if (duration === 1) {
+          currentStage.completedDate = new Date(currentStage.startDate);
+        } else {
+          currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
+        }
+        for (let i = stageIndex + 1; i < newPlan.length; i++) {
+          const stage = newPlan[i];
+          const previousStage = newPlan[i - 1];
+          if (previousStage.completedDate) {
+            stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+            const duration = Math.max(1, Number(stage.durationDays) || 1);
+            if (duration === 1) {
+              stage.completedDate = new Date(stage.startDate);
+            } else {
+              stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+            }
+          } else {
+            stage.startDate = null;
+            stage.completedDate = null;
+          }
+        }
+      } 
+      else if (field === 'completedDate' && currentStage.completedDate) {
+        const duration = Math.max(1, Number(currentStage.durationDays) || 1);
+        if (duration === 1) {
+          currentStage.startDate = new Date(currentStage.completedDate);
+        } else {
+          currentStage.startDate = addBusinessDays(currentStage.completedDate, -(duration - 1));
+        }
+        for (let i = stageIndex + 1; i < newPlan.length; i++) {
+          const stage = newPlan[i];
+          const previousStage = newPlan[i - 1];
+          if (previousStage.completedDate) {
+            stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+            const duration = Math.max(1, Number(stage.durationDays) || 1);
+            if (duration === 1) {
+              stage.completedDate = new Date(stage.startDate);
+            } else {
+              stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+            }
+          } else {
+            stage.startDate = null;
+            stage.completedDate = null;
+          }
+        }
+      }
+      else if (field === 'durationDays') {
+        if (currentStage.startDate) {
+          const duration = Math.max(1, Number(currentStage.durationDays) || 1);
+          if (duration === 1) {
+            currentStage.completedDate = new Date(currentStage.startDate);
+          } else {
+            currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
+          }
+          for (let i = stageIndex + 1; i < newPlan.length; i++) {
+            const stage = newPlan[i];
+            const previousStage = newPlan[i - 1];
+            if (previousStage.completedDate) {
+              stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+              const duration = Math.max(1, Number(stage.durationDays) || 1);
+              if (duration === 1) {
+                stage.completedDate = new Date(stage.startDate);
+              } else {
+                stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+              }
+            } else {
+              stage.startDate = null;
+              stage.completedDate = null;
+            }
+          }
+        }
+      }
+      if (field === 'startDate' && !value) {
+        for (let i = stageIndex; i < newPlan.length; i++) {
+          newPlan[i].startDate = null;
+          newPlan[i].completedDate = null;
+        }
+      }
+      setEditedPlan(newPlan);
+    };
+
     const dashboardStats = useMemo(() => {
         const totalOrders = orders.length;
         const totalWeight = orders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
@@ -1073,75 +1273,6 @@ export default function OrdersPage() {
         } finally {
             setIsFetchingPlan(false);
         }
-    };
-
-    const handlePlanChange = (stageIndex: number, field: 'startDate' | 'completedDate' | 'durationDays', value: any) => {
-        let newPlan = JSON.parse(JSON.stringify(editedPlan));
-
-        const currentStage = newPlan[stageIndex];
-        
-        if (field === 'startDate' || field === 'completedDate') {
-            currentStage[field] = value ? new Date(value) : null;
-        } else if (field === 'durationDays') {
-            currentStage[field] = value === '' ? undefined : Number(value);
-        }
-        
-        if ((field === 'startDate' && currentStage.startDate) || field === 'durationDays') {
-            // Para a primeira etapa, usa a data de início dela mesma
-            // Para etapas seguintes, obtém a data de conclusão da etapa anterior
-            for (let i = stageIndex; i < newPlan.length; i++) {
-                const stage = newPlan[i];
-                
-                if (i > stageIndex) {
-                    // Para etapas seguintes, a data de início é IGUAL à data de conclusão da etapa anterior
-                    const previousStage = newPlan[i - 1];
-                    stage.startDate = previousStage.completedDate ? new Date(previousStage.completedDate) : null;
-                }
-                
-                if (stage.startDate) {
-                    const duration = Math.max(0, Number(stage.durationDays) || 0);
-                    // A data de conclusão é calculada somando a duração à data de início
-                    // Se duração for 1 dia, começa e termina no mesmo dia
-                    const daysToAdd = Math.max(0, Math.ceil(duration) - 1);
-                    stage.completedDate = addDays(new Date(stage.startDate), daysToAdd);
-                } else {
-                    stage.completedDate = null;
-                }
-            }
-        }
-        
-        if (field === 'completedDate') {
-            // Se alterou manualmente a data de conclusão, recalcula as próximas etapas
-            for (let i = stageIndex + 1; i < newPlan.length; i++) {
-                const stage = newPlan[i];
-                const previousStage = newPlan[i - 1];
-                // A próxima etapa inicia na MESMA data que a anterior terminou
-                stage.startDate = previousStage.completedDate ? new Date(previousStage.completedDate) : null;
-                if (stage.startDate) {
-                    const duration = Math.max(0, Number(stage.durationDays) || 0);
-                    const daysToAdd = Math.max(0, Math.ceil(duration) - 1);
-                    stage.completedDate = addDays(new Date(stage.startDate), daysToAdd);
-                } else {
-                    stage.completedDate = null;
-                }
-            }
-        }
-        
-        if (field === 'startDate' && !value) {
-            // Se removeu a data de início, limpa todas as datas seguintes
-            for (let i = stageIndex; i < newPlan.length; i++) {
-                newPlan[i].startDate = null;
-                newPlan[i].completedDate = null;
-            }
-        }
-
-        const finalPlan = newPlan.map((p: any) => ({
-            ...p,
-            startDate: p.startDate ? new Date(p.startDate) : null,
-            completedDate: p.completedDate ? new Date(p.completedDate) : null,
-        }));
-        
-        setEditedPlan(finalPlan);
     };
 
     const handleSaveProgress = async () => {
@@ -1875,7 +2006,7 @@ export default function OrdersPage() {
                                                                                         </TooltipTrigger>
                                                                                         <TooltipContent><p>Copiar Progresso</p></TooltipContent>
                                                                                     </Tooltip>
-                                                                                )}
+                                                                                } 
                                                                             </TooltipProvider>
                                                                         </div>
                                                                     </TableCell>
@@ -1923,125 +2054,272 @@ export default function OrdersPage() {
             </Sheet>
 
             <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
-                <DialogContent className="sm:max-w-2xl">
+                <DialogContent className="sm:max-w-3xl">
                     <DialogHeader>
-                        <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
-                        <DialogDescription>
-                            Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente.
-                        </DialogDescription>
+                      <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
+                      <DialogDescription>
+                        Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
+                      </DialogDescription>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                        <div className="flex items-center gap-2">
+                          <CalendarIcon className="h-4 w-4 text-blue-600" />
+                          <p className="text-sm text-blue-800">
+                            <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), 
+                            excluindo feriados nacionais brasileiros.
+                          </p>
+                        </div>
+                      </div>
                     </DialogHeader>
                     <ScrollArea className="max-h-[60vh]">
-                        <div className="space-y-4 p-1 pr-4">
-                            {isFetchingPlan ? (
-                                <div className="flex justify-center items-center h-48">
-                                    <p>Buscando plano de fabricação...</p>
-                                </div>
-                            ) : (editedPlan && editedPlan.length > 0) ? (
-                                editedPlan.map((stage, index) => (
-                                    <Card key={index} className="p-4 relative">
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-destructive"
-                                            onClick={() => handleRemoveStageFromPlan(index)}
-                                        >
-                                            <XCircleIcon className="h-4 w-4" />
-                                            <span className="sr-only">Remover etapa</span>
-                                        </Button>
-                                        <CardTitle className="text-lg mb-4 pr-8">{stage.stageName}</CardTitle>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                             <div className="space-y-2">
-                                                <Label>Status</Label>
-                                                <Select 
-                                                    value={stage.status} 
-                                                    onValueChange={(value) => {
-                                                        const newPlan = [...editedPlan];
-                                                        newPlan[index] = { ...newPlan[index], status: value };
-                                                        setEditedPlan(newPlan);
-                                                    }}
-                                                >
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="Selecione o status" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="Pendente">Pendente</SelectItem>
-                                                        <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                                                        <SelectItem value="Concluído">Concluído</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label>Duração (dias)</Label>
-                                                <Input
-                                                    type="number"
-                                                    step="any"
-                                                    placeholder="Ex: 1.5"
-                                                    value={stage.durationDays ?? ''}
-                                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
-                                                />
-                                            </div>
+                      <div className="space-y-4 p-1 pr-4">
+                        {isFetchingPlan ? (
+                          <div className="flex justify-center items-center h-48">
+                            <div className="text-center">
+                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                              <p>Buscando plano de fabricação...</p>
+                            </div>
+                          </div>
+                        ) : (editedPlan && editedPlan.length > 0) ? (
+                          editedPlan.map((stage, index) => (
+                            <Card key={index} className="p-4 relative">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-destructive"
+                                onClick={() => handleRemoveStageFromPlan(index)}
+                              >
+                                <XCircleIcon className="h-4 w-4" />
+                                <span className="sr-only">Remover etapa</span>
+                              </Button>
+                              <CardTitle className="text-lg mb-4 pr-8 flex items-center gap-2">
+                                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+                                  {index + 1}
+                                </span>
+                                {stage.stageName}
+                              </CardTitle>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Status</Label>
+                                  <Select 
+                                    value={stage.status} 
+                                    onValueChange={(value) => {
+                                      const newPlan = [...editedPlan];
+                                      newPlan[index] = { ...newPlan[index], status: value };
+                                      setEditedPlan(newPlan);
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Selecione o status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Pendente">
+                                        <div className="flex items-center gap-2">
+                                          <Hourglass className="h-4 w-4 text-yellow-500" />
+                                          Pendente
                                         </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                                            <div className="space-y-2">
-                                                <Label>Data de Início</Label>
-                                                <Popover>
-                                                    <PopoverTrigger asChild>
-                                                        <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.startDate && "text-muted-foreground")}>
-                                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                                            {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                                        </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0">
-                                                        <Calendar mode="single" selected={stage.startDate ? new Date(stage.startDate) : undefined} onSelect={(date) => handlePlanChange(index, 'startDate', date)} initialFocus />
-                                                    </PopoverContent>
-                                                </Popover>
-                                            </div>
-                                             <div className="space-y-2">
-                                                <Label>Data de Conclusão</Label>
-                                                <Popover>
-                                                    <PopoverTrigger asChild>
-                                                        <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !stage.completedDate && "text-muted-foreground")}>
-                                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                                            {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                                        </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0">
-                                                        <Calendar mode="single" selected={stage.completedDate ? new Date(stage.completedDate) : undefined} onSelect={(date) => handlePlanChange(index, 'completedDate', date)} initialFocus />
-                                                    </PopoverContent>
-                                                </Popover>
-                                            </div>
+                                      </SelectItem>
+                                      <SelectItem value="Em Andamento">
+                                        <div className="flex items-center gap-2">
+                                          <PlayCircle className="h-4 w-4 text-blue-500" />
+                                          Em Andamento
                                         </div>
-                                    </Card>
-                                ))
-                            ) : (
-                                <div className="text-center text-muted-foreground py-8">
-                                    <p>Nenhuma etapa de fabricação definida para este item.</p>
-                                    <p className="text-sm">Você pode definir as etapas na tela de Produtos.</p>
+                                      </SelectItem>
+                                      <SelectItem value="Concluído">
+                                        <div className="flex items-center gap-2">
+                                          <CheckCircle className="h-4 w-4 text-green-500" />
+                                          Concluído
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                 </div>
-                            )}
-                        </div>
+                                <div className="space-y-2">
+                                  <Label>Duração (dias úteis)</Label>
+                                  <Input
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    placeholder="Ex: 3"
+                                    value={stage.durationDays ?? ''}
+                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
+                                  />
+                                  <p className="text-xs text-muted-foreground">
+                                    Apenas dias úteis (seg-sex, exceto feriados)
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                <div className="space-y-2">
+                                  <Label>Data de Início</Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button 
+                                        variant={"outline"} 
+                                        className={cn(
+                                          "w-full justify-start text-left font-normal", 
+                                          !stage.startDate && "text-muted-foreground",
+                                          stage.startDate && !isBusinessDay(stage.startDate) && "border-yellow-500 bg-yellow-50"
+                                        )}
+                                      >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0">
+                                      <Calendar 
+                                        mode="single" 
+                                        selected={stage.startDate ? new Date(stage.startDate) : undefined} 
+                                        onSelect={(date) => handlePlanChange(index, 'startDate', date)} 
+                                        initialFocus 
+                                        modifiers={{
+                                          weekend: (date) => isWeekend(date),
+                                          holiday: (date) => isHoliday(date)
+                                        }}
+                                        modifiersStyles={{
+                                          weekend: { 
+                                            backgroundColor: '#fef3c7', 
+                                            color: '#d97706' 
+                                          },
+                                          holiday: { 
+                                            backgroundColor: '#fecaca', 
+                                            color: '#dc2626' 
+                                          }
+                                        }}
+                                      />
+                                      <div className="p-3 border-t text-xs text-muted-foreground">
+                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                  {stage.startDate && !isBusinessDay(stage.startDate) && (
+                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      Esta data cai em fim de semana ou feriado
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Data de Conclusão</Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button 
+                                        variant={"outline"} 
+                                        className={cn(
+                                          "w-full justify-start text-left font-normal", 
+                                          !stage.completedDate && "text-muted-foreground",
+                                          stage.completedDate && !isBusinessDay(stage.completedDate) && "border-yellow-500 bg-yellow-50"
+                                        )}
+                                      >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0">
+                                      <Calendar 
+                                        mode="single" 
+                                        selected={stage.completedDate ? new Date(stage.completedDate) : undefined} 
+                                        onSelect={(date) => handlePlanChange(index, 'completedDate', date)} 
+                                        initialFocus 
+                                        modifiers={{
+                                          weekend: (date) => isWeekend(date),
+                                          holiday: (date) => isHoliday(date)
+                                        }}
+                                        modifiersStyles={{
+                                          weekend: { 
+                                            backgroundColor: '#fef3c7', 
+                                            color: '#d97706' 
+                                          },
+                                          holiday: { 
+                                            backgroundColor: '#fecaca', 
+                                            color: '#dc2626' 
+                                          }
+                                        }}
+                                      />
+                                      <div className="p-3 border-t text-xs text-muted-foreground">
+                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                  {stage.completedDate && !isBusinessDay(stage.completedDate) && (
+                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      Esta data cai em fim de semana ou feriado
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              {stage.startDate && stage.completedDate && (
+                                <BusinessDayInfo 
+                                  startDate={stage.startDate} 
+                                  endDate={stage.completedDate} 
+                                  expectedDuration={Number(stage.durationDays) || 1} 
+                                />
+                              )}
+                              {index < editedPlan.length - 1 && (
+                                <div className="flex justify-center mt-4">
+                                  <div className="flex items-center gap-2 text-muted-foreground">
+                                    <div className="w-4 h-0.5 bg-border"></div>
+                                    <ArrowDown className="h-4 w-4" />
+                                    <div className="w-4 h-0.5 bg-border"></div>
+                                  </div>
+                                </div>
+                              )}
+                            </Card>
+                          ))
+                        ) : (
+                          <div className="text-center text-muted-foreground py-8">
+                            <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                            <p className="text-lg font-medium">Nenhuma etapa de fabricação definida</p>
+                            <p className="text-sm">Você pode definir as etapas na tela de Produtos ou adicionar manualmente abaixo.</p>
+                          </div>
+                        )}
+                      </div>
                     </ScrollArea>
                     <div className="pt-4 border-t">
-                        <Label className="text-sm font-medium">Adicionar Nova Etapa</Label>
-                        <div className="flex items-center gap-2 mt-2">
-                            <Input
-                                placeholder="Nome da nova etapa"
-                                value={newStageNameForPlan}
-                                onChange={(e) => setNewStageNameForPlan(e.target.value)}
-                            />
-                            <Button type="button" variant="secondary" onClick={handleAddStageToPlan}>
-                                <PlusCircle className="mr-2 h-4 w-4" />
-                                Adicionar
-                            </Button>
-                        </div>
+                      <Label className="text-sm font-medium">Adicionar Nova Etapa</Label>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Input
+                          placeholder="Nome da nova etapa"
+                          value={newStageNameForPlan}
+                          onChange={(e) => setNewStageNameForPlan(e.target.value)}
+                        />
+                        <Button 
+                          type="button" 
+                          variant="secondary" 
+                          onClick={handleAddStageToPlan}
+                          disabled={!newStageNameForPlan.trim()}
+                        >
+                          <PlusCircle className="mr-2 h-4 w-4" />
+                          Adicionar
+                        </Button>
+                      </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleSaveProgress}>Salvar Progresso</Button>
+                      <div className="flex items-center justify-between w-full">
+                        <div className="text-sm text-muted-foreground">
+                          {editedPlan.length > 0 && (
+                            <span>
+                              {editedPlan.length} etapa{editedPlan.length !== 1 ? 's' : ''} configurada{editedPlan.length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>
+                            Cancelar
+                          </Button>
+                          <Button 
+                            onClick={handleSaveProgress}
+                            disabled={editedPlan.length === 0}
+                          >
+                            <CalendarCheck className="mr-2 h-4 w-4" />
+                            Salvar Progresso
+                          </Button>
+                        </div>
+                      </div>
                     </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                  </DialogContent>
+                </Dialog>
 
             <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <AlertDialogContent>
