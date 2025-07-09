@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -134,6 +134,123 @@ type Order = {
     };
 };
 
+// Feriados nacionais brasileiros para 2024-2025
+const brazilianHolidays = [
+  // 2024
+  new Date(2024, 0, 1),   // Ano Novo
+  new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
+  new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
+  new Date(2024, 2, 29),  // Sexta-feira Santa
+  new Date(2024, 3, 21),  // Tiradentes
+  new Date(2024, 4, 1),   // Dia do Trabalho
+  new Date(2024, 4, 30),  // Corpus Christi
+  new Date(2024, 8, 7),   // Independência do Brasil
+  new Date(2024, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2024, 10, 2),  // Finados
+  new Date(2024, 10, 15), // Proclamação da República
+  new Date(2024, 11, 25), // Natal
+  // 2025
+  new Date(2025, 0, 1),   // Ano Novo
+  new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
+  new Date(2025, 2, 4),   // Carnaval (Terça-feira)
+  new Date(2025, 3, 18),  // Sexta-feira Santa
+  new Date(2025, 3, 21),  // Tiradentes
+  new Date(2025, 4, 1),   // Dia do Trabalho
+  new Date(2025, 5, 19),  // Corpus Christi
+  new Date(2025, 8, 7),   // Independência do Brasil
+  new Date(2025, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2025, 10, 2),  // Finados
+  new Date(2025, 10, 15), // Proclamação da República
+  new Date(2025, 11, 25), // Natal
+];
+
+// Funções utilitárias para cálculo de dias úteis
+const isHoliday = (date: Date): boolean => {
+  return brazilianHolidays.some(holiday => isSameDay(holiday, date));
+};
+
+const isBusinessDay = (date: Date): boolean => {
+  return !isWeekend(date) && !isHoliday(date);
+};
+
+const addBusinessDays = (startDate: Date, days: number): Date => {
+  if (days === 0) return new Date(startDate);
+  
+  let currentDate = new Date(startDate);
+  let remainingDays = Math.abs(days);
+  const isAdding = days > 0;
+  
+  while (remainingDays > 0) {
+    currentDate = addDays(currentDate, isAdding ? 1 : -1);
+    if (isBusinessDay(currentDate)) {
+      remainingDays--;
+    }
+  }
+  return currentDate;
+};
+
+const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
+  if (isSameDay(startDate, endDate)) return 1;
+  let count = 0;
+  let currentDate = new Date(startDate);
+  const end = new Date(endDate);
+  while (currentDate <= end) {
+    if (isBusinessDay(currentDate)) {
+      count++;
+    }
+    currentDate = addDays(currentDate, 1);
+  }
+  return count;
+};
+
+const getNextBusinessDay = (fromDate: Date): Date => {
+  let nextDay = addDays(fromDate, 1);
+  while (!isBusinessDay(nextDay)) {
+    nextDay = addDays(nextDay, 1);
+  }
+  return nextDay;
+};
+
+// Componente para exibir informações de dias úteis
+interface BusinessDayInfoProps {
+  startDate: Date | null;
+  endDate: Date | null;
+  expectedDuration: number;
+}
+
+function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
+  if (!startDate || !endDate) return null;
+  
+  const actualDuration = countBusinessDaysBetween(startDate, endDate);
+  const isCorrect = actualDuration === expectedDuration;
+  
+  return (
+    <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+      <div className="flex items-center gap-2">
+        <span className="font-medium">Dias úteis:</span>
+        <span>{actualDuration}</span>
+        {expectedDuration && expectedDuration !== actualDuration && (
+          <span className="text-yellow-600">(esperado: {expectedDuration})</span>
+        )}
+      </div>
+      {!isCorrect && (
+        <p className="text-yellow-600 mt-1">
+          ⚠️ A duração atual não corresponde aos dias definidos
+        </p>
+      )}
+      {isBusinessDay(startDate) && isBusinessDay(endDate) && (
+        <p className="text-green-600 mt-1">
+          ✓ Datas em dias úteis
+        </p>
+      )}
+      {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
+        <p className="text-red-600 mt-1">
+          ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
+        </p>
+      )}
+    </div>
+  );
+}
 
 const calculateTotalWeight = (items: OrderItem[]): number => {
     if (!items || !Array.isArray(items)) return 0;
@@ -145,21 +262,15 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
 };
 
 const calculateItemProgress = (item: OrderItem): number => {
-    // If a plan exists, calculate based on it.
     if (item.productionPlan && item.productionPlan.length > 0) {
         const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
         return (completedStages / item.productionPlan.length) * 100;
     }
 
-    // If no plan exists:
-    // If there is a non-empty product code, it implies a plan SHOULD exist but hasn't loaded.
-    // Show 0% to avoid misleading 100%. This is a safe fallback.
     if (item.code && item.code.trim() !== "") {
         return 0;
     }
     
-    // If there is no plan AND no valid product code, it's a manually described item.
-    // Considered "production complete" by default.
     return 100;
 };
 
@@ -170,7 +281,6 @@ const calculateOrderProgress = (order: Order): number => {
     const totalProgress = order.items.reduce((acc, item) => acc + calculateItemProgress(item), 0);
     return totalProgress / order.items.length;
 };
-
 
 const mapOrderStatus = (status?: string): string => {
     if (!status) return "Não definido";
@@ -685,204 +795,110 @@ export default function OrdersPage() {
         }
     };
 
-    // Feriados nacionais brasileiros para 2024-2025
-    const brazilianHolidays = [
-      // 2024
-      new Date(2024, 0, 1),   // Ano Novo
-      new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
-      new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
-      new Date(2024, 2, 29),  // Sexta-feira Santa
-      new Date(2024, 3, 21),  // Tiradentes
-      new Date(2024, 4, 1),   // Dia do Trabalho
-      new Date(2024, 4, 30),  // Corpus Christi
-      new Date(2024, 8, 7),   // Independência do Brasil
-      new Date(2024, 9, 12),  // Nossa Senhora Aparecida
-      new Date(2024, 10, 2),  // Finados
-      new Date(2024, 10, 15), // Proclamação da República
-      new Date(2024, 11, 25), // Natal
-      // 2025
-      new Date(2025, 0, 1),   // Ano Novo
-      new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
-      new Date(2025, 2, 4),   // Carnaval (Terça-feira)
-      new Date(2025, 3, 18),  // Sexta-feira Santa
-      new Date(2025, 3, 21),  // Tiradentes
-      new Date(2025, 4, 1),   // Dia do Trabalho
-      new Date(2025, 5, 19),  // Corpus Christi
-      new Date(2025, 8, 7),   // Independência do Brasil
-      new Date(2025, 9, 12),  // Nossa Senhora Aparecida
-      new Date(2025, 10, 2),  // Finados
-      new Date(2025, 10, 15), // Proclamação da República
-      new Date(2025, 11, 25), // Natal
-    ];
-    
-    const isHoliday = (date) => {
-      return brazilianHolidays.some(holiday => isSameDay(holiday, date));
-    };
-    
-    const isBusinessDay = (date) => {
-      return !isWeekend(date) && !isHoliday(date);
-    };
-    
-    const addBusinessDays = (startDate, days) => {
-      if (days === 0) return new Date(startDate);
-      
-      let currentDate = new Date(startDate);
-      let remainingDays = Math.abs(days);
-      const isAdding = days > 0;
-      
-      while (remainingDays > 0) {
-        currentDate = addDays(currentDate, isAdding ? 1 : -1);
-        if (isBusinessDay(currentDate)) {
-          remainingDays--;
+    const handlePlanChange = (stageIndex: number, field: 'startDate' | 'completedDate' | 'durationDays', value: any) => {
+        let newPlan = JSON.parse(JSON.stringify(editedPlan));
+        const currentStage = newPlan[stageIndex];
+        
+        if (field === 'startDate' || field === 'completedDate') {
+            currentStage[field] = value ? new Date(value) : null;
+        } else if (field === 'durationDays') {
+            currentStage[field] = value === '' ? undefined : Number(value);
         }
-      }
-      return currentDate;
-    };
-    
-    const countBusinessDaysBetween = (startDate, endDate) => {
-      if (isSameDay(startDate, endDate)) return 1;
-      let count = 0;
-      let currentDate = new Date(startDate);
-      const end = new Date(endDate);
-      while (currentDate <= end) {
-        if (isBusinessDay(currentDate)) {
-          count++;
-        }
-        currentDate = addDays(currentDate, 1);
-      }
-      return count;
-    };
-    
-    const getNextBusinessDay = (fromDate) => {
-      let nextDay = addDays(fromDate, 1);
-      while (!isBusinessDay(nextDay)) {
-        nextDay = addDays(nextDay, 1);
-      }
-      return nextDay;
-    };
-    
-    function BusinessDayInfo({ startDate, endDate, expectedDuration }) {
-      if (!startDate || !endDate) return null;
-      const actualDuration = countBusinessDaysBetween(startDate, endDate);
-      const isCorrect = actualDuration === expectedDuration;
-      return (
-        <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
-          <div className="flex items-center gap-2">
-            <span className="font-medium">Dias úteis:</span>
-            <span>{actualDuration}</span>
-            {expectedDuration && expectedDuration !== actualDuration && (
-              <span className="text-yellow-600">(esperado: {expectedDuration})</span>
-            )}
-          </div>
-          {!isCorrect && (
-            <p className="text-yellow-600 mt-1">
-              ⚠️ A duração atual não corresponde aos dias definidos
-            </p>
-          )}
-          {isBusinessDay(startDate) && isBusinessDay(endDate) && (
-            <p className="text-green-600 mt-1">
-              ✓ Datas em dias úteis
-            </p>
-          )}
-          {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
-            <p className="text-red-600 mt-1">
-              ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
-            </p>
-          )}
-        </div>
-      );
-    }
-
-    const handlePlanChange = (stageIndex, field, value) => {
-      let newPlan = JSON.parse(JSON.stringify(editedPlan));
-      const currentStage = newPlan[stageIndex];
-      if (field === 'startDate' || field === 'completedDate') {
-        currentStage[field] = value ? new Date(value) : null;
-      } else if (field === 'durationDays') {
-        currentStage[field] = value === '' ? undefined : Number(value);
-      }
-      // Recalcular datas baseado no campo alterado
-      if (field === 'startDate' && currentStage.startDate) {
-        const duration = Math.max(1, Number(currentStage.durationDays) || 1);
-        if (duration === 1) {
-          currentStage.completedDate = new Date(currentStage.startDate);
-        } else {
-          currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
-        }
-        for (let i = stageIndex + 1; i < newPlan.length; i++) {
-          const stage = newPlan[i];
-          const previousStage = newPlan[i - 1];
-          if (previousStage.completedDate) {
-            stage.startDate = addBusinessDays(previousStage.completedDate, 1);
-            const duration = Math.max(1, Number(stage.durationDays) || 1);
+        
+        // Recalcular datas baseado no campo alterado
+        if (field === 'startDate' && currentStage.startDate) {
+            const duration = Math.max(1, Number(currentStage.durationDays) || 1);
             if (duration === 1) {
-              stage.completedDate = new Date(stage.startDate);
+                currentStage.completedDate = new Date(currentStage.startDate);
             } else {
-              stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
             }
-          } else {
-            stage.startDate = null;
-            stage.completedDate = null;
-          }
-        }
-      } 
-      else if (field === 'completedDate' && currentStage.completedDate) {
-        const duration = Math.max(1, Number(currentStage.durationDays) || 1);
-        if (duration === 1) {
-          currentStage.startDate = new Date(currentStage.completedDate);
-        } else {
-          currentStage.startDate = addBusinessDays(currentStage.completedDate, -(duration - 1));
-        }
-        for (let i = stageIndex + 1; i < newPlan.length; i++) {
-          const stage = newPlan[i];
-          const previousStage = newPlan[i - 1];
-          if (previousStage.completedDate) {
-            stage.startDate = addBusinessDays(previousStage.completedDate, 1);
-            const duration = Math.max(1, Number(stage.durationDays) || 1);
+            
+            // Recalcular todas as etapas seguintes
+            for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                const stage = newPlan[i];
+                const previousStage = newPlan[i - 1];
+                
+                if (previousStage.completedDate) {
+                    stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+                    const duration = Math.max(1, Number(stage.durationDays) || 1);
+                    if (duration === 1) {
+                        stage.completedDate = new Date(stage.startDate);
+                    } else {
+                        stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                    }
+                } else {
+                    stage.startDate = null;
+                    stage.completedDate = null;
+                }
+            }
+        } 
+        else if (field === 'completedDate' && currentStage.completedDate) {
+            const duration = Math.max(1, Number(currentStage.durationDays) || 1);
             if (duration === 1) {
-              stage.completedDate = new Date(stage.startDate);
+                currentStage.startDate = new Date(currentStage.completedDate);
             } else {
-              stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                currentStage.startDate = addBusinessDays(currentStage.completedDate, -(duration - 1));
             }
-          } else {
-            stage.startDate = null;
-            stage.completedDate = null;
-          }
-        }
-      }
-      else if (field === 'durationDays') {
-        if (currentStage.startDate) {
-          const duration = Math.max(1, Number(currentStage.durationDays) || 1);
-          if (duration === 1) {
-            currentStage.completedDate = new Date(currentStage.startDate);
-          } else {
-            currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
-          }
-          for (let i = stageIndex + 1; i < newPlan.length; i++) {
-            const stage = newPlan[i];
-            const previousStage = newPlan[i - 1];
-            if (previousStage.completedDate) {
-              stage.startDate = addBusinessDays(previousStage.completedDate, 1);
-              const duration = Math.max(1, Number(stage.durationDays) || 1);
-              if (duration === 1) {
-                stage.completedDate = new Date(stage.startDate);
-              } else {
-                stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
-              }
-            } else {
-              stage.startDate = null;
-              stage.completedDate = null;
+            
+            // Recalcular todas as etapas seguintes
+            for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                const stage = newPlan[i];
+                const previousStage = newPlan[i - 1];
+                
+                if (previousStage.completedDate) {
+                    stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+                    const duration = Math.max(1, Number(stage.durationDays) || 1);
+                    if (duration === 1) {
+                        stage.completedDate = new Date(stage.startDate);
+                    } else {
+                        stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                    }
+                } else {
+                    stage.startDate = null;
+                    stage.completedDate = null;
+                }
             }
-          }
         }
-      }
-      if (field === 'startDate' && !value) {
-        for (let i = stageIndex; i < newPlan.length; i++) {
-          newPlan[i].startDate = null;
-          newPlan[i].completedDate = null;
+        else if (field === 'durationDays') {
+            if (currentStage.startDate) {
+                const duration = Math.max(1, Number(currentStage.durationDays) || 1);
+                if (duration === 1) {
+                    currentStage.completedDate = new Date(currentStage.startDate);
+                } else {
+                    currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
+                }
+                
+                // Recalcular todas as etapas seguintes
+                for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                    const stage = newPlan[i];
+                    const previousStage = newPlan[i - 1];
+                    
+                    if (previousStage.completedDate) {
+                        stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+                        const duration = Math.max(1, Number(stage.durationDays) || 1);
+                        if (duration === 1) {
+                            stage.completedDate = new Date(stage.startDate);
+                        } else {
+                            stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                        }
+                    } else {
+                        stage.startDate = null;
+                        stage.completedDate = null;
+                    }
+                }
+            }
         }
-      }
-      setEditedPlan(newPlan);
+        
+        // Se removeu a data de início, limpar todas as datas seguintes
+        if (field === 'startDate' && !value) {
+            for (let i = stageIndex; i < newPlan.length; i++) {
+                newPlan[i].startDate = null;
+                newPlan[i].completedDate = null;
+            }
+        }
+        
+        setEditedPlan(newPlan);
     };
 
     const dashboardStats = useMemo(() => {
@@ -1319,9 +1335,6 @@ export default function OrdersPage() {
             
             const allItemsCompleted = updatedItemsForCheck.every(
                 (item: any) => {
-                    // An item is considered complete for the purposes of closing an order if:
-                    // 1. Its production plan is 100% finished.
-                    // 2. It has no production plan (it's a non-manufactured item).
                     if (item.productionPlan && item.productionPlan.length > 0) {
                          return item.productionPlan.every((p: any) => p.status === 'Concluído');
                     }
@@ -1381,23 +1394,19 @@ export default function OrdersPage() {
             
             const updatedItems = selectedOrder.items.map(item => {
                 if (item.id === targetItem.id) {
-                    // Deep copy the plan to avoid reference issues. Dates become strings.
                     const newPlan = JSON.parse(JSON.stringify(sourceProductionPlan));
                     return { ...item, productionPlan: newPlan };
                 }
                 return item;
             });
 
-            // Prepare the items array for Firestore, ensuring dates are Timestamps
             const itemsForFirestore = updatedItems.map(item => {
                 const planForFirestore = (item.productionPlan || []).map(p => ({
                     ...p,
-                    // new Date() correctly handles Date objects and ISO strings
                     startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
                     completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
                 }));
                 
-                // Return the full item with the corrected production plan and other dates
                 return {
                     ...item,
                     productionPlan: planForFirestore,
@@ -1411,7 +1420,6 @@ export default function OrdersPage() {
 
             toast({ title: "Progresso colado!", description: `Etapas aplicadas ao item "${targetItem.description}".` });
             
-            // Refetch and update UI
             const allOrders = await fetchOrders();
             const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
             if (updatedOrder) {
@@ -1453,9 +1461,8 @@ export default function OrdersPage() {
         setNewStageNameForPlan("");
     };
 
-
     return (
-        <>
+        <div className="w-full">
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de Produção</h1>
@@ -1553,7 +1560,9 @@ export default function OrdersPage() {
                     <CardContent>
                         {isLoading ? (
                             <div className="space-y-4">
-                                <Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" />
                             </div>
                         ) : (
                            <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
@@ -1565,7 +1574,7 @@ export default function OrdersPage() {
             <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) { setIsEditing(false); setSelectedItems(new Set()); setProgressClipboard(null); } }}>
                 <SheetContent className="w-full sm:max-w-4xl">
                     {selectedOrder && (
-                        <>
+                        <div>
                             <SheetHeader>
                                 <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
                                 <SheetDescription>
@@ -1574,7 +1583,6 @@ export default function OrdersPage() {
                             </SheetHeader>
                             
                             {isEditing ? (
-                                // EDIT VIEW
                                 <Form {...form}>
                                     <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-[calc(100%-4rem)]">
                                         <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
@@ -1830,21 +1838,12 @@ export default function OrdersPage() {
                                     </form>
                                 </Form>
                             ) : (
-                                // READ-ONLY VIEW
                                 <>
                                     <ScrollArea className="h-[calc(100vh-12rem)]">
                                         <div className="space-y-6 py-6 pr-6">
                                             <Card>
                                                 <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
                                                 <CardContent className="space-y-3 text-sm">
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="font-medium text-muted-foreground">OS Interna</span>
-                                                        <span className="font-semibold text-primary">{selectedOrder.internalOS || 'Não definida'}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="font-medium text-muted-foreground">Projeto Cliente</span>
-                                                        <span className="font-semibold">{selectedOrder.projectName || 'Não definido'}</span>
-                                                    </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground">Status</span>
                                                         {(() => {
@@ -1876,7 +1875,7 @@ export default function OrdersPage() {
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground flex items-center"><ListChecks className="mr-2 h-4 w-4" />Progresso Geral</span>
                                                         <div className="flex items-center gap-2 w-1/2">
-                                                            <Progress value={calculateOrderProgress(selectedOrder)} className="h-2" />
+                                                            <Progress value={calculateOrderProgress(selectedOrder)} className="h-2 flex-1" />
                                                             <span className="font-semibold">{Math.round(calculateOrderProgress(selectedOrder))}%</span>
                                                         </div>
                                                     </div>
@@ -1893,7 +1892,7 @@ export default function OrdersPage() {
                                                     <div className="flex items-center justify-between">
                                                         <Label htmlFor="drawings-view" className="flex items-center gap-2 text-sm font-normal"><File className="h-4 w-4" />Desenhos Técnicos</Label>
                                                         <Checkbox id="drawings-view" checked={selectedOrder.documents?.drawings} disabled />
-                                                                                                       </div>
+                                                    </div>
                                                     <div className="flex items-center justify-between">
                                                         <Label htmlFor="inspection-view" className="flex items-center gap-2 text-sm font-normal"><ClipboardCheck className="h-4 w-4" />Plano de Inspeção e Testes (PIT)</Label>
                                                         <Checkbox id="inspection-view" checked={selectedOrder.documents?.inspectionTestPlan} disabled />
@@ -2006,7 +2005,7 @@ export default function OrdersPage() {
                                                                                         </TooltipTrigger>
                                                                                         <TooltipContent><p>Copiar Progresso</p></TooltipContent>
                                                                                     </Tooltip>
-                                                                                } 
+                                                                                )}
                                                                             </TooltipProvider>
                                                                         </div>
                                                                     </TableCell>
@@ -2048,7 +2047,7 @@ export default function OrdersPage() {
                                     </SheetFooter>
                                 </>
                             )}
-                        </>
+                        </div>
                     )}
                 </SheetContent>
             </Sheet>
@@ -2337,6 +2336,6 @@ export default function OrdersPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-        </>
+        </div>
     );
 }
