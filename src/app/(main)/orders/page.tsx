@@ -1,1778 +1,2341 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, getDocs, doc, getDoc, updateDoc, Timestamp } from "firebase/firestore";
+import { useForm, useFieldArray } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, isSameDay, addDays, isWeekend, startOfDay, endOfDay } from "date-fns";
+import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 
-import { 
-  CalendarIcon, 
-  Clock, 
-  Users, 
-  Settings, 
-  FileText, 
-  CheckCircle, 
-  PlayCircle, 
-  Hourglass, 
-  AlertTriangle,
-  Package,
-  User,
-  MapPin,
-  Filter,
-  Download,
-  Calendar as CalendarPlus,
-  BarChart3,
-  RefreshCw,
-  Activity,
-  UserCheck,
-  Edit3,
-  Search,
-  CheckSquare,
-  X,
-  RotateCcw,
-  Ban
-} from "lucide-react";
+const productionStageSchema = z.object({
+    stageName: z.string(),
+    status: z.string(),
+    startDate: z.date().nullable().optional(),
+    completedDate: z.date().nullable().optional(),
+    durationDays: z.coerce.number().min(0).optional(),
+});
 
-// Types
-type ProductionStage = {
-  stageName: string;
-  status: string;
-  startDate: Date | null;
-  completedDate: Date | null;
-  durationDays?: number;
-};
+const orderItemSchema = z.object({
+    id: z.string().optional(),
+    code: z.string().optional(),
+    product_code: z.string().optional(),
+    description: z.string().min(1, "A descrição é obrigatória."),
+    quantity: z.coerce.number().min(0, "A quantidade não pode ser negativa."),
+    unitWeight: z.coerce.number().min(0, "O peso não pode ser negativo.").optional(),
+    productionPlan: z.array(productionStageSchema).optional(),
+    itemDeliveryDate: z.date().nullable().optional(),
+    shippingList: z.string().optional(),
+    invoiceNumber: z.string().optional(),
+    shippingDate: z.date().nullable().optional(),
+});
 
-type OrderItem = {
-  id: string;
-  code?: string;
-  description: string;
-  quantity: number;
-  productionPlan?: ProductionStage[];
+const orderStatusEnum = z.enum([
+    "Aguardando Produção",
+    "Em Produção",
+    "Pronto para Entrega",
+    "Concluído",
+    "Cancelado",
+    "Atrasado",
+]);
+
+const customerInfoSchema = z.object({
+  id: z.string({ required_error: "Selecione um cliente." }),
+  name: z.string(),
+});
+
+const orderSchema = z.object({
+  id: z.string(),
+  customer: customerInfoSchema,
+  quotationNumber: z.string().optional(),
+  internalOS: z.string().optional(),
+  projectName: z.string().optional(),
+  status: orderStatusEnum,
+  deliveryDate: z.date().nullable().optional(),
+  items: z.array(orderItemSchema),
+  driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
+  documents: z.object({
+    drawings: z.boolean().default(false),
+    inspectionTestPlan: z.boolean().default(false),
+    paintPlan: z.boolean().default(false),
+  }).optional(),
+});
+
+type ProductionStage = z.infer<typeof productionStageSchema>;
+type OrderItem = z.infer<typeof orderItemSchema>;
+
+type CustomerInfo = { id: string; name: string };
+
+type CompanyData = {
+    nomeFantasia?: string;
+    logo?: { preview?: string };
+    endereco?: string;
+    cnpj?: string;
+    email?: string;
+    celular?: string;
+    website?: string;
 };
 
 type Order = {
-  id: string;
-  quotationNumber: string;
-  customer: { name: string };
-  items: OrderItem[];
-  status: string;
-  deliveryDate?: Date;
-  projectName?: string;
+    id: string;
+    quotationId: string;
+    quotationNumber: string;
+    internalOS?: string;
+    projectName?: string;
+    customer: CustomerInfo;
+    items: OrderItem[];
+    totalValue: number;
+    totalWeight: number;
+    status: string;
+    createdAt: Date;
+    deliveryDate?: Date;
+    driveLink?: string;
+    documents: {
+        drawings: boolean;
+        inspectionTestPlan: boolean;
+        paintPlan: boolean;
+    };
 };
 
-type Resource = {
-  id: string;
-  name: string;
-  type: string;
-  capacity: number;
-  status: string;
-  location?: string;
+// Feriados nacionais brasileiros para 2024-2025
+const brazilianHolidays = [
+  // 2024
+  new Date(2024, 0, 1),   // Ano Novo
+  new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
+  new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
+  new Date(2024, 2, 29),  // Sexta-feira Santa
+  new Date(2024, 3, 21),  // Tiradentes
+  new Date(2024, 4, 1),   // Dia do Trabalho
+  new Date(2024, 4, 30),  // Corpus Christi
+  new Date(2024, 8, 7),   // Independência do Brasil
+  new Date(2024, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2024, 10, 2),  // Finados
+  new Date(2024, 10, 15), // Proclamação da República
+  new Date(2024, 11, 25), // Natal
+  // 2025
+  new Date(2025, 0, 1),   // Ano Novo
+  new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
+  new Date(2025, 2, 4),   // Carnaval (Terça-feira)
+  new Date(2025, 3, 18),  // Sexta-feira Santa
+  new Date(2025, 3, 21),  // Tiradentes
+  new Date(2025, 4, 1),   // Dia do Trabalho
+  new Date(2025, 5, 19),  // Corpus Christi
+  new Date(2025, 8, 7),   // Independência do Brasil
+  new Date(2025, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2025, 10, 2),  // Finados
+  new Date(2025, 10, 15), // Proclamação da República
+  new Date(2025, 11, 25), // Natal
+];
+
+// Funções utilitárias para cálculo de dias úteis
+const isHoliday = (date: Date): boolean => {
+  return brazilianHolidays.some(holiday => isSameDay(holiday, date));
 };
 
-type Task = {
-  id: string;
-  orderId: string;
-  orderNumber: string;
-  itemId: string;
-  itemDescription: string;
-  stageName: string;
-  status: string;
-  startDate: Date | null;
-  completedDate: Date | null;
-  durationDays: number;
-  customer: string;
-  priority: 'alta' | 'media' | 'baixa';
-  assignedResource?: string;
-  assignedResourceName?: string;
-  location?: string;
-  selected?: boolean;
+const isBusinessDay = (date: Date): boolean => {
+  return !isWeekend(date) && !isHoliday(date);
 };
 
-type TasksByDate = {
-  [date: string]: Task[];
-};
-
-type CompanyData = {
-  nomeFantasia?: string;
-  logo?: { preview?: string };
-  endereco?: string;
-  cnpj?: string;
-  email?: string;
-  celular?: string;
-  website?: string;
-};
-
-// Utility functions
-const getTaskPriority = (deliveryDate?: Date): 'alta' | 'media' | 'baixa' => {
-  if (!deliveryDate) return 'baixa';
-  const today = new Date();
-  const diffDays = Math.ceil((deliveryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+const addBusinessDays = (startDate: Date, days: number): Date => {
+  if (days === 0) return new Date(startDate);
   
-  if (diffDays <= 7) return 'alta';
-  if (diffDays <= 30) return 'media';
-  return 'baixa';
-};
-
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case 'Concluído':
-    case 'Concluída':
-      return 'bg-green-100 text-green-800 hover:bg-green-100';
-    case 'Em Andamento':
-      return 'bg-blue-100 text-blue-800 hover:bg-blue-100';
-    case 'Pendente':
-      return 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100';
-    case 'Reprogramada':
-      return 'bg-purple-100 text-purple-800 hover:bg-purple-100';
-    case 'Cancelada':
-      return 'bg-red-100 text-red-800 hover:bg-red-100';
-    default:
-      return 'bg-gray-100 text-gray-800 hover:bg-gray-100';
+  let currentDate = new Date(startDate);
+  let remainingDays = Math.abs(days);
+  const isAdding = days > 0;
+  
+  while (remainingDays > 0) {
+    currentDate = addDays(currentDate, isAdding ? 1 : -1);
+    if (isBusinessDay(currentDate)) {
+      remainingDays--;
+    }
   }
+  return currentDate;
 };
 
-const getStatusIcon = (status: string) => {
-  switch (status) {
-    case 'Concluído':
-    case 'Concluída':
-      return <CheckCircle className="h-3 w-3 mr-1" />;
-    case 'Em Andamento':
-      return <PlayCircle className="h-3 w-3 mr-1" />;
-    case 'Pendente':
-      return <Hourglass className="h-3 w-3 mr-1" />;
-    case 'Reprogramada':
-      return <RotateCcw className="h-3 w-3 mr-1" />;
-    case 'Cancelada':
-      return <Ban className="h-3 w-3 mr-1" />;
-    default:
-      return <Hourglass className="h-3 w-3 mr-1" />;
+const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
+  if (isSameDay(startDate, endDate)) return 1;
+  let count = 0;
+  let currentDate = new Date(startDate);
+  const end = new Date(endDate);
+  while (currentDate <= end) {
+    if (isBusinessDay(currentDate)) {
+      count++;
+    }
+    currentDate = addDays(currentDate, 1);
   }
+  return count;
 };
 
-const getPriorityColor = (priority: string) => {
-  switch (priority) {
-    case 'alta':
-      return 'bg-red-100 text-red-800 hover:bg-red-100';
-    case 'media':
-      return 'bg-orange-100 text-orange-800 hover:bg-orange-100';
-    case 'baixa':
-      return 'bg-green-100 text-green-800 hover:bg-green-100';
-    default:
-      return 'bg-gray-100 text-gray-800 hover:bg-gray-100';
+const getNextBusinessDay = (fromDate: Date): Date => {
+  let nextDay = addDays(fromDate, 1);
+  while (!isBusinessDay(nextDay)) {
+    nextDay = addDays(nextDay, 1);
   }
+  return nextDay;
 };
 
-const getResourceTypeLabel = (type: string) => {
-  const types = {
-    'maquina': 'Máquina',
-    'equipamento': 'Equipamento',
-    'veiculo': 'Veículo',
-    'ferramenta': 'Ferramenta',
-    'espaco': 'Espaço',
-    'mao_de_obra': 'Mão de Obra'
-  };
-  return types[type as keyof typeof types] || type;
-};
-
-export default function TaskManagementPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
-  const [resourceFilter, setResourceFilter] = useState<string>("all");
-  const [osFilter, setOsFilter] = useState<string>("all");
-  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
-  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [selectedResourceForAssign, setSelectedResourceForAssign] = useState<string>("");
-  const [newTaskStatus, setNewTaskStatus] = useState<string>("");
-  const { user, loading: authLoading } = useAuth();
-  const { toast } = useToast();
-
-  // Fetch data
-  const fetchOrders = async () => {
-    if (!user) return [];
-    try {
-      const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
-      const ordersList = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
-        
-        const enrichedItems = (data.items || []).map((item: any, index: number) => ({
-          ...item,
-          id: item.id || `${doc.id}-${index}`,
-          productionPlan: (item.productionPlan || []).map((p: any) => ({
-            ...p,
-            startDate: p.startDate?.toDate ? p.startDate.toDate() : null,
-            completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
-          }))
-        }));
-
-        return {
-          id: doc.id,
-          quotationNumber: data.quotationNumber || data.orderNumber || 'N/A',
-          customer: { name: data.customer?.name || data.customerName || 'Cliente não informado' },
-          items: enrichedItems,
-          status: data.status || 'Pendente',
-          deliveryDate: deliveryDate,
-          projectName: data.projectName || '',
-        } as Order;
-      });
-      
-      return ordersList;
-    } catch (error) {
-      console.error("Error fetching orders:", error);
-      return [];
-    }
-  };
-
-  const fetchResources = async () => {
-    if (!user) return [];
-    try {
-      const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-      const docSnap = await getDoc(resourcesRef);
-      if (docSnap.exists()) {
-        return docSnap.data().resources || [];
-      }
-      return [];
-    } catch (error) {
-      console.error("Error fetching resources:", error);
-      return [];
-    }
-  };
-
-  const generateTasks = (ordersList: Order[]): Task[] => {
-    const tasksList: Task[] = [];
-    
-    ordersList.forEach(order => {
-      order.items.forEach(item => {
-        if (item.productionPlan && item.productionPlan.length > 0) {
-          item.productionPlan.forEach(stage => {
-            const priority = getTaskPriority(order.deliveryDate);
-            
-            tasksList.push({
-              id: `${order.id}-${item.id}-${stage.stageName}`,
-              orderId: order.id,
-              orderNumber: order.quotationNumber,
-              itemId: item.id,
-              itemDescription: item.description,
-              stageName: stage.stageName,
-              status: stage.status,
-              startDate: stage.startDate,
-              completedDate: stage.completedDate,
-              durationDays: stage.durationDays || 1,
-              customer: order.customer.name,
-              priority: priority,
-              assignedResource: undefined,
-              assignedResourceName: undefined,
-              location: undefined,
-              selected: false,
-            });
-          });
-        }
-      });
-    });
-    
-    return tasksList;
-  };
-
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const [ordersList, resourcesList] = await Promise.all([
-        fetchOrders(),
-        fetchResources()
-      ]);
-      
-      setOrders(ordersList);
-      setResources(resourcesList);
-      
-      const tasksList = generateTasks(ordersList);
-      setTasks(tasksList);
-      
-    } catch (error) {
-      console.error("Error loading data:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao carregar dados",
-        description: "Não foi possível carregar as informações.",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!authLoading && user) {
-      loadData();
-    }
-  }, [user, authLoading]);
-
-  // Filtered tasks
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(task => {
-      const statusMatch = statusFilter === "all" || task.status === statusFilter;
-      const priorityMatch = priorityFilter === "all" || task.priority === priorityFilter;
-      const osMatch = osFilter === "all" || task.orderNumber.toLowerCase().includes(osFilter.toLowerCase());
-      
-      let resourceMatch = true;
-      if (resourceFilter === "unassigned") {
-        resourceMatch = !task.assignedResource;
-      } else if (resourceFilter !== "all") {
-        resourceMatch = task.assignedResource === resourceFilter;
-      }
-      
-      return statusMatch && priorityMatch && resourceMatch && osMatch;
-    });
-  }, [tasks, statusFilter, priorityFilter, resourceFilter, osFilter]);
-
-  // Tasks by date
-  const tasksByDate = useMemo(() => {
-    const grouped: TasksByDate = {};
-    
-    filteredTasks.forEach(task => {
-      if (task.startDate) {
-        const dateKey = format(task.startDate, 'yyyy-MM-dd');
-        if (!grouped[dateKey]) {
-          grouped[dateKey] = [];
-        }
-        grouped[dateKey].push(task);
-      }
-    });
-    
-    return grouped;
-  }, [filteredTasks]);
-
-  // Unique OS numbers for filter
-  const uniqueOS = useMemo(() => {
-    const osNumbers = new Set(tasks.map(task => task.orderNumber).filter(Boolean));
-    return Array.from(osNumbers).sort();
-  }, [tasks]);
-
-  // Tasks for selected date
-  const tasksForSelectedDate = useMemo(() => {
-    const dateKey = format(selectedDate, 'yyyy-MM-dd');
-    return tasksByDate[dateKey] || [];
-  }, [tasksByDate, selectedDate]);
-
-  // Selected tasks for the day
-  const selectedTasksForDay = useMemo(() => {
-    return tasksForSelectedDate.filter(task => task.selected);
-  }, [tasksForSelectedDate]);
-
-  // Statistics
-  const stats = useMemo(() => {
-    const total = filteredTasks.length;
-    const completed = filteredTasks.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length;
-    const inProgress = filteredTasks.filter(t => t.status === 'Em Andamento').length;
-    const pending = filteredTasks.filter(t => t.status === 'Pendente').length;
-    const reprogrammed = filteredTasks.filter(t => t.status === 'Reprogramada').length;
-    const cancelled = filteredTasks.filter(t => t.status === 'Cancelada').length;
-    const highPriority = filteredTasks.filter(t => t.priority === 'alta').length;
-    const assigned = filteredTasks.filter(t => t.assignedResource).length;
-    const unassigned = filteredTasks.filter(t => !t.assignedResource).length;
-    
-    return { total, completed, inProgress, pending, reprogrammed, cancelled, highPriority, assigned, unassigned };
-  }, [filteredTasks]);
-
-  // Task selection handlers
-  const handleTaskSelection = (taskId: string, selected: boolean) => {
-    setTasks(prevTasks => 
-      prevTasks.map(task => 
-        task.id === taskId ? { ...task, selected } : task
-      )
-    );
-  };
-
-  const handleSelectAllTasksForDay = (selected: boolean) => {
-    setTasks(prevTasks => 
-      prevTasks.map(task => {
-        const isTaskForSelectedDate = task.startDate && 
-          format(task.startDate, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd');
-        return isTaskForSelectedDate ? { ...task, selected } : task;
-      })
-    );
-  };
-
-  // Status update handlers
-  const handleUpdateTaskStatus = (task: Task) => {
-    setSelectedTask(task);
-    setNewTaskStatus(task.status);
-    setIsStatusDialogOpen(true);
-  };
-
-  const handleSaveTaskStatus = async () => {
-    if (!selectedTask) return;
-
-    try {
-      // Update task locally
-      const updatedTasks = tasks.map(task => 
-        task.id === selectedTask.id 
-          ? { ...task, status: newTaskStatus, completedDate: newTaskStatus === 'Concluído' ? new Date() : task.completedDate }
-          : task
-      );
-      
-      setTasks(updatedTasks);
-
-      // Here you would update Firebase if needed
-      // await updateTaskStatusInFirebase(selectedTask, newTaskStatus);
-
-      toast({
-        title: "Status atualizado!",
-        description: `Tarefa "${selectedTask.stageName}" foi marcada como "${newTaskStatus}".`,
-      });
-
-      setIsStatusDialogOpen(false);
-      setSelectedTask(null);
-      setNewTaskStatus("");
-
-    } catch (error) {
-      console.error("Error updating task status:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao atualizar status",
-        description: "Não foi possível atualizar o status da tarefa.",
-      });
-    }
-  };
-
-  // Export functions
-  const exportSelectedTasks = async () => {
-    const tasksToExport = selectedTasksForDay;
-    
-    if (tasksToExport.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Nenhuma tarefa selecionada",
-        description: "Selecione pelo menos uma tarefa para exportar.",
-      });
-      return;
-    }
-
-    toast({ title: "Gerando relatório...", description: "Por favor, aguarde." });
-
-    try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
-      
-      const docPdf = new jsPDF();
-      const pageWidth = docPdf.internal.pageSize.width;
-      let yPos = 15;
-
-      // Header
-      if (companyData.logo?.preview) {
-        try {
-          docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
-        } catch (e) {
-          console.error("Error adding logo to PDF:", e);
-        }
-      }
-
-      let textX = 65;
-      let textY = yPos;
-      docPdf.setFontSize(18).setFont(undefined, 'bold');
-      docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
-      textY += 6;
-
-      docPdf.setFontSize(9).setFont(undefined, 'normal');
-      if (companyData.endereco) {
-        const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
-        docPdf.text(addressLines, textX, textY);
-        textY += (addressLines.length * 4);
-      }
-
-      yPos = 55;
-      docPdf.setFontSize(14).setFont(undefined, 'bold');
-      docPdf.text('RELATÓRIO DE TAREFAS SELECIONADAS', pageWidth / 2, yPos, { align: 'center' });
-      yPos += 15;
-
-      docPdf.setFontSize(11).setFont(undefined, 'normal');
-      docPdf.text(`Data: ${format(selectedDate, "dd/MM/yyyy")}`, 15, yPos);
-      docPdf.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, pageWidth - 15, yPos, { align: 'right' });
-      yPos += 12;
-
-      // Statistics
-      docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('RESUMO DAS TAREFAS SELECIONADAS:', 15, yPos);
-      yPos += 8;
-      
-      docPdf.setFont(undefined, 'normal');
-      docPdf.text(`Total de Tarefas: ${tasksToExport.length}`, 15, yPos);
-      
-      const statusCounts = {
-        'Concluído': tasksToExport.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length,
-        'Em Andamento': tasksToExport.filter(t => t.status === 'Em Andamento').length,
-        'Pendente': tasksToExport.filter(t => t.status === 'Pendente').length,
-        'Reprogramada': tasksToExport.filter(t => t.status === 'Reprogramada').length,
-        'Cancelada': tasksToExport.filter(t => t.status === 'Cancelada').length,
-      };
-
-      let statusX = 15;
-      yPos += 5;
-      Object.entries(statusCounts).forEach(([status, count]) => {
-        if (count > 0) {
-          docPdf.text(`${status}: ${count}`, statusX, yPos);
-          statusX += 45;
-          if (statusX > pageWidth - 45) {
-            statusX = 15;
-            yPos += 5;
-          }
-        }
-      });
-      
-      yPos += 15;
-
-      // Group tasks by location/sector
-      const tasksByLocation = tasksToExport.reduce((acc, task) => {
-        const location = task.location || task.assignedResourceName || 'Setor Geral';
-        if (!acc[location]) acc[location] = [];
-        acc[location].push(task);
-        return acc;
-      }, {} as { [key: string]: Task[] });
-
-      // Tasks table for each sector
-      Object.entries(tasksByLocation).forEach(([location, locationTasks]) => {
-        // Check if we need a new page before adding sector header
-        if (yPos > 200) {
-          docPdf.addPage();
-          yPos = 20;
-        }
-
-        docPdf.setFontSize(12).setFont(undefined, 'bold');
-        docPdf.text(`SETOR/RECURSO: ${location.toUpperCase()}`, 15, yPos);
-        yPos += 8;
-
-        const tableBody = locationTasks.map(task => [
-          task.orderNumber || 'N/A',
-          task.customer || 'N/A',
-          task.itemDescription.length > 30 ? 
-            task.itemDescription.substring(0, 30) + '...' : 
-            task.itemDescription,
-          task.stageName || 'N/A',
-          task.assignedResourceName || 'Não atribuído',
-          task.priority.charAt(0).toUpperCase() + task.priority.slice(1),
-          task.status || 'Pendente',
-          task.status === 'Concluído' || task.status === 'Concluída' ? '✓' : '☐',
-          '', // Campo para observações
-        ]);
-
-        autoTable(docPdf, {
-          startY: yPos,
-          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Ok', 'Observações']],
-          body: tableBody,
-          styles: { 
-            fontSize: 7,
-            cellPadding: 2,
-          },
-          headStyles: { 
-            fillColor: [37, 99, 235], 
-            fontSize: 8, 
-            textColor: 255, 
-            halign: 'center',
-            fontStyle: 'bold'
-          },
-          columnStyles: {
-            0: { cellWidth: 18, halign: 'center' }, // Pedido
-            1: { cellWidth: 22 }, // Cliente
-            2: { cellWidth: 32 }, // Item
-            3: { cellWidth: 22 }, // Etapa
-            4: { cellWidth: 28 }, // Recurso
-            5: { cellWidth: 16, halign: 'center' }, // Prioridade
-            6: { cellWidth: 20, halign: 'center' }, // Status
-            7: { cellWidth: 12, halign: 'center' }, // Ok
-            8: { cellWidth: 25, halign: 'center' }, // Observações
-          },
-          margin: { left: 15, right: 15 },
-          tableWidth: 'auto'
-        });
-
-        yPos = (docPdf as any).lastAutoTable.finalY + 15;
-        
-        // Add space for manual annotations
-        if (locationTasks.length > 0) {
-          docPdf.setFontSize(8).setFont(undefined, 'normal');
-          docPdf.text('Observações/Anotações:', 15, yPos);
-          yPos += 5;
-          
-          // Draw lines for manual notes
-          for (let i = 0; i < 3; i++) {
-            docPdf.line(15, yPos + (i * 5), pageWidth - 15, yPos + (i * 5));
-          }
-          yPos += 20;
-        }
-        
-        // Check if we need a new page
-        if (yPos > 250) {
-          docPdf.addPage();
-          yPos = 20;
-        }
-      });
-
-      // Add footer with signature fields
-      const finalY = yPos + 10;
-      const footerY = Math.max(finalY, 250);
-      
-      if (footerY > 270) {
-        docPdf.addPage();
-        yPos = 20;
-      } else {
-        yPos = footerY;
-      }
-
-      docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('CONTROLE E ASSINATURAS', 15, yPos);
-      yPos += 10;
-
-      docPdf.setFontSize(9).setFont(undefined, 'normal');
-      
-      // Supervisor signature
-      docPdf.text('Supervisor/Coordenador:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
-      yPos += 15;
-
-      // Quality control signature
-      docPdf.text('Controle de Qualidade:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
-      yPos += 15;
-
-      // General notes section
-      docPdf.setFontSize(9).setFont(undefined, 'bold');
-      docPdf.text('Observações Gerais do Dia:', 15, yPos);
-      yPos += 8;
-      
-      docPdf.setFont(undefined, 'normal');
-      for (let i = 0; i < 4; i++) {
-        docPdf.line(15, yPos + (i * 6), pageWidth - 15, yPos + (i * 6));
-      }
-
-      docPdf.save(`Tarefas_Selecionadas_${format(selectedDate, 'yyyyMMdd')}.pdf`);
-
-      toast({
-        title: "Relatório gerado com sucesso!",
-        description: `O arquivo PDF foi baixado com ${tasksToExport.length} tarefas selecionadas.`,
-      });
-
-    } catch (error) {
-      console.error("Error generating selected tasks report:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar relatório",
-        description: "Não foi possível gerar o arquivo PDF.",
-      });
-    }
-  };
-
-  const exportDailyTasks = async () => {
-    toast({ title: "Gerando relatório...", description: "Por favor, aguarde." });
-
-    try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
-      
-      const docPdf = new jsPDF();
-      const pageWidth = docPdf.internal.pageSize.width;
-      let yPos = 15;
-
-      // Header
-      if (companyData.logo?.preview) {
-        try {
-          docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
-        } catch (e) {
-          console.error("Error adding logo to PDF:", e);
-        }
-      }
-
-      let textX = 65;
-      let textY = yPos;
-      docPdf.setFontSize(18).setFont(undefined, 'bold');
-      docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
-      textY += 6;
-      
-      docPdf.setFontSize(9).setFont(undefined, 'normal');
-      if (companyData.endereco) {
-        const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
-        docPdf.text(addressLines, textX, textY);
-        textY += (addressLines.length * 4);
-      }
-
-      yPos = 55;
-      docPdf.setFontSize(14).setFont(undefined, 'bold');
-      docPdf.text('RELATÓRIO DE TAREFAS DIÁRIAS', pageWidth / 2, yPos, { align: 'center' });
-      yPos += 15;
-
-      docPdf.setFontSize(11).setFont(undefined, 'normal');
-      docPdf.text(`Data: ${format(selectedDate, "dd/MM/yyyy")}`, 15, yPos);
-      docPdf.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, pageWidth - 15, yPos, { align: 'right' });
-      yPos += 12;
-
-      // Statistics
-      // Organização e espaçamento do bloco de estatísticas
-      docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('RESUMO DO DIA:', 15, yPos);
-      yPos += 8;
-      docPdf.setFont(undefined, 'normal');
-      docPdf.text(`Total de Tarefas: ${tasksForSelectedDate.length}`, 15, yPos);
-      docPdf.text(`Concluídas: ${tasksForSelectedDate.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length}`, 80, yPos);
-      docPdf.text(`Em Andamento: ${tasksForSelectedDate.filter(t => t.status === 'Em Andamento').length}`, 140, yPos);
-      yPos += 15;
-
-      // Group tasks by location/sector
-      const tasksByLocation = tasksForSelectedDate.reduce((acc, task) => {
-        const location = task.location || task.assignedResourceName || 'Setor Geral';
-        if (!acc[location]) acc[location] = [];
-        acc[location].push(task);
-        return acc;
-      }, {} as { [key: string]: Task[] });
-
-      // Tasks table for each sector
-      Object.entries(tasksByLocation).forEach(([location, locationTasks]) => {
-        // Check if we need a new page before adding sector header
-        if (yPos > 200) {
-          docPdf.addPage();
-          yPos = 20;
-        }
-
-        docPdf.setFontSize(12).setFont(undefined, 'bold');
-        docPdf.text(`SETOR/RECURSO: ${location.toUpperCase()}`, 15, yPos);
-        yPos += 8;
-
-        const tableBody = locationTasks.map(task => [
-          task.orderNumber || 'N/A',
-          task.customer || 'N/A',
-          task.itemDescription.length > 30 ? 
-            task.itemDescription.substring(0, 30) + '...' : 
-            task.itemDescription,
-          task.stageName || 'N/A',
-          task.assignedResourceName || 'Não atribuído',
-          task.priority.charAt(0).toUpperCase() + task.priority.slice(1),
-          '☐ Concluído', // Checkbox para marcar como concluído
-          '☐ Pendente',  // Checkbox para marcar como pendente
-        ]);
-
-        autoTable(docPdf, {
-          startY: yPos,
-          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Observações']],
-          body: tableBody,
-          styles: { 
-            fontSize: 7,
-            cellPadding: 2,
-          },
-          headStyles: { 
-            fillColor: [37, 99, 235], 
-            fontSize: 8, 
-            textColor: 255, 
-            halign: 'center',
-            fontStyle: 'bold'
-          },
-          columnStyles: {
-            0: { cellWidth: 20, halign: 'center' }, // Pedido
-            1: { cellWidth: 25 }, // Cliente
-            2: { cellWidth: 35 }, // Item
-            3: { cellWidth: 25 }, // Etapa
-            4: { cellWidth: 30 }, // Recurso
-            5: { cellWidth: 18, halign: 'center' }, // Prioridade
-            6: { cellWidth: 22, halign: 'center' }, // Status
-            7: { cellWidth: 22, halign: 'center' }, // Observações
-          },
-          margin: { left: 15, right: 15 },
-          tableWidth: 'auto'
-        });
-
-        yPos = (docPdf as any).lastAutoTable.finalY + 15;
-        
-        // Add space for manual annotations
-        if (locationTasks.length > 0) {
-          docPdf.setFontSize(8).setFont(undefined, 'normal');
-          docPdf.text('Observações/Anotações:', 15, yPos);
-          yPos += 5;
-          
-          // Draw lines for manual notes
-          for (let i = 0; i < 3; i++) {
-            docPdf.line(15, yPos + (i * 5), pageWidth - 15, yPos + (i * 5));
-          }
-          yPos += 20;
-        }
-        
-        // Check if we need a new page
-        if (yPos > 250) {
-          docPdf.addPage();
-          yPos = 20;
-        }
-      });
-
-      // Add footer with signature fields
-      const finalY = yPos + 10;
-      const footerY = Math.max(finalY, 250);
-      
-      if (footerY > 270) {
-        docPdf.addPage();
-        yPos = 20;
-      } else {
-        yPos = footerY;
-      }
-
-      docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('CONTROLE E ASSINATURAS', 15, yPos);
-      yPos += 10;
-
-      docPdf.setFontSize(9).setFont(undefined, 'normal');
-      
-      // Supervisor signature
-      docPdf.text('Supervisor/Coordenador:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
-      yPos += 15;
-
-      // Quality control signature
-      docPdf.text('Controle de Qualidade:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
-      yPos += 15;
-
-      // General notes section
-      docPdf.setFontSize(9).setFont(undefined, 'bold');
-      docPdf.text('Observações Gerais do Dia:', 15, yPos);
-      yPos += 8;
-      
-      docPdf.setFont(undefined, 'normal');
-      for (let i = 0; i < 4; i++) {
-        docPdf.line(15, yPos + (i * 6), pageWidth - 15, yPos + (i * 6));
-      }
-
-      docPdf.save(`Tarefas_Diarias_${format(selectedDate, 'yyyyMMdd')}.pdf`);
-
-      toast({
-        title: "Relatório gerado com sucesso!",
-        description: "O arquivo PDF foi baixado com as tarefas e campos para controle.",
-      });
-
-    } catch (error) {
-      console.error("Error generating daily tasks report:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar relatório",
-        description: "Não foi possível gerar o arquivo PDF.",
-      });
-    }
-  };
-
-  const clearFilters = () => {
-    setStatusFilter("all");
-    setPriorityFilter("all");
-    setResourceFilter("all");
-    setOsFilter("all");
-  };
-
-  // Fechar dialogs e resetar estado
-  const handleCloseAssignDialog = () => {
-    setIsAssignDialogOpen(false);
-    setSelectedTask(null);
-    setSelectedResourceForAssign("none");
-  };
-
-  const handleCloseStatusDialog = () => {
-    setIsStatusDialogOpen(false);
-    setSelectedTask(null);
-    setNewTaskStatus("");
-  };
-
-  // Handlers para atribuição de recursos
-  const handleAssignResource = (task: Task) => {
-    setSelectedTask(task);
-    setSelectedResourceForAssign(task.assignedResource || "none");
-    setIsAssignDialogOpen(true);
-  };
-
-  const handleSaveAssignment = async () => {
-    if (!selectedTask) return;
-
-    try {
-      const selectedResource = (selectedResourceForAssign && selectedResourceForAssign !== "none") ? 
-        resources.find(r => r.id === selectedResourceForAssign) : 
-        undefined;
-      
-      const updatedTasks = tasks.map(task => {
-        if (task.id === selectedTask.id) {
-          return {
-            ...task,
-            assignedResource: (selectedResourceForAssign === "none") ? undefined : selectedResourceForAssign,
-            assignedResourceName: selectedResource?.name || undefined,
-            location: selectedResource?.location || undefined,
-          };
-        }
-        return task;
-      });
-
-      setTasks(updatedTasks);
-
-      toast({
-        title: "Recurso atribuído!",
-        description: `Tarefa "${selectedTask.stageName}" foi ${selectedResourceForAssign === "none" ? 'removida da atribuição' : 'atribuída ao recurso "' + selectedResource?.name + '"'}.`,
-      });
-
-      setIsAssignDialogOpen(false);
-      setSelectedTask(null);
-      setSelectedResourceForAssign("none");
-
-    } catch (error) {
-      console.error("Error assigning resource:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao atribuir recurso",
-        description: "Não foi possível salvar a atribuição.",
-      });
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight font-headline">Gestão de Tarefas</h1>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <Skeleton className="h-4 w-[100px]" />
-                <Skeleton className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-7 w-[60px]" />
-                <Skeleton className="h-3 w-[120px] mt-1" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-        <div className="space-y-4">
-          <Skeleton className="h-[400px] w-full" />
-        </div>
-      </div>
-    );
-  }
-
+// Componente para exibir informações de dias úteis
+interface BusinessDayInfoProps {
+  startDate: Date | null;
+  endDate: Date | null;
+  expectedDuration: number;
+}
+
+function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
+  if (!startDate || !endDate) return null;
+  
+  const actualDuration = countBusinessDaysBetween(startDate, endDate);
+  const isCorrect = actualDuration === expectedDuration;
+  
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight font-headline">Gestão de Tarefas</h1>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={loadData}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Atualizar
-          </Button>
-          <Button onClick={exportDailyTasks}>
-            <Download className="mr-2 h-4 w-4" />
-            Exportar Todas do Dia
-          </Button>
-          <Button 
-            onClick={exportSelectedTasks}
-            disabled={selectedTasksForDay.length === 0}
-            variant="default"
-          >
-            <CheckSquare className="mr-2 h-4 w-4" />
-            Exportar Selecionadas ({selectedTasksForDay.length})
-          </Button>
-        </div>
+    <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+      <div className="flex items-center gap-2">
+        <span className="font-medium">Dias úteis:</span>
+        <span>{actualDuration}</span>
+        {expectedDuration && expectedDuration !== actualDuration && (
+          <span className="text-yellow-600">(esperado: {expectedDuration})</span>
+        )}
       </div>
-
-      {/* Statistics Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Tarefas</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.total}</div>
-            <p className="text-xs text-muted-foreground">Em todos os projetos</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Concluídas</CardTitle>
-            <CheckCircle className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}% do total
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Em Andamento</CardTitle>
-            <PlayCircle className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{stats.inProgress}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.inProgress / stats.total) * 100) : 0}% do total
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pendentes</CardTitle>
-            <Hourglass className="h-4 w-4 text-yellow-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{stats.pending}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.pending / stats.total) * 100) : 0}% do total
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Reprogramadas</CardTitle>
-            <RotateCcw className="h-4 w-4 text-purple-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-purple-600">{stats.reprogrammed}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.reprogrammed / stats.total) * 100) : 0}% do total
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Canceladas</CardTitle>
-            <Ban className="h-4 w-4 text-red-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{stats.cancelled}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.cancelled / stats.total) * 100) : 0}% do total
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Não Atribuídas</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{stats.unassigned}</div>
-            <p className="text-xs text-muted-foreground">Precisam de recurso</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="calendar" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="calendar">Visão por Data</TabsTrigger>
-          <TabsTrigger value="list">Lista Completa</TabsTrigger>
-          <TabsTrigger value="resources">Recursos</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="calendar" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Calendar */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Selecionar Data</CardTitle>
-                <CardDescription>Clique em uma data para ver as tarefas programadas</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={(date) => date && setSelectedDate(date)}
-                  className="rounded-md border"
-                  modifiers={{
-                    hasTasks: (date) => {
-                      const dateKey = format(date, 'yyyy-MM-dd');
-                      return tasksByDate[dateKey] && tasksByDate[dateKey].length > 0;
-                    }
-                  }}
-                  modifiersStyles={{
-                    hasTasks: {
-                      backgroundColor: '#dbeafe',
-                      color: '#1e40af',
-                      fontWeight: 'bold'
-                    }
-                  }}
-                />
-              </CardContent>
-            </Card>
-
-            {/* Tasks for Selected Date */}
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>
-                      Tarefas para {format(selectedDate, "dd/MM/yyyy")}
-                    </CardTitle>
-                    <CardDescription>
-                      {tasksForSelectedDate.length} tarefa(s) programada(s) para este dia
-                    </CardDescription>
-                  </div>
-                  {tasksForSelectedDate.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSelectAllTasksForDay(true)}
-                      >
-                        Selecionar Todas
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSelectAllTasksForDay(false)}
-                      >
-                        Desmarcar Todas
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {tasksForSelectedDate.length > 0 ? (
-                  <div className="space-y-4">
-                    {tasksForSelectedDate.map(task => (
-                      <div key={task.id} className="border rounded-lg p-4 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id={`task-${task.id}`}
-                              checked={task.selected || false}
-                              onCheckedChange={(checked) => handleTaskSelection(task.id, checked as boolean)}
-                            />
-                            <Badge className={getStatusColor(task.status)}>
-                              {getStatusIcon(task.status)}
-                              {task.status}
-                            </Badge>
-                            <Badge className={getPriorityColor(task.priority)}>
-                              {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground">Pedido {task.orderNumber}</span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleUpdateTaskStatus(task)}
-                            >
-                              <Edit3 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        <h4 className="font-semibold">{task.stageName}</h4>
-                        <p className="text-sm text-muted-foreground">{task.itemDescription}</p>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            {task.customer}
-                          </span>
-                          {task.location && (
-                            <span className="flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              {task.location}
-                            </span>
-                          )}
-                          {task.assignedResourceName && (
-                            <span className="flex items-center gap-1">
-                              <UserCheck className="h-3 w-3" />
-                              {task.assignedResourceName}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <CalendarPlus className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Nenhuma tarefa programada para esta data</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="list" className="space-y-4">
-          {/* Filters */}
-          <Card className="p-4">
-            <div className="space-y-4">
-              <span className="text-sm font-medium">Filtrar tarefas por:</span>
-              
-              {/* Primeira linha de filtros */}
-              <div className="flex flex-wrap items-center gap-4">
-                {/* Filtro por OS - Input de busca e Select */}
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-medium text-muted-foreground min-w-[40px]">OS:</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Buscar por OS..."
-                      value={osFilter === "all" ? "" : osFilter}
-                      onChange={(e) => setOsFilter(e.target.value || "all")}
-                      className="pl-9 w-[160px]"
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">ou</span>
-                  <Select value={osFilter} onValueChange={setOsFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Selecionar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas as OS</SelectItem>
-                      {uniqueOS.map(osNumber => (
-                        <SelectItem key={osNumber} value={osNumber}>
-                          {osNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os Status</SelectItem>
-                    <SelectItem value="Pendente">Pendente</SelectItem>
-                    <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                    <SelectItem value="Concluído">Concluído</SelectItem>
-                    <SelectItem value="Reprogramada">Reprogramada</SelectItem>
-                    <SelectItem value="Cancelada">Cancelada</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              {/* Segunda linha de filtros */}
-              <div className="flex flex-wrap items-center gap-4">
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Prioridade" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as Prioridades</SelectItem>
-                    <SelectItem value="alta">Alta</SelectItem>
-                    <SelectItem value="media">Média</SelectItem>
-                    <SelectItem value="baixa">Baixa</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={resourceFilter} onValueChange={setResourceFilter}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Recurso Atribuído" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os Recursos</SelectItem>
-                    {resources
-                      .filter(r => r.status === 'disponivel')
-                      .map(resource => (
-                        <SelectItem key={resource.id} value={resource.id}>
-                          {resource.name} ({getResourceTypeLabel(resource.type)})
-                        </SelectItem>
-                      ))}
-                    <SelectItem value="unassigned">Não Atribuídas</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Button variant="ghost" onClick={clearFilters}>
-                  <Filter className="mr-2 h-4 w-4" />
-                  Limpar Filtros
-                </Button>
-              </div>
-            </div>
-          </Card>
-
-          {/* Tasks Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Lista de Tarefas</CardTitle>
-              <CardDescription>
-                Todas as tarefas de produção organizadas por prioridade e data
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Pedido</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Item</TableHead>
-                    <TableHead>Etapa</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Prioridade</TableHead>
-                    <TableHead>Recurso Atribuído</TableHead>
-                    <TableHead>Início Previsto</TableHead>
-                    <TableHead>Duração</TableHead>
-                    <TableHead className="text-center">Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredTasks.length > 0 ? (
-                    filteredTasks
-                      .sort((a, b) => {
-                        // Sort by priority first, then by start date
-                        const priorityOrder = { alta: 3, media: 2, baixa: 1 };
-                        const priorityDiff = priorityOrder[b.priority] - priorityOrder[a.priority];
-                        if (priorityDiff !== 0) return priorityDiff;
-                        
-                        if (a.startDate && b.startDate) {
-                          return a.startDate.getTime() - b.startDate.getTime();
-                        }
-                        if (a.startDate && !b.startDate) return -1;
-                        if (!a.startDate && b.startDate) return 1;
-                        return 0;
-                      })
-                      .map((task) => (
-                        <TableRow key={task.id}>
-                          <TableCell className="font-medium">{task.orderNumber}</TableCell>
-                          <TableCell>{task.customer}</TableCell>
-                          <TableCell>
-                            <div className="max-w-[200px] truncate" title={task.itemDescription}>
-                              {task.itemDescription}
-                            </div>
-                          </TableCell>
-                          <TableCell>{task.stageName}</TableCell>
-                          <TableCell>
-                            <Badge className={getStatusColor(task.status)}>
-                              {getStatusIcon(task.status)}
-                              {task.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={getPriorityColor(task.priority)}>
-                              {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {task.assignedResourceName ? (
-                              <div className="flex items-center gap-2">
-                                <UserCheck className="h-4 w-4 text-green-600" />
-                                <span className="text-sm">{task.assignedResourceName}</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <AlertTriangle className="h-4 w-4 text-orange-500" />
-                                <span className="text-sm text-muted-foreground">Não atribuído</span>
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {task.startDate ? format(task.startDate, "dd/MM/yyyy") : "A definir"}
-                          </TableCell>
-                          <TableCell>{task.durationDays} dia(s)</TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleAssignResource(task)}
-                              >
-                                <Edit3 className="h-4 w-4 mr-1" />
-                                {task.assignedResource ? 'Alterar' : 'Atribuir'}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleUpdateTaskStatus(task)}
-                              >
-                                <Settings className="h-4 w-4 mr-1" />
-                                Status
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={10} className="text-center h-24">
-                        Nenhuma tarefa encontrada com os filtros atuais.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="resources" className="space-y-4">
-          {/* Resource Statistics */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total de Recursos</CardTitle>
-                <Settings className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{resources.length}</div>
-                <p className="text-xs text-muted-foreground">Recursos cadastrados</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Disponíveis</CardTitle>
-                <CheckCircle className="h-4 w-4 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {resources.filter(r => r.status === 'disponivel').length}
-                </div>
-                <p className="text-xs text-muted-foreground">Prontos para uso</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Ocupados</CardTitle>
-                <Activity className="h-4 w-4 text-yellow-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-yellow-600">
-                  {resources.filter(r => r.status === 'ocupado').length}
-                </div>
-                <p className="text-xs text-muted-foreground">Em uso atualmente</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Manutenção</CardTitle>
-                <AlertTriangle className="h-4 w-4 text-red-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600">
-                  {resources.filter(r => r.status === 'manutencao').length}
-                </div>
-                <p className="text-xs text-muted-foreground">Indisponíveis</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Resources by Type */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recursos por Tipo</CardTitle>
-                <CardDescription>Distribuição dos recursos por categoria</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {Object.entries(
-                    resources.reduce((acc, resource) => {
-                      acc[resource.type] = (acc[resource.type] || 0) + 1;
-                      return acc;
-                    }, {} as Record<string, number>)
-                  ).map(([type, count]) => (
-                    <div key={type} className="flex items-center justify-between">
-                      <span className="text-sm">{getResourceTypeLabel(type)}</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 bg-secondary rounded-full h-2">
-                          <div
-                            className="bg-primary h-2 rounded-full transition-all"
-                            style={{
-                              width: `${resources.length > 0 ? (count / resources.length) * 100 : 0}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="text-sm font-medium w-8">{count}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Status dos Recursos</CardTitle>
-                <CardDescription>Situação atual de todos os recursos</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {['disponivel', 'ocupado', 'manutencao', 'inativo'].map(status => {
-                    const count = resources.filter(r => r.status === status).length;
-                    const percentage = resources.length > 0 ? (count / resources.length) * 100 : 0;
-                    const labels = {
-                      disponivel: 'Disponível',
-                      ocupado: 'Ocupado',
-                      manutencao: 'Manutenção',
-                      inativo: 'Inativo'
-                    };
-                    const colors = {
-                      disponivel: 'bg-green-500',
-                      ocupado: 'bg-yellow-500',
-                      manutencao: 'bg-red-500',
-                      inativo: 'bg-gray-500'
-                    };
-                    
-                    return (
-                      <div key={status} className="flex items-center justify-between">
-                        <span className="text-sm">{labels[status as keyof typeof labels]}</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-20 bg-secondary rounded-full h-2">
-                            <div
-                              className={`${colors[status as keyof typeof colors]} h-2 rounded-full transition-all`}
-                              style={{ width: `${percentage}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-medium w-8">{count}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Resources Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Lista de Recursos</CardTitle>
-              <CardDescription>Todos os recursos produtivos disponíveis</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Capacidade</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Localização</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {resources.length > 0 ? (
-                    resources.map((resource) => (
-                      <TableRow key={resource.id}>
-                        <TableCell className="font-medium">{resource.name}</TableCell>
-                        <TableCell>{getResourceTypeLabel(resource.type)}</TableCell>
-                        <TableCell>{resource.capacity}</TableCell>
-                        <TableCell>
-                          <Badge className={getStatusColor(resource.status)}>
-                            {resource.status === 'disponivel' && 'Disponível'}
-                            {resource.status === 'ocupado' && 'Ocupado'}
-                            {resource.status === 'manutencao' && 'Manutenção'}
-                            {resource.status === 'inativo' && 'Inativo'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{resource.location || "-"}</TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center h-24">
-                        Nenhum recurso cadastrado.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Dialog para Atribuição de Recurso */}
-      <Dialog open={isAssignDialogOpen} onOpenChange={(open) => {
-        if (!open) {
-          handleCloseAssignDialog();
-        }
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Atribuir Recurso à Tarefa</DialogTitle>
-            <DialogDescription>
-              Selecione um recurso para executar a tarefa "{selectedTask?.stageName}" do item "{selectedTask?.itemDescription}".
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Recurso Disponível</label>
-              <Select 
-                value={selectedResourceForAssign || "none"} 
-                onValueChange={(value) => setSelectedResourceForAssign(value === "none" ? "" : value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um recurso" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-orange-500" />
-                      Remover atribuição
-                    </div>
-                  </SelectItem>
-                  {resources
-                    .filter(r => r.status === 'disponivel')
-                    .map(resource => (
-                      <SelectItem key={resource.id} value={resource.id}>
-                        <div className="flex items-center gap-2">
-                          <UserCheck className="h-4 w-4 text-green-600" />
-                          <div>
-                            <div className="font-medium">{resource.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {getResourceTypeLabel(resource.type)} - Capacidade: {resource.capacity}
-                              {resource.location && ` - ${resource.location}`}
-                            </div>
-                          </div>
-                        </div>
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              {resources.filter(r => r.status === 'disponivel').length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Nenhum recurso disponível no momento.
-                </p>
-              )}
-            </div>
-            
-            {selectedTask && (
-              <div className="rounded-lg border p-3 bg-muted/50">
-                <h4 className="font-medium text-sm mb-2">Detalhes da Tarefa</h4>
-                <div className="space-y-1 text-xs text-muted-foreground">
-                  <p><strong>Pedido:</strong> {selectedTask.orderNumber}</p>
-                  <p><strong>Cliente:</strong> {selectedTask.customer}</p>
-                  <p><strong>Item:</strong> {selectedTask.itemDescription}</p>
-                  <p><strong>Etapa:</strong> {selectedTask.stageName}</p>
-                  <p><strong>Duração:</strong> {selectedTask.durationDays} dia(s)</p>
-                  <p><strong>Prioridade:</strong> {selectedTask.priority.charAt(0).toUpperCase() + selectedTask.priority.slice(1)}</p>
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCloseAssignDialog}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSaveAssignment}>
-              Salvar Atribuição
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog para Atualização de Status */}
-      <Dialog open={isStatusDialogOpen} onOpenChange={(open) => {
-        if (!open) {
-          handleCloseStatusDialog();
-        }
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Atualizar Status da Tarefa</DialogTitle>
-            <DialogDescription>
-              Altere o status da tarefa "{selectedTask?.stageName}" do item "{selectedTask?.itemDescription}".
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Novo Status</label>
-              <Select 
-                value={newTaskStatus} 
-                onValueChange={setNewTaskStatus}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Pendente">
-                    <div className="flex items-center gap-2">
-                      <Hourglass className="h-4 w-4 text-yellow-600" />
-                      Pendente
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Em Andamento">
-                    <div className="flex items-center gap-2">
-                      <PlayCircle className="h-4 w-4 text-blue-600" />
-                      Em Andamento
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Concluído">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                      Concluído
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Reprogramada">
-                    <div className="flex items-center gap-2">
-                      <RotateCcw className="h-4 w-4 text-purple-600" />
-                      Reprogramada
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Cancelada">
-                    <div className="flex items-center gap-2">
-                      <Ban className="h-4 w-4 text-red-600" />
-                      Cancelada
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            {selectedTask && (
-              <div className="rounded-lg border p-3 bg-muted/50">
-                <h4 className="font-medium text-sm mb-2">Detalhes da Tarefa</h4>
-                <div className="space-y-1 text-xs text-muted-foreground">
-                  <p><strong>Pedido:</strong> {selectedTask.orderNumber}</p>
-                  <p><strong>Cliente:</strong> {selectedTask.customer}</p>
-                  <p><strong>Item:</strong> {selectedTask.itemDescription}</p>
-                  <p><strong>Etapa:</strong> {selectedTask.stageName}</p>
-                  <p><strong>Status Atual:</strong> {selectedTask.status}</p>
-                  <p><strong>Duração:</strong> {selectedTask.durationDays} dia(s)</p>
-                  <p><strong>Prioridade:</strong> {selectedTask.priority.charAt(0).toUpperCase() + selectedTask.priority.slice(1)}</p>
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCloseStatusDialog}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSaveTaskStatus} disabled={!newTaskStatus}>
-              Salvar Status
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {!isCorrect && (
+        <p className="text-yellow-600 mt-1">
+          ⚠️ A duração atual não corresponde aos dias definidos
+        </p>
+      )}
+      {isBusinessDay(startDate) && isBusinessDay(endDate) && (
+        <p className="text-green-600 mt-1">
+          ✓ Datas em dias úteis
+        </p>
+      )}
+      {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
+        <p className="text-red-600 mt-1">
+          ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
+        </p>
+      )}
     </div>
   );
+}
+
+const calculateTotalWeight = (items: OrderItem[]): number => {
+    if (!items || !Array.isArray(items)) return 0;
+    return items.reduce((acc, item) => {
+        const quantity = Number(item.quantity) || 0;
+        const unitWeight = Number(item.unitWeight) || 0;
+        return acc + (quantity * unitWeight);
+    }, 0);
+};
+
+const calculateItemProgress = (item: OrderItem): number => {
+    if (item.productionPlan && item.productionPlan.length > 0) {
+        const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
+        return (completedStages / item.productionPlan.length) * 100;
+    }
+
+    if (item.code && item.code.trim() !== "") {
+        return 0;
+    }
+    
+    return 100;
+};
+
+const calculateOrderProgress = (order: Order): number => {
+    if (!order.items || order.items.length === 0) {
+        return 0;
+    }
+    const totalProgress = order.items.reduce((acc, item) => acc + calculateItemProgress(item), 0);
+    return totalProgress / order.items.length;
+};
+
+const mapOrderStatus = (status?: string): string => {
+    if (!status) return "Não definido";
+    const lowerStatus = status.toLowerCase().trim();
+    
+    const statusMap: { [key: string]: string } = {
+        'in production': 'Em Produção',
+        'em produção': 'Em Produção',
+        'in progress': 'Em Produção',
+        'in-progress': 'Em Produção',
+        'em progresso': 'Em Produção',
+        'awaiting production': 'Aguardando Produção',
+        'aguardando produção': 'Aguardando Produção',
+        'pending': 'Aguardando Produção',
+        'completed': 'Concluído',
+        'concluído': 'Concluído',
+        'finished': 'Concluído',
+        'cancelled': 'Cancelado',
+        'cancelado': 'Cancelado',
+        'ready': 'Pronto para Entrega',
+        'pronto para entrega': 'Pronto para Entrega'
+    };
+
+    return statusMap[lowerStatus] || status;
+};
+
+const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
+    switch (status) {
+        case "Em Produção":
+            return { variant: "default", icon: PlayCircle, label: "Em Produção", colorClass: "" };
+        case "Aguardando Produção":
+            return { variant: "secondary", icon: Hourglass, label: "Aguardando Produção", colorClass: "" };
+        case "Concluído":
+            return { variant: "default", icon: CheckCircle, label: "Concluído", colorClass: "bg-green-600 hover:bg-green-600/90" };
+        case "Pronto para Entrega":
+            return { variant: "default", icon: Truck, label: "Pronto para Entrega", colorClass: "bg-blue-500 hover:bg-blue-500/90" };
+        case "Cancelado":
+            return { variant: "destructive", icon: XCircle, label: "Cancelado", colorClass: "" };
+        case "Atrasado":
+            return { variant: "destructive", icon: AlertTriangle, label: "Atrasado", colorClass: "bg-orange-500 hover:bg-orange-500/90 border-transparent text-destructive-foreground" };
+        default:
+            return { variant: "outline", icon: Package, label: status || "Não definido", colorClass: "" };
+    }
+};
+
+function DocumentStatusIcons({ documents }: { documents?: Order['documents'] }) {
+    if (!documents) return null;
+    
+    const iconClass = (present?: boolean) => cn("h-4 w-4", present ? "text-green-500" : "text-muted-foreground/50");
+
+    return (
+        <TooltipProvider>
+            <div className="flex items-center justify-center gap-2">
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button className="focus:outline-none"><File className={iconClass(documents.drawings)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Desenhos {documents.drawings ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button className="focus:outline-none"><ClipboardCheck className={iconClass(documents.inspectionTestPlan)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Plano de Inspeção {documents.inspectionTestPlan ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                       <button className="focus:outline-none"><Palette className={iconClass(documents.paintPlan)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Plano de Pintura {documents.paintPlan ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+            </div>
+        </TooltipProvider>
+    );
+}
+
+function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: (order: Order) => void; }) {
+    if (orders.length === 0) {
+        return (
+             <Table>
+                <TableBody>
+                    <TableRow>
+                        <TableCell colSpan={9} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
+                    </TableRow>
+                </TableBody>
+            </Table>
+        );
+    }
+    
+    return (
+        <Table>
+            <TableHeader>
+                <TableRow>
+                    <TableHead className="w-[100px]">Nº Pedido</TableHead>
+                    <TableHead className="w-[120px]">OS Interna</TableHead>
+                    <TableHead>Projeto Cliente</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="w-[100px] text-center">Docs</TableHead>
+                    <TableHead className="w-[120px]">Data Entrega</TableHead>
+                    <TableHead className="w-[120px] text-right">Peso Total</TableHead>
+                    <TableHead className="w-[150px]">Progresso</TableHead>
+                    <TableHead className="w-[180px]">Status</TableHead>
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                {orders.map((order) => {
+                    const statusProps = getStatusProps(order.status);
+                    const orderProgress = calculateOrderProgress(order);
+                    return (
+                        <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
+                            <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
+                            <TableCell className="font-medium">{order.internalOS || 'N/A'}</TableCell>
+                            <TableCell>{order.projectName || 'N/A'}</TableCell>
+                            <TableCell>{order.customer?.name || 'Cliente não informado'}</TableCell>
+                            <TableCell>
+                                <DocumentStatusIcons documents={order.documents} />
+                            </TableCell>
+                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
+                            <TableCell className="text-right font-medium">
+                                {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                    <Progress value={orderProgress} className="h-2" />
+                                    <span className="text-xs font-medium text-muted-foreground">{Math.round(orderProgress)}%</span>
+                                </div>
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant={statusProps.variant} className={statusProps.colorClass}>
+                                    <statusProps.icon className="mr-2 h-4 w-4" />
+                                    {statusProps.label}
+                                </Badge>
+                            </TableCell>
+                        </TableRow>
+                    );
+                })}
+            </TableBody>
+        </Table>
+    );
+}
+
+export default function OrdersPage() {
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSheetOpen, setIsSheetOpen] = useState(false);
+    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [isEditing, setIsEditing] = useState(false);
+    const { toast } = useToast();
+    const { user, loading: authLoading } = useAuth();
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+
+    // Progress tracking state
+    const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
+    const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
+    const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
+    const [isFetchingPlan, setIsFetchingPlan] = useState(false);
+    const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
+    const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
+    
+    // Filter states
+    const [searchQuery, setSearchQuery] = useState("");
+    const [customers, setCustomers] = useState<CustomerInfo[]>([]);
+    const [statusFilter, setStatusFilter] = useState<string>("all");
+    const [customerFilter, setCustomerFilter] = useState<string>("all");
+    const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+
+    const form = useForm<z.infer<typeof orderSchema>>({
+        resolver: zodResolver(orderSchema),
+    });
+
+    const { fields } = useFieldArray({
+        control: form.control,
+        name: "items"
+    });
+
+    const fetchCustomers = async () => {
+        if (!user) return;
+        try {
+            const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
+            const customersList = querySnapshot.docs.map((doc) => ({
+                id: doc.id,
+                name: doc.data().nomeFantasia || doc.data().name || "Cliente sem nome",
+            }));
+            setCustomers(customersList);
+        } catch (error) {
+            console.error("Error fetching customers for filter:", error);
+        }
+    };
+    
+    const fetchOrders = async (): Promise<Order[]> => {
+        if (!user) return [];
+        setIsLoading(true);
+        let ordersList: Order[] = [];
+        try {
+            const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
+            const productsMap = new Map<string, { unitWeight: number, productionPlanTemplate?: any[] }>();
+            productsSnapshot.forEach(doc => {
+                const productCode = (doc.id || '').trim().toUpperCase();
+                if (productCode) {
+                    const data = doc.data();
+                    productsMap.set(productCode, { 
+                        unitWeight: data.unitWeight || 0,
+                        productionPlanTemplate: data.productionPlanTemplate
+                    });
+                }
+            });
+
+            const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+            ordersList = querySnapshot.docs.map(doc => {
+                const data = doc.data();
+                const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
+                const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
+                
+                const enrichedItems = (data.items || []).map((item: any, index: number) => {
+                    const itemCode = item.code || item.product_code || '';
+                    const enrichedItem = { 
+                        ...item, 
+                        id: item.id || `${doc.id}-${index}`,
+                        code: itemCode,
+                    };
+                    delete enrichedItem.product_code;
+
+                    enrichedItem.unitWeight = Number(enrichedItem.unitWeight) || 0;
+
+                    const productCodeToSearch = (itemCode).trim().toUpperCase();
+                    const productData = productCodeToSearch ? productsMap.get(productCodeToSearch) : undefined;
+                    
+                    if (enrichedItem.unitWeight === 0) {
+                        if (productData && productData.unitWeight) {
+                            enrichedItem.unitWeight = Number(productData.unitWeight) || 0;
+                        }
+                    }
+
+                    let finalProductionPlan = (item.productionPlan || []).map((p: any) => ({
+                        ...p,
+                        startDate: p.startDate?.toDate ? p.startDate.toDate() : null,
+                        completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
+                    }));
+
+                    if (finalProductionPlan.length === 0) {
+                        if (productData && productData.productionPlanTemplate && productData.productionPlanTemplate.length > 0) {
+                            finalProductionPlan = productData.productionPlanTemplate.map((stage: any) => ({
+                                ...stage,
+                                status: "Pendente",
+                                startDate: null,
+                                completedDate: null,
+                            }));
+                        }
+                    }
+                    enrichedItem.productionPlan = finalProductionPlan;
+
+                    return {
+                        ...enrichedItem,
+                        itemDeliveryDate: item.itemDeliveryDate?.toDate() || deliveryDate,
+                        shippingList: item.shippingList || '',
+                        invoiceNumber: item.invoiceNumber || '',
+                        shippingDate: item.shippingDate?.toDate() || null,
+                    };
+                });
+
+                let finalStatus = mapOrderStatus(data.status);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                if (deliveryDate && deliveryDate < today && !['Concluído', 'Cancelado'].includes(finalStatus)) {
+                    finalStatus = 'Atrasado';
+                }
+                
+                let customerInfo: CustomerInfo = { id: '', name: 'Cliente não informado' };
+                if (data.customer && typeof data.customer === 'object' && data.customer.name) {
+                    customerInfo = { id: data.customer.id || '', name: data.customer.name };
+                } else if (typeof data.customerName === 'string') {
+                    customerInfo = { id: data.customerId || '', name: data.customerName };
+                } else if (typeof data.customer === 'string') { 
+                    customerInfo = { id: '', name: data.customer };
+                }
+
+                const orderNum = (data.orderNumber || data.quotationNumber || 'N/A').toString();
+
+                return {
+                    id: doc.id,
+                    quotationId: data.quotationId || '',
+                    quotationNumber: orderNum,
+                    internalOS: data.internalOS || '',
+                    projectName: data.projectName || '',
+                    customer: customerInfo,
+                    items: enrichedItems,
+                    totalValue: data.totalValue || 0,
+                    status: finalStatus,
+                    createdAt: createdAtDate,
+                    deliveryDate: deliveryDate,
+                    totalWeight: calculateTotalWeight(enrichedItems),
+                    driveLink: data.driveLink || '',
+                    documents: data.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                } as Order;
+            });
+            
+            setOrders(ordersList);
+        } catch (error) {
+            console.error("Error fetching orders:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao buscar pedidos",
+                description: "Ocorreu um erro ao carregar a lista de pedidos.",
+            });
+        } finally {
+            setIsLoading(false);
+        }
+        return ordersList;
+    };
+
+    useEffect(() => {
+        if (!authLoading && user) {
+            fetchOrders();
+            fetchCustomers();
+        }
+    }, [user, authLoading]);
+
+    const handleViewOrder = (order: Order) => {
+        setSelectedOrder(order);
+        form.reset({
+            ...order,
+            status: order.status as any,
+            documents: order.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+        });
+        setIsEditing(false);
+        setSelectedItems(new Set());
+        setIsSheetOpen(true);
+    };
+
+    const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
+        if (!selectedOrder) return;
+    
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            
+            const itemsToSave = values.items.map(formItem => {
+                const originalItem = selectedOrder.items.find(i => i.id === formItem.id);
+                const planToSave = originalItem?.productionPlan?.map(p => ({
+                    ...p,
+                    startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
+                    completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                })) || [];
+
+                return {
+                    ...formItem,
+                    itemDeliveryDate: formItem.itemDeliveryDate ? Timestamp.fromDate(new Date(formItem.itemDeliveryDate)) : null,
+                    shippingDate: formItem.shippingDate ? Timestamp.fromDate(new Date(formItem.shippingDate)) : null,
+                    productionPlan: planToSave,
+                };
+            });
+    
+            const totalWeight = calculateTotalWeight(itemsToSave);
+            
+            const dataToSave = {
+                customer: values.customer,
+                customerId: values.customer.id,
+                customerName: values.customer.name,
+                internalOS: values.internalOS,
+                projectName: values.projectName,
+                quotationNumber: values.quotationNumber,
+                deliveryDate: values.deliveryDate ? Timestamp.fromDate(new Date(values.deliveryDate)) : null,
+                status: values.status,
+                driveLink: values.driveLink,
+                documents: values.documents,
+                items: itemsToSave,
+                totalWeight: totalWeight,
+            };
+    
+            await updateDoc(orderRef, dataToSave);
+    
+            toast({
+                title: "Pedido atualizado!",
+                description: "Os dados do pedido foram salvos com sucesso.",
+            });
+
+            // Manually update the state for immediate feedback
+            const updatedOrderForState: Order = {
+                ...selectedOrder,
+                quotationNumber: values.quotationNumber!,
+                deliveryDate: values.deliveryDate ? new Date(values.deliveryDate) : undefined,
+                customer: values.customer,
+                projectName: values.projectName,
+                internalOS: values.internalOS,
+                status: values.status,
+                driveLink: values.driveLink,
+                documents: values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                items: values.items.map(item => ({
+                    ...item,
+                    itemDeliveryDate: item.itemDeliveryDate ? new Date(item.itemDeliveryDate) : undefined,
+                    shippingDate: item.shippingDate ? new Date(item.shippingDate) : undefined,
+                    productionPlan: (item.productionPlan || []).map(p => ({
+                        ...p,
+                        startDate: p.startDate ? new Date(p.startDate) : undefined,
+                        completedDate: p.completedDate ? new Date(p.completedDate) : undefined,
+                    })) as any
+                })),
+                totalWeight: totalWeight,
+            };
+
+            setOrders(prevOrders => 
+                prevOrders.map(o => (o.id === updatedOrderForState.id ? updatedOrderForState : o))
+            );
+            
+            setSelectedOrder(updatedOrderForState);
+            
+            form.reset({
+                ...updatedOrderForState,
+                status: updatedOrderForState.status as any,
+            });
+    
+            setIsEditing(false);
+        } catch (error) {
+            console.error("Error updating order:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao salvar",
+                description: "Não foi possível atualizar o pedido.",
+            });
+        }
+    };
+    
+    const uniqueStatuses = useMemo(() => {
+        const statuses = new Set(orders.map(order => order.status).filter(Boolean));
+        return Array.from(statuses);
+    }, [orders]);
+
+    const filteredOrders = useMemo(() => {
+        const filtered = orders.filter(order => {
+            const query = searchQuery.toLowerCase();
+            const customerName = order.customer?.name?.toLowerCase() || '';
+            const status = order.status?.toLowerCase() || '';
+            const quotationNumber = order.quotationNumber?.toString() || '';
+            const internalOS = order.internalOS?.toLowerCase() || '';
+            const projectName = order.projectName?.toLowerCase() || '';
+
+            const textMatch = quotationNumber.includes(query) ||
+                customerName.includes(query) ||
+                status.includes(query) ||
+                internalOS.includes(query) ||
+                projectName.includes(query);
+
+            const statusMatch = statusFilter === 'all' || order.status === statusFilter;
+            const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
+            const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
+
+            return textMatch && statusMatch && customerMatch && dateMatch;
+        });
+
+        return filtered.sort((a, b) => {
+            const aIsCompleted = a.status === 'Concluído';
+            const bIsCompleted = b.status === 'Concluído';
+
+            if (aIsCompleted && !bIsCompleted) return 1;
+            if (!aIsCompleted && bIsCompleted) return -1;
+            
+            const aDate = a.deliveryDate;
+            const bDate = b.deliveryDate;
+
+            if (aDate && !bDate) return -1;
+            if (!aDate && bDate) return 1;
+            if (aDate && bDate) {
+                const dateComparison = aDate.getTime() - bDate.getTime();
+                if (dateComparison !== 0) return dateComparison;
+            }
+
+            return b.createdAt.getTime() - a.createdAt.getTime();
+        });
+    }, [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
+    
+    const watchedItems = form.watch("items");
+    const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
+
+    const clearFilters = () => {
+        setSearchQuery("");
+        setStatusFilter("all");
+        setCustomerFilter("all");
+        setDateFilter(undefined);
+    };
+
+    const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter;
+
+    const handleDeleteClick = (order: Order) => {
+        setOrderToDelete(order);
+        setIsDeleteDialogOpen(true);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!orderToDelete) return;
+        try {
+            await deleteDoc(doc(db, "companies", "mecald", "orders", orderToDelete.id));
+            toast({ title: "Pedido excluído!", description: "O pedido foi removido do sistema." });
+            setOrderToDelete(null);
+            setIsDeleteDialogOpen(false);
+            setIsSheetOpen(false);
+            await fetchOrders();
+        } catch (error) {
+            console.error("Error deleting order: ", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao excluir pedido",
+                description: "Não foi possível remover o pedido. Tente novamente.",
+            });
+        }
+    };
+
+    const handlePlanChange = (stageIndex: number, field: 'startDate' | 'completedDate' | 'durationDays', value: any) => {
+        let newPlan = JSON.parse(JSON.stringify(editedPlan));
+        const currentStage = newPlan[stageIndex];
+        
+        if (field === 'startDate' || field === 'completedDate') {
+            currentStage[field] = value ? new Date(value) : null;
+        } else if (field === 'durationDays') {
+            currentStage[field] = value === '' ? undefined : Number(value);
+        }
+        
+        // Recalcular datas baseado no campo alterado
+        if (field === 'startDate' && currentStage.startDate) {
+            const duration = Math.max(1, Number(currentStage.durationDays) || 1);
+            if (duration === 1) {
+                currentStage.completedDate = new Date(currentStage.startDate);
+            } else {
+                currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
+            }
+            
+            // Recalcular todas as etapas seguintes
+            for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                const stage = newPlan[i];
+                const previousStage = newPlan[i - 1];
+                
+                if (previousStage.completedDate) {
+                    stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+                    const duration = Math.max(1, Number(stage.durationDays) || 1);
+                    if (duration === 1) {
+                        stage.completedDate = new Date(stage.startDate);
+                    } else {
+                        stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                    }
+                } else {
+                    stage.startDate = null;
+                    stage.completedDate = null;
+                }
+            }
+        } 
+        else if (field === 'completedDate' && currentStage.completedDate) {
+            const duration = Math.max(1, Number(currentStage.durationDays) || 1);
+            if (duration === 1) {
+                currentStage.startDate = new Date(currentStage.completedDate);
+            } else {
+                currentStage.startDate = addBusinessDays(currentStage.completedDate, -(duration - 1));
+            }
+            
+            // Recalcular todas as etapas seguintes
+            for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                const stage = newPlan[i];
+                const previousStage = newPlan[i - 1];
+                
+                if (previousStage.completedDate) {
+                    stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+                    const duration = Math.max(1, Number(stage.durationDays) || 1);
+                    if (duration === 1) {
+                        stage.completedDate = new Date(stage.startDate);
+                    } else {
+                        stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                    }
+                } else {
+                    stage.startDate = null;
+                    stage.completedDate = null;
+                }
+            }
+        }
+        else if (field === 'durationDays') {
+            if (currentStage.startDate) {
+                const duration = Math.max(1, Number(currentStage.durationDays) || 1);
+                if (duration === 1) {
+                    currentStage.completedDate = new Date(currentStage.startDate);
+                } else {
+                    currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
+                }
+                
+                // Recalcular todas as etapas seguintes
+                for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                    const stage = newPlan[i];
+                    const previousStage = newPlan[i - 1];
+                    
+                    if (previousStage.completedDate) {
+                        stage.startDate = addBusinessDays(previousStage.completedDate, 1);
+                        const duration = Math.max(1, Number(stage.durationDays) || 1);
+                        if (duration === 1) {
+                            stage.completedDate = new Date(stage.startDate);
+                        } else {
+                            stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
+                        }
+                    } else {
+                        stage.startDate = null;
+                        stage.completedDate = null;
+                    }
+                }
+            }
+        }
+        
+        // Se removeu a data de início, limpar todas as datas seguintes
+        if (field === 'startDate' && !value) {
+            for (let i = stageIndex; i < newPlan.length; i++) {
+                newPlan[i].startDate = null;
+                newPlan[i].completedDate = null;
+            }
+        }
+        
+        setEditedPlan(newPlan);
+    };
+
+    const dashboardStats = useMemo(() => {
+        const totalOrders = orders.length;
+        const totalWeight = orders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        
+        const completedOrdersList = orders.filter(order => order.status === 'Concluído');
+        const completedOrders = completedOrdersList.length;
+        const completedWeight = completedOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+
+        const inProgressOrdersList = orders.filter(order => ['Em Produção', 'Aguardando Produção'].includes(order.status));
+        const inProgressOrders = inProgressOrdersList.length;
+        const inProgressWeight = inProgressOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+
+        const delayedOrders = orders.filter(order => order.status === 'Atrasado').length;
+
+        return { 
+            totalOrders, 
+            totalWeight,
+            completedOrders, 
+            completedWeight,
+            inProgressOrders, 
+            inProgressWeight,
+            delayedOrders 
+        };
+    }, [orders]);
+
+    const handleItemSelection = (itemId: string) => {
+        setSelectedItems(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(itemId)) {
+                newSet.delete(itemId);
+            } else {
+                newSet.add(itemId);
+            }
+            return newSet;
+        });
+    };
+
+    const handleSelectAll = (checked: boolean | 'indeterminate') => {
+        if (checked === true && selectedOrder) {
+            const allItemIds = new Set(selectedOrder.items.map(item => item.id!));
+            setSelectedItems(allItemIds);
+        } else {
+            setSelectedItems(new Set());
+        }
+    };
+    
+    const handleGeneratePackingSlip = async () => {
+        if (!selectedOrder || selectedItems.size === 0) return;
+    
+        toast({ title: "Gerando Romaneio...", description: "Por favor, aguarde." });
+    
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const itemsToInclude = selectedOrder.items.filter(item => selectedItems.has(item.id!));
+            const totalWeightOfSelection = calculateTotalWeight(itemsToInclude);
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let yPos = 15;
+    
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+
+            let textX = 65;
+            let textY = yPos;
+            docPdf.setFontSize(18).setFont(undefined, 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+            textY += 6;
+            
+            docPdf.setFontSize(9).setFont(undefined, 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+                docPdf.text(addressLines, textX, textY);
+                textY += (addressLines.length * 4);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+            }
+            
+            yPos = 55;
+            docPdf.setFontSize(14).setFont(undefined, 'bold');
+            docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+    
+            docPdf.setFontSize(11).setFont(undefined, 'normal');
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
+            
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, 15, yPos);
+            if (selectedOrder.deliveryDate) {
+                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            }
+            yPos += 7;
+
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
+            yPos += 12;
+    
+            const tableBody = itemsToInclude.map(item => {
+                const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                return [
+                    item.code || '-',
+                    item.description,
+                    item.quantity.toString(),
+                    (Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                    itemTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                ];
+            });
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
+                body: tableBody,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255, halign: 'center' },
+                columnStyles: {
+                    0: { cellWidth: 20 },
+                    1: { cellWidth: 'auto' },
+                    2: { cellWidth: 20, halign: 'center' },
+                    3: { cellWidth: 30, halign: 'center' },
+                    4: { cellWidth: 30, halign: 'center' },
+                }
+            });
+    
+            let finalY = (docPdf as any).lastAutoTable.finalY;
+            const footerStartY = pageHeight - 35;
+
+            if (finalY + 20 > footerStartY) {
+                docPdf.addPage();
+                finalY = 15;
+            }
+    
+            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.text(
+                `Peso Total dos Itens: ${totalWeightOfSelection.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, 
+                pageWidth - 15, finalY + 15, { align: 'right' }
+            );
+
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            docPdf.text('Recebido por:', 15, footerStartY);
+            docPdf.line(40, footerStartY, 120, footerStartY);
+            docPdf.text('Data:', 15, footerStartY + 10);
+            docPdf.line(28, footerStartY + 10, 85, footerStartY + 10);
+    
+            docPdf.save(`Romaneio_${selectedOrder.quotationNumber}.pdf`);
+            
+        } catch (error) {
+            console.error("Error generating packing slip:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar romaneio",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
+
+    const handleExportSchedule = async () => {
+        if (!selectedOrder) return;
+
+        toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            let yPos = 15;
+
+            // Header com logo e informações da empresa
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+
+            // Informações da empresa ao lado da logo
+            let companyInfoX = 65;
+            let companyInfoY = yPos + 5;
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', companyInfoX, companyInfoY);
+            companyInfoY += 6;
+            
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - companyInfoX - 15);
+                docPdf.text(addressLines, companyInfoX, companyInfoY);
+                companyInfoY += (addressLines.length * 3);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, companyInfoX, companyInfoY);
+                companyInfoY += 4;
+            }
+            if (companyData.email) {
+                docPdf.text(`Email: ${companyData.email}`, companyInfoX, companyInfoY);
+                companyInfoY += 4;
+            }
+            if (companyData.celular) {
+                docPdf.text(`Telefone: ${companyData.celular}`, companyInfoX, companyInfoY);
+            }
+
+            yPos = 45;
+
+            // Título do documento
+            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+
+            // Informações do pedido em duas colunas
+            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            
+            // Coluna esquerda
+            const leftColumnX = 15;
+            let leftColumnY = yPos;
+            docPdf.setFont(undefined, 'bold');
+            docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+            leftColumnY += 6;
+            docPdf.setFont(undefined, 'normal');
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            if (selectedOrder.projectName) {
+                docPdf.text(`Projeto: ${selectedOrder.projectName}`, leftColumnX, leftColumnY);
+                leftColumnY += 5;
+            }
+            
+            // Coluna direita
+            const rightColumnX = pageWidth / 2 + 10;
+            let rightColumnY = yPos + 6; // Alinha com o início dos dados
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            if (selectedOrder.deliveryDate) {
+                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+                rightColumnY += 5;
+            }
+            docPdf.text(`Status: ${selectedOrder.status}`, rightColumnX, rightColumnY);
+            
+            yPos = Math.max(leftColumnY, rightColumnY) + 10;
+
+            // Tabela do cronograma
+            const tableBody: any[][] = [];
+            selectedOrder.items.forEach(item => {
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    // Cabeçalho do item com código, descrição e quantidade na mesma linha
+                    const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
+                    tableBody.push([{ 
+                        content: itemHeader, 
+                        colSpan: 5, 
+                        styles: { 
+                            fontStyle: 'bold', 
+                            fillColor: '#f0f0f0',
+                            fontSize: 9
+                        } 
+                    }]);
+                    
+                    // Etapas do item
+                    item.productionPlan.forEach(stage => {
+                        tableBody.push([
+                            `  • ${stage.stageName}`,
+                            stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : 'N/A',
+                            stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : 'N/A',
+                            `${stage.durationDays || 0} dia(s)`,
+                            stage.status,
+                        ]);
+                    });
+                    
+                    // Linha em branco para separar itens
+                    tableBody.push([{ content: '', colSpan: 5, styles: { minCellHeight: 3 } }]);
+                }
+            });
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Etapa', 'Início Previsto', 'Fim Previsto', 'Duração', 'Status']],
+                body: tableBody,
+                styles: { 
+                    fontSize: 8,
+                    cellPadding: 2
+                },
+                headStyles: { 
+                    fillColor: [37, 99, 235], 
+                    fontSize: 9, 
+                    textColor: 255,
+                    fontStyle: 'bold'
+                },
+                columnStyles: {
+                    0: { cellWidth: 60 }, // Etapa
+                    1: { cellWidth: 25, halign: 'center' }, // Início
+                    2: { cellWidth: 25, halign: 'center' }, // Fim
+                    3: { cellWidth: 20, halign: 'center' }, // Duração
+                    4: { cellWidth: 25, halign: 'center' }, // Status
+                },
+                didParseCell: (data) => {
+                    if (data.cell.raw && (data.cell.raw as any).colSpan) {
+                        data.cell.styles.halign = 'left';
+                    }
+                },
+                margin: { left: 15, right: 15 }
+            });
+
+            // Rodapé com informações adicionais
+            const finalY = (docPdf as any).lastAutoTable.finalY;
+            const pageHeight = docPdf.internal.pageSize.height;
+            
+            if (finalY + 30 < pageHeight - 20) {
+                yPos = finalY + 15;
+                docPdf.setFontSize(8).setFont(undefined, 'italic');
+                docPdf.text(
+                    `Documento gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    yPos,
+                    { align: 'center' }
+                );
+            }
+
+            docPdf.save(`Cronograma_Pedido_${selectedOrder.quotationNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
+
+        } catch (error) {
+            console.error("Error generating schedule PDF:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar cronograma",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
+
+    const handleOpenProgressModal = async (item: OrderItem) => {
+        setItemToTrack(item);
+        setIsProgressModalOpen(true);
+        setEditedPlan([]);
+        setIsFetchingPlan(true);
+
+        try {
+            let productTemplateMap = new Map<string, number>();
+            if (item.code) {
+                const productRef = doc(db, "companies", "mecald", "products", item.code);
+                const productSnap = await getDoc(productRef);
+                if (productSnap.exists()) {
+                    const template = productSnap.data().productionPlanTemplate || [];
+                    template.forEach((stage: any) => {
+                        productTemplateMap.set(stage.stageName, stage.durationDays || 0);
+                    });
+                }
+            }
+
+            let finalPlan: ProductionStage[];
+
+            if (item.productionPlan && item.productionPlan.length > 0) {
+                finalPlan = item.productionPlan.map(stage => ({
+                    ...stage,
+                    startDate: stage.startDate ? new Date(stage.startDate) : null,
+                    completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
+                    durationDays: stage.durationDays ?? productTemplateMap.get(stage.stageName) ?? 0,
+                }));
+            } else {
+                finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, durationDays]) => ({
+                    stageName,
+                    durationDays,
+                    status: "Pendente",
+                    startDate: null,
+                    completedDate: null,
+                }));
+            }
+            setEditedPlan(finalPlan);
+
+        } catch(error) {
+            console.error("Error preparing production plan:", error);
+            toast({ variant: "destructive", title: "Erro ao carregar plano", description: "Não foi possível carregar os dados do plano." });
+            setEditedPlan([]);
+        } finally {
+            setIsFetchingPlan(false);
+        }
+    };
+
+    const handleSaveProgress = async () => {
+        if (!selectedOrder || !itemToTrack) return;
+    
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            const currentOrderSnap = await getDoc(orderRef);
+            if (!currentOrderSnap.exists()) {
+                throw new Error("Pedido não encontrado no banco de dados.");
+            }
+            const currentOrderData = currentOrderSnap.data();
+
+            const itemsForFirestore = currentOrderData.items.map((item: any) => {
+                let planForFirestore: any[];
+    
+                if (item.id === itemToTrack.id) {
+                    planForFirestore = editedPlan.map(p => ({
+                        ...p,
+                        startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
+                        completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
+                    }));
+                } else {
+                    planForFirestore = (item.productionPlan || []).map((p: any) => ({
+                        ...p,
+                        startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
+                        completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                    }));
+                }
+                const { id, product_code, ...restOfItem } = item as any;
+                return {...restOfItem, id: item.id, productionPlan: planForFirestore };
+            });
+    
+            await updateDoc(orderRef, { items: itemsForFirestore });
+
+            const updatedItemsForCheck = itemsForFirestore.map((item: any) => ({
+                ...item,
+                productionPlan: (item.productionPlan || []).map((p: any) => ({
+                    ...p,
+                    startDate: p.startDate?.toDate ? p.startDate.toDate() : p.startDate,
+                    completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : p.completedDate,
+                }))
+            }));
+            
+            const allItemsCompleted = updatedItemsForCheck.every(
+                (item: any) => {
+                    if (item.productionPlan && item.productionPlan.length > 0) {
+                         return item.productionPlan.every((p: any) => p.status === 'Concluído');
+                    }
+                    return true;
+                }
+            );
+
+            if (allItemsCompleted && selectedOrder.status !== 'Concluído') {
+                await updateDoc(orderRef, { status: "Concluído" });
+                toast({ 
+                    title: "Pedido Concluído!", 
+                    description: "Todos os itens foram finalizados e o status do pedido foi atualizado automaticamente." 
+                });
+            } else {
+                toast({ title: "Progresso salvo!", description: "As etapas de produção foram atualizadas." });
+            }
+            
+            setIsProgressModalOpen(false);
+            setItemToTrack(null);
+    
+            const allOrders = await fetchOrders();
+            const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
+            if (updatedOrderInList) {
+                setSelectedOrder(updatedOrderInList);
+                 form.reset({
+                    ...updatedOrderInList,
+                    status: updatedOrderInList.status as any,
+                });
+            }
+
+        } catch (error) {
+            console.error("Error saving progress:", error);
+            toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar o progresso do item." });
+        }
+    };
+    
+    const handleCopyProgress = (itemToCopy: OrderItem) => {
+        setProgressClipboard(itemToCopy);
+        toast({
+            title: "Progresso copiado!",
+            description: `Selecione 'Colar' no item de destino para aplicar as etapas de "${itemToCopy.description}".`,
+        });
+    };
+
+    const handleCancelCopy = () => {
+        setProgressClipboard(null);
+    };
+
+    const handlePasteProgress = async (targetItem: OrderItem) => {
+        if (!progressClipboard || !selectedOrder) {
+            toast({ variant: "destructive", title: "Erro", description: "Nenhum progresso na área de transferência." });
+            return;
+        }
+
+        try {
+            const sourceProductionPlan = progressClipboard.productionPlan || [];
+            
+            const updatedItems = selectedOrder.items.map(item => {
+                if (item.id === targetItem.id) {
+                    const newPlan = JSON.parse(JSON.stringify(sourceProductionPlan));
+                    return { ...item, productionPlan: newPlan };
+                }
+                return item;
+            });
+
+            const itemsForFirestore = updatedItems.map(item => {
+                const planForFirestore = (item.productionPlan || []).map(p => ({
+                    ...p,
+                    startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
+                    completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
+                }));
+                
+                return {
+                    ...item,
+                    productionPlan: planForFirestore,
+                    itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
+                    shippingDate: item.shippingDate ? Timestamp.fromDate(new Date(item.shippingDate)) : null,
+                };
+            });
+
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            await updateDoc(orderRef, { items: itemsForFirestore });
+
+            toast({ title: "Progresso colado!", description: `Etapas aplicadas ao item "${targetItem.description}".` });
+            
+            const allOrders = await fetchOrders();
+            const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
+            if (updatedOrder) {
+                setSelectedOrder(updatedOrder);
+                form.reset({
+                    ...updatedOrder,
+                    status: updatedOrder.status as any,
+                });
+            }
+
+        } catch (error) {
+            console.error("Error pasting progress:", error);
+            toast({ variant: "destructive", title: "Erro ao colar", description: "Não foi possível colar o progresso." });
+        }
+    };
+
+    const handleRemoveStageFromPlan = (indexToRemove: number) => {
+        setEditedPlan(editedPlan.filter((_, index) => index !== indexToRemove));
+    };
+
+    const handleAddStageToPlan = () => {
+        const trimmedName = newStageNameForPlan.trim();
+        if (!trimmedName) {
+        toast({
+            variant: "destructive",
+            title: "Nome da etapa inválido",
+            description: "O nome da etapa não pode estar em branco.",
+        });
+        return;
+        }
+        const newStage: ProductionStage = {
+            stageName: trimmedName,
+            status: "Pendente",
+            startDate: null,
+            completedDate: null,
+            durationDays: 0,
+        };
+        setEditedPlan([...editedPlan, newStage]);
+        setNewStageNameForPlan("");
+    };
+
+    return (
+        <div className="w-full">
+            <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+                <div className="flex items-center justify-between space-y-2">
+                    <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de Produção</h1>
+                     <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                            placeholder="Buscar por nº, OS, projeto, cliente..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-9 w-80"
+                        />
+                    </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <StatCard
+                        title="Total de Pedidos"
+                        value={dashboardStats.totalOrders.toString()}
+                        icon={Package}
+                        description={`${dashboardStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg no total`}
+                    />
+                    <StatCard
+                        title="Pedidos Concluídos"
+                        value={dashboardStats.completedOrders.toString()}
+                        icon={CheckCircle}
+                        description={`${dashboardStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg concluídas`}
+                    />
+                    <StatCard
+                        title="Em Andamento"
+                        value={dashboardStats.inProgressOrders.toString()}
+                        icon={PlayCircle}
+                        description={`${dashboardStats.inProgressWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg em produção`}
+                    />
+                    <StatCard
+                        title="Pedidos Atrasados"
+                        value={dashboardStats.delayedOrders.toString()}
+                        icon={AlertTriangle}
+                        description="Pedidos com data de entrega vencida"
+                    />
+                </div>
+
+                 <Card className="p-4">
+                    <div className="flex flex-wrap items-center gap-4">
+                        <span className="text-sm font-medium">Filtrar por:</span>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos os Status</SelectItem>
+                                {uniqueStatuses.map(status => (
+                                    <SelectItem key={status} value={status}>{status}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={customerFilter} onValueChange={setCustomerFilter}>
+                            <SelectTrigger className="w-[240px]">
+                                <SelectValue placeholder="Cliente" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos os Clientes</SelectItem>
+                                {customers.map(customer => (
+                                    <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant={"outline"} className={cn("w-[240px] justify-start text-left font-normal", !dateFilter && "text-muted-foreground")}>
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {dateFilter ? format(dateFilter, "dd/MM/yyyy") : <span>Data de Entrega</span>}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0">
+                                <Calendar mode="single" selected={dateFilter} onSelect={setDateFilter} initialFocus />
+                            </PopoverContent>
+                        </Popover>
+                        
+                        {hasActiveFilters && (
+                            <Button variant="ghost" onClick={clearFilters}>
+                                <X className="mr-2 h-4 w-4" />
+                                Limpar Filtros
+                            </Button>
+                        )}
+                    </div>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Lista de Pedidos</CardTitle>
+                        <CardDescription>Acompanhe todos os pedidos de produção aprovados.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoading ? (
+                            <div className="space-y-4">
+                                <Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" />
+                                <Skeleton className="h-10 w-full" />
+                            </div>
+                        ) : (
+                           <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+
+            <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) { setIsEditing(false); setSelectedItems(new Set()); setProgressClipboard(null); } }}>
+                <SheetContent className="w-full sm:max-w-4xl">
+                    {selectedOrder && (
+                        <div>
+                            <SheetHeader>
+                                <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
+                                <SheetDescription>
+                                    Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
+                                </SheetDescription>
+                            </SheetHeader>
+                            
+                            {isEditing ? (
+                                <Form {...form}>
+                                    <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-[calc(100%-4rem)]">
+                                        <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
+                                            <div className="space-y-6">
+                                                <Card className="p-4 bg-secondary/50">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                                        <FormField control={form.control} name="customer" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Cliente</FormLabel>
+                                                                <Select
+                                                                    onValueChange={(value) => {
+                                                                        const selectedCustomer = customers.find(c => c.id === value);
+                                                                        if (selectedCustomer) field.onChange(selectedCustomer);
+                                                                    }}
+                                                                    value={field.value?.id}
+                                                                >
+                                                                    <FormControl>
+                                                                        <SelectTrigger>
+                                                                            <SelectValue placeholder="Selecione um cliente" />
+                                                                        </SelectTrigger>
+                                                                    </FormControl>
+                                                                    <SelectContent>
+                                                                        {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                         <FormField control={form.control} name="projectName" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Projeto do Cliente</FormLabel>
+                                                                <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                        <FormField control={form.control} name="internalOS" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>OS Interna</FormLabel>
+                                                                <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField
+                                                            control={form.control}
+                                                            name="status"
+                                                            render={({ field }) => (
+                                                                <FormItem>
+                                                                    <FormLabel>Status do Pedido</FormLabel>
+                                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                        <FormControl>
+                                                                            <SelectTrigger>
+                                                                                <SelectValue placeholder="Selecione um status" />
+                                                                            </SelectTrigger>
+                                                                        </FormControl>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
+                                                                            <SelectItem value="Em Produção">Em Produção</SelectItem>
+                                                                            <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
+                                                                            <SelectItem value="Concluído">Concluído</SelectItem>
+                                                                            <SelectItem value="Cancelado">Cancelado</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                    <FormMessage />
+                                                                </FormItem>
+                                                            )}
+                                                        />
+                                                    </div>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                                                        <FormField control={form.control} name="quotationNumber" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Nº Pedido (Compra)</FormLabel>
+                                                                <FormControl><Input placeholder="Nº do Pedido de Compra do Cliente" {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField control={form.control} name="deliveryDate" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Data de Entrega</FormLabel>
+                                                                <Popover>
+                                                                    <PopoverTrigger asChild>
+                                                                        <FormControl>
+                                                                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                            </Button>
+                                                                        </FormControl>
+                                                                    </PopoverTrigger>
+                                                                    <PopoverContent className="w-auto p-0">
+                                                                        <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                    </PopoverContent>
+                                                                </Popover>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                    </div>
+                                                    <div className="space-y-4 mt-6">
+                                                        <FormField control={form.control} name="driveLink" render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Link da Pasta (Google Drive)</FormLabel>
+                                                                <FormControl><Input type="url" placeholder="https://drive.google.com/..." {...field} value={field.value ?? ''} /></FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}/>
+                                                    </div>
+                                                </Card>
+
+                                                <Card>
+                                                    <CardHeader><CardTitle>Checklist de Documentos</CardTitle></CardHeader>
+                                                    <CardContent className="space-y-4">
+                                                        <FormField control={form.control} name="documents.drawings" render={({ field }) => (
+                                                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                                                <div className="space-y-0.5">
+                                                                    <FormLabel>Desenhos Técnicos</FormLabel>
+                                                                    <FormDescription>Marque se os desenhos foram recebidos e estão na pasta.</FormDescription>
+                                                                </div>
+                                                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField control={form.control} name="documents.inspectionTestPlan" render={({ field }) => (
+                                                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                                                <div className="space-y-0.5">
+                                                                    <FormLabel>Plano de Inspeção e Testes (PIT)</FormLabel>
+                                                                    <FormDescription>Marque se o plano de inspeção foi recebido.</FormDescription>
+                                                                </div>
+                                                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                                                            </FormItem>
+                                                        )}/>
+                                                        <FormField control={form.control} name="documents.paintPlan" render={({ field }) => (
+                                                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                                                <div className="space-y-0.5">
+                                                                    <FormLabel>Plano de Pintura</FormLabel>
+                                                                    <FormDescription>Marque se o plano de pintura foi recebido.</FormDescription>
+                                                                </div>
+                                                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                                                            </FormItem>
+                                                        )}/>
+                                                    </CardContent>
+                                                </Card>
+
+                                                <Card>
+                                                    <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
+                                                    <CardContent className="space-y-4">
+                                                        {fields.map((field, index) => {
+                                                            const itemProgress = calculateItemProgress(watchedItems[index] || {});
+                                                            return (
+                                                            <Card key={field.id} className="p-4 bg-secondary">
+                                                                <div className="space-y-4">
+                                                                    <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
+                                                                        <FormItem>
+                                                                            <FormLabel>Descrição do Item {index + 1}</FormLabel>
+                                                                            <FormControl><Textarea placeholder="Descrição completa do item" {...field} /></FormControl>
+                                                                            <FormMessage />
+                                                                        </FormItem>
+                                                                    )}/>
+                                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                                         <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Código</FormLabel>
+                                                                                <FormControl><Input placeholder="Cód. Produto" {...field} value={field.value || ''} /></FormControl>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
+                                                                         <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Quantidade</FormLabel>
+                                                                                <FormControl><Input type="number" placeholder="0" {...field} value={field.value ?? ''} /></FormControl>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
+                                                                         <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Peso Unit. (kg)</FormLabel>
+                                                                                <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
+                                                                        <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
+                                                                            <FormItem>
+                                                                                <FormLabel>Entrega do Item</FormLabel>
+                                                                                <Popover>
+                                                                                    <PopoverTrigger asChild>
+                                                                                        <FormControl>
+                                                                                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                                {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                                            </Button>
+                                                                                        </FormControl>
+                                                                                    </PopoverTrigger>
+                                                                                    <PopoverContent className="w-auto p-0">
+                                                                                        <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                                    </PopoverContent>
+                                                                                </Popover>
+                                                                                <FormMessage />
+                                                                            </FormItem>
+                                                                        )}/>
+                                                                    </div>
+                                                                    {itemProgress === 100 && (
+                                                                        <>
+                                                                            <Separator className="my-2" />
+                                                                            <h5 className="text-sm font-semibold">Informações de Envio (Item Concluído)</h5>
+                                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                                <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
+                                                                                    <FormItem>
+                                                                                        <FormLabel>Lista de Embarque (LE)</FormLabel>
+                                                                                        <FormControl><Input placeholder="Nº da LE" {...field} value={field.value ?? ''} /></FormControl>
+                                                                                        <FormMessage />
+                                                                                    </FormItem>
+                                                                                )}/>
+                                                                                 <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
+                                                                                    <FormItem>
+                                                                                        <FormLabel>Nota Fiscal (NF-e)</FormLabel>
+                                                                                        <FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl>
+                                                                                        <FormMessage />
+                                                                                    </FormItem>
+                                                                                )}/>
+                                                                                 <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
+                                                                                    <FormItem>
+                                                                                        <FormLabel>Data de Envio</FormLabel>
+                                                                                        <Popover>
+                                                                                            <PopoverTrigger asChild>
+                                                                                                <FormControl>
+                                                                                                    <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                                                                                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                                        {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                                                    </Button>
+                                                                                                </FormControl>
+                                                                                            </PopoverTrigger>
+                                                                                            <PopoverContent className="w-auto p-0">
+                                                                                                <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                                            </PopoverContent>
+                                                                                        </Popover>
+                                                                                        <FormMessage />
+                                                                                    </FormItem>
+                                                                                )}/>
+                                                                            </div>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            </Card>
+                                                        )})}
+                                                    </CardContent>
+                                                </Card>
+                                            </div>
+                                        </ScrollArea>
+                                        <SheetFooter className="py-4 border-t">
+                                            <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
+                                            <Button type="submit" disabled={form.formState.isSubmitting}>
+                                                {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                                            </Button>
+                                        </SheetFooter>
+                                    </form>
+                                </Form>
+                            ) : (
+                                <>
+                                    <ScrollArea className="h-[calc(100vh-12rem)]">
+                                        <div className="space-y-6 py-6 pr-6">
+                                            <Card>
+                                                <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
+                                                <CardContent className="space-y-3 text-sm">
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground">Status</span>
+                                                        {(() => {
+                                                            const statusProps = getStatusProps(selectedOrder.status);
+                                                            return <Badge variant={statusProps.variant} className={statusProps.colorClass}><statusProps.icon className="mr-2 h-4 w-4" />{statusProps.label}</Badge>;
+                                                        })()}
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
+                                                        <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
+                                                        <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><FolderGit2 className="mr-2 h-4 w-4" />Pasta no Drive</span>
+                                                        {selectedOrder.driveLink ? (
+                                                            <Button variant="link" asChild className="p-0 h-auto text-base">
+                                                                <a href={selectedOrder.driveLink} target="_blank" rel="noopener noreferrer">
+                                                                    Abrir Link
+                                                                </a>
+                                                            </Button>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">Não definido</span>
+                                                        )}
+                                                    </div>
+                                                    <Separator className="my-3" />
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><ListChecks className="mr-2 h-4 w-4" />Progresso Geral</span>
+                                                        <div className="flex items-center gap-2 w-1/2">
+                                                            <Progress value={calculateOrderProgress(selectedOrder)} className="h-2 flex-1" />
+                                                            <span className="font-semibold">{Math.round(calculateOrderProgress(selectedOrder))}%</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between items-center font-bold text-lg pt-2">
+                                                        <span className="font-medium text-muted-foreground flex items-center"><Weight className="mr-2 h-5 w-5"/>Peso Total</span>
+                                                        <span className="text-primary">{selectedOrder.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card>
+                                                <CardHeader><CardTitle>Checklist de Documentos</CardTitle></CardHeader>
+                                                <CardContent className="space-y-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <Label htmlFor="drawings-view" className="flex items-center gap-2 text-sm font-normal"><File className="h-4 w-4" />Desenhos Técnicos</Label>
+                                                        <Checkbox id="drawings-view" checked={selectedOrder.documents?.drawings} disabled />
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <Label htmlFor="inspection-view" className="flex items-center gap-2 text-sm font-normal"><ClipboardCheck className="h-4 w-4" />Plano de Inspeção e Testes (PIT)</Label>
+                                                        <Checkbox id="inspection-view" checked={selectedOrder.documents?.inspectionTestPlan} disabled />
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <Label htmlFor="paint-view" className="flex items-center gap-2 text-sm font-normal"><Palette className="h-4 w-4" />Plano de Pintura</Label>
+                                                        <Checkbox id="paint-view" checked={selectedOrder.documents?.paintPlan} disabled />
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+
+                                            <Card>
+                                                <CardHeader><CardTitle>Itens do Pedido</CardTitle></CardHeader>
+                                                <CardContent>
+                                                    <Table>
+                                                        <TableHeader>
+                                                            <TableRow>
+                                                                <TableHead className="w-12">
+                                                                    <Checkbox
+                                                                        checked={
+                                                                            selectedItems.size > 0 &&
+                                                                            (selectedOrder.items.length === selectedItems.size
+                                                                                ? true
+                                                                                : 'indeterminate')
+                                                                        }
+                                                                        onCheckedChange={handleSelectAll}
+                                                                    />
+                                                                </TableHead>
+                                                                <TableHead>Descrição</TableHead>
+                                                                <TableHead className="text-center w-[80px]">Qtd.</TableHead>
+                                                                <TableHead className="text-center w-[120px]">Progresso</TableHead>
+                                                                <TableHead className="text-right w-[120px]">Peso Total</TableHead>
+                                                                <TableHead className="text-center w-[120px]">Ações</TableHead>
+                                                            </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                            {selectedOrder.items.map((item) => {
+                                                                const itemProgress = calculateItemProgress(item);
+                                                                return (
+                                                                <TableRow key={item.id!}>
+                                                                    <TableCell>
+                                                                        <Checkbox
+                                                                            checked={selectedItems.has(item.id!)}
+                                                                            onCheckedChange={() => handleItemSelection(item.id!)}
+                                                                            aria-label={`Select item ${item.description}`}
+                                                                        />
+                                                                    </TableCell>
+                                                                    <TableCell className="font-medium">
+                                                                        {item.description}
+                                                                        {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
+                                                                        {item.itemDeliveryDate && (
+                                                                            <span className="block text-xs text-muted-foreground">
+                                                                                Entrega: {format(item.itemDeliveryDate, 'dd/MM/yy')}
+                                                                            </span>
+                                                                        )}
+                                                                        {itemProgress === 100 && (item.shippingList || item.invoiceNumber || item.shippingDate) && (
+                                                                            <div className="mt-1 pt-1 border-t border-dashed border-muted-foreground/20 text-xs text-muted-foreground space-y-0.5">
+                                                                                {item.shippingList && <p>LE: <span className="font-semibold">{item.shippingList}</span></p>}
+                                                                                {item.invoiceNumber && <p>NF-e: <span className="font-semibold">{item.invoiceNumber}</span></p>}
+                                                                                {item.shippingDate && <p>Envio: <span className="font-semibold">{format(item.shippingDate, 'dd/MM/yy')}</span></p>}
+                                                                            </div>
+                                                                        )}
+                                                                    </TableCell>
+                                                                    <TableCell className="text-center">{item.quantity}</TableCell>
+                                                                    <TableCell>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Progress value={itemProgress} className="h-2 flex-1" />
+                                                                            <span className="text-sm font-medium w-8 text-right">{Math.round(itemProgress)}%</span>
+                                                                        </div>
+                                                                    </TableCell>
+                                                                    <TableCell className="text-right font-semibold">{( (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0) ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                                                                    <TableCell className="text-center">
+                                                                        <div className="flex items-center justify-center gap-1">
+                                                                            <TooltipProvider>
+                                                                                <Tooltip>
+                                                                                    <TooltipTrigger asChild>
+                                                                                        <Button variant="ghost" size="icon" onClick={() => handleOpenProgressModal(item)}>
+                                                                                            <ListChecks className="h-4 w-4" />
+                                                                                        </Button>
+                                                                                    </TooltipTrigger>
+                                                                                    <TooltipContent><p>Editar Progresso</p></TooltipContent>
+                                                                                </Tooltip>
+                                                                            
+                                                                                {progressClipboard ? (
+                                                                                    progressClipboard.id === item.id ? (
+                                                                                        <Tooltip>
+                                                                                            <TooltipTrigger asChild>
+                                                                                                <Button variant="ghost" size="icon" onClick={handleCancelCopy} className="text-destructive hover:text-destructive">
+                                                                                                    <XCircleIcon className="h-4 w-4" />
+                                                                                                </Button>
+                                                                                            </TooltipTrigger>
+                                                                                            <TooltipContent><p>Cancelar Cópia</p></TooltipContent>
+                                                                                        </Tooltip>
+                                                                                    ) : (
+                                                                                        <Tooltip>
+                                                                                            <TooltipTrigger asChild>
+                                                                                                <Button variant="ghost" size="icon" onClick={() => handlePasteProgress(item)}>
+                                                                                                    <ClipboardPaste className="h-4 w-4" />
+                                                                                                </Button>
+                                                                                            </TooltipTrigger>
+                                                                                            <TooltipContent><p>Colar progresso de "{progressClipboard.description}"</p></TooltipContent>
+                                                                                        </Tooltip>
+                                                                                    )
+                                                                                ) : (
+                                                                                    <Tooltip>
+                                                                                        <TooltipTrigger asChild>
+                                                                                            <Button variant="ghost" size="icon" onClick={() => handleCopyProgress(item)} disabled={!item.productionPlan || item.productionPlan.length === 0}>
+                                                                                                <Copy className="h-4 w-4" />
+                                                                                            </Button>
+                                                                                        </TooltipTrigger>
+                                                                                        <TooltipContent><p>Copiar Progresso</p></TooltipContent>
+                                                                                    </Tooltip>
+                                                                                )}
+                                                                            </TooltipProvider>
+                                                                        </div>
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            )})}
+                                                        </TableBody>
+                                                    </Table>
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+                                    </ScrollArea>
+                                    <SheetFooter className="pt-4 pr-6 border-t flex flex-wrap gap-2 sm:justify-between items-center">
+                                        <div className="flex gap-2 flex-wrap">
+                                            <Button 
+                                                onClick={handleGeneratePackingSlip} 
+                                                disabled={selectedItems.size === 0}
+                                            >
+                                                <FileText className="mr-2 h-4 w-4" />
+                                                Emitir Romaneio ({selectedItems.size})
+                                            </Button>
+                                             <Button 
+                                                onClick={handleExportSchedule}
+                                                variant="outline"
+                                            >
+                                                <GanttChart className="mr-2 h-4 w-4" />
+                                                Exportar Cronograma
+                                            </Button>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Button onClick={() => setIsEditing(true)}>
+                                                <Edit className="mr-2 h-4 w-4" />
+                                                Editar Pedido
+                                            </Button>
+                                            <Button variant="destructive" onClick={() => selectedOrder && handleDeleteClick(selectedOrder)}>
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Excluir
+                                            </Button>
+                                        </div>
+                                    </SheetFooter>
+                                </>
+                            )}
+                        </div>
+                    )}
+                </SheetContent>
+            </Sheet>
+
+            <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
+                <DialogContent className="sm:max-w-3xl">
+                    <DialogHeader>
+                      <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
+                      <DialogDescription>
+                        Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
+                      </DialogDescription>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                        <div className="flex items-center gap-2">
+                          <CalendarIcon className="h-4 w-4 text-blue-600" />
+                          <p className="text-sm text-blue-800">
+                            <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), 
+                            excluindo feriados nacionais brasileiros.
+                          </p>
+                        </div>
+                      </div>
+                    </DialogHeader>
+                    <ScrollArea className="max-h-[60vh]">
+                      <div className="space-y-4 p-1 pr-4">
+                        {isFetchingPlan ? (
+                          <div className="flex justify-center items-center h-48">
+                            <div className="text-center">
+                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                              <p>Buscando plano de fabricação...</p>
+                            </div>
+                          </div>
+                        ) : (editedPlan && editedPlan.length > 0) ? (
+                          editedPlan.map((stage, index) => (
+                            <Card key={index} className="p-4 relative">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-destructive"
+                                onClick={() => handleRemoveStageFromPlan(index)}
+                              >
+                                <XCircleIcon className="h-4 w-4" />
+                                <span className="sr-only">Remover etapa</span>
+                              </Button>
+                              <CardTitle className="text-lg mb-4 pr-8 flex items-center gap-2">
+                                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+                                  {index + 1}
+                                </span>
+                                {stage.stageName}
+                              </CardTitle>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Status</Label>
+                                  <Select 
+                                    value={stage.status} 
+                                    onValueChange={(value) => {
+                                      const newPlan = [...editedPlan];
+                                      newPlan[index] = { ...newPlan[index], status: value };
+                                      setEditedPlan(newPlan);
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Selecione o status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Pendente">
+                                        <div className="flex items-center gap-2">
+                                          <Hourglass className="h-4 w-4 text-yellow-500" />
+                                          Pendente
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="Em Andamento">
+                                        <div className="flex items-center gap-2">
+                                          <PlayCircle className="h-4 w-4 text-blue-500" />
+                                          Em Andamento
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="Concluído">
+                                        <div className="flex items-center gap-2">
+                                          <CheckCircle className="h-4 w-4 text-green-500" />
+                                          Concluído
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Duração (dias úteis)</Label>
+                                  <Input
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    placeholder="Ex: 3"
+                                    value={stage.durationDays ?? ''}
+                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
+                                  />
+                                  <p className="text-xs text-muted-foreground">
+                                    Apenas dias úteis (seg-sex, exceto feriados)
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                <div className="space-y-2">
+                                  <Label>Data de Início</Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button 
+                                        variant={"outline"} 
+                                        className={cn(
+                                          "w-full justify-start text-left font-normal", 
+                                          !stage.startDate && "text-muted-foreground",
+                                          stage.startDate && !isBusinessDay(stage.startDate) && "border-yellow-500 bg-yellow-50"
+                                        )}
+                                      >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0">
+                                      <Calendar 
+                                        mode="single" 
+                                        selected={stage.startDate ? new Date(stage.startDate) : undefined} 
+                                        onSelect={(date) => handlePlanChange(index, 'startDate', date)} 
+                                        initialFocus 
+                                        modifiers={{
+                                          weekend: (date) => isWeekend(date),
+                                          holiday: (date) => isHoliday(date)
+                                        }}
+                                        modifiersStyles={{
+                                          weekend: { 
+                                            backgroundColor: '#fef3c7', 
+                                            color: '#d97706' 
+                                          },
+                                          holiday: { 
+                                            backgroundColor: '#fecaca', 
+                                            color: '#dc2626' 
+                                          }
+                                        }}
+                                      />
+                                      <div className="p-3 border-t text-xs text-muted-foreground">
+                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                  {stage.startDate && !isBusinessDay(stage.startDate) && (
+                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      Esta data cai em fim de semana ou feriado
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Data de Conclusão</Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button 
+                                        variant={"outline"} 
+                                        className={cn(
+                                          "w-full justify-start text-left font-normal", 
+                                          !stage.completedDate && "text-muted-foreground",
+                                          stage.completedDate && !isBusinessDay(stage.completedDate) && "border-yellow-500 bg-yellow-50"
+                                        )}
+                                      >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0">
+                                      <Calendar 
+                                        mode="single" 
+                                        selected={stage.completedDate ? new Date(stage.completedDate) : undefined} 
+                                        onSelect={(date) => handlePlanChange(index, 'completedDate', date)} 
+                                        initialFocus 
+                                        modifiers={{
+                                          weekend: (date) => isWeekend(date),
+                                          holiday: (date) => isHoliday(date)
+                                        }}
+                                        modifiersStyles={{
+                                          weekend: { 
+                                            backgroundColor: '#fef3c7', 
+                                            color: '#d97706' 
+                                          },
+                                          holiday: { 
+                                            backgroundColor: '#fecaca', 
+                                            color: '#dc2626' 
+                                          }
+                                        }}
+                                      />
+                                      <div className="p-3 border-t text-xs text-muted-foreground">
+                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                  {stage.completedDate && !isBusinessDay(stage.completedDate) && (
+                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      Esta data cai em fim de semana ou feriado
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              {stage.startDate && stage.completedDate && (
+                                <BusinessDayInfo 
+                                  startDate={stage.startDate} 
+                                  endDate={stage.completedDate} 
+                                  expectedDuration={Number(stage.durationDays) || 1} 
+                                />
+                              )}
+                              {index < editedPlan.length - 1 && (
+                                <div className="flex justify-center mt-4">
+                                  <div className="flex items-center gap-2 text-muted-foreground">
+                                    <div className="w-4 h-0.5 bg-border"></div>
+                                    <ArrowDown className="h-4 w-4" />
+                                    <div className="w-4 h-0.5 bg-border"></div>
+                                  </div>
+                                </div>
+                              )}
+                            </Card>
+                          ))
+                        ) : (
+                          <div className="text-center text-muted-foreground py-8">
+                            <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                            <p className="text-lg font-medium">Nenhuma etapa de fabricação definida</p>
+                            <p className="text-sm">Você pode definir as etapas na tela de Produtos ou adicionar manualmente abaixo.</p>
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                    <div className="pt-4 border-t">
+                      <Label className="text-sm font-medium">Adicionar Nova Etapa</Label>
+                      <div className="flex items-center gap-2 mt-2">
+                        <Input
+                          placeholder="Nome da nova etapa"
+                          value={newStageNameForPlan}
+                          onChange={(e) => setNewStageNameForPlan(e.target.value)}
+                        />
+                        <Button 
+                          type="button" 
+                          variant="secondary" 
+                          onClick={handleAddStageToPlan}
+                          disabled={!newStageNameForPlan.trim()}
+                        >
+                          <PlusCircle className="mr-2 h-4 w-4" />
+                          Adicionar
+                        </Button>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <div className="flex items-center justify-between w-full">
+                        <div className="text-sm text-muted-foreground">
+                          {editedPlan.length > 0 && (
+                            <span>
+                              {editedPlan.length} etapa{editedPlan.length !== 1 ? 's' : ''} configurada{editedPlan.length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>
+                            Cancelar
+                          </Button>
+                          <Button 
+                            onClick={handleSaveProgress}
+                            disabled={editedPlan.length === 0}
+                          >
+                            <CalendarCheck className="mr-2 h-4 w-4" />
+                            Salvar Progresso
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta ação não pode ser desfeita. Isso excluirá permanentemente o pedido Nº <span className="font-bold">{orderToDelete?.quotationNumber}</span> do sistema.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
+                            Sim, excluir pedido
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </div>
+    );
 }
