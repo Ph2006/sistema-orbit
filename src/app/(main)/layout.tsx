@@ -30,16 +30,16 @@ export const useAuth = () => useContext(AuthContext);
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/products", label: "Produtos", icon: ShoppingCart },
-  { href: "/orders", label: "Pedidos", icon: Package },
-  { href: "/tasks", label: "Tarefas", icon: ListChecks }, // ADICIONADO
   { href: "/customers", label: "Clientes", icon: Users },
-  { href: "/quality", label: "Qualidade", icon: ClipboardCheck },
+  { href: "/company", label: "Empresa", icon: Building },
+  { href: "/products", label: "Produtos", icon: ShoppingCart },
+  { href: "/quotations", label: "Orçamentos", icon: FileText },
+  { href: "/orders", label: "Pedidos", icon: Package },
+  { href: "/tasks", label: "Tarefas", icon: ListChecks },
   { href: "/materials", label: "Materiais", icon: Wrench },
   { href: "/costs", label: "Custos", icon: DollarSign },
-  { href: "/quotations", label: "Orçamentos", icon: FileText },
+  { href: "/quality", label: "Qualidade", icon: ClipboardCheck },
   { href: "/finance", label: "Financeiro", icon: TrendingUp },
-  { href: "/company", label: "Empresa", icon: Building },
 ];
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
