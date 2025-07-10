@@ -900,6 +900,7 @@ export default function TaskManagementPage() {
       yPos += 5;
 
       const statusCounts = {
+        'Em Andamento': selectedTasks.filter(t => t.status === 'Em Andamento').length,
         'Atribuída': selectedTasks.filter(t => t.status === 'Atribuída').length,
         'Pendente': selectedTasks.filter(t => t.status === 'Pendente').length,
         'Concluído': selectedTasks.filter(t => t.status === 'Concluído').length,
@@ -1394,17 +1395,17 @@ export default function TaskManagementPage() {
                           </TableCell>
                           <TableCell className="text-center">
                             <div className="flex items-center gap-1">
-                              {task.status === 'Pendente' && (
+                              {(task.status === 'Pendente' || task.status === 'Em Andamento') && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleAssignTask(task)}
                                 >
                                   <UserCheck className="h-4 w-4 mr-1" />
-                                  Atribuir
+                                  {task.status === 'Em Andamento' && (task.assignedResource || task.responsibleMember) ? 'Reatribuir' : 'Atribuir'}
                                 </Button>
                               )}
-                              {task.status === 'Atribuída' && (
+                              {(task.status === 'Atribuída' || task.status === 'Em Andamento') && (
                                 <>
                                   <Button
                                     variant="ghost"
