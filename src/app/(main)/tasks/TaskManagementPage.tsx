@@ -18,6 +18,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -42,7 +43,8 @@ import {
   RefreshCw,
   Activity,
   UserCheck,
-  Edit3
+  Edit3,
+  Search
 } from "lucide-react";
 
 // Types
@@ -171,6 +173,7 @@ export default function TaskManagementPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [resourceFilter, setResourceFilter] = useState<string>("all");
+  const [osFilter, setOsFilter] = useState<string>("all");
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedResourceForAssign, setSelectedResourceForAssign] = useState<string>("");
@@ -306,6 +309,7 @@ export default function TaskManagementPage() {
       
       const statusMatch = statusFilter === "all" || task.status === statusFilter;
       const priorityMatch = priorityFilter === "all" || task.priority === priorityFilter;
+      const osMatch = osFilter === "all" || task.orderNumber.toLowerCase().includes(osFilter.toLowerCase());
       
       let resourceMatch = true;
       if (resourceFilter === "unassigned") {
@@ -314,9 +318,9 @@ export default function TaskManagementPage() {
         resourceMatch = task.assignedResource === resourceFilter;
       }
       
-      return statusMatch && priorityMatch && resourceMatch;
+      return statusMatch && priorityMatch && resourceMatch && osMatch;
     });
-  }, [tasks, statusFilter, priorityFilter, resourceFilter]);
+  }, [tasks, statusFilter, priorityFilter, resourceFilter, osFilter]);
 
   // Tasks by date
   const tasksByDate = useMemo(() => {
@@ -334,6 +338,12 @@ export default function TaskManagementPage() {
     
     return grouped;
   }, [filteredTasks]);
+
+  // Unique OS numbers for filter
+  const uniqueOS = useMemo(() => {
+    const osNumbers = new Set(tasks.map(task => task.orderNumber).filter(Boolean));
+    return Array.from(osNumbers).sort();
+  }, [tasks]);
 
   // Tasks for selected date
   const tasksForSelectedDate = useMemo(() => {
@@ -475,6 +485,7 @@ export default function TaskManagementPage() {
     setStatusFilter("all");
     setPriorityFilter("all");
     setResourceFilter("all");
+    setOsFilter("all");
   };
 
   // Handlers para atribuição de recursos
@@ -720,10 +731,6 @@ export default function TaskManagementPage() {
                             <User className="h-3 w-3" />
                             {task.customer}
                           </span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {task.durationDays} dia(s)
-                          </span>
                           {task.location && (
                             <span className="flex items-center gap-1">
                               <MapPin className="h-3 w-3" />
@@ -754,53 +761,87 @@ export default function TaskManagementPage() {
         <TabsContent value="list" className="space-y-4">
           {/* Filters */}
           <Card className="p-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <span className="text-sm font-medium">Filtrar por:</span>
+            <div className="space-y-4">
+              <span className="text-sm font-medium">Filtrar tarefas por:</span>
               
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os Status</SelectItem>
-                  <SelectItem value="Pendente">Pendente</SelectItem>
-                  <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* Primeira linha de filtros */}
+              <div className="flex flex-wrap items-center gap-4">
+                {/* Filtro por OS - Input de busca e Select */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium text-muted-foreground min-w-[40px]">OS:</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar por OS..."
+                      value={osFilter === "all" ? "" : osFilter}
+                      onChange={(e) => setOsFilter(e.target.value || "all")}
+                      className="pl-9 w-[160px]"
+                    />
+                  </div>
+                  <span className="text-xs text-muted-foreground">ou</span>
+                  <Select value={osFilter} onValueChange={setOsFilter}>
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue placeholder="Selecionar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas as OS</SelectItem>
+                      {uniqueOS.map(osNumber => (
+                        <SelectItem key={osNumber} value={osNumber}>
+                          {osNumber}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os Status</SelectItem>
+                    <SelectItem value="Pendente">Pendente</SelectItem>
+                    <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Segunda linha de filtros */}
+              <div className="flex flex-wrap items-center gap-4">
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Prioridade" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as Prioridades</SelectItem>
+                    <SelectItem value="alta">Alta</SelectItem>
+                    <SelectItem value="media">Média</SelectItem>
+                    <SelectItem value="baixa">Baixa</SelectItem>
+                  </SelectContent>
+                </Select>
 
-              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Prioridade" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas as Prioridades</SelectItem>
-                  <SelectItem value="alta">Alta</SelectItem>
-                  <SelectItem value="media">Média</SelectItem>
-                  <SelectItem value="baixa">Baixa</SelectItem>
-                </SelectContent>
-              </Select>
+                <Select value={resourceFilter} onValueChange={setResourceFilter}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Recurso Atribuído" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os Recursos</SelectItem>
+                    {resources
+                      .filter(r => r.status === 'disponivel')
+                      .map(resource => (
+                        <SelectItem key={resource.id} value={resource.id}>
+                          {resource.name} ({getResourceTypeLabel(resource.type)})
+                        </SelectItem>
+                      ))}
+                    <SelectItem value="unassigned">Não Atribuídas</SelectItem>
+                  </SelectContent>
+                </Select>
 
-              <Select value={resourceFilter} onValueChange={setResourceFilter}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="Recurso Atribuído" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os Recursos</SelectItem>
-                  {resources
-                    .filter(r => r.status === 'disponivel')
-                    .map(resource => (
-                      <SelectItem key={resource.id} value={resource.id}>
-                        {resource.name} ({getResourceTypeLabel(resource.type)})
-                      </SelectItem>
-                    ))}
-                  <SelectItem value="unassigned">Não Atribuídas</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Button variant="ghost" onClick={clearFilters}>
-                <Filter className="mr-2 h-4 w-4" />
-                Limpar Filtros
-              </Button>
+                <Button variant="ghost" onClick={clearFilters}>
+                  <Filter className="mr-2 h-4 w-4" />
+                  Limpar Filtros
+                </Button>
+              </div>
             </div>
           </Card>
 
