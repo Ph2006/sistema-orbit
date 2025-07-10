@@ -492,14 +492,14 @@ export default function TaskManagementPage() {
   const handleCloseAssignDialog = () => {
     setIsAssignDialogOpen(false);
     setSelectedTask(null);
-    setSelectedResourceForAssign("");
+    setSelectedResourceForAssign("none");
   };
 
   // Handlers para atribuição de recursos
   const handleAssignResource = (task: Task) => {
     setSelectedTask(task);
-    // Garantir que o valor seja válido para o Select
-    setSelectedResourceForAssign(task.assignedResource || "");
+    // Usar "none" como valor padrão quando não há recurso atribuído
+    setSelectedResourceForAssign(task.assignedResource || "none");
     setIsAssignDialogOpen(true);
   };
 
@@ -507,8 +507,8 @@ export default function TaskManagementPage() {
     if (!selectedTask) return;
 
     try {
-      // Encontrar o recurso selecionado
-      const selectedResource = selectedResourceForAssign ? 
+      // Encontrar o recurso selecionado (apenas se não for "none")
+      const selectedResource = (selectedResourceForAssign && selectedResourceForAssign !== "none") ? 
         resources.find(r => r.id === selectedResourceForAssign) : 
         undefined;
       
@@ -517,7 +517,7 @@ export default function TaskManagementPage() {
         if (task.id === selectedTask.id) {
           return {
             ...task,
-            assignedResource: selectedResourceForAssign || undefined,
+            assignedResource: (selectedResourceForAssign === "none") ? undefined : selectedResourceForAssign,
             assignedResourceName: selectedResource?.name || undefined,
             location: selectedResource?.location || undefined,
           };
@@ -532,12 +532,12 @@ export default function TaskManagementPage() {
 
       toast({
         title: "Recurso atribuído!",
-        description: `Tarefa "${selectedTask.stageName}" foi ${selectedResourceForAssign ? 'atribuída ao recurso "' + selectedResource?.name + '"' : 'removida da atribuição'}.`,
+        description: `Tarefa "${selectedTask.stageName}" foi ${selectedResourceForAssign === "none" ? 'removida da atribuição' : 'atribuída ao recurso "' + selectedResource?.name + '"'}.`,
       });
 
       setIsAssignDialogOpen(false);
       setSelectedTask(null);
-      setSelectedResourceForAssign("");
+      setSelectedResourceForAssign("none");
 
     } catch (error) {
       console.error("Error assigning resource:", error);
@@ -753,10 +753,6 @@ export default function TaskManagementPage() {
                               {task.assignedResourceName}
                             </span>
                           )}
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {task.durationDays} dia(s)
-                          </span>
                         </div>
                       </div>
                     ))}
@@ -1158,14 +1154,14 @@ export default function TaskManagementPage() {
             <div className="space-y-2">
               <label className="text-sm font-medium">Recurso Disponível</label>
               <Select 
-                value={selectedResourceForAssign} 
-                onValueChange={(value) => setSelectedResourceForAssign(value || "")}
+                value={selectedResourceForAssign || "none"} 
+                onValueChange={(value) => setSelectedResourceForAssign(value === "none" ? "" : value)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione um recurso" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">
+                  <SelectItem value="none">
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="h-4 w-4 text-orange-500" />
                       Remover atribuição
