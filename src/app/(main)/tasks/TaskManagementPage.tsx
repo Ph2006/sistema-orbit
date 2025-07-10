@@ -279,6 +279,8 @@ const getResourceTypeLabel = (type: string) => {
     'espaco': 'Espaço',
     'mao_de_obra': 'Mão de Obra'
   };
+
+  const selectedTasksCount = tasks.filter(task => task.selected).length;
   return types[type as keyof typeof types] || type;
 };
 
@@ -300,6 +302,7 @@ export default function TaskManagementPage() {
   // Modal states
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isCompleteDialogOpen, setIsCompleteDialogOpen] = useState(false);
+  const [isRemoveAssignmentDialogOpen, setIsRemoveAssignmentDialogOpen] = useState(false);
   const [isRescheduleDialogOpen, setIsRescheduleDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   
@@ -615,10 +618,13 @@ export default function TaskManagementPage() {
       
       // Usar setDoc com merge para garantir que o documento seja criado se não existir
       await setDoc(assignmentsRef, { 
-        assignments: updatedAssignments.map(a => ({
-          ...a,
-          assignedAt: Timestamp.fromDate(a.assignedAt)
-        }))
+        assignments: updatedAssignments.map(a => {
+          const assignedAt = a.assignedAt instanceof Date ? a.assignedAt : new Date(a.assignedAt);
+          return {
+            ...a,
+            assignedAt: Timestamp.fromDate(assignedAt)
+          };
+        })
       }, { merge: true });
 
       toast({
@@ -697,10 +703,14 @@ export default function TaskManagementPage() {
         const updatedAssignments = currentAssignments.filter((a: any) => a.taskId !== selectedTask.id);
         
         await setDoc(assignmentsRef, { 
-          assignments: updatedAssignments.map((a: any) => ({
-            ...a,
-            assignedAt: a.assignedAt instanceof Timestamp ? a.assignedAt : Timestamp.fromDate(a.assignedAt)
-          }))
+          assignments: updatedAssignments.map((a: any) => {
+            const assignedAt = a.assignedAt instanceof Date ? a.assignedAt : 
+                             (a.assignedAt?.toDate ? a.assignedAt.toDate() : new Date(a.assignedAt));
+            return {
+              ...a,
+              assignedAt: Timestamp.fromDate(assignedAt)
+            };
+          })
         }, { merge: true });
       }
 
@@ -803,11 +813,20 @@ export default function TaskManagementPage() {
         });
         
         await setDoc(assignmentsRef, { 
-          assignments: updatedAssignments.map((a: any) => ({
-            ...a,
-            assignedAt: a.assignedAt instanceof Timestamp ? a.assignedAt : Timestamp.fromDate(a.assignedAt),
-            reprogrammedAt: a.reprogrammedAt ? Timestamp.fromDate(a.reprogrammedAt) : undefined
-          }))
+          assignments: updatedAssignments.map((a: any) => {
+            const assignedAt = a.assignedAt instanceof Date ? a.assignedAt : 
+                             (a.assignedAt?.toDate ? a.assignedAt.toDate() : new Date(a.assignedAt));
+            const reprogrammedAt = a.reprogrammedAt ? 
+              (a.reprogrammedAt instanceof Date ? a.reprogrammedAt : 
+               (a.reprogrammedAt?.toDate ? a.reprogrammedAt.toDate() : new Date(a.reprogrammedAt))) : 
+              undefined;
+            
+            return {
+              ...a,
+              assignedAt: Timestamp.fromDate(assignedAt),
+              reprogrammedAt: reprogrammedAt ? Timestamp.fromDate(reprogrammedAt) : undefined
+            };
+          })
         }, { merge: true });
       }
 
@@ -854,8 +873,9 @@ export default function TaskManagementPage() {
       const docSnap = await getDoc(companyRef);
       const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
       
-      const docPdf = new jsPDF();
+      const docPdf = new jsPDF('landscape'); // Formato paisagem
       const pageWidth = docPdf.internal.pageSize.width;
+      const pageHeight = docPdf.internal.pageSize.height;
       let yPos = 15;
 
       // Header
@@ -939,42 +959,50 @@ export default function TaskManagementPage() {
         const tableBody = responsibleTasks.map(task => [
           task.orderNumber || 'N/A',
           task.customer || 'N/A',
-          task.itemDescription.length > 30 ? 
-            task.itemDescription.substring(0, 30) + '...' : 
+          task.itemDescription.length > 40 ? 
+            task.itemDescription.substring(0, 40) + '...' : 
             task.itemDescription,
           task.stageName || 'N/A',
           task.assignedResourceName || 'Não atribuído',
           task.priority.charAt(0).toUpperCase() + task.priority.slice(1),
           task.status || 'Pendente',
-          '☐', // Checkbox para marcar execução
+          task.originalStartDate ? format(task.originalStartDate, 'dd/MM/yy') : 'A definir',
+          task.originalCompletedDate ? format(task.originalCompletedDate, 'dd/MM/yy') : 'A definir',
+          `${task.originalDurationDays} dia(s)`,
+          '☐', // Checkbox para Concluído
+          '☐', // Checkbox para Reprogramado
           '', // Campo para observações
         ]);
 
         autoTable(docPdf, {
           startY: yPos,
-          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Exec.', 'Observações']],
+          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Início', 'Conclusão', 'Duração', 'Concluído', 'Reprog.', 'Observações']],
           body: tableBody,
           styles: { 
-            fontSize: 7,
-            cellPadding: 2,
+            fontSize: 6,
+            cellPadding: 1.5,
           },
           headStyles: { 
             fillColor: [37, 99, 235], 
-            fontSize: 8, 
+            fontSize: 7, 
             textColor: 255, 
             halign: 'center',
             fontStyle: 'bold'
           },
           columnStyles: {
             0: { cellWidth: 18, halign: 'center' }, // Pedido
-            1: { cellWidth: 22 }, // Cliente
-            2: { cellWidth: 32 }, // Item
-            3: { cellWidth: 22 }, // Etapa
-            4: { cellWidth: 28 }, // Recurso
-            5: { cellWidth: 16, halign: 'center' }, // Prioridade
-            6: { cellWidth: 20, halign: 'center' }, // Status
-            7: { cellWidth: 12, halign: 'center' }, // Execução
-            8: { cellWidth: 25, halign: 'center' }, // Observações
+            1: { cellWidth: 35 }, // Cliente
+            2: { cellWidth: 45 }, // Item
+            3: { cellWidth: 30 }, // Etapa
+            4: { cellWidth: 35 }, // Recurso
+            5: { cellWidth: 18, halign: 'center' }, // Prioridade
+            6: { cellWidth: 22, halign: 'center' }, // Status
+            7: { cellWidth: 18, halign: 'center' }, // Início
+            8: { cellWidth: 18, halign: 'center' }, // Conclusão
+            9: { cellWidth: 18, halign: 'center' }, // Duração
+            10: { cellWidth: 15, halign: 'center' }, // Concluído
+            11: { cellWidth: 15, halign: 'center' }, // Reprogramado
+            12: { cellWidth: 30, halign: 'center' }, // Observações
           },
           margin: { left: 15, right: 15 },
           tableWidth: 'auto'
@@ -982,42 +1010,74 @@ export default function TaskManagementPage() {
 
         yPos = (docPdf as any).lastAutoTable.finalY + 15;
         
-        // Add space for notes
+        // Add space for notes and status update
         if (responsibleTasks.length > 0) {
           docPdf.setFontSize(8).setFont(undefined, 'normal');
-          docPdf.text('Anotações do Responsável:', 15, yPos);
+          docPdf.text('Instruções para Preenchimento:', 15, yPos);
+          yPos += 4;
+          docPdf.setFontSize(7);
+          docPdf.text('• Marque "Concluído" quando a tarefa for finalizada com sucesso', 15, yPos);
+          yPos += 4;
+          docPdf.text('• Marque "Reprog." quando a tarefa precisar ser reagendada e anote o motivo', 15, yPos);
+          yPos += 4;
+          docPdf.text('• Use o campo "Observações" para anotar problemas, qualidade ou informações importantes', 15, yPos);
+          yPos += 6;
+          
+          docPdf.setFontSize(8).setFont(undefined, 'bold');
+          docPdf.text('Anotações Gerais do Responsável:', 15, yPos);
           yPos += 5;
           
           // Draw lines for manual notes
-          for (let i = 0; i < 3; i++) {
-            docPdf.line(15, yPos + (i * 5), pageWidth - 15, yPos + (i * 5));
+          for (let i = 0; i < 4; i++) {
+            docPdf.line(15, yPos + (i * 6), pageWidth - 15, yPos + (i * 6));
           }
-          yPos += 20;
+          yPos += 30;
         }
       });
 
       // Add signature footer
-      if (yPos + 30 > docPdf.internal.pageSize.height - 20) {
+      if (yPos + 40 > pageHeight - 20) {
         docPdf.addPage();
         yPos = 20;
       }
 
       docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('ASSINATURAS E APROVAÇÕES', 15, yPos);
-      yPos += 10;
+      docPdf.text('CONTROLE E ASSINATURAS', 15, yPos);
+      yPos += 12;
 
       docPdf.setFontSize(9).setFont(undefined, 'normal');
       
-      // Supervisor signature
-      docPdf.text('Supervisor/Coordenador:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
+      // Create two columns for signatures
+      const leftColumn = 15;
+      const rightColumn = pageWidth / 2 + 20;
+      
+      // Left column signatures
+      docPdf.text('Supervisor/Coordenador:', leftColumn, yPos);
+      docPdf.line(leftColumn + 55, yPos, leftColumn + 140, yPos);
+      docPdf.text('Data: ___/___/_____', leftColumn + 150, yPos);
+      
+      // Right column signatures  
+      docPdf.text('Controle de Qualidade:', rightColumn, yPos);
+      docPdf.line(rightColumn + 55, yPos, rightColumn + 140, yPos);
+      docPdf.text('Data: ___/___/_____', rightColumn + 150, yPos);
+      
+      yPos += 20;
+      
+      // Additional signature line
+      docPdf.text('Responsável pela Execução:', leftColumn, yPos);
+      docPdf.line(leftColumn + 65, yPos, leftColumn + 150, yPos);
+      docPdf.text('Data: ___/___/_____', leftColumn + 160, yPos);
+      
+      docPdf.text('Gerente de Produção:', rightColumn, yPos);
+      docPdf.line(rightColumn + 55, yPos, rightColumn + 140, yPos);
+      docPdf.text('Data: ___/___/_____', rightColumn + 150, yPos);
+
       yPos += 15;
 
-      // Quality control signature
-      docPdf.text('Controle de Qualidade:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
+      // Final instructions
+      docPdf.setFontSize(8).setFont(undefined, 'italic');
+      docPdf.text('Importante: Este documento deve ser preenchido durante a execução das tarefas e devolvido ao final do expediente.', 
+                  pageWidth / 2, yPos, { align: 'center' });
 
       docPdf.save(`Relatorio_Tarefas_${format(new Date(), 'yyyyMMdd')}.pdf`);
 
@@ -1051,7 +1111,57 @@ export default function TaskManagementPage() {
     );
   };
 
-  const clearFilters = () => {
+  // Remove assignment handler
+  const handleRemoveAssignment = (task: Task) => {
+    setSelectedTask(task);
+    setIsRemoveAssignmentDialogOpen(true);
+  };
+
+  const handleConfirmRemoveAssignment = async () => {
+    if (!selectedTask) return;
+
+    try {
+      // Remover da lista de atribuições
+      const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
+      
+      // Verificar se o documento existe
+      const assignmentsSnap = await getDoc(assignmentsRef);
+      
+      if (assignmentsSnap.exists()) {
+        const currentAssignments = assignmentsSnap.data().assignments || [];
+        const updatedAssignments = currentAssignments.filter((a: any) => a.taskId !== selectedTask.id);
+        
+        await setDoc(assignmentsRef, { 
+          assignments: updatedAssignments.map((a: any) => {
+            const assignedAt = a.assignedAt instanceof Date ? a.assignedAt : 
+                             (a.assignedAt?.toDate ? a.assignedAt.toDate() : new Date(a.assignedAt));
+            return {
+              ...a,
+              assignedAt: Timestamp.fromDate(assignedAt)
+            };
+          })
+        }, { merge: true });
+      }
+
+      toast({
+        title: "Atribuição removida!",
+        description: `A atribuição da tarefa "${selectedTask.stageName}" foi removida.`,
+      });
+
+      setIsRemoveAssignmentDialogOpen(false);
+      setSelectedTask(null);
+      
+      await loadData();
+
+    } catch (error) {
+      console.error("Error removing assignment:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao remover atribuição",
+        description: "Não foi possível remover a atribuição da tarefa.",
+      });
+    }
+  };
     setStatusFilter("all");
     setPriorityFilter("all");
     setResourceFilter("all");
@@ -1059,7 +1169,7 @@ export default function TaskManagementPage() {
     setSearchQuery("");
   };
 
-  const selectedTasksCount = tasks.filter(task => task.selected).length;
+  const clearFilters = () => {
 
   if (isLoading) {
     return (
@@ -1076,7 +1186,7 @@ export default function TaskManagementPage() {
             <p className="text-xs text-muted-foreground">Urgentes</p>
           </CardContent>
         </Card>
-      </div>
+        {/* Dialog para Reprogramação de Tarefa */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[...Array(4)].map((_, i) => (
             <Card key={i}>
@@ -1403,6 +1513,17 @@ export default function TaskManagementPage() {
                                 >
                                   <UserCheck className="h-4 w-4 mr-1" />
                                   {task.status === 'Em Andamento' && (task.assignedResource || task.responsibleMember) ? 'Reatribuir' : 'Atribuir'}
+                                </Button>
+                              )}
+                              {(task.assignedResource || task.responsibleMember) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemoveAssignment(task)}
+                                  className="text-red-600 hover:text-red-700"
+                                >
+                                  <X className="h-4 w-4 mr-1" />
+                                  Remover
                                 </Button>
                               )}
                               {(task.status === 'Atribuída' || task.status === 'Em Andamento') && (
@@ -1742,6 +1863,7 @@ export default function TaskManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
 
       {/* Dialog para Conclusão de Tarefa */}
       <Dialog open={isCompleteDialogOpen} onOpenChange={(open) => {
@@ -1795,7 +1917,54 @@ export default function TaskManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog para Reprogramação de Tarefa */}
+      {/* Dialog para Remover Atribuição */}
+      <Dialog open={isRemoveAssignmentDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsRemoveAssignmentDialogOpen(false);
+          setSelectedTask(null);
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remover Atribuição</DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja remover a atribuição da tarefa "{selectedTask?.stageName}"?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {selectedTask && (
+              <div className="rounded-lg border p-3 bg-red-50">
+                <h4 className="font-medium text-sm mb-2 text-red-800">Atribuição Atual</h4>
+                <div className="space-y-1 text-xs text-red-700">
+                  <p><strong>Tarefa:</strong> {selectedTask.stageName}</p>
+                  <p><strong>Item:</strong> {selectedTask.itemDescription}</p>
+                  {selectedTask.assignedResourceName && (
+                    <p><strong>Recurso:</strong> {selectedTask.assignedResourceName}</p>
+                  )}
+                  {selectedTask.responsibleMemberName && (
+                    <p><strong>Responsável:</strong> {selectedTask.responsibleMemberName}</p>
+                  )}
+                  <p className="text-red-600 mt-2">
+                    ⚠️ Esta ação removerá todas as atribuições de recurso e responsável desta tarefa.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRemoveAssignmentDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleConfirmRemoveAssignment}
+              variant="destructive"
+            >
+              <X className="mr-2 h-4 w-4" />
+              Remover Atribuição
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isRescheduleDialogOpen} onOpenChange={(open) => {
         if (!open) {
           setIsRescheduleDialogOpen(false);
