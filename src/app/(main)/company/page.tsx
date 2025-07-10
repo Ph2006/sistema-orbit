@@ -8,7 +8,7 @@ import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebas
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import Image from "next/image";
-import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,11 +52,14 @@ const resourceSchema = z.object({
     type: z.enum(["maquina", "equipamento", "veiculo", "ferramenta", "espaco", "mao_de_obra"], { required_error: "Selecione um tipo." }),
     description: z.string().optional(),
     capacity: z.number().min(1, { message: "A capacidade deve ser maior que 0." }),
-    status: z.enum(["disponivel", "ocupado", "manutencao", "inativo"], { required_error: "Selecione um status." }),
+    status: z.enum(["disponivel", "ocupado", "manutencao", "inativo", "ausente", "ferias"], { required_error: "Selecione um status." }),
     location: z.string().optional(),
     serialNumber: z.string().optional(),
     acquisitionDate: z.string().optional(),
     maintenanceDate: z.string().optional(),
+    absenceStartDate: z.string().optional(),
+    absenceEndDate: z.string().optional(),
+    absenceReason: z.string().optional(),
     updatedAt: z.any().optional(),
 });
 
@@ -127,6 +130,9 @@ export default function CompanyPage() {
         serialNumber: "",
         acquisitionDate: "",
         maintenanceDate: "",
+        absenceStartDate: "",
+        absenceEndDate: "",
+        absenceReason: "",
     }
   });
 
@@ -231,18 +237,32 @@ export default function CompanyPage() {
       disponivel: "bg-green-100 text-green-800 hover:bg-green-100",
       ocupado: "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
       manutencao: "bg-red-100 text-red-800 hover:bg-red-100",
-      inativo: "bg-gray-100 text-gray-800 hover:bg-gray-100"
+      inativo: "bg-gray-100 text-gray-800 hover:bg-gray-100",
+      ausente: "bg-orange-100 text-orange-800 hover:bg-orange-100",
+      ferias: "bg-blue-100 text-blue-800 hover:bg-blue-100"
     };
     
     const labels = {
       disponivel: "Disponível",
       ocupado: "Ocupado",
       manutencao: "Manutenção",
-      inativo: "Inativo"
+      inativo: "Inativo",
+      ausente: "Ausente",
+      ferias: "Férias"
+    };
+
+    const icons = {
+      disponivel: <CheckCircle className="h-3 w-3 mr-1" />,
+      ocupado: <Activity className="h-3 w-3 mr-1" />,
+      manutencao: <Settings className="h-3 w-3 mr-1" />,
+      inativo: <AlertCircle className="h-3 w-3 mr-1" />,
+      ausente: <UserX className="h-3 w-3 mr-1" />,
+      ferias: <Calendar className="h-3 w-3 mr-1" />
     };
 
     return (
       <Badge className={variants[status as keyof typeof variants]}>
+        {icons[status as keyof typeof icons]}
         {labels[status as keyof typeof labels]}
       </Badge>
     );
@@ -254,8 +274,14 @@ export default function CompanyPage() {
     const occupied = resources.filter(r => r.status === 'ocupado').length;
     const maintenance = resources.filter(r => r.status === 'manutencao').length;
     const inactive = resources.filter(r => r.status === 'inativo').length;
+    const absent = resources.filter(r => r.status === 'ausente').length;
+    const vacation = resources.filter(r => r.status === 'ferias').length;
     
-    return { total, available, occupied, maintenance, inactive };
+    // Recursos efetivamente disponíveis (não incluindo ausentes e férias no cálculo de ociosidade)
+    const activeResources = resources.filter(r => !['ausente', 'ferias', 'inativo'].includes(r.status)).length;
+    const idleRate = activeResources > 0 ? (available / activeResources) * 100 : 0;
+    
+    return { total, available, occupied, maintenance, inactive, absent, vacation, activeResources, idleRate };
   };
 
   // Funções de submit
@@ -369,7 +395,10 @@ export default function CompanyPage() {
         location: "", 
         serialNumber: "", 
         acquisitionDate: "", 
-        maintenanceDate: "" 
+        maintenanceDate: "",
+        absenceStartDate: "",
+        absenceEndDate: "",
+        absenceReason: ""
     });
     setIsResourceFormOpen(true);
   };
@@ -424,6 +453,9 @@ export default function CompanyPage() {
   // Variáveis calculadas
   const stats = getResourceStats();
   const isLoadingPage = isLoading || authLoading;
+
+  // Watch do status do recurso para mostrar/ocultar campos de ausência
+  const watchedStatus = resourceForm.watch("status");
 
   return (
     <>
@@ -669,12 +701,36 @@ export default function CompanyPage() {
           {/* ABA RECURSOS PRODUTIVOS */}
           <TabsContent value="resources">
             <div className="space-y-6">
-              {/* Dashboard de Ocupação */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Dashboard de Ocupação Atualizado */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium">Total de Recursos</CardTitle>
                     <Settings className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{stats.total}</div>
+                    <p className="text-xs text-muted-foreground">recursos cadastrados</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Disponíveis</CardTitle>
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-green-600">{stats.available}</div>
+                    <p className="text-xs text-muted-foreground">
+                      {stats.activeResources > 0 ? Math.round((stats.available / stats.activeResources) * 100) : 0}% dos ativos
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Em Manutenção</CardTitle>
+                    <Settings className="h-4 w-4 text-red-600" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-red-600">{stats.maintenance}</div>
@@ -683,43 +739,109 @@ export default function CompanyPage() {
                     </p>
                   </CardContent>
                 </Card>
+
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Ausentes/Férias</CardTitle>
+                    <UserX className="h-4 w-4 text-orange-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-orange-600">{stats.absent + stats.vacation}</div>
+                    <p className="text-xs text-muted-foreground">
+                      não computados na ociosidade
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Taxa de Ociosidade</CardTitle>
+                    <Activity className="h-4 w-4 text-blue-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-blue-600">{Math.round(stats.idleRate)}%</div>
+                    <p className="text-xs text-muted-foreground">recursos ativos ociosos</p>
+                  </CardContent>
+                </Card>
               </div>
 
-              {/* Gráfico de Ocupação */}
+              {/* Gráfico de Ocupação Atualizado */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Taxa de Ocupação</CardTitle>
-                  <CardDescription>Distribuição do status dos recursos produtivos</CardDescription>
+                  <CardTitle>Distribuição dos Recursos</CardTitle>
+                  <CardDescription>Status atual dos recursos produtivos (ausentes/férias não afetam ociosidade)</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span>Disponíveis</span>
+                      <span className="flex items-center">
+                        <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
+                        Disponíveis
+                      </span>
                       <span>{stats.available} / {stats.total}</span>
                     </div>
                     <Progress value={stats.total > 0 ? (stats.available / stats.total) * 100 : 0} className="h-2" />
                   </div>
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span>Ocupados</span>
+                      <span className="flex items-center">
+                        <Activity className="h-3 w-3 mr-1 text-yellow-600" />
+                        Ocupados
+                      </span>
                       <span>{stats.occupied} / {stats.total}</span>
                     </div>
                     <Progress value={stats.total > 0 ? (stats.occupied / stats.total) * 100 : 0} className="h-2 [&>div]:bg-yellow-500" />
                   </div>
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span>Em Manutenção</span>
+                      <span className="flex items-center">
+                        <Settings className="h-3 w-3 mr-1 text-red-600" />
+                        Em Manutenção
+                      </span>
                       <span>{stats.maintenance} / {stats.total}</span>
                     </div>
                     <Progress value={stats.total > 0 ? (stats.maintenance / stats.total) * 100 : 0} className="h-2 [&>div]:bg-red-500" />
                   </div>
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span>Inativos</span>
+                      <span className="flex items-center">
+                        <UserX className="h-3 w-3 mr-1 text-orange-600" />
+                        Ausentes
+                      </span>
+                      <span>{stats.absent} / {stats.total}</span>
+                    </div>
+                    <Progress value={stats.total > 0 ? (stats.absent / stats.total) * 100 : 0} className="h-2 [&>div]:bg-orange-500" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="flex items-center">
+                        <Calendar className="h-3 w-3 mr-1 text-blue-600" />
+                        Férias
+                      </span>
+                      <span>{stats.vacation} / {stats.total}</span>
+                    </div>
+                    <Progress value={stats.total > 0 ? (stats.vacation / stats.total) * 100 : 0} className="h-2 [&>div]:bg-blue-500" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="flex items-center">
+                        <AlertCircle className="h-3 w-3 mr-1 text-gray-600" />
+                        Inativos
+                      </span>
                       <span>{stats.inactive} / {stats.total}</span>
                     </div>
                     <Progress value={stats.total > 0 ? (stats.inactive / stats.total) * 100 : 0} className="h-2 [&>div]:bg-gray-500" />
                   </div>
+                  {stats.activeResources > 0 && (
+                    <div className="pt-4 border-t">
+                      <div className="text-sm text-muted-foreground mb-2">
+                        <strong>Recursos Ativos:</strong> {stats.activeResources} (excluindo ausentes, férias e inativos)
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        <strong>Taxa de Ociosidade Real:</strong> {Math.round(stats.idleRate)}% dos recursos ativos estão disponíveis
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -751,6 +873,7 @@ export default function CompanyPage() {
                           <TableHead>Capacidade</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Localização</TableHead>
+                          <TableHead>Período</TableHead>
                           <TableHead className="text-right">Ações</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -765,6 +888,14 @@ export default function CompanyPage() {
                               <TableCell>{resource.capacity}</TableCell>
                               <TableCell>{getStatusBadge(resource.status)}</TableCell>
                               <TableCell>{resource.location || "-"}</TableCell>
+                              <TableCell>
+                                {(resource.status === 'ausente' || resource.status === 'ferias') && resource.absenceStartDate && resource.absenceEndDate ? (
+                                  <div className="text-xs">
+                                    <div>{new Date(resource.absenceStartDate).toLocaleDateString('pt-BR')} até</div>
+                                    <div>{new Date(resource.absenceEndDate).toLocaleDateString('pt-BR')}</div>
+                                  </div>
+                                ) : "-"}
+                              </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-2">
                                   <Button variant="ghost" size="icon" onClick={() => handleEditResourceClick(resource)}>
@@ -779,7 +910,7 @@ export default function CompanyPage() {
                           ))
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={6} className="text-center h-24">Nenhum recurso cadastrado.</TableCell>
+                            <TableCell colSpan={7} className="text-center h-24">Nenhum recurso cadastrado.</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
@@ -943,6 +1074,8 @@ export default function CompanyPage() {
                         <SelectItem value="disponivel">Disponível</SelectItem>
                         <SelectItem value="ocupado">Ocupado</SelectItem>
                         <SelectItem value="manutencao">Manutenção</SelectItem>
+                        <SelectItem value="ausente">Ausente</SelectItem>
+                        <SelectItem value="ferias">Férias</SelectItem>
                         <SelectItem value="inativo">Inativo</SelectItem>
                       </SelectContent>
                     </Select>
@@ -950,6 +1083,55 @@ export default function CompanyPage() {
                   </FormItem>
                 )} />
               </div>
+              
+              {/* Campos condicionais para ausência/férias */}
+              {(watchedStatus === 'ausente' || watchedStatus === 'ferias') && (
+                <div className="space-y-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
+                  <h4 className="font-medium text-orange-800 flex items-center">
+                    {watchedStatus === 'ferias' ? <Calendar className="h-4 w-4 mr-2" /> : <UserX className="h-4 w-4 mr-2" />}
+                    Informações de {watchedStatus === 'ferias' ? 'Férias' : 'Ausência'}
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={resourceForm.control} name="absenceStartDate" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Data de Início</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={resourceForm.control} name="absenceEndDate" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Data de Retorno</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                  <FormField control={resourceForm.control} name="absenceReason" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Motivo {watchedStatus === 'ferias' ? '(Opcional)' : ''}</FormLabel>
+                      <FormControl>
+                        <Textarea 
+                          placeholder={watchedStatus === 'ferias' 
+                            ? "Ex: Férias anuais, descanso..." 
+                            : "Ex: Licença médica, treinamento, viagem de trabalho..."
+                          } 
+                          {...field} 
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <div className="text-sm text-orange-700 bg-orange-100 p-3 rounded">
+                    <strong>Importante:</strong> Recursos em {watchedStatus === 'ferias' ? 'férias' : 'ausência'} não são contabilizados no cálculo de ociosidade da empresa.
+                  </div>
+                </div>
+              )}
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField control={resourceForm.control} name="location" render={({ field }) => (
                   <FormItem>
