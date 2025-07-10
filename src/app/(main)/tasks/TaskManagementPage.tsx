@@ -22,6 +22,8 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 import { 
   CalendarIcon, 
@@ -44,7 +46,11 @@ import {
   Activity,
   UserCheck,
   Edit3,
-  Search
+  Search,
+  CheckSquare,
+  X,
+  RotateCcw,
+  Ban
 } from "lucide-react";
 
 // Types
@@ -99,6 +105,7 @@ type Task = {
   assignedResource?: string;
   assignedResourceName?: string;
   location?: string;
+  selected?: boolean;
 };
 
 type TasksByDate = {
@@ -129,13 +136,36 @@ const getTaskPriority = (deliveryDate?: Date): 'alta' | 'media' | 'baixa' => {
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'Concluído':
+    case 'Concluída':
       return 'bg-green-100 text-green-800 hover:bg-green-100';
     case 'Em Andamento':
       return 'bg-blue-100 text-blue-800 hover:bg-blue-100';
     case 'Pendente':
       return 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100';
+    case 'Reprogramada':
+      return 'bg-purple-100 text-purple-800 hover:bg-purple-100';
+    case 'Cancelada':
+      return 'bg-red-100 text-red-800 hover:bg-red-100';
     default:
       return 'bg-gray-100 text-gray-800 hover:bg-gray-100';
+  }
+};
+
+const getStatusIcon = (status: string) => {
+  switch (status) {
+    case 'Concluído':
+    case 'Concluída':
+      return <CheckCircle className="h-3 w-3 mr-1" />;
+    case 'Em Andamento':
+      return <PlayCircle className="h-3 w-3 mr-1" />;
+    case 'Pendente':
+      return <Hourglass className="h-3 w-3 mr-1" />;
+    case 'Reprogramada':
+      return <RotateCcw className="h-3 w-3 mr-1" />;
+    case 'Cancelada':
+      return <Ban className="h-3 w-3 mr-1" />;
+    default:
+      return <Hourglass className="h-3 w-3 mr-1" />;
   }
 };
 
@@ -175,8 +205,10 @@ export default function TaskManagementPage() {
   const [resourceFilter, setResourceFilter] = useState<string>("all");
   const [osFilter, setOsFilter] = useState<string>("all");
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [selectedResourceForAssign, setSelectedResourceForAssign] = useState<string>("");
+  const [newTaskStatus, setNewTaskStatus] = useState<string>("");
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
@@ -239,9 +271,6 @@ export default function TaskManagementPage() {
       order.items.forEach(item => {
         if (item.productionPlan && item.productionPlan.length > 0) {
           item.productionPlan.forEach(stage => {
-            // Filtrar tarefas concluídas - elas não devem aparecer para execução
-            if (stage.status === 'Concluído') return;
-            
             const priority = getTaskPriority(order.deliveryDate);
             
             tasksList.push({
@@ -257,9 +286,10 @@ export default function TaskManagementPage() {
               durationDays: stage.durationDays || 1,
               customer: order.customer.name,
               priority: priority,
-              assignedResource: undefined, // Será preenchido pela atribuição
+              assignedResource: undefined,
               assignedResourceName: undefined,
               location: undefined,
+              selected: false,
             });
           });
         }
@@ -304,9 +334,6 @@ export default function TaskManagementPage() {
   // Filtered tasks
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
-      // Filtrar tarefas concluídas - elas não devem aparecer
-      if (task.status === 'Concluído') return false;
-      
       const statusMatch = statusFilter === "all" || task.status === statusFilter;
       const priorityMatch = priorityFilter === "all" || task.priority === priorityFilter;
       const osMatch = osFilter === "all" || task.orderNumber.toLowerCase().includes(osFilter.toLowerCase());
@@ -351,20 +378,316 @@ export default function TaskManagementPage() {
     return tasksByDate[dateKey] || [];
   }, [tasksByDate, selectedDate]);
 
+  // Selected tasks for the day
+  const selectedTasksForDay = useMemo(() => {
+    return tasksForSelectedDate.filter(task => task.selected);
+  }, [tasksForSelectedDate]);
+
   // Statistics
   const stats = useMemo(() => {
     const total = filteredTasks.length;
-    const completed = 0; // Não mostramos concluídas, então sempre 0
+    const completed = filteredTasks.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length;
     const inProgress = filteredTasks.filter(t => t.status === 'Em Andamento').length;
     const pending = filteredTasks.filter(t => t.status === 'Pendente').length;
+    const reprogrammed = filteredTasks.filter(t => t.status === 'Reprogramada').length;
+    const cancelled = filteredTasks.filter(t => t.status === 'Cancelada').length;
     const highPriority = filteredTasks.filter(t => t.priority === 'alta').length;
     const assigned = filteredTasks.filter(t => t.assignedResource).length;
     const unassigned = filteredTasks.filter(t => !t.assignedResource).length;
     
-    return { total, completed, inProgress, pending, highPriority, assigned, unassigned };
+    return { total, completed, inProgress, pending, reprogrammed, cancelled, highPriority, assigned, unassigned };
   }, [filteredTasks]);
 
+  // Task selection handlers
+  const handleTaskSelection = (taskId: string, selected: boolean) => {
+    setTasks(prevTasks => 
+      prevTasks.map(task => 
+        task.id === taskId ? { ...task, selected } : task
+      )
+    );
+  };
+
+  const handleSelectAllTasksForDay = (selected: boolean) => {
+    setTasks(prevTasks => 
+      prevTasks.map(task => {
+        const isTaskForSelectedDate = task.startDate && 
+          format(task.startDate, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd');
+        return isTaskForSelectedDate ? { ...task, selected } : task;
+      })
+    );
+  };
+
+  // Status update handlers
+  const handleUpdateTaskStatus = (task: Task) => {
+    setSelectedTask(task);
+    setNewTaskStatus(task.status);
+    setIsStatusDialogOpen(true);
+  };
+
+  const handleSaveTaskStatus = async () => {
+    if (!selectedTask) return;
+
+    try {
+      // Update task locally
+      const updatedTasks = tasks.map(task => 
+        task.id === selectedTask.id 
+          ? { ...task, status: newTaskStatus, completedDate: newTaskStatus === 'Concluído' ? new Date() : task.completedDate }
+          : task
+      );
+      
+      setTasks(updatedTasks);
+
+      // Here you would update Firebase if needed
+      // await updateTaskStatusInFirebase(selectedTask, newTaskStatus);
+
+      toast({
+        title: "Status atualizado!",
+        description: `Tarefa "${selectedTask.stageName}" foi marcada como "${newTaskStatus}".`,
+      });
+
+      setIsStatusDialogOpen(false);
+      setSelectedTask(null);
+      setNewTaskStatus("");
+
+    } catch (error) {
+      console.error("Error updating task status:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao atualizar status",
+        description: "Não foi possível atualizar o status da tarefa.",
+      });
+    }
+  };
+
   // Export functions
+  const exportSelectedTasks = async () => {
+    const tasksToExport = selectedTasksForDay;
+    
+    if (tasksToExport.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nenhuma tarefa selecionada",
+        description: "Selecione pelo menos uma tarefa para exportar.",
+      });
+      return;
+    }
+
+    toast({ title: "Gerando relatório...", description: "Por favor, aguarde." });
+
+    try {
+      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      const docSnap = await getDoc(companyRef);
+      const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+      
+      const docPdf = new jsPDF();
+      const pageWidth = docPdf.internal.pageSize.width;
+      let yPos = 15;
+
+      // Header
+      if (companyData.logo?.preview) {
+        try {
+          docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+        } catch (e) {
+          console.error("Error adding logo to PDF:", e);
+        }
+      }
+
+      let textX = 65;
+      let textY = yPos;
+      docPdf.setFontSize(18).setFont(undefined, 'bold');
+      docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+      textY += 6;
+
+      docPdf.setFontSize(9).setFont(undefined, 'normal');
+      if (companyData.endereco) {
+        const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+        docPdf.text(addressLines, textX, textY);
+        textY += (addressLines.length * 4);
+      }
+
+      yPos = 55;
+      docPdf.setFontSize(14).setFont(undefined, 'bold');
+      docPdf.text('RELATÓRIO DE TAREFAS SELECIONADAS', pageWidth / 2, yPos, { align: 'center' });
+      yPos += 15;
+
+      docPdf.setFontSize(11).setFont(undefined, 'normal');
+      docPdf.text(`Data: ${format(selectedDate, "dd/MM/yyyy")}`, 15, yPos);
+      docPdf.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, pageWidth - 15, yPos, { align: 'right' });
+      yPos += 12;
+
+      // Statistics
+      docPdf.setFontSize(10).setFont(undefined, 'bold');
+      docPdf.text('RESUMO DAS TAREFAS SELECIONADAS:', 15, yPos);
+      yPos += 8;
+      
+      docPdf.setFont(undefined, 'normal');
+      docPdf.text(`Total de Tarefas: ${tasksToExport.length}`, 15, yPos);
+      
+      const statusCounts = {
+        'Concluído': tasksToExport.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length,
+        'Em Andamento': tasksToExport.filter(t => t.status === 'Em Andamento').length,
+        'Pendente': tasksToExport.filter(t => t.status === 'Pendente').length,
+        'Reprogramada': tasksToExport.filter(t => t.status === 'Reprogramada').length,
+        'Cancelada': tasksToExport.filter(t => t.status === 'Cancelada').length,
+      };
+
+      let statusX = 15;
+      yPos += 5;
+      Object.entries(statusCounts).forEach(([status, count]) => {
+        if (count > 0) {
+          docPdf.text(`${status}: ${count}`, statusX, yPos);
+          statusX += 45;
+          if (statusX > pageWidth - 45) {
+            statusX = 15;
+            yPos += 5;
+          }
+        }
+      });
+      
+      yPos += 15;
+
+      // Group tasks by location/sector
+      const tasksByLocation = tasksToExport.reduce((acc, task) => {
+        const location = task.location || task.assignedResourceName || 'Setor Geral';
+        if (!acc[location]) acc[location] = [];
+        acc[location].push(task);
+        return acc;
+      }, {} as { [key: string]: Task[] });
+
+      // Tasks table for each sector
+      Object.entries(tasksByLocation).forEach(([location, locationTasks]) => {
+        // Check if we need a new page before adding sector header
+        if (yPos > 200) {
+          docPdf.addPage();
+          yPos = 20;
+        }
+
+        docPdf.setFontSize(12).setFont(undefined, 'bold');
+        docPdf.text(`SETOR/RECURSO: ${location.toUpperCase()}`, 15, yPos);
+        yPos += 8;
+
+        const tableBody = locationTasks.map(task => [
+          task.orderNumber || 'N/A',
+          task.customer || 'N/A',
+          task.itemDescription.length > 30 ? 
+            task.itemDescription.substring(0, 30) + '...' : 
+            task.itemDescription,
+          task.stageName || 'N/A',
+          task.assignedResourceName || 'Não atribuído',
+          task.priority.charAt(0).toUpperCase() + task.priority.slice(1),
+          task.status || 'Pendente',
+          task.status === 'Concluído' || task.status === 'Concluída' ? '✓' : '☐',
+          '', // Campo para observações
+        ]);
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Ok', 'Observações']],
+          body: tableBody,
+          styles: { 
+            fontSize: 7,
+            cellPadding: 2,
+          },
+          headStyles: { 
+            fillColor: [37, 99, 235], 
+            fontSize: 8, 
+            textColor: 255, 
+            halign: 'center',
+            fontStyle: 'bold'
+          },
+          columnStyles: {
+            0: { cellWidth: 18, halign: 'center' }, // Pedido
+            1: { cellWidth: 22 }, // Cliente
+            2: { cellWidth: 32 }, // Item
+            3: { cellWidth: 22 }, // Etapa
+            4: { cellWidth: 28 }, // Recurso
+            5: { cellWidth: 16, halign: 'center' }, // Prioridade
+            6: { cellWidth: 20, halign: 'center' }, // Status
+            7: { cellWidth: 12, halign: 'center' }, // Ok
+            8: { cellWidth: 25, halign: 'center' }, // Observações
+          },
+          margin: { left: 15, right: 15 },
+          tableWidth: 'auto'
+        });
+
+        yPos = (docPdf as any).lastAutoTable.finalY + 15;
+        
+        // Add space for manual annotations
+        if (locationTasks.length > 0) {
+          docPdf.setFontSize(8).setFont(undefined, 'normal');
+          docPdf.text('Observações/Anotações:', 15, yPos);
+          yPos += 5;
+          
+          // Draw lines for manual notes
+          for (let i = 0; i < 3; i++) {
+            docPdf.line(15, yPos + (i * 5), pageWidth - 15, yPos + (i * 5));
+          }
+          yPos += 20;
+        }
+        
+        // Check if we need a new page
+        if (yPos > 250) {
+          docPdf.addPage();
+          yPos = 20;
+        }
+      });
+
+      // Add footer with signature fields
+      const finalY = yPos + 10;
+      const footerY = Math.max(finalY, 250);
+      
+      if (footerY > 270) {
+        docPdf.addPage();
+        yPos = 20;
+      } else {
+        yPos = footerY;
+      }
+
+      docPdf.setFontSize(10).setFont(undefined, 'bold');
+      docPdf.text('CONTROLE E ASSINATURAS', 15, yPos);
+      yPos += 10;
+
+      docPdf.setFontSize(9).setFont(undefined, 'normal');
+      
+      // Supervisor signature
+      docPdf.text('Supervisor/Coordenador:', 15, yPos);
+      docPdf.line(60, yPos, 120, yPos);
+      docPdf.text('Data: ___/___/_____', 130, yPos);
+      yPos += 15;
+
+      // Quality control signature
+      docPdf.text('Controle de Qualidade:', 15, yPos);
+      docPdf.line(60, yPos, 120, yPos);
+      docPdf.text('Data: ___/___/_____', 130, yPos);
+      yPos += 15;
+
+      // General notes section
+      docPdf.setFontSize(9).setFont(undefined, 'bold');
+      docPdf.text('Observações Gerais do Dia:', 15, yPos);
+      yPos += 8;
+      
+      docPdf.setFont(undefined, 'normal');
+      for (let i = 0; i < 4; i++) {
+        docPdf.line(15, yPos + (i * 6), pageWidth - 15, yPos + (i * 6));
+      }
+
+      docPdf.save(`Tarefas_Selecionadas_${format(selectedDate, 'yyyyMMdd')}.pdf`);
+
+      toast({
+        title: "Relatório gerado com sucesso!",
+        description: `O arquivo PDF foi baixado com ${tasksToExport.length} tarefas selecionadas.`,
+      });
+
+    } catch (error) {
+      console.error("Error generating selected tasks report:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar relatório",
+        description: "Não foi possível gerar o arquivo PDF.",
+      });
+    }
+  };
+
   const exportDailyTasks = async () => {
     toast({ title: "Gerando relatório...", description: "Por favor, aguarde." });
 
@@ -410,13 +733,13 @@ export default function TaskManagementPage() {
       yPos += 12;
 
       // Statistics
+      // Organização e espaçamento do bloco de estatísticas
       docPdf.setFontSize(10).setFont(undefined, 'bold');
       docPdf.text('RESUMO DO DIA:', 15, yPos);
       yPos += 8;
-      
       docPdf.setFont(undefined, 'normal');
       docPdf.text(`Total de Tarefas: ${tasksForSelectedDate.length}`, 15, yPos);
-      docPdf.text(`Concluídas: ${tasksForSelectedDate.filter(t => t.status === 'Concluído').length}`, 80, yPos);
+      docPdf.text(`Concluídas: ${tasksForSelectedDate.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length}`, 80, yPos);
       docPdf.text(`Em Andamento: ${tasksForSelectedDate.filter(t => t.status === 'Em Andamento').length}`, 140, yPos);
       yPos += 15;
 
@@ -567,17 +890,22 @@ export default function TaskManagementPage() {
     setOsFilter("all");
   };
 
-  // Fechar dialog e resetar estado
+  // Fechar dialogs e resetar estado
   const handleCloseAssignDialog = () => {
     setIsAssignDialogOpen(false);
     setSelectedTask(null);
     setSelectedResourceForAssign("none");
   };
 
+  const handleCloseStatusDialog = () => {
+    setIsStatusDialogOpen(false);
+    setSelectedTask(null);
+    setNewTaskStatus("");
+  };
+
   // Handlers para atribuição de recursos
   const handleAssignResource = (task: Task) => {
     setSelectedTask(task);
-    // Usar "none" como valor padrão quando não há recurso atribuído
     setSelectedResourceForAssign(task.assignedResource || "none");
     setIsAssignDialogOpen(true);
   };
@@ -586,12 +914,10 @@ export default function TaskManagementPage() {
     if (!selectedTask) return;
 
     try {
-      // Encontrar o recurso selecionado (apenas se não for "none")
       const selectedResource = (selectedResourceForAssign && selectedResourceForAssign !== "none") ? 
         resources.find(r => r.id === selectedResourceForAssign) : 
         undefined;
       
-      // Atualizar a tarefa localmente
       const updatedTasks = tasks.map(task => {
         if (task.id === selectedTask.id) {
           return {
@@ -605,9 +931,6 @@ export default function TaskManagementPage() {
       });
 
       setTasks(updatedTasks);
-
-      // Aqui você pode adicionar a lógica para salvar no Firebase se necessário
-      // Por exemplo, salvar as atribuições em uma coleção separada
 
       toast({
         title: "Recurso atribuído!",
@@ -666,13 +989,21 @@ export default function TaskManagementPage() {
           </Button>
           <Button onClick={exportDailyTasks}>
             <Download className="mr-2 h-4 w-4" />
-            Exportar Tarefas do Dia
+            Exportar Todas do Dia
+          </Button>
+          <Button 
+            onClick={exportSelectedTasks}
+            disabled={selectedTasksForDay.length === 0}
+            variant="default"
+          >
+            <CheckSquare className="mr-2 h-4 w-4" />
+            Exportar Selecionadas ({selectedTasksForDay.length})
           </Button>
         </div>
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Tarefas</CardTitle>
@@ -692,7 +1023,7 @@ export default function TaskManagementPage() {
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
             <p className="text-xs text-muted-foreground">
-              Não exibidas na lista
+              {stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}% do total
             </p>
           </CardContent>
         </Card>
@@ -725,23 +1056,38 @@ export default function TaskManagementPage() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Reprogramadas</CardTitle>
+            <RotateCcw className="h-4 w-4 text-purple-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">{stats.reprogrammed}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats.total > 0 ? Math.round((stats.reprogrammed / stats.total) * 100) : 0}% do total
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Canceladas</CardTitle>
+            <Ban className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{stats.cancelled}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats.total > 0 ? Math.round((stats.cancelled / stats.total) * 100) : 0}% do total
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Não Atribuídas</CardTitle>
             <AlertTriangle className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{stats.unassigned}</div>
             <p className="text-xs text-muted-foreground">Precisam de recurso</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Atribuídas</CardTitle>
-            <UserCheck className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{stats.assigned}</div>
-            <p className="text-xs text-muted-foreground">Com recursos definidos</p>
           </CardContent>
         </Card>
       </div>
@@ -787,12 +1133,34 @@ export default function TaskManagementPage() {
             {/* Tasks for Selected Date */}
             <Card className="lg:col-span-2">
               <CardHeader>
-                <CardTitle>
-                  Tarefas para {format(selectedDate, "dd/MM/yyyy")}
-                </CardTitle>
-                <CardDescription>
-                  {tasksForSelectedDate.length} tarefa(s) programada(s) para este dia
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>
+                      Tarefas para {format(selectedDate, "dd/MM/yyyy")}
+                    </CardTitle>
+                    <CardDescription>
+                      {tasksForSelectedDate.length} tarefa(s) programada(s) para este dia
+                    </CardDescription>
+                  </div>
+                  {tasksForSelectedDate.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSelectAllTasksForDay(true)}
+                      >
+                        Selecionar Todas
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSelectAllTasksForDay(false)}
+                      >
+                        Desmarcar Todas
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 {tasksForSelectedDate.length > 0 ? (
@@ -801,17 +1169,29 @@ export default function TaskManagementPage() {
                       <div key={task.id} className="border rounded-lg p-4 space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={`task-${task.id}`}
+                              checked={task.selected || false}
+                              onCheckedChange={(checked) => handleTaskSelection(task.id, checked as boolean)}
+                            />
                             <Badge className={getStatusColor(task.status)}>
-                              {task.status === 'Concluído' && <CheckCircle className="h-3 w-3 mr-1" />}
-                              {task.status === 'Em Andamento' && <PlayCircle className="h-3 w-3 mr-1" />}
-                              {task.status === 'Pendente' && <Hourglass className="h-3 w-3 mr-1" />}
+                              {getStatusIcon(task.status)}
                               {task.status}
                             </Badge>
                             <Badge className={getPriorityColor(task.priority)}>
                               {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
                             </Badge>
                           </div>
-                          <span className="text-sm text-muted-foreground">Pedido {task.orderNumber}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">Pedido {task.orderNumber}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleUpdateTaskStatus(task)}
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                         <h4 className="font-semibold">{task.stageName}</h4>
                         <p className="text-sm text-muted-foreground">{task.itemDescription}</p>
@@ -891,6 +1271,9 @@ export default function TaskManagementPage() {
                     <SelectItem value="all">Todos os Status</SelectItem>
                     <SelectItem value="Pendente">Pendente</SelectItem>
                     <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                    <SelectItem value="Concluído">Concluído</SelectItem>
+                    <SelectItem value="Reprogramada">Reprogramada</SelectItem>
+                    <SelectItem value="Cancelada">Cancelada</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -986,6 +1369,7 @@ export default function TaskManagementPage() {
                           <TableCell>{task.stageName}</TableCell>
                           <TableCell>
                             <Badge className={getStatusColor(task.status)}>
+                              {getStatusIcon(task.status)}
                               {task.status}
                             </Badge>
                           </TableCell>
@@ -1012,14 +1396,24 @@ export default function TaskManagementPage() {
                           </TableCell>
                           <TableCell>{task.durationDays} dia(s)</TableCell>
                           <TableCell className="text-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleAssignResource(task)}
-                            >
-                              <Edit3 className="h-4 w-4 mr-1" />
-                              {task.assignedResource ? 'Alterar' : 'Atribuir'}
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleAssignResource(task)}
+                              >
+                                <Edit3 className="h-4 w-4 mr-1" />
+                                {task.assignedResource ? 'Alterar' : 'Atribuir'}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleUpdateTaskStatus(task)}
+                              >
+                                <Settings className="h-4 w-4 mr-1" />
+                                Status
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
@@ -1291,6 +1685,90 @@ export default function TaskManagementPage() {
             </Button>
             <Button onClick={handleSaveAssignment}>
               Salvar Atribuição
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para Atualização de Status */}
+      <Dialog open={isStatusDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          handleCloseStatusDialog();
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Atualizar Status da Tarefa</DialogTitle>
+            <DialogDescription>
+              Altere o status da tarefa "{selectedTask?.stageName}" do item "{selectedTask?.itemDescription}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Novo Status</label>
+              <Select 
+                value={newTaskStatus} 
+                onValueChange={setNewTaskStatus}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Pendente">
+                    <div className="flex items-center gap-2">
+                      <Hourglass className="h-4 w-4 text-yellow-600" />
+                      Pendente
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="Em Andamento">
+                    <div className="flex items-center gap-2">
+                      <PlayCircle className="h-4 w-4 text-blue-600" />
+                      Em Andamento
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="Concluído">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      Concluído
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="Reprogramada">
+                    <div className="flex items-center gap-2">
+                      <RotateCcw className="h-4 w-4 text-purple-600" />
+                      Reprogramada
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="Cancelada">
+                    <div className="flex items-center gap-2">
+                      <Ban className="h-4 w-4 text-red-600" />
+                      Cancelada
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {selectedTask && (
+              <div className="rounded-lg border p-3 bg-muted/50">
+                <h4 className="font-medium text-sm mb-2">Detalhes da Tarefa</h4>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p><strong>Pedido:</strong> {selectedTask.orderNumber}</p>
+                  <p><strong>Cliente:</strong> {selectedTask.customer}</p>
+                  <p><strong>Item:</strong> {selectedTask.itemDescription}</p>
+                  <p><strong>Etapa:</strong> {selectedTask.stageName}</p>
+                  <p><strong>Status Atual:</strong> {selectedTask.status}</p>
+                  <p><strong>Duração:</strong> {selectedTask.durationDays} dia(s)</p>
+                  <p><strong>Prioridade:</strong> {selectedTask.priority.charAt(0).toUpperCase() + selectedTask.priority.slice(1)}</p>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseStatusDialog}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveTaskStatus} disabled={!newTaskStatus}>
+              Salvar Status
             </Button>
           </DialogFooter>
         </DialogContent>
