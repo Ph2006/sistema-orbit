@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { collection, getDocs, doc, getDoc, updateDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, isSameDay, addDays, isWeekend, startOfDay, endOfDay } from "date-fns";
+import { format, addDays, isWeekend, startOfDay, endOfDay } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -19,11 +19,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 
 import { 
   CalendarIcon, 
@@ -50,7 +50,10 @@ import {
   CheckSquare,
   X,
   RotateCcw,
-  Ban
+  Ban,
+  Crown,
+  TrendingUp,
+  Award
 } from "lucide-react";
 
 // Types
@@ -89,6 +92,15 @@ type Resource = {
   location?: string;
 };
 
+type TeamMember = {
+  id: string;
+  name: string;
+  position: string;
+  email: string;
+  phone: string;
+  permission: string;
+};
+
 type Task = {
   id: string;
   orderId: string;
@@ -96,20 +108,37 @@ type Task = {
   itemId: string;
   itemDescription: string;
   stageName: string;
+  stageIndex: number;
   status: string;
-  startDate: Date | null;
-  completedDate: Date | null;
-  durationDays: number;
+  originalStartDate: Date | null;
+  originalCompletedDate: Date | null;
+  originalDurationDays: number;
   customer: string;
   priority: 'alta' | 'media' | 'baixa';
   assignedResource?: string;
   assignedResourceName?: string;
+  responsibleMember?: string;
+  responsibleMemberName?: string;
   location?: string;
+  actualStartDate?: Date;
+  actualCompletedDate?: Date;
+  reprogrammedDate?: Date;
+  reprogrammedDuration?: number;
+  reprogrammedReason?: string;
+  taskNotes?: string;
+  completedBy?: string;
+  completedAt?: Date;
   selected?: boolean;
 };
 
-type TasksByDate = {
-  [date: string]: Task[];
+type TaskAssignment = {
+  taskId: string;
+  resourceId: string;
+  resourceName: string;
+  responsibleId: string;
+  responsibleName: string;
+  assignedAt: Date;
+  notes?: string;
 };
 
 type CompanyData = {
@@ -120,6 +149,65 @@ type CompanyData = {
   email?: string;
   celular?: string;
   website?: string;
+};
+
+// Feriados nacionais brasileiros para 2024-2025
+const brazilianHolidays = [
+  // 2024
+  new Date(2024, 0, 1),   // Ano Novo
+  new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
+  new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
+  new Date(2024, 2, 29),  // Sexta-feira Santa
+  new Date(2024, 3, 21),  // Tiradentes
+  new Date(2024, 4, 1),   // Dia do Trabalho
+  new Date(2024, 4, 30),  // Corpus Christi
+  new Date(2024, 8, 7),   // Independência do Brasil
+  new Date(2024, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2024, 10, 2),  // Finados
+  new Date(2024, 10, 15), // Proclamação da República
+  new Date(2024, 11, 25), // Natal
+  // 2025
+  new Date(2025, 0, 1),   // Ano Novo
+  new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
+  new Date(2025, 2, 4),   // Carnaval (Terça-feira)
+  new Date(2025, 3, 18),  // Sexta-feira Santa
+  new Date(2025, 3, 21),  // Tiradentes
+  new Date(2025, 4, 1),   // Dia do Trabalho
+  new Date(2025, 5, 19),  // Corpus Christi
+  new Date(2025, 8, 7),   // Independência do Brasil
+  new Date(2025, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2025, 10, 2),  // Finados
+  new Date(2025, 10, 15), // Proclamação da República
+  new Date(2025, 11, 25), // Natal
+];
+
+// Funções utilitárias para cálculo de dias úteis
+const isHoliday = (date: Date): boolean => {
+  return brazilianHolidays.some(holiday => 
+    holiday.getDate() === date.getDate() && 
+    holiday.getMonth() === date.getMonth() && 
+    holiday.getFullYear() === date.getFullYear()
+  );
+};
+
+const isBusinessDay = (date: Date): boolean => {
+  return !isWeekend(date) && !isHoliday(date);
+};
+
+const addBusinessDays = (startDate: Date, days: number): Date => {
+  if (days === 0) return new Date(startDate);
+  
+  let currentDate = new Date(startDate);
+  let remainingDays = Math.abs(days);
+  const isAdding = days > 0;
+  
+  while (remainingDays > 0) {
+    currentDate = addDays(currentDate, isAdding ? 1 : -1);
+    if (isBusinessDay(currentDate)) {
+      remainingDays--;
+    }
+  }
+  return currentDate;
 };
 
 // Utility functions
@@ -144,8 +232,8 @@ const getStatusColor = (status: string) => {
       return 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100';
     case 'Reprogramada':
       return 'bg-purple-100 text-purple-800 hover:bg-purple-100';
-    case 'Cancelada':
-      return 'bg-red-100 text-red-800 hover:bg-red-100';
+    case 'Atribuída':
+      return 'bg-orange-100 text-orange-800 hover:bg-orange-100';
     default:
       return 'bg-gray-100 text-gray-800 hover:bg-gray-100';
   }
@@ -162,8 +250,8 @@ const getStatusIcon = (status: string) => {
       return <Hourglass className="h-3 w-3 mr-1" />;
     case 'Reprogramada':
       return <RotateCcw className="h-3 w-3 mr-1" />;
-    case 'Cancelada':
-      return <Ban className="h-3 w-3 mr-1" />;
+    case 'Atribuída':
+      return <UserCheck className="h-3 w-3 mr-1" />;
     default:
       return <Hourglass className="h-3 w-3 mr-1" />;
   }
@@ -197,22 +285,41 @@ const getResourceTypeLabel = (type: string) => {
 export default function TaskManagementPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  
+  // Filter states
+  const [statusFilter, setStatusFilter] = useState<string>("Pendente");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [resourceFilter, setResourceFilter] = useState<string>("all");
-  const [osFilter, setOsFilter] = useState<string>("all");
+  const [responsibleFilter, setResponsibleFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  
+  // Modal states
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
-  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
+  const [isCompleteDialogOpen, setIsCompleteDialogOpen] = useState(false);
+  const [isRescheduleDialogOpen, setIsRescheduleDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  
+  // Assignment form states
   const [selectedResourceForAssign, setSelectedResourceForAssign] = useState<string>("");
-  const [newTaskStatus, setNewTaskStatus] = useState<string>("");
+  const [selectedResponsibleForAssign, setSelectedResponsibleForAssign] = useState<string>("");
+  const [assignmentNotes, setAssignmentNotes] = useState<string>("");
+  
+  // Complete form states
+  const [completionNotes, setCompletionNotes] = useState<string>("");
+  
+  // Reschedule form states
+  const [rescheduleDate, setRescheduleDate] = useState<Date | undefined>(undefined);
+  const [rescheduleDuration, setRescheduleDuration] = useState<number>(1);
+  const [rescheduleReason, setRescheduleReason] = useState<string>("");
+  
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  // Fetch data
+  // Fetch data functions
   const fetchOrders = async () => {
     if (!user) return [];
     try {
@@ -264,33 +371,78 @@ export default function TaskManagementPage() {
     }
   };
 
-  const generateTasks = (ordersList: Order[]): Task[] => {
+  const fetchTeamMembers = async () => {
+    if (!user) return [];
+    try {
+      const teamRef = doc(db, "companies", "mecald", "settings", "team");
+      const docSnap = await getDoc(teamRef);
+      if (docSnap.exists()) {
+        return docSnap.data().members || [];
+      }
+      return [];
+    } catch (error) {
+      console.error("Error fetching team members:", error);
+      return [];
+    }
+  };
+
+  const fetchTaskAssignments = async () => {
+    if (!user) return [];
+    try {
+      const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
+      const docSnap = await getDoc(assignmentsRef);
+      if (docSnap.exists()) {
+        const assignments = docSnap.data().assignments || [];
+        return assignments.map((assignment: any) => ({
+          ...assignment,
+          assignedAt: assignment.assignedAt?.toDate ? assignment.assignedAt.toDate() : new Date(),
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error("Error fetching task assignments:", error);
+      return [];
+    }
+  };
+
+  const generateTasks = (ordersList: Order[], assignmentsList: TaskAssignment[]): Task[] => {
     const tasksList: Task[] = [];
     
     ordersList.forEach(order => {
       order.items.forEach(item => {
         if (item.productionPlan && item.productionPlan.length > 0) {
-          item.productionPlan.forEach(stage => {
-            const priority = getTaskPriority(order.deliveryDate);
-            
-            tasksList.push({
-              id: `${order.id}-${item.id}-${stage.stageName}`,
-              orderId: order.id,
-              orderNumber: order.quotationNumber,
-              itemId: item.id,
-              itemDescription: item.description,
-              stageName: stage.stageName,
-              status: stage.status,
-              startDate: stage.startDate,
-              completedDate: stage.completedDate,
-              durationDays: stage.durationDays || 1,
-              customer: order.customer.name,
-              priority: priority,
-              assignedResource: undefined,
-              assignedResourceName: undefined,
-              location: undefined,
-              selected: false,
-            });
+          item.productionPlan.forEach((stage, stageIndex) => {
+            if (stage.status === 'Pendente') { // Só gera tarefas para etapas pendentes
+              const priority = getTaskPriority(order.deliveryDate);
+              const taskId = `${order.id}-${item.id}-${stage.stageName}`;
+              
+              // Busca se existe atribuição para esta tarefa
+              const assignment = assignmentsList.find(a => a.taskId === taskId);
+              
+              const task: Task = {
+                id: taskId,
+                orderId: order.id,
+                orderNumber: order.quotationNumber,
+                itemId: item.id,
+                itemDescription: item.description,
+                stageName: stage.stageName,
+                stageIndex: stageIndex,
+                status: assignment ? 'Atribuída' : 'Pendente',
+                originalStartDate: stage.startDate,
+                originalCompletedDate: stage.completedDate,
+                originalDurationDays: stage.durationDays || 1,
+                customer: order.customer.name,
+                priority: priority,
+                assignedResource: assignment?.resourceId,
+                assignedResourceName: assignment?.resourceName,
+                responsibleMember: assignment?.responsibleId,
+                responsibleMemberName: assignment?.responsibleName,
+                taskNotes: assignment?.notes,
+                selected: false,
+              };
+              
+              tasksList.push(task);
+            }
           });
         }
       });
@@ -302,15 +454,19 @@ export default function TaskManagementPage() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [ordersList, resourcesList] = await Promise.all([
+      const [ordersList, resourcesList, teamList, assignmentsList] = await Promise.all([
         fetchOrders(),
-        fetchResources()
+        fetchResources(),
+        fetchTeamMembers(),
+        fetchTaskAssignments()
       ]);
       
       setOrders(ordersList);
       setResources(resourcesList);
+      setTeamMembers(teamList);
+      setTaskAssignments(assignmentsList);
       
-      const tasksList = generateTasks(ordersList);
+      const tasksList = generateTasks(ordersList, assignmentsList);
       setTasks(tasksList);
       
     } catch (error) {
@@ -334,9 +490,15 @@ export default function TaskManagementPage() {
   // Filtered tasks
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
+      const query = searchQuery.toLowerCase();
+      const textMatch = 
+        task.orderNumber.toLowerCase().includes(query) ||
+        task.customer.toLowerCase().includes(query) ||
+        task.itemDescription.toLowerCase().includes(query) ||
+        task.stageName.toLowerCase().includes(query);
+
       const statusMatch = statusFilter === "all" || task.status === statusFilter;
       const priorityMatch = priorityFilter === "all" || task.priority === priorityFilter;
-      const osMatch = osFilter === "all" || task.orderNumber.toLowerCase().includes(osFilter.toLowerCase());
       
       let resourceMatch = true;
       if (resourceFilter === "unassigned") {
@@ -345,129 +507,308 @@ export default function TaskManagementPage() {
         resourceMatch = task.assignedResource === resourceFilter;
       }
       
-      return statusMatch && priorityMatch && resourceMatch && osMatch;
-    });
-  }, [tasks, statusFilter, priorityFilter, resourceFilter, osFilter]);
-
-  // Tasks by date
-  const tasksByDate = useMemo(() => {
-    const grouped: TasksByDate = {};
-    
-    filteredTasks.forEach(task => {
-      if (task.startDate) {
-        const dateKey = format(task.startDate, 'yyyy-MM-dd');
-        if (!grouped[dateKey]) {
-          grouped[dateKey] = [];
-        }
-        grouped[dateKey].push(task);
+      let responsibleMatch = true;
+      if (responsibleFilter === "unassigned") {
+        responsibleMatch = !task.responsibleMember;
+      } else if (responsibleFilter !== "all") {
+        responsibleMatch = task.responsibleMember === responsibleFilter;
       }
+
+      return textMatch && statusMatch && priorityMatch && resourceMatch && responsibleMatch;
     });
-    
-    return grouped;
-  }, [filteredTasks]);
-
-  // Unique OS numbers for filter
-  const uniqueOS = useMemo(() => {
-    const osNumbers = new Set(tasks.map(task => task.orderNumber).filter(Boolean));
-    return Array.from(osNumbers).sort();
-  }, [tasks]);
-
-  // Tasks for selected date
-  const tasksForSelectedDate = useMemo(() => {
-    const dateKey = format(selectedDate, 'yyyy-MM-dd');
-    return tasksByDate[dateKey] || [];
-  }, [tasksByDate, selectedDate]);
-
-  // Selected tasks for the day
-  const selectedTasksForDay = useMemo(() => {
-    return tasksForSelectedDate.filter(task => task.selected);
-  }, [tasksForSelectedDate]);
+  }, [tasks, searchQuery, statusFilter, priorityFilter, resourceFilter, responsibleFilter]);
 
   // Statistics
   const stats = useMemo(() => {
-    const total = filteredTasks.length;
-    const completed = filteredTasks.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length;
-    const inProgress = filteredTasks.filter(t => t.status === 'Em Andamento').length;
-    const pending = filteredTasks.filter(t => t.status === 'Pendente').length;
-    const reprogrammed = filteredTasks.filter(t => t.status === 'Reprogramada').length;
-    const cancelled = filteredTasks.filter(t => t.status === 'Cancelada').length;
-    const highPriority = filteredTasks.filter(t => t.priority === 'alta').length;
-    const assigned = filteredTasks.filter(t => t.assignedResource).length;
-    const unassigned = filteredTasks.filter(t => !t.assignedResource).length;
+    const total = tasks.length;
+    const assigned = tasks.filter(t => t.status === 'Atribuída').length;
+    const pending = tasks.filter(t => t.status === 'Pendente').length;
+    const completed = tasks.filter(t => t.status === 'Concluído').length;
+    const rescheduled = tasks.filter(t => t.status === 'Reprogramada').length;
+    const highPriority = tasks.filter(t => t.priority === 'alta').length;
     
-    return { total, completed, inProgress, pending, reprogrammed, cancelled, highPriority, assigned, unassigned };
-  }, [filteredTasks]);
+    return { total, assigned, pending, completed, rescheduled, highPriority };
+  }, [tasks]);
 
-  // Task selection handlers
-  const handleTaskSelection = (taskId: string, selected: boolean) => {
-    setTasks(prevTasks => 
-      prevTasks.map(task => 
-        task.id === taskId ? { ...task, selected } : task
-      )
-    );
-  };
+  // Leadership statistics
+  const leadershipStats = useMemo(() => {
+    const memberStats = teamMembers.map(member => {
+      const memberTasks = tasks.filter(t => t.responsibleMember === member.id);
+      const completed = memberTasks.filter(t => t.status === 'Concluído').length;
+      const rescheduled = memberTasks.filter(t => t.status === 'Reprogramada').length;
+      const total = memberTasks.length;
+      
+      return {
+        id: member.id,
+        name: member.name,
+        position: member.position,
+        completed,
+        rescheduled,
+        total,
+        efficiency: total > 0 ? (completed / total) * 100 : 0
+      };
+    }).filter(stat => stat.total > 0)
+      .sort((a, b) => b.completed - a.completed);
 
-  const handleSelectAllTasksForDay = (selected: boolean) => {
-    setTasks(prevTasks => 
-      prevTasks.map(task => {
-        const isTaskForSelectedDate = task.startDate && 
-          format(task.startDate, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd');
-        return isTaskForSelectedDate ? { ...task, selected } : task;
-      })
-    );
-  };
+    return memberStats;
+  }, [tasks, teamMembers]);
 
-  // Status update handlers
-  const handleUpdateTaskStatus = (task: Task) => {
+  // Task assignment handlers
+  const handleAssignTask = (task: Task) => {
     setSelectedTask(task);
-    setNewTaskStatus(task.status);
-    setIsStatusDialogOpen(true);
+    setSelectedResourceForAssign(task.assignedResource || "");
+    setSelectedResponsibleForAssign(task.responsibleMember || "");
+    setAssignmentNotes(task.taskNotes || "");
+    setIsAssignDialogOpen(true);
   };
 
-  const handleSaveTaskStatus = async () => {
+  const handleSaveAssignment = async () => {
+    if (!selectedTask || !selectedResourceForAssign || !selectedResponsibleForAssign) {
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios",
+        description: "Selecione um recurso e um responsável para atribuir a tarefa.",
+      });
+      return;
+    }
+
+    try {
+      const selectedResource = resources.find(r => r.id === selectedResourceForAssign);
+      const selectedResponsible = teamMembers.find(m => m.id === selectedResponsibleForAssign);
+      
+      if (!selectedResource || !selectedResponsible) {
+        throw new Error("Recurso ou responsável não encontrado");
+      }
+
+      const assignment: TaskAssignment = {
+        taskId: selectedTask.id,
+        resourceId: selectedResourceForAssign,
+        resourceName: selectedResource.name,
+        responsibleId: selectedResponsibleForAssign,
+        responsibleName: selectedResponsible.name,
+        assignedAt: new Date(),
+        notes: assignmentNotes
+      };
+
+      // Salvar no Firebase
+      const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
+      const currentAssignments = taskAssignments.filter(a => a.taskId !== selectedTask.id);
+      const updatedAssignments = [...currentAssignments, assignment];
+      
+      await updateDoc(assignmentsRef, { 
+        assignments: updatedAssignments.map(a => ({
+          ...a,
+          assignedAt: Timestamp.fromDate(a.assignedAt)
+        }))
+      });
+
+      toast({
+        title: "Tarefa atribuída!",
+        description: `Tarefa "${selectedTask.stageName}" atribuída ao recurso "${selectedResource.name}" sob responsabilidade de "${selectedResponsible.name}".`,
+      });
+
+      setIsAssignDialogOpen(false);
+      setSelectedTask(null);
+      setSelectedResourceForAssign("");
+      setSelectedResponsibleForAssign("");
+      setAssignmentNotes("");
+      
+      await loadData();
+
+    } catch (error) {
+      console.error("Error assigning task:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao atribuir tarefa",
+        description: "Não foi possível salvar a atribuição da tarefa.",
+      });
+    }
+  };
+
+  // Task completion handlers
+  const handleCompleteTask = (task: Task) => {
+    setSelectedTask(task);
+    setCompletionNotes("");
+    setIsCompleteDialogOpen(true);
+  };
+
+  const handleSaveCompletion = async () => {
     if (!selectedTask) return;
 
     try {
-      // Update task locally
-      const updatedTasks = tasks.map(task => 
-        task.id === selectedTask.id 
-          ? { ...task, status: newTaskStatus, completedDate: newTaskStatus === 'Concluído' ? new Date() : task.completedDate }
-          : task
-      );
+      // Atualizar o status da etapa no pedido
+      const orderRef = doc(db, "companies", "mecald", "orders", selectedTask.orderId);
+      const orderSnap = await getDoc(orderRef);
       
-      setTasks(updatedTasks);
+      if (!orderSnap.exists()) {
+        throw new Error("Pedido não encontrado");
+      }
 
-      // Here you would update Firebase if needed
-      // await updateTaskStatusInFirebase(selectedTask, newTaskStatus);
-
-      toast({
-        title: "Status atualizado!",
-        description: `Tarefa "${selectedTask.stageName}" foi marcada como "${newTaskStatus}".`,
+      const orderData = orderSnap.data();
+      const updatedItems = orderData.items.map((item: any) => {
+        if (item.id === selectedTask.itemId) {
+          const updatedPlan = item.productionPlan.map((stage: any, index: number) => {
+            if (index === selectedTask.stageIndex) {
+              return {
+                ...stage,
+                status: 'Concluído',
+                completedDate: Timestamp.fromDate(new Date()),
+                actualCompletedDate: Timestamp.fromDate(new Date()),
+                completedBy: user?.email || 'Sistema',
+                completionNotes: completionNotes
+              };
+            }
+            return stage;
+          });
+          return { ...item, productionPlan: updatedPlan };
+        }
+        return item;
       });
 
-      setIsStatusDialogOpen(false);
+      await updateDoc(orderRef, { items: updatedItems });
+
+      // Remover da lista de atribuições
+      const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
+      const updatedAssignments = taskAssignments.filter(a => a.taskId !== selectedTask.id);
+      await updateDoc(assignmentsRef, { 
+        assignments: updatedAssignments.map(a => ({
+          ...a,
+          assignedAt: Timestamp.fromDate(a.assignedAt)
+        }))
+      });
+
+      toast({
+        title: "Tarefa concluída!",
+        description: `Tarefa "${selectedTask.stageName}" foi marcada como concluída.`,
+      });
+
+      setIsCompleteDialogOpen(false);
       setSelectedTask(null);
-      setNewTaskStatus("");
+      setCompletionNotes("");
+      
+      await loadData();
 
     } catch (error) {
-      console.error("Error updating task status:", error);
+      console.error("Error completing task:", error);
       toast({
         variant: "destructive",
-        title: "Erro ao atualizar status",
-        description: "Não foi possível atualizar o status da tarefa.",
+        title: "Erro ao concluir tarefa",
+        description: "Não foi possível marcar a tarefa como concluída.",
+      });
+    }
+  };
+
+  // Task reschedule handlers
+  const handleRescheduleTask = (task: Task) => {
+    setSelectedTask(task);
+    setRescheduleDate(undefined);
+    setRescheduleDuration(task.originalDurationDays);
+    setRescheduleReason("");
+    setIsRescheduleDialogOpen(true);
+  };
+
+  const handleSaveReschedule = async () => {
+    if (!selectedTask || !rescheduleDate || !rescheduleReason.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios",
+        description: "Preencha a nova data, duração e motivo da reprogramação.",
+      });
+      return;
+    }
+
+    try {
+      // Calcular nova data de conclusão considerando dias úteis
+      const newCompletedDate = addBusinessDays(rescheduleDate, rescheduleDuration - 1);
+
+      // Atualizar o status da etapa no pedido
+      const orderRef = doc(db, "companies", "mecald", "orders", selectedTask.orderId);
+      const orderSnap = await getDoc(orderRef);
+      
+      if (!orderSnap.exists()) {
+        throw new Error("Pedido não encontrado");
+      }
+
+      const orderData = orderSnap.data();
+      const updatedItems = orderData.items.map((item: any) => {
+        if (item.id === selectedTask.itemId) {
+          const updatedPlan = item.productionPlan.map((stage: any, index: number) => {
+            if (index === selectedTask.stageIndex) {
+              return {
+                ...stage,
+                status: 'Reprogramada',
+                startDate: Timestamp.fromDate(rescheduleDate),
+                completedDate: Timestamp.fromDate(newCompletedDate),
+                durationDays: rescheduleDuration,
+                reprogrammedReason: rescheduleReason,
+                reprogrammedBy: user?.email || 'Sistema',
+                reprogrammedAt: Timestamp.fromDate(new Date())
+              };
+            }
+            return stage;
+          });
+          return { ...item, productionPlan: updatedPlan };
+        }
+        return item;
+      });
+
+      await updateDoc(orderRef, { items: updatedItems });
+
+      // Atualizar a atribuição para refletir a reprogramação
+      const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
+      const updatedAssignments = taskAssignments.map(a => {
+        if (a.taskId === selectedTask.id) {
+          return {
+            ...a,
+            reprogrammedDate: rescheduleDate,
+            reprogrammedDuration: rescheduleDuration,
+            reprogrammedReason: rescheduleReason,
+            reprogrammedAt: new Date()
+          };
+        }
+        return a;
+      });
+      
+      await updateDoc(assignmentsRef, { 
+        assignments: updatedAssignments.map(a => ({
+          ...a,
+          assignedAt: Timestamp.fromDate(a.assignedAt),
+          reprogrammedAt: a.reprogrammedAt ? Timestamp.fromDate(a.reprogrammedAt) : undefined
+        }))
+      });
+
+      toast({
+        title: "Tarefa reprogramada!",
+        description: `Tarefa "${selectedTask.stageName}" foi reprogramada para ${format(rescheduleDate, 'dd/MM/yyyy')}.`,
+      });
+
+      setIsRescheduleDialogOpen(false);
+      setSelectedTask(null);
+      setRescheduleDate(undefined);
+      setRescheduleDuration(1);
+      setRescheduleReason("");
+      
+      await loadData();
+
+    } catch (error) {
+      console.error("Error rescheduling task:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao reprogramar tarefa",
+        description: "Não foi possível reprogramar a tarefa.",
       });
     }
   };
 
   // Export functions
-  const exportSelectedTasks = async () => {
-    const tasksToExport = selectedTasksForDay;
+  const exportDailyTasks = async () => {
+    const selectedTasks = tasks.filter(task => task.selected);
     
-    if (tasksToExport.length === 0) {
+    if (selectedTasks.length === 0) {
       toast({
         variant: "destructive",
         title: "Nenhuma tarefa selecionada",
-        description: "Selecione pelo menos uma tarefa para exportar.",
+        description: "Selecione pelo menos uma tarefa para gerar o relatório.",
       });
       return;
     }
@@ -507,11 +848,11 @@ export default function TaskManagementPage() {
 
       yPos = 55;
       docPdf.setFontSize(14).setFont(undefined, 'bold');
-      docPdf.text('RELATÓRIO DE TAREFAS SELECIONADAS', pageWidth / 2, yPos, { align: 'center' });
+      docPdf.text('RELATÓRIO DIÁRIO DE TAREFAS', pageWidth / 2, yPos, { align: 'center' });
       yPos += 15;
 
       docPdf.setFontSize(11).setFont(undefined, 'normal');
-      docPdf.text(`Data: ${format(selectedDate, "dd/MM/yyyy")}`, 15, yPos);
+      docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, 15, yPos);
       docPdf.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, pageWidth - 15, yPos, { align: 'right' });
       yPos += 12;
 
@@ -521,52 +862,46 @@ export default function TaskManagementPage() {
       yPos += 8;
       
       docPdf.setFont(undefined, 'normal');
-      docPdf.text(`Total de Tarefas: ${tasksToExport.length}`, 15, yPos);
-      
+      docPdf.text(`Total de Tarefas: ${selectedTasks.length}`, 15, yPos);
+      yPos += 5;
+
       const statusCounts = {
-        'Concluído': tasksToExport.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length,
-        'Em Andamento': tasksToExport.filter(t => t.status === 'Em Andamento').length,
-        'Pendente': tasksToExport.filter(t => t.status === 'Pendente').length,
-        'Reprogramada': tasksToExport.filter(t => t.status === 'Reprogramada').length,
-        'Cancelada': tasksToExport.filter(t => t.status === 'Cancelada').length,
+        'Atribuída': selectedTasks.filter(t => t.status === 'Atribuída').length,
+        'Pendente': selectedTasks.filter(t => t.status === 'Pendente').length,
+        'Concluído': selectedTasks.filter(t => t.status === 'Concluído').length,
+        'Reprogramada': selectedTasks.filter(t => t.status === 'Reprogramada').length,
       };
 
-      let statusX = 15;
-      yPos += 5;
       Object.entries(statusCounts).forEach(([status, count]) => {
         if (count > 0) {
-          docPdf.text(`${status}: ${count}`, statusX, yPos);
-          statusX += 45;
-          if (statusX > pageWidth - 45) {
-            statusX = 15;
-            yPos += 5;
-          }
+          docPdf.text(`${status}: ${count}`, 15, yPos);
+          yPos += 5;
         }
       });
       
-      yPos += 15;
+      yPos += 10;
 
-      // Group tasks by location/sector
-      const tasksByLocation = tasksToExport.reduce((acc, task) => {
-        const location = task.location || task.assignedResourceName || 'Setor Geral';
-        if (!acc[location]) acc[location] = [];
-        acc[location].push(task);
+      // Group tasks by responsible member
+      const tasksByResponsible = selectedTasks.reduce((acc, task) => {
+        const responsible = task.responsibleMemberName || 'Não Atribuído';
+        if (!acc[responsible]) acc[responsible] = [];
+        acc[responsible].push(task);
         return acc;
       }, {} as { [key: string]: Task[] });
 
-      // Tasks table for each sector
-      Object.entries(tasksByLocation).forEach(([location, locationTasks]) => {
-        // Check if we need a new page before adding sector header
+      // Tasks table for each responsible
+      Object.entries(tasksByResponsible).forEach(([responsible, responsibleTasks]) => {
+        // Check if we need a new page
         if (yPos > 200) {
           docPdf.addPage();
           yPos = 20;
         }
 
         docPdf.setFontSize(12).setFont(undefined, 'bold');
-        docPdf.text(`SETOR/RECURSO: ${location.toUpperCase()}`, 15, yPos);
+        docPdf.text(`RESPONSÁVEL: ${responsible.toUpperCase()}`, 15, yPos);
         yPos += 8;
 
-        const tableBody = locationTasks.map(task => [
+        const tableBody = responsibleTasks.map(task => [
           task.orderNumber || 'N/A',
           task.customer || 'N/A',
           task.itemDescription.length > 30 ? 
@@ -576,13 +911,13 @@ export default function TaskManagementPage() {
           task.assignedResourceName || 'Não atribuído',
           task.priority.charAt(0).toUpperCase() + task.priority.slice(1),
           task.status || 'Pendente',
-          task.status === 'Concluído' || task.status === 'Concluída' ? '✓' : '☐',
+          '☐', // Checkbox para marcar execução
           '', // Campo para observações
         ]);
 
         autoTable(docPdf, {
           startY: yPos,
-          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Ok', 'Observações']],
+          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Exec.', 'Observações']],
           body: tableBody,
           styles: { 
             fontSize: 7,
@@ -603,7 +938,7 @@ export default function TaskManagementPage() {
             4: { cellWidth: 28 }, // Recurso
             5: { cellWidth: 16, halign: 'center' }, // Prioridade
             6: { cellWidth: 20, halign: 'center' }, // Status
-            7: { cellWidth: 12, halign: 'center' }, // Ok
+            7: { cellWidth: 12, halign: 'center' }, // Execução
             8: { cellWidth: 25, halign: 'center' }, // Observações
           },
           margin: { left: 15, right: 15 },
@@ -612,10 +947,10 @@ export default function TaskManagementPage() {
 
         yPos = (docPdf as any).lastAutoTable.finalY + 15;
         
-        // Add space for manual annotations
-        if (locationTasks.length > 0) {
+        // Add space for notes
+        if (responsibleTasks.length > 0) {
           docPdf.setFontSize(8).setFont(undefined, 'normal');
-          docPdf.text('Observações/Anotações:', 15, yPos);
+          docPdf.text('Anotações do Responsável:', 15, yPos);
           yPos += 5;
           
           // Draw lines for manual notes
@@ -624,27 +959,16 @@ export default function TaskManagementPage() {
           }
           yPos += 20;
         }
-        
-        // Check if we need a new page
-        if (yPos > 250) {
-          docPdf.addPage();
-          yPos = 20;
-        }
       });
 
-      // Add footer with signature fields
-      const finalY = yPos + 10;
-      const footerY = Math.max(finalY, 250);
-      
-      if (footerY > 270) {
+      // Add signature footer
+      if (yPos + 30 > docPdf.internal.pageSize.height - 20) {
         docPdf.addPage();
         yPos = 20;
-      } else {
-        yPos = footerY;
       }
 
       docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('CONTROLE E ASSINATURAS', 15, yPos);
+      docPdf.text('ASSINATURAS E APROVAÇÕES', 15, yPos);
       yPos += 10;
 
       docPdf.setFontSize(9).setFont(undefined, 'normal');
@@ -659,27 +983,16 @@ export default function TaskManagementPage() {
       docPdf.text('Controle de Qualidade:', 15, yPos);
       docPdf.line(60, yPos, 120, yPos);
       docPdf.text('Data: ___/___/_____', 130, yPos);
-      yPos += 15;
 
-      // General notes section
-      docPdf.setFontSize(9).setFont(undefined, 'bold');
-      docPdf.text('Observações Gerais do Dia:', 15, yPos);
-      yPos += 8;
-      
-      docPdf.setFont(undefined, 'normal');
-      for (let i = 0; i < 4; i++) {
-        docPdf.line(15, yPos + (i * 6), pageWidth - 15, yPos + (i * 6));
-      }
-
-      docPdf.save(`Tarefas_Selecionadas_${format(selectedDate, 'yyyyMMdd')}.pdf`);
+      docPdf.save(`Relatorio_Tarefas_${format(new Date(), 'yyyyMMdd')}.pdf`);
 
       toast({
         title: "Relatório gerado com sucesso!",
-        description: `O arquivo PDF foi baixado com ${tasksToExport.length} tarefas selecionadas.`,
+        description: `O arquivo PDF foi baixado com ${selectedTasks.length} tarefas selecionadas.`,
       });
 
     } catch (error) {
-      console.error("Error generating selected tasks report:", error);
+      console.error("Error generating tasks report:", error);
       toast({
         variant: "destructive",
         title: "Erro ao gerar relatório",
@@ -688,268 +1001,30 @@ export default function TaskManagementPage() {
     }
   };
 
-  const exportDailyTasks = async () => {
-    toast({ title: "Gerando relatório...", description: "Por favor, aguarde." });
+  // Task selection handlers
+  const handleTaskSelection = (taskId: string, selected: boolean) => {
+    setTasks(prevTasks => 
+      prevTasks.map(task => 
+        task.id === taskId ? { ...task, selected } : task
+      )
+    );
+  };
 
-    try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
-      
-      const docPdf = new jsPDF();
-      const pageWidth = docPdf.internal.pageSize.width;
-      let yPos = 15;
-
-      // Header
-      if (companyData.logo?.preview) {
-        try {
-          docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
-        } catch (e) {
-          console.error("Error adding logo to PDF:", e);
-        }
-      }
-
-      let textX = 65;
-      let textY = yPos;
-      docPdf.setFontSize(18).setFont(undefined, 'bold');
-      docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
-      textY += 6;
-      
-      docPdf.setFontSize(9).setFont(undefined, 'normal');
-      if (companyData.endereco) {
-        const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
-        docPdf.text(addressLines, textX, textY);
-        textY += (addressLines.length * 4);
-      }
-
-      yPos = 55;
-      docPdf.setFontSize(14).setFont(undefined, 'bold');
-      docPdf.text('RELATÓRIO DE TAREFAS DIÁRIAS', pageWidth / 2, yPos, { align: 'center' });
-      yPos += 15;
-
-      docPdf.setFontSize(11).setFont(undefined, 'normal');
-      docPdf.text(`Data: ${format(selectedDate, "dd/MM/yyyy")}`, 15, yPos);
-      docPdf.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, pageWidth - 15, yPos, { align: 'right' });
-      yPos += 12;
-
-      // Statistics
-      // Organização e espaçamento do bloco de estatísticas
-      docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('RESUMO DO DIA:', 15, yPos);
-      yPos += 8;
-      docPdf.setFont(undefined, 'normal');
-      docPdf.text(`Total de Tarefas: ${tasksForSelectedDate.length}`, 15, yPos);
-      docPdf.text(`Concluídas: ${tasksForSelectedDate.filter(t => t.status === 'Concluído' || t.status === 'Concluída').length}`, 80, yPos);
-      docPdf.text(`Em Andamento: ${tasksForSelectedDate.filter(t => t.status === 'Em Andamento').length}`, 140, yPos);
-      yPos += 15;
-
-      // Group tasks by location/sector
-      const tasksByLocation = tasksForSelectedDate.reduce((acc, task) => {
-        const location = task.location || task.assignedResourceName || 'Setor Geral';
-        if (!acc[location]) acc[location] = [];
-        acc[location].push(task);
-        return acc;
-      }, {} as { [key: string]: Task[] });
-
-      // Tasks table for each sector
-      Object.entries(tasksByLocation).forEach(([location, locationTasks]) => {
-        // Check if we need a new page before adding sector header
-        if (yPos > 200) {
-          docPdf.addPage();
-          yPos = 20;
-        }
-
-        docPdf.setFontSize(12).setFont(undefined, 'bold');
-        docPdf.text(`SETOR/RECURSO: ${location.toUpperCase()}`, 15, yPos);
-        yPos += 8;
-
-        const tableBody = locationTasks.map(task => [
-          task.orderNumber || 'N/A',
-          task.customer || 'N/A',
-          task.itemDescription.length > 30 ? 
-            task.itemDescription.substring(0, 30) + '...' : 
-            task.itemDescription,
-          task.stageName || 'N/A',
-          task.assignedResourceName || 'Não atribuído',
-          task.priority.charAt(0).toUpperCase() + task.priority.slice(1),
-          '☐ Concluído', // Checkbox para marcar como concluído
-          '☐ Pendente',  // Checkbox para marcar como pendente
-        ]);
-
-        autoTable(docPdf, {
-          startY: yPos,
-          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Observações']],
-          body: tableBody,
-          styles: { 
-            fontSize: 7,
-            cellPadding: 2,
-          },
-          headStyles: { 
-            fillColor: [37, 99, 235], 
-            fontSize: 8, 
-            textColor: 255, 
-            halign: 'center',
-            fontStyle: 'bold'
-          },
-          columnStyles: {
-            0: { cellWidth: 20, halign: 'center' }, // Pedido
-            1: { cellWidth: 25 }, // Cliente
-            2: { cellWidth: 35 }, // Item
-            3: { cellWidth: 25 }, // Etapa
-            4: { cellWidth: 30 }, // Recurso
-            5: { cellWidth: 18, halign: 'center' }, // Prioridade
-            6: { cellWidth: 22, halign: 'center' }, // Status
-            7: { cellWidth: 22, halign: 'center' }, // Observações
-          },
-          margin: { left: 15, right: 15 },
-          tableWidth: 'auto'
-        });
-
-        yPos = (docPdf as any).lastAutoTable.finalY + 15;
-        
-        // Add space for manual annotations
-        if (locationTasks.length > 0) {
-          docPdf.setFontSize(8).setFont(undefined, 'normal');
-          docPdf.text('Observações/Anotações:', 15, yPos);
-          yPos += 5;
-          
-          // Draw lines for manual notes
-          for (let i = 0; i < 3; i++) {
-            docPdf.line(15, yPos + (i * 5), pageWidth - 15, yPos + (i * 5));
-          }
-          yPos += 20;
-        }
-        
-        // Check if we need a new page
-        if (yPos > 250) {
-          docPdf.addPage();
-          yPos = 20;
-        }
-      });
-
-      // Add footer with signature fields
-      const finalY = yPos + 10;
-      const footerY = Math.max(finalY, 250);
-      
-      if (footerY > 270) {
-        docPdf.addPage();
-        yPos = 20;
-      } else {
-        yPos = footerY;
-      }
-
-      docPdf.setFontSize(10).setFont(undefined, 'bold');
-      docPdf.text('CONTROLE E ASSINATURAS', 15, yPos);
-      yPos += 10;
-
-      docPdf.setFontSize(9).setFont(undefined, 'normal');
-      
-      // Supervisor signature
-      docPdf.text('Supervisor/Coordenador:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
-      yPos += 15;
-
-      // Quality control signature
-      docPdf.text('Controle de Qualidade:', 15, yPos);
-      docPdf.line(60, yPos, 120, yPos);
-      docPdf.text('Data: ___/___/_____', 130, yPos);
-      yPos += 15;
-
-      // General notes section
-      docPdf.setFontSize(9).setFont(undefined, 'bold');
-      docPdf.text('Observações Gerais do Dia:', 15, yPos);
-      yPos += 8;
-      
-      docPdf.setFont(undefined, 'normal');
-      for (let i = 0; i < 4; i++) {
-        docPdf.line(15, yPos + (i * 6), pageWidth - 15, yPos + (i * 6));
-      }
-
-      docPdf.save(`Tarefas_Diarias_${format(selectedDate, 'yyyyMMdd')}.pdf`);
-
-      toast({
-        title: "Relatório gerado com sucesso!",
-        description: "O arquivo PDF foi baixado com as tarefas e campos para controle.",
-      });
-
-    } catch (error) {
-      console.error("Error generating daily tasks report:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar relatório",
-        description: "Não foi possível gerar o arquivo PDF.",
-      });
-    }
+  const handleSelectAllTasks = (selected: boolean) => {
+    setTasks(prevTasks => 
+      prevTasks.map(task => ({ ...task, selected }))
+    );
   };
 
   const clearFilters = () => {
     setStatusFilter("all");
     setPriorityFilter("all");
     setResourceFilter("all");
-    setOsFilter("all");
+    setResponsibleFilter("all");
+    setSearchQuery("");
   };
 
-  // Fechar dialogs e resetar estado
-  const handleCloseAssignDialog = () => {
-    setIsAssignDialogOpen(false);
-    setSelectedTask(null);
-    setSelectedResourceForAssign("none");
-  };
-
-  const handleCloseStatusDialog = () => {
-    setIsStatusDialogOpen(false);
-    setSelectedTask(null);
-    setNewTaskStatus("");
-  };
-
-  // Handlers para atribuição de recursos
-  const handleAssignResource = (task: Task) => {
-    setSelectedTask(task);
-    setSelectedResourceForAssign(task.assignedResource || "none");
-    setIsAssignDialogOpen(true);
-  };
-
-  const handleSaveAssignment = async () => {
-    if (!selectedTask) return;
-
-    try {
-      const selectedResource = (selectedResourceForAssign && selectedResourceForAssign !== "none") ? 
-        resources.find(r => r.id === selectedResourceForAssign) : 
-        undefined;
-      
-      const updatedTasks = tasks.map(task => {
-        if (task.id === selectedTask.id) {
-          return {
-            ...task,
-            assignedResource: (selectedResourceForAssign === "none") ? undefined : selectedResourceForAssign,
-            assignedResourceName: selectedResource?.name || undefined,
-            location: selectedResource?.location || undefined,
-          };
-        }
-        return task;
-      });
-
-      setTasks(updatedTasks);
-
-      toast({
-        title: "Recurso atribuído!",
-        description: `Tarefa "${selectedTask.stageName}" foi ${selectedResourceForAssign === "none" ? 'removida da atribuição' : 'atribuída ao recurso "' + selectedResource?.name + '"'}.`,
-      });
-
-      setIsAssignDialogOpen(false);
-      setSelectedTask(null);
-      setSelectedResourceForAssign("none");
-
-    } catch (error) {
-      console.error("Error assigning resource:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao atribuir recurso",
-        description: "Não foi possível salvar a atribuição.",
-      });
-    }
-  };
+  const selectedTasksCount = tasks.filter(task => task.selected).length;
 
   if (isLoading) {
     return (
@@ -987,23 +1062,19 @@ export default function TaskManagementPage() {
             <RefreshCw className="mr-2 h-4 w-4" />
             Atualizar
           </Button>
-          <Button onClick={exportDailyTasks}>
-            <Download className="mr-2 h-4 w-4" />
-            Exportar Todas do Dia
-          </Button>
           <Button 
-            onClick={exportSelectedTasks}
-            disabled={selectedTasksForDay.length === 0}
+            onClick={exportDailyTasks}
+            disabled={selectedTasksCount === 0}
             variant="default"
           >
-            <CheckSquare className="mr-2 h-4 w-4" />
-            Exportar Selecionadas ({selectedTasksForDay.length})
+            <Download className="mr-2 h-4 w-4" />
+            Exportar Selecionadas ({selectedTasksCount})
           </Button>
         </div>
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Tarefas</CardTitle>
@@ -1011,32 +1082,19 @@ export default function TaskManagementPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.total}</div>
-            <p className="text-xs text-muted-foreground">Em todos os projetos</p>
+            <p className="text-xs text-muted-foreground">Tarefas pendentes</p>
           </CardContent>
         </Card>
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Concluídas</CardTitle>
-            <CheckCircle className="h-4 w-4 text-green-600" />
+            <CardTitle className="text-sm font-medium">Atribuídas</CardTitle>
+            <UserCheck className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
+            <div className="text-2xl font-bold text-blue-600">{stats.assigned}</div>
             <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}% do total
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Em Andamento</CardTitle>
-            <PlayCircle className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{stats.inProgress}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.inProgress / stats.total) * 100) : 0}% do total
+              {stats.total > 0 ? Math.round((stats.assigned / stats.total) * 100) : 0}% do total
             </p>
           </CardContent>
         </Card>
@@ -1056,213 +1114,65 @@ export default function TaskManagementPage() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Concluídas</CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
+            <p className="text-xs text-muted-foreground">Finalizadas</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Reprogramadas</CardTitle>
             <RotateCcw className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-purple-600">{stats.reprogrammed}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.reprogrammed / stats.total) * 100) : 0}% do total
-            </p>
+            <div className="text-2xl font-bold text-purple-600">{stats.rescheduled}</div>
+            <p className="text-xs text-muted-foreground">Reagendadas</p>
           </CardContent>
         </Card>
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Canceladas</CardTitle>
-            <Ban className="h-4 w-4 text-red-600" />
+            <CardTitle className="text-sm font-medium">Alta Prioridade</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{stats.cancelled}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.cancelled / stats.total) * 100) : 0}% do total
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Não Atribuídas</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{stats.unassigned}</div>
-            <p className="text-xs text-muted-foreground">Precisam de recurso</p>
+            <div className="text-2xl font-bold text-red-600">{stats.highPriority}</div>
+            <p className="text-xs text-muted-foreground">Urgentes</p>
           </CardContent>
         </Card>
       </div>
 
-      <Tabs defaultValue="calendar" className="space-y-4">
+      <Tabs defaultValue="tasks" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="calendar">Visão por Data</TabsTrigger>
-          <TabsTrigger value="list">Lista Completa</TabsTrigger>
-          <TabsTrigger value="resources">Recursos</TabsTrigger>
+          <TabsTrigger value="tasks">Gestão de Tarefas</TabsTrigger>
+          <TabsTrigger value="dashboard">Dashboard de Liderança</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="calendar" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Calendar */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Selecionar Data</CardTitle>
-                <CardDescription>Clique em uma data para ver as tarefas programadas</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={(date) => date && setSelectedDate(date)}
-                  className="rounded-md border"
-                  modifiers={{
-                    hasTasks: (date) => {
-                      const dateKey = format(date, 'yyyy-MM-dd');
-                      return tasksByDate[dateKey] && tasksByDate[dateKey].length > 0;
-                    }
-                  }}
-                  modifiersStyles={{
-                    hasTasks: {
-                      backgroundColor: '#dbeafe',
-                      color: '#1e40af',
-                      fontWeight: 'bold'
-                    }
-                  }}
-                />
-              </CardContent>
-            </Card>
-
-            {/* Tasks for Selected Date */}
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>
-                      Tarefas para {format(selectedDate, "dd/MM/yyyy")}
-                    </CardTitle>
-                    <CardDescription>
-                      {tasksForSelectedDate.length} tarefa(s) programada(s) para este dia
-                    </CardDescription>
-                  </div>
-                  {tasksForSelectedDate.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSelectAllTasksForDay(true)}
-                      >
-                        Selecionar Todas
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSelectAllTasksForDay(false)}
-                      >
-                        Desmarcar Todas
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {tasksForSelectedDate.length > 0 ? (
-                  <div className="space-y-4">
-                    {tasksForSelectedDate.map(task => (
-                      <div key={task.id} className="border rounded-lg p-4 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id={`task-${task.id}`}
-                              checked={task.selected || false}
-                              onCheckedChange={(checked) => handleTaskSelection(task.id, checked as boolean)}
-                            />
-                            <Badge className={getStatusColor(task.status)}>
-                              {getStatusIcon(task.status)}
-                              {task.status}
-                            </Badge>
-                            <Badge className={getPriorityColor(task.priority)}>
-                              {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground">Pedido {task.orderNumber}</span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleUpdateTaskStatus(task)}
-                            >
-                              <Edit3 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        <h4 className="font-semibold">{task.stageName}</h4>
-                        <p className="text-sm text-muted-foreground">{task.itemDescription}</p>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            {task.customer}
-                          </span>
-                          {task.location && (
-                            <span className="flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              {task.location}
-                            </span>
-                          )}
-                          {task.assignedResourceName && (
-                            <span className="flex items-center gap-1">
-                              <UserCheck className="h-3 w-3" />
-                              {task.assignedResourceName}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <CalendarPlus className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Nenhuma tarefa programada para esta data</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="list" className="space-y-4">
+        <TabsContent value="tasks" className="space-y-4">
           {/* Filters */}
           <Card className="p-4">
             <div className="space-y-4">
-              <span className="text-sm font-medium">Filtrar tarefas por:</span>
-              
-              {/* Primeira linha de filtros */}
-              <div className="flex flex-wrap items-center gap-4">
-                {/* Filtro por OS - Input de busca e Select */}
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-medium text-muted-foreground min-w-[40px]">OS:</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Buscar por OS..."
-                      value={osFilter === "all" ? "" : osFilter}
-                      onChange={(e) => setOsFilter(e.target.value || "all")}
-                      className="pl-9 w-[160px]"
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">ou</span>
-                  <Select value={osFilter} onValueChange={setOsFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Selecionar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas as OS</SelectItem>
-                      {uniqueOS.map(osNumber => (
-                        <SelectItem key={osNumber} value={osNumber}>
-                          {osNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <div className="flex items-center gap-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por pedido, cliente, item, etapa..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
                 </div>
-                
+                <Button variant="ghost" onClick={clearFilters}>
+                  <Filter className="mr-2 h-4 w-4" />
+                  Limpar Filtros
+                </Button>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-4">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="Status" />
@@ -1270,16 +1180,12 @@ export default function TaskManagementPage() {
                   <SelectContent>
                     <SelectItem value="all">Todos os Status</SelectItem>
                     <SelectItem value="Pendente">Pendente</SelectItem>
-                    <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                    <SelectItem value="Concluído">Concluído</SelectItem>
+                    <SelectItem value="Atribuída">Atribuída</SelectItem>
+                    <SelectItem value="Concluído">Concluída</SelectItem>
                     <SelectItem value="Reprogramada">Reprogramada</SelectItem>
-                    <SelectItem value="Cancelada">Cancelada</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              
-              {/* Segunda linha de filtros */}
-              <div className="flex flex-wrap items-center gap-4">
+
                 <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                   <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="Prioridade" />
@@ -1294,7 +1200,7 @@ export default function TaskManagementPage() {
 
                 <Select value={resourceFilter} onValueChange={setResourceFilter}>
                   <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Recurso Atribuído" />
+                    <SelectValue placeholder="Recurso" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos os Recursos</SelectItem>
@@ -1309,10 +1215,20 @@ export default function TaskManagementPage() {
                   </SelectContent>
                 </Select>
 
-                <Button variant="ghost" onClick={clearFilters}>
-                  <Filter className="mr-2 h-4 w-4" />
-                  Limpar Filtros
-                </Button>
+                <Select value={responsibleFilter} onValueChange={setResponsibleFilter}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Responsável" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os Responsáveis</SelectItem>
+                    {teamMembers.map(member => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.name} ({member.position})
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="unassigned">Não Atribuídas</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </Card>
@@ -1320,24 +1236,44 @@ export default function TaskManagementPage() {
           {/* Tasks Table */}
           <Card>
             <CardHeader>
-              <CardTitle>Lista de Tarefas</CardTitle>
-              <CardDescription>
-                Todas as tarefas de produção organizadas por prioridade e data
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Lista de Tarefas</CardTitle>
+                  <CardDescription>
+                    Gerencie a atribuição e execução de tarefas de produção
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSelectAllTasks(true)}
+                  >
+                    Selecionar Todas
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSelectAllTasks(false)}
+                  >
+                    Desmarcar Todas
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-12">Sel.</TableHead>
                     <TableHead>Pedido</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>Item</TableHead>
                     <TableHead>Etapa</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Prioridade</TableHead>
-                    <TableHead>Recurso Atribuído</TableHead>
-                    <TableHead>Início Previsto</TableHead>
-                    <TableHead>Duração</TableHead>
+                    <TableHead>Recurso</TableHead>
+                    <TableHead>Responsável</TableHead>
                     <TableHead className="text-center">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1345,20 +1281,25 @@ export default function TaskManagementPage() {
                   {filteredTasks.length > 0 ? (
                     filteredTasks
                       .sort((a, b) => {
-                        // Sort by priority first, then by start date
+                        // Sort by priority first, then by status
                         const priorityOrder = { alta: 3, media: 2, baixa: 1 };
                         const priorityDiff = priorityOrder[b.priority] - priorityOrder[a.priority];
                         if (priorityDiff !== 0) return priorityDiff;
                         
-                        if (a.startDate && b.startDate) {
-                          return a.startDate.getTime() - b.startDate.getTime();
-                        }
-                        if (a.startDate && !b.startDate) return -1;
-                        if (!a.startDate && b.startDate) return 1;
-                        return 0;
+                        const statusOrder = { 'Atribuída': 3, 'Pendente': 2, 'Reprogramada': 1, 'Concluído': 0 };
+                        return (statusOrder[b.status as keyof typeof statusOrder] || 0) - 
+                               (statusOrder[a.status as keyof typeof statusOrder] || 0);
                       })
                       .map((task) => (
                         <TableRow key={task.id}>
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              checked={task.selected || false}
+                              onChange={(e) => handleTaskSelection(task.id, e.target.checked)}
+                              className="rounded border-gray-300"
+                            />
+                          </TableCell>
                           <TableCell className="font-medium">{task.orderNumber}</TableCell>
                           <TableCell>{task.customer}</TableCell>
                           <TableCell>
@@ -1392,27 +1333,50 @@ export default function TaskManagementPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            {task.startDate ? format(task.startDate, "dd/MM/yyyy") : "A definir"}
+                            {task.responsibleMemberName ? (
+                              <div className="flex items-center gap-2">
+                                <User className="h-4 w-4 text-blue-600" />
+                                <span className="text-sm">{task.responsibleMemberName}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4 text-orange-500" />
+                                <span className="text-sm text-muted-foreground">Não atribuído</span>
+                              </div>
+                            )}
                           </TableCell>
-                          <TableCell>{task.durationDays} dia(s)</TableCell>
                           <TableCell className="text-center">
                             <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleAssignResource(task)}
-                              >
-                                <Edit3 className="h-4 w-4 mr-1" />
-                                {task.assignedResource ? 'Alterar' : 'Atribuir'}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleUpdateTaskStatus(task)}
-                              >
-                                <Settings className="h-4 w-4 mr-1" />
-                                Status
-                              </Button>
+                              {task.status === 'Pendente' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleAssignTask(task)}
+                                >
+                                  <UserCheck className="h-4 w-4 mr-1" />
+                                  Atribuir
+                                </Button>
+                              )}
+                              {task.status === 'Atribuída' && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleCompleteTask(task)}
+                                  >
+                                    <CheckCircle className="h-4 w-4 mr-1" />
+                                    Concluir
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRescheduleTask(task)}
+                                  >
+                                    <RotateCcw className="h-4 w-4 mr-1" />
+                                    Reprogramar
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1430,239 +1394,271 @@ export default function TaskManagementPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="resources" className="space-y-4">
-          {/* Resource Statistics */}
+        <TabsContent value="dashboard" className="space-y-4">
+          {/* Leadership Dashboard */}
+          <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Crown className="h-5 w-5 text-yellow-500" />
+                  Ranking de Performance da Equipe
+                </CardTitle>
+                <CardDescription>
+                  Desempenho dos membros da equipe na conclusão e reprogramação de tarefas
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Posição</TableHead>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Cargo</TableHead>
+                      <TableHead>Concluídas</TableHead>
+                      <TableHead>Reprogramadas</TableHead>
+                      <TableHead>Total</TableHead>
+                      <TableHead>Eficiência</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {leadershipStats.map((member, index) => (
+                      <TableRow key={member.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {index === 0 && <Crown className="h-4 w-4 text-yellow-500" />}
+                            {index === 1 && <Award className="h-4 w-4 text-gray-400" />}
+                            {index === 2 && <Award className="h-4 w-4 text-orange-400" />}
+                            <span className="font-medium">#{index + 1}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">{member.name}</TableCell>
+                        <TableCell>{member.position}</TableCell>
+                        <TableCell>
+                          <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                            {member.completed}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100">
+                            {member.rescheduled}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{member.total}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Progress value={member.efficiency} className="h-2 w-20" />
+                            <span className="text-sm font-medium">{Math.round(member.efficiency)}%</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {leadershipStats.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center h-24">
+                          Nenhum membro da equipe com tarefas atribuídas ainda.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-blue-500" />
+                  Top Performer
+                </CardTitle>
+                <CardDescription>
+                  Membro da equipe com melhor desempenho
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {leadershipStats.length > 0 ? (
+                  <div className="space-y-4">
+                    <div className="text-center">
+                      <Crown className="h-8 w-8 text-yellow-500 mx-auto mb-2" />
+                      <h3 className="text-lg font-bold">{leadershipStats[0].name}</h3>
+                      <p className="text-sm text-muted-foreground">{leadershipStats[0].position}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm">Tarefas Concluídas</span>
+                        <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                          {leadershipStats[0].completed}
+                        </Badge>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm">Taxa de Eficiência</span>
+                        <span className="font-bold text-green-600">
+                          {Math.round(leadershipStats[0].efficiency)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm">Total de Tarefas</span>
+                        <span className="font-medium">{leadershipStats[0].total}</span>
+                      </div>
+                    </div>
+                    <Progress value={leadershipStats[0].efficiency} className="h-3" />
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Nenhuma tarefa foi atribuída ainda</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Additional Stats */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total de Recursos</CardTitle>
-                <Settings className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium">Total de Membros Ativos</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{resources.length}</div>
-                <p className="text-xs text-muted-foreground">Recursos cadastrados</p>
+                <div className="text-2xl font-bold">{leadershipStats.length}</div>
+                <p className="text-xs text-muted-foreground">Com tarefas atribuídas</p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Disponíveis</CardTitle>
+                <CardTitle className="text-sm font-medium">Média de Eficiência</CardTitle>
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {leadershipStats.length > 0 
+                    ? Math.round(leadershipStats.reduce((acc, member) => acc + member.efficiency, 0) / leadershipStats.length)
+                    : 0}%
+                </div>
+                <p className="text-xs text-muted-foreground">Da equipe</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Concluídas</CardTitle>
                 <CheckCircle className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-green-600">
-                  {resources.filter(r => r.status === 'disponivel').length}
+                  {leadershipStats.reduce((acc, member) => acc + member.completed, 0)}
                 </div>
-                <p className="text-xs text-muted-foreground">Prontos para uso</p>
+                <p className="text-xs text-muted-foreground">Por toda a equipe</p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Ocupados</CardTitle>
-                <Activity className="h-4 w-4 text-yellow-600" />
+                <CardTitle className="text-sm font-medium">Total Reprogramadas</CardTitle>
+                <RotateCcw className="h-4 w-4 text-purple-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-yellow-600">
-                  {resources.filter(r => r.status === 'ocupado').length}
+                <div className="text-2xl font-bold text-purple-600">
+                  {leadershipStats.reduce((acc, member) => acc + member.rescheduled, 0)}
                 </div>
-                <p className="text-xs text-muted-foreground">Em uso atualmente</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Manutenção</CardTitle>
-                <AlertTriangle className="h-4 w-4 text-red-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600">
-                  {resources.filter(r => r.status === 'manutencao').length}
-                </div>
-                <p className="text-xs text-muted-foreground">Indisponíveis</p>
+                <p className="text-xs text-muted-foreground">Por toda a equipe</p>
               </CardContent>
             </Card>
           </div>
-
-          {/* Resources by Type */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recursos por Tipo</CardTitle>
-                <CardDescription>Distribuição dos recursos por categoria</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {Object.entries(
-                    resources.reduce((acc, resource) => {
-                      acc[resource.type] = (acc[resource.type] || 0) + 1;
-                      return acc;
-                    }, {} as Record<string, number>)
-                  ).map(([type, count]) => (
-                    <div key={type} className="flex items-center justify-between">
-                      <span className="text-sm">{getResourceTypeLabel(type)}</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 bg-secondary rounded-full h-2">
-                          <div
-                            className="bg-primary h-2 rounded-full transition-all"
-                            style={{
-                              width: `${resources.length > 0 ? (count / resources.length) * 100 : 0}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="text-sm font-medium w-8">{count}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Status dos Recursos</CardTitle>
-                <CardDescription>Situação atual de todos os recursos</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {['disponivel', 'ocupado', 'manutencao', 'inativo'].map(status => {
-                    const count = resources.filter(r => r.status === status).length;
-                    const percentage = resources.length > 0 ? (count / resources.length) * 100 : 0;
-                    const labels = {
-                      disponivel: 'Disponível',
-                      ocupado: 'Ocupado',
-                      manutencao: 'Manutenção',
-                      inativo: 'Inativo'
-                    };
-                    const colors = {
-                      disponivel: 'bg-green-500',
-                      ocupado: 'bg-yellow-500',
-                      manutencao: 'bg-red-500',
-                      inativo: 'bg-gray-500'
-                    };
-                    
-                    return (
-                      <div key={status} className="flex items-center justify-between">
-                        <span className="text-sm">{labels[status as keyof typeof labels]}</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-20 bg-secondary rounded-full h-2">
-                            <div
-                              className={`${colors[status as keyof typeof colors]} h-2 rounded-full transition-all`}
-                              style={{ width: `${percentage}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-medium w-8">{count}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Resources Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Lista de Recursos</CardTitle>
-              <CardDescription>Todos os recursos produtivos disponíveis</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nome</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Capacidade</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Localização</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {resources.length > 0 ? (
-                    resources.map((resource) => (
-                      <TableRow key={resource.id}>
-                        <TableCell className="font-medium">{resource.name}</TableCell>
-                        <TableCell>{getResourceTypeLabel(resource.type)}</TableCell>
-                        <TableCell>{resource.capacity}</TableCell>
-                        <TableCell>
-                          <Badge className={getStatusColor(resource.status)}>
-                            {resource.status === 'disponivel' && 'Disponível'}
-                            {resource.status === 'ocupado' && 'Ocupado'}
-                            {resource.status === 'manutencao' && 'Manutenção'}
-                            {resource.status === 'inativo' && 'Inativo'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{resource.location || "-"}</TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center h-24">
-                        Nenhum recurso cadastrado.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
 
-      {/* Dialog para Atribuição de Recurso */}
+      {/* Dialog para Atribuição de Tarefa */}
       <Dialog open={isAssignDialogOpen} onOpenChange={(open) => {
         if (!open) {
-          handleCloseAssignDialog();
+          setIsAssignDialogOpen(false);
+          setSelectedTask(null);
+          setSelectedResourceForAssign("");
+          setSelectedResponsibleForAssign("");
+          setAssignmentNotes("");
         }
       }}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Atribuir Recurso à Tarefa</DialogTitle>
+            <DialogTitle>Atribuir Tarefa</DialogTitle>
             <DialogDescription>
-              Selecione um recurso para executar a tarefa "{selectedTask?.stageName}" do item "{selectedTask?.itemDescription}".
+              Atribua um recurso e um responsável para executar a tarefa "{selectedTask?.stageName}" do item "{selectedTask?.itemDescription}".
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Recurso Disponível</label>
-              <Select 
-                value={selectedResourceForAssign || "none"} 
-                onValueChange={(value) => setSelectedResourceForAssign(value === "none" ? "" : value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um recurso" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-orange-500" />
-                      Remover atribuição
-                    </div>
-                  </SelectItem>
-                  {resources
-                    .filter(r => r.status === 'disponivel')
-                    .map(resource => (
-                      <SelectItem key={resource.id} value={resource.id}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Recurso Produtivo</Label>
+                <Select 
+                  value={selectedResourceForAssign} 
+                  onValueChange={setSelectedResourceForAssign}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um recurso" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {resources
+                      .filter(r => r.status === 'disponivel')
+                      .map(resource => (
+                        <SelectItem key={resource.id} value={resource.id}>
+                          <div className="flex items-center gap-2">
+                            <Settings className="h-4 w-4 text-blue-600" />
+                            <div>
+                              <div className="font-medium">{resource.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {getResourceTypeLabel(resource.type)} - Capacidade: {resource.capacity}
+                                {resource.location && ` - ${resource.location}`}
+                              </div>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                {resources.filter(r => r.status === 'disponivel').length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum recurso disponível no momento.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Membro Responsável</Label>
+                <Select 
+                  value={selectedResponsibleForAssign} 
+                  onValueChange={setSelectedResponsibleForAssign}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um responsável" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {teamMembers.map(member => (
+                      <SelectItem key={member.id} value={member.id}>
                         <div className="flex items-center gap-2">
-                          <UserCheck className="h-4 w-4 text-green-600" />
+                          <User className="h-4 w-4 text-green-600" />
                           <div>
-                            <div className="font-medium">{resource.name}</div>
+                            <div className="font-medium">{member.name}</div>
                             <div className="text-xs text-muted-foreground">
-                              {getResourceTypeLabel(resource.type)} - Capacidade: {resource.capacity}
-                              {resource.location && ` - ${resource.location}`}
+                              {member.position} - {member.email}
                             </div>
                           </div>
                         </div>
                       </SelectItem>
                     ))}
-                </SelectContent>
-              </Select>
-              {resources.filter(r => r.status === 'disponivel').length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  Nenhum recurso disponível no momento.
-                </p>
-              )}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Observações da Atribuição</Label>
+              <Textarea
+                placeholder="Instruções especiais, observações ou recomendações para a execução da tarefa..."
+                value={assignmentNotes}
+                onChange={(e) => setAssignmentNotes(e.target.value)}
+                rows={3}
+              />
             </div>
             
             {selectedTask && (
@@ -1673,102 +1669,189 @@ export default function TaskManagementPage() {
                   <p><strong>Cliente:</strong> {selectedTask.customer}</p>
                   <p><strong>Item:</strong> {selectedTask.itemDescription}</p>
                   <p><strong>Etapa:</strong> {selectedTask.stageName}</p>
-                  <p><strong>Duração:</strong> {selectedTask.durationDays} dia(s)</p>
+                  <p><strong>Duração Original:</strong> {selectedTask.originalDurationDays} dia(s) úteis</p>
                   <p><strong>Prioridade:</strong> {selectedTask.priority.charAt(0).toUpperCase() + selectedTask.priority.slice(1)}</p>
+                  {selectedTask.originalStartDate && (
+                    <p><strong>Início Planejado:</strong> {format(selectedTask.originalStartDate, 'dd/MM/yyyy')}</p>
+                  )}
+                  {selectedTask.originalCompletedDate && (
+                    <p><strong>Conclusão Planejada:</strong> {format(selectedTask.originalCompletedDate, 'dd/MM/yyyy')}</p>
+                  )}
                 </div>
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={handleCloseAssignDialog}>
+            <Button variant="outline" onClick={() => setIsAssignDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSaveAssignment}>
-              Salvar Atribuição
+            <Button 
+              onClick={handleSaveAssignment}
+              disabled={!selectedResourceForAssign || !selectedResponsibleForAssign}
+            >
+              Atribuir Tarefa
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Dialog para Atualização de Status */}
-      <Dialog open={isStatusDialogOpen} onOpenChange={(open) => {
+      {/* Dialog para Conclusão de Tarefa */}
+      <Dialog open={isCompleteDialogOpen} onOpenChange={(open) => {
         if (!open) {
-          handleCloseStatusDialog();
+          setIsCompleteDialogOpen(false);
+          setSelectedTask(null);
+          setCompletionNotes("");
         }
       }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Atualizar Status da Tarefa</DialogTitle>
+            <DialogTitle>Concluir Tarefa</DialogTitle>
             <DialogDescription>
-              Altere o status da tarefa "{selectedTask?.stageName}" do item "{selectedTask?.itemDescription}".
+              Marque a tarefa "{selectedTask?.stageName}" como concluída.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Novo Status</label>
-              <Select 
-                value={newTaskStatus} 
-                onValueChange={setNewTaskStatus}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Pendente">
-                    <div className="flex items-center gap-2">
-                      <Hourglass className="h-4 w-4 text-yellow-600" />
-                      Pendente
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Em Andamento">
-                    <div className="flex items-center gap-2">
-                      <PlayCircle className="h-4 w-4 text-blue-600" />
-                      Em Andamento
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Concluído">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                      Concluído
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Reprogramada">
-                    <div className="flex items-center gap-2">
-                      <RotateCcw className="h-4 w-4 text-purple-600" />
-                      Reprogramada
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="Cancelada">
-                    <div className="flex items-center gap-2">
-                      <Ban className="h-4 w-4 text-red-600" />
-                      Cancelada
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <Label className="text-sm font-medium">Observações da Conclusão</Label>
+              <Textarea
+                placeholder="Descreva como a tarefa foi executada, problemas encontrados, qualidade do resultado..."
+                value={completionNotes}
+                onChange={(e) => setCompletionNotes(e.target.value)}
+                rows={4}
+              />
             </div>
             
             {selectedTask && (
-              <div className="rounded-lg border p-3 bg-muted/50">
-                <h4 className="font-medium text-sm mb-2">Detalhes da Tarefa</h4>
-                <div className="space-y-1 text-xs text-muted-foreground">
+              <div className="rounded-lg border p-3 bg-green-50">
+                <h4 className="font-medium text-sm mb-2 text-green-800">Resumo da Tarefa</h4>
+                <div className="space-y-1 text-xs text-green-700">
                   <p><strong>Pedido:</strong> {selectedTask.orderNumber}</p>
                   <p><strong>Cliente:</strong> {selectedTask.customer}</p>
-                  <p><strong>Item:</strong> {selectedTask.itemDescription}</p>
                   <p><strong>Etapa:</strong> {selectedTask.stageName}</p>
-                  <p><strong>Status Atual:</strong> {selectedTask.status}</p>
-                  <p><strong>Duração:</strong> {selectedTask.durationDays} dia(s)</p>
-                  <p><strong>Prioridade:</strong> {selectedTask.priority.charAt(0).toUpperCase() + selectedTask.priority.slice(1)}</p>
+                  <p><strong>Recurso:</strong> {selectedTask.assignedResourceName}</p>
+                  <p><strong>Responsável:</strong> {selectedTask.responsibleMemberName}</p>
+                  <p><strong>Data de Conclusão:</strong> {format(new Date(), 'dd/MM/yyyy HH:mm')}</p>
                 </div>
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={handleCloseStatusDialog}>
+            <Button variant="outline" onClick={() => setIsCompleteDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSaveTaskStatus} disabled={!newTaskStatus}>
-              Salvar Status
+            <Button onClick={handleSaveCompletion} className="bg-green-600 hover:bg-green-700">
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Marcar como Concluída
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para Reprogramação de Tarefa */}
+      <Dialog open={isRescheduleDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsRescheduleDialogOpen(false);
+          setSelectedTask(null);
+          setRescheduleDate(undefined);
+          setRescheduleDuration(1);
+          setRescheduleReason("");
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Reprogramar Tarefa</DialogTitle>
+            <DialogDescription>
+              Reprograme a tarefa "{selectedTask?.stageName}" para uma nova data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Nova Data de Início</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant={"outline"} 
+                      className={cn(
+                        "w-full justify-start text-left font-normal", 
+                        !rescheduleDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {rescheduleDate ? format(rescheduleDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar 
+                      mode="single" 
+                      selected={rescheduleDate} 
+                      onSelect={setRescheduleDate} 
+                      initialFocus 
+                      disabled={(date) => date < new Date()}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Nova Duração (dias úteis)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={rescheduleDuration}
+                  onChange={(e) => setRescheduleDuration(parseInt(e.target.value) || 1)}
+                  placeholder="Quantidade de dias úteis"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Motivo da Reprogramação *</Label>
+              <Textarea
+                placeholder="Explique o motivo da reprogramação: falta de material, problemas técnicos, priorização de outros pedidos..."
+                value={rescheduleReason}
+                onChange={(e) => setRescheduleReason(e.target.value)}
+                rows={3}
+                required
+              />
+            </div>
+
+            {rescheduleDate && (
+              <div className="rounded-lg border p-3 bg-blue-50">
+                <h4 className="font-medium text-sm mb-2 text-blue-800">Novo Cronograma</h4>
+                <div className="space-y-1 text-xs text-blue-700">
+                  <p><strong>Início:</strong> {format(rescheduleDate, 'dd/MM/yyyy')}</p>
+                  <p><strong>Conclusão:</strong> {format(addBusinessDays(rescheduleDate, rescheduleDuration - 1), 'dd/MM/yyyy')}</p>
+                  <p><strong>Duração:</strong> {rescheduleDuration} dia(s) úteis</p>
+                  <p className="text-blue-600 mt-2">
+                    ⚠️ Esta reprogramação será registrada no histórico da tarefa e do pedido.
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {selectedTask && (
+              <div className="rounded-lg border p-3 bg-muted/50">
+                <h4 className="font-medium text-sm mb-2">Cronograma Original</h4>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p><strong>Início Original:</strong> {selectedTask.originalStartDate ? format(selectedTask.originalStartDate, 'dd/MM/yyyy') : 'Não definido'}</p>
+                  <p><strong>Conclusão Original:</strong> {selectedTask.originalCompletedDate ? format(selectedTask.originalCompletedDate, 'dd/MM/yyyy') : 'Não definido'}</p>
+                  <p><strong>Duração Original:</strong> {selectedTask.originalDurationDays} dia(s) úteis</p>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRescheduleDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleSaveReschedule}
+              disabled={!rescheduleDate || !rescheduleReason.trim()}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Reprogramar Tarefa
             </Button>
           </DialogFooter>
         </DialogContent>
