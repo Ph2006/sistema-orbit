@@ -995,7 +995,7 @@ export default function TaskManagementPage() {
             0: { cellWidth: 18, halign: 'center' }, // Pedido
             1: { cellWidth: 35 }, // Cliente
             2: { cellWidth: 45 }, // Item
-            3: { cellWidth: 30 }, // Etapa
+            3: { cellWidth: 30, halign: 'center' }, // Etapa
             4: { cellWidth: 35 }, // Recurso
             5: { cellWidth: 18, halign: 'center' }, // Prioridade
             6: { cellWidth: 22, halign: 'center' }, // Status
@@ -1164,14 +1164,14 @@ export default function TaskManagementPage() {
       });
     }
   };
+
+  const clearFilters = () => {
     setStatusFilter("all");
     setPriorityFilter("all");
     setResourceFilter("all");
     setResponsibleFilter("all");
     setSearchQuery("");
   };
-
-  const clearFilters = () => {
 
   if (isLoading) {
     return (
@@ -1863,12 +1863,8 @@ export default function TaskManagementPage() {
               Atribuir Tarefa
             </Button>
           </DialogFooter>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
 
       {/* Dialog para Conclusão de Tarefa */}
       <Dialog open={isCompleteDialogOpen} onOpenChange={(open) => {
