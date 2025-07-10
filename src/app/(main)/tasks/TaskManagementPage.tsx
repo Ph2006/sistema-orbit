@@ -785,11 +785,17 @@ export default function TaskManagementPage() {
                   <SelectValue placeholder="Recurso Atribuído" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos os Status</SelectItem>
-                  <SelectItem value="Pendente">Pendente</SelectItem>
-                  <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                  <SelectItem value="Concluído">Concluído</SelectItem>
-                              </Select>
+                  <SelectItem value="all">Todos os Recursos</SelectItem>
+                  {resources
+                    .filter(r => r.status === 'disponivel')
+                    .map(resource => (
+                      <SelectItem key={resource.id} value={resource.id}>
+                        {resource.name} ({getResourceTypeLabel(resource.type)})
+                      </SelectItem>
+                    ))}
+                  <SelectItem value="unassigned">Não Atribuídas</SelectItem>
+                </SelectContent>
+              </Select>
 
               <Button variant="ghost" onClick={clearFilters}>
                 <Filter className="mr-2 h-4 w-4" />
@@ -816,8 +822,10 @@ export default function TaskManagementPage() {
                     <TableHead>Etapa</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Prioridade</TableHead>
+                    <TableHead>Recurso Atribuído</TableHead>
                     <TableHead>Início Previsto</TableHead>
                     <TableHead>Duração</TableHead>
+                    <TableHead className="text-center">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1077,6 +1085,79 @@ export default function TaskManagementPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Dialog para Atribuição de Recurso */}
+      <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Atribuir Recurso à Tarefa</DialogTitle>
+            <DialogDescription>
+              Selecione um recurso para executar a tarefa "{selectedTask?.stageName}" do item "{selectedTask?.itemDescription}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Recurso Disponível</label>
+              <Select value={selectedResourceForAssign} onValueChange={setSelectedResourceForAssign}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um recurso" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-orange-500" />
+                      Remover atribuição
+                    </div>
+                  </SelectItem>
+                  {resources
+                    .filter(r => r.status === 'disponivel')
+                    .map(resource => (
+                      <SelectItem key={resource.id} value={resource.id}>
+                        <div className="flex items-center gap-2">
+                          <UserCheck className="h-4 w-4 text-green-600" />
+                          <div>
+                            <div className="font-medium">{resource.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {getResourceTypeLabel(resource.type)} - Capacidade: {resource.capacity}
+                              {resource.location && ` - ${resource.location}`}
+                            </div>
+                          </div>
+                        </div>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {resources.filter(r => r.status === 'disponivel').length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Nenhum recurso disponível no momento.
+                </p>
+              )}
+            </div>
+            
+            {selectedTask && (
+              <div className="rounded-lg border p-3 bg-muted/50">
+                <h4 className="font-medium text-sm mb-2">Detalhes da Tarefa</h4>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p><strong>Pedido:</strong> {selectedTask.orderNumber}</p>
+                  <p><strong>Cliente:</strong> {selectedTask.customer}</p>
+                  <p><strong>Item:</strong> {selectedTask.itemDescription}</p>
+                  <p><strong>Etapa:</strong> {selectedTask.stageName}</p>
+                  <p><strong>Duração:</strong> {selectedTask.durationDays} dia(s)</p>
+                  <p><strong>Prioridade:</strong> {selectedTask.priority.charAt(0).toUpperCase() + selectedTask.priority.slice(1)}</p>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAssignDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveAssignment}>
+              Salvar Atribuição
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
