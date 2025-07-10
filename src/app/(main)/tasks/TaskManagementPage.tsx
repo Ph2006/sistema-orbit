@@ -488,9 +488,17 @@ export default function TaskManagementPage() {
     setOsFilter("all");
   };
 
+  // Fechar dialog e resetar estado
+  const handleCloseAssignDialog = () => {
+    setIsAssignDialogOpen(false);
+    setSelectedTask(null);
+    setSelectedResourceForAssign("");
+  };
+
   // Handlers para atribuição de recursos
   const handleAssignResource = (task: Task) => {
     setSelectedTask(task);
+    // Garantir que o valor seja válido para o Select
     setSelectedResourceForAssign(task.assignedResource || "");
     setIsAssignDialogOpen(true);
   };
@@ -500,7 +508,9 @@ export default function TaskManagementPage() {
 
     try {
       // Encontrar o recurso selecionado
-      const selectedResource = resources.find(r => r.id === selectedResourceForAssign);
+      const selectedResource = selectedResourceForAssign ? 
+        resources.find(r => r.id === selectedResourceForAssign) : 
+        undefined;
       
       // Atualizar a tarefa localmente
       const updatedTasks = tasks.map(task => {
@@ -522,7 +532,7 @@ export default function TaskManagementPage() {
 
       toast({
         title: "Recurso atribuído!",
-        description: `Tarefa "${selectedTask.stageName}" foi atribuída ao recurso "${selectedResource?.name || 'Nenhum'}".`,
+        description: `Tarefa "${selectedTask.stageName}" foi ${selectedResourceForAssign ? 'atribuída ao recurso "' + selectedResource?.name + '"' : 'removida da atribuição'}.`,
       });
 
       setIsAssignDialogOpen(false);
@@ -743,6 +753,10 @@ export default function TaskManagementPage() {
                               {task.assignedResourceName}
                             </span>
                           )}
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {task.durationDays} dia(s)
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -1128,7 +1142,11 @@ export default function TaskManagementPage() {
       </Tabs>
 
       {/* Dialog para Atribuição de Recurso */}
-      <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
+      <Dialog open={isAssignDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          handleCloseAssignDialog();
+        }
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Atribuir Recurso à Tarefa</DialogTitle>
@@ -1139,7 +1157,10 @@ export default function TaskManagementPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Recurso Disponível</label>
-              <Select value={selectedResourceForAssign} onValueChange={setSelectedResourceForAssign}>
+              <Select 
+                value={selectedResourceForAssign} 
+                onValueChange={(value) => setSelectedResourceForAssign(value || "")}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione um recurso" />
                 </SelectTrigger>
@@ -1190,7 +1211,7 @@ export default function TaskManagementPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAssignDialogOpen(false)}>
+            <Button variant="outline" onClick={handleCloseAssignDialog}>
               Cancelar
             </Button>
             <Button onClick={handleSaveAssignment}>
