@@ -282,7 +282,8 @@ const getResourceTypeLabel = (type: string) => {
   };
 
   const selectedTasksCount = tasks.filter(task => task.selected).length;
-  return types[type as keyof typeof types] || type;
+
+  if (isLoading) {
 };
 
 export default function TaskManagementPage() {
