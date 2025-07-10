@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { collection, getDocs, doc, getDoc, updateDoc, Timestamp } from "firebase/firestore";
+import { collection, getDocs, doc, getDoc, updateDoc, setDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, addDays, isWeekend, startOfDay, endOfDay } from "date-fns";
@@ -291,7 +291,7 @@ export default function TaskManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   
   // Filter states
-  const [statusFilter, setStatusFilter] = useState<string>("Pendente");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [resourceFilter, setResourceFilter] = useState<string>("all");
   const [responsibleFilter, setResponsibleFilter] = useState<string>("all");
@@ -412,12 +412,19 @@ export default function TaskManagementPage() {
       order.items.forEach(item => {
         if (item.productionPlan && item.productionPlan.length > 0) {
           item.productionPlan.forEach((stage, stageIndex) => {
-            if (stage.status === 'Pendente') { // Só gera tarefas para etapas pendentes
+            // Incluir tarefas Pendentes e Em Andamento
+            if (stage.status === 'Pendente' || stage.status === 'Em Andamento') {
               const priority = getTaskPriority(order.deliveryDate);
               const taskId = `${order.id}-${item.id}-${stage.stageName}`;
               
               // Busca se existe atribuição para esta tarefa
               const assignment = assignmentsList.find(a => a.taskId === taskId);
+              
+              // Determinar o status da tarefa
+              let taskStatus = stage.status; // 'Pendente' ou 'Em Andamento'
+              if (stage.status === 'Pendente' && assignment) {
+                taskStatus = 'Atribuída';
+              }
               
               const task: Task = {
                 id: taskId,
@@ -427,7 +434,7 @@ export default function TaskManagementPage() {
                 itemDescription: item.description,
                 stageName: stage.stageName,
                 stageIndex: stageIndex,
-                status: assignment ? 'Atribuída' : 'Pendente',
+                status: taskStatus,
                 originalStartDate: stage.startDate,
                 originalCompletedDate: stage.completedDate,
                 originalDurationDays: stage.durationDays || 1,
@@ -523,11 +530,12 @@ export default function TaskManagementPage() {
     const total = tasks.length;
     const assigned = tasks.filter(t => t.status === 'Atribuída').length;
     const pending = tasks.filter(t => t.status === 'Pendente').length;
+    const inProgress = tasks.filter(t => t.status === 'Em Andamento').length;
     const completed = tasks.filter(t => t.status === 'Concluído').length;
     const rescheduled = tasks.filter(t => t.status === 'Reprogramada').length;
     const highPriority = tasks.filter(t => t.priority === 'alta').length;
     
-    return { total, assigned, pending, completed, rescheduled, highPriority };
+    return { total, assigned, pending, inProgress, completed, rescheduled, highPriority };
   }, [tasks]);
 
   // Leadership statistics
@@ -590,17 +598,28 @@ export default function TaskManagementPage() {
         notes: assignmentNotes
       };
 
-      // Salvar no Firebase
+      // Salvar no Firebase - usar setDoc com merge para criar o documento se não existir
       const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
-      const currentAssignments = taskAssignments.filter(a => a.taskId !== selectedTask.id);
-      const updatedAssignments = [...currentAssignments, assignment];
       
-      await updateDoc(assignmentsRef, { 
+      // Verificar se o documento existe
+      const docSnap = await getDoc(assignmentsRef);
+      
+      let currentAssignments: TaskAssignment[] = [];
+      if (docSnap.exists()) {
+        currentAssignments = docSnap.data().assignments || [];
+      }
+      
+      // Remover atribuição existente da mesma tarefa (se houver)
+      const filteredAssignments = currentAssignments.filter(a => a.taskId !== selectedTask.id);
+      const updatedAssignments = [...filteredAssignments, assignment];
+      
+      // Usar setDoc com merge para garantir que o documento seja criado se não existir
+      await setDoc(assignmentsRef, { 
         assignments: updatedAssignments.map(a => ({
           ...a,
           assignedAt: Timestamp.fromDate(a.assignedAt)
         }))
-      });
+      }, { merge: true });
 
       toast({
         title: "Tarefa atribuída!",
@@ -669,13 +688,21 @@ export default function TaskManagementPage() {
 
       // Remover da lista de atribuições
       const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
-      const updatedAssignments = taskAssignments.filter(a => a.taskId !== selectedTask.id);
-      await updateDoc(assignmentsRef, { 
-        assignments: updatedAssignments.map(a => ({
-          ...a,
-          assignedAt: Timestamp.fromDate(a.assignedAt)
-        }))
-      });
+      
+      // Verificar se o documento existe
+      const assignmentsSnap = await getDoc(assignmentsRef);
+      
+      if (assignmentsSnap.exists()) {
+        const currentAssignments = assignmentsSnap.data().assignments || [];
+        const updatedAssignments = currentAssignments.filter((a: any) => a.taskId !== selectedTask.id);
+        
+        await setDoc(assignmentsRef, { 
+          assignments: updatedAssignments.map((a: any) => ({
+            ...a,
+            assignedAt: a.assignedAt instanceof Timestamp ? a.assignedAt : Timestamp.fromDate(a.assignedAt)
+          }))
+        }, { merge: true });
+      }
 
       toast({
         title: "Tarefa concluída!",
@@ -756,26 +783,33 @@ export default function TaskManagementPage() {
 
       // Atualizar a atribuição para refletir a reprogramação
       const assignmentsRef = doc(db, "companies", "mecald", "settings", "taskAssignments");
-      const updatedAssignments = taskAssignments.map(a => {
-        if (a.taskId === selectedTask.id) {
-          return {
-            ...a,
-            reprogrammedDate: rescheduleDate,
-            reprogrammedDuration: rescheduleDuration,
-            reprogrammedReason: rescheduleReason,
-            reprogrammedAt: new Date()
-          };
-        }
-        return a;
-      });
       
-      await updateDoc(assignmentsRef, { 
-        assignments: updatedAssignments.map(a => ({
-          ...a,
-          assignedAt: Timestamp.fromDate(a.assignedAt),
-          reprogrammedAt: a.reprogrammedAt ? Timestamp.fromDate(a.reprogrammedAt) : undefined
-        }))
-      });
+      // Verificar se o documento existe
+      const assignmentsSnap = await getDoc(assignmentsRef);
+      
+      if (assignmentsSnap.exists()) {
+        const currentAssignments = assignmentsSnap.data().assignments || [];
+        const updatedAssignments = currentAssignments.map((a: any) => {
+          if (a.taskId === selectedTask.id) {
+            return {
+              ...a,
+              reprogrammedDate: rescheduleDate,
+              reprogrammedDuration: rescheduleDuration,
+              reprogrammedReason: rescheduleReason,
+              reprogrammedAt: new Date()
+            };
+          }
+          return a;
+        });
+        
+        await setDoc(assignmentsRef, { 
+          assignments: updatedAssignments.map((a: any) => ({
+            ...a,
+            assignedAt: a.assignedAt instanceof Timestamp ? a.assignedAt : Timestamp.fromDate(a.assignedAt),
+            reprogrammedAt: a.reprogrammedAt ? Timestamp.fromDate(a.reprogrammedAt) : undefined
+          }))
+        }, { merge: true });
+      }
 
       toast({
         title: "Tarefa reprogramada!",
@@ -1031,7 +1065,17 @@ export default function TaskManagementPage() {
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
           <h1 className="text-3xl font-bold tracking-tight font-headline">Gestão de Tarefas</h1>
-        </div>
+          <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Alta Prioridade</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{stats.highPriority}</div>
+            <p className="text-xs text-muted-foreground">Urgentes</p>
+          </CardContent>
+        </Card>
+      </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[...Array(4)].map((_, i) => (
             <Card key={i}>
@@ -1114,6 +1158,19 @@ export default function TaskManagementPage() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Em Andamento</CardTitle>
+            <PlayCircle className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{stats.inProgress}</div>
+            <p className="text-xs text-muted-foreground">
+              {stats.total > 0 ? Math.round((stats.inProgress / stats.total) * 100) : 0}% do total
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Concluídas</CardTitle>
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
@@ -1131,17 +1188,6 @@ export default function TaskManagementPage() {
           <CardContent>
             <div className="text-2xl font-bold text-purple-600">{stats.rescheduled}</div>
             <p className="text-xs text-muted-foreground">Reagendadas</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Alta Prioridade</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{stats.highPriority}</div>
-            <p className="text-xs text-muted-foreground">Urgentes</p>
           </CardContent>
         </Card>
       </div>
@@ -1180,6 +1226,7 @@ export default function TaskManagementPage() {
                   <SelectContent>
                     <SelectItem value="all">Todos os Status</SelectItem>
                     <SelectItem value="Pendente">Pendente</SelectItem>
+                    <SelectItem value="Em Andamento">Em Andamento</SelectItem>
                     <SelectItem value="Atribuída">Atribuída</SelectItem>
                     <SelectItem value="Concluído">Concluída</SelectItem>
                     <SelectItem value="Reprogramada">Reprogramada</SelectItem>
@@ -1286,7 +1333,7 @@ export default function TaskManagementPage() {
                         const priorityDiff = priorityOrder[b.priority] - priorityOrder[a.priority];
                         if (priorityDiff !== 0) return priorityDiff;
                         
-                        const statusOrder = { 'Atribuída': 3, 'Pendente': 2, 'Reprogramada': 1, 'Concluído': 0 };
+                        const statusOrder = { 'Em Andamento': 4, 'Atribuída': 3, 'Pendente': 2, 'Reprogramada': 1, 'Concluído': 0 };
                         return (statusOrder[b.status as keyof typeof statusOrder] || 0) - 
                                (statusOrder[a.status as keyof typeof statusOrder] || 0);
                       })
