@@ -1861,9 +1861,12 @@ export default function TaskManagementPage() {
               Atribuir Tarefa
             </Button>
           </DialogFooter>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
 
       {/* Dialog para Conclusão de Tarefa */}
       <Dialog open={isCompleteDialogOpen} onOpenChange={(open) => {
