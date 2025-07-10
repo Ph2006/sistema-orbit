@@ -422,7 +422,7 @@ export default function TaskManagementPage() {
 
       // Group tasks by location/sector
       const tasksByLocation = tasksForSelectedDate.reduce((acc, task) => {
-        const location = task.location || 'Setor Geral';
+        const location = task.location || task.assignedResourceName || 'Setor Geral';
         if (!acc[location]) acc[location] = [];
         acc[location].push(task);
         return acc;
@@ -430,37 +430,72 @@ export default function TaskManagementPage() {
 
       // Tasks table for each sector
       Object.entries(tasksByLocation).forEach(([location, locationTasks]) => {
+        // Check if we need a new page before adding sector header
+        if (yPos > 200) {
+          docPdf.addPage();
+          yPos = 20;
+        }
+
         docPdf.setFontSize(12).setFont(undefined, 'bold');
-        docPdf.text(`SETOR: ${location.toUpperCase()}`, 15, yPos);
+        docPdf.text(`SETOR/RECURSO: ${location.toUpperCase()}`, 15, yPos);
         yPos += 8;
 
         const tableBody = locationTasks.map(task => [
-          task.orderNumber,
-          task.customer,
-          task.itemDescription.substring(0, 40) + (task.itemDescription.length > 40 ? '...' : ''),
-          task.stageName,
-          task.status,
+          task.orderNumber || 'N/A',
+          task.customer || 'N/A',
+          task.itemDescription.length > 30 ? 
+            task.itemDescription.substring(0, 30) + '...' : 
+            task.itemDescription,
+          task.stageName || 'N/A',
+          task.assignedResourceName || 'Não atribuído',
           task.priority.charAt(0).toUpperCase() + task.priority.slice(1),
+          '☐ Concluído', // Checkbox para marcar como concluído
+          '☐ Pendente',  // Checkbox para marcar como pendente
         ]);
 
         autoTable(docPdf, {
           startY: yPos,
-          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Status', 'Prioridade']],
+          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Recurso', 'Prioridade', 'Status', 'Observações']],
           body: tableBody,
-          styles: { fontSize: 8 },
-          headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255, halign: 'center' },
-          columnStyles: {
-            0: { cellWidth: 25 },
-            1: { cellWidth: 35 },
-            2: { cellWidth: 50 },
-            3: { cellWidth: 30 },
-            4: { cellWidth: 25 },
-            5: { cellWidth: 25 },
+          styles: { 
+            fontSize: 7,
+            cellPadding: 2,
           },
-          margin: { left: 15, right: 15 }
+          headStyles: { 
+            fillColor: [37, 99, 235], 
+            fontSize: 8, 
+            textColor: 255, 
+            halign: 'center',
+            fontStyle: 'bold'
+          },
+          columnStyles: {
+            0: { cellWidth: 20, halign: 'center' }, // Pedido
+            1: { cellWidth: 25 }, // Cliente
+            2: { cellWidth: 35 }, // Item
+            3: { cellWidth: 25 }, // Etapa
+            4: { cellWidth: 30 }, // Recurso
+            5: { cellWidth: 18, halign: 'center' }, // Prioridade
+            6: { cellWidth: 22, halign: 'center' }, // Status
+            7: { cellWidth: 22, halign: 'center' }, // Observações
+          },
+          margin: { left: 15, right: 15 },
+          tableWidth: 'auto'
         });
 
-        yPos = (docPdf as any).lastAutoTable.finalY + 10;
+        yPos = (docPdf as any).lastAutoTable.finalY + 15;
+        
+        // Add space for manual annotations
+        if (locationTasks.length > 0) {
+          docPdf.setFontSize(8).setFont(undefined, 'normal');
+          docPdf.text('Observações/Anotações:', 15, yPos);
+          yPos += 5;
+          
+          // Draw lines for manual notes
+          for (let i = 0; i < 3; i++) {
+            docPdf.line(15, yPos + (i * 5), pageWidth - 15, yPos + (i * 5));
+          }
+          yPos += 20;
+        }
         
         // Check if we need a new page
         if (yPos > 250) {
@@ -469,7 +504,51 @@ export default function TaskManagementPage() {
         }
       });
 
+      // Add footer with signature fields
+      const finalY = yPos + 10;
+      const footerY = Math.max(finalY, 250);
+      
+      if (footerY > 270) {
+        docPdf.addPage();
+        yPos = 20;
+      } else {
+        yPos = footerY;
+      }
+
+      docPdf.setFontSize(10).setFont(undefined, 'bold');
+      docPdf.text('CONTROLE E ASSINATURAS', 15, yPos);
+      yPos += 10;
+
+      docPdf.setFontSize(9).setFont(undefined, 'normal');
+      
+      // Supervisor signature
+      docPdf.text('Supervisor/Coordenador:', 15, yPos);
+      docPdf.line(60, yPos, 120, yPos);
+      docPdf.text('Data: ___/___/_____', 130, yPos);
+      yPos += 15;
+
+      // Quality control signature
+      docPdf.text('Controle de Qualidade:', 15, yPos);
+      docPdf.line(60, yPos, 120, yPos);
+      docPdf.text('Data: ___/___/_____', 130, yPos);
+      yPos += 15;
+
+      // General notes section
+      docPdf.setFontSize(9).setFont(undefined, 'bold');
+      docPdf.text('Observações Gerais do Dia:', 15, yPos);
+      yPos += 8;
+      
+      docPdf.setFont(undefined, 'normal');
+      for (let i = 0; i < 4; i++) {
+        docPdf.line(15, yPos + (i * 6), pageWidth - 15, yPos + (i * 6));
+      }
+
       docPdf.save(`Tarefas_Diarias_${format(selectedDate, 'yyyyMMdd')}.pdf`);
+
+      toast({
+        title: "Relatório gerado com sucesso!",
+        description: "O arquivo PDF foi baixado com as tarefas e campos para controle.",
+      });
 
     } catch (error) {
       console.error("Error generating daily tasks report:", error);
