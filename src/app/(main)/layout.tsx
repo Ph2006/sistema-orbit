@@ -7,7 +7,7 @@ import { auth } from "@/lib/firebase";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarFooter, SidebarInset } from "@/components/ui/sidebar";
 import { OrbitLogo } from "@/components/logo";
 import Link from "next/link";
-import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart, TrendingUp } from "lucide-react";
+import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart, TrendingUp, ListChecks } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -30,14 +30,15 @@ export const useAuth = () => useContext(AuthContext);
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/products", label: "Produtos", icon: ShoppingCart }, // ADICIONADO
+  { href: "/products", label: "Produtos", icon: ShoppingCart },
   { href: "/orders", label: "Pedidos", icon: Package },
+  { href: "/tasks", label: "Tarefas", icon: ListChecks }, // ADICIONADO
   { href: "/customers", label: "Clientes", icon: Users },
   { href: "/quality", label: "Qualidade", icon: ClipboardCheck },
   { href: "/materials", label: "Materiais", icon: Wrench },
   { href: "/costs", label: "Custos", icon: DollarSign },
   { href: "/quotations", label: "Orçamentos", icon: FileText },
-  { href: "/finance", label: "Financeiro", icon: TrendingUp }, // ADICIONADO
+  { href: "/finance", label: "Financeiro", icon: TrendingUp },
   { href: "/company", label: "Empresa", icon: Building },
 ];
 
