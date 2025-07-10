@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -39,7 +40,9 @@ import {
   Calendar as CalendarPlus,
   BarChart3,
   RefreshCw,
-  Activity
+  Activity,
+  UserCheck,
+  Edit3
 } from "lucide-react";
 
 // Types
@@ -92,6 +95,7 @@ type Task = {
   customer: string;
   priority: 'alta' | 'media' | 'baixa';
   assignedResource?: string;
+  assignedResourceName?: string;
   location?: string;
 };
 
@@ -167,6 +171,9 @@ export default function TaskManagementPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [resourceFilter, setResourceFilter] = useState<string>("all");
+  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedResourceForAssign, setSelectedResourceForAssign] = useState<string>("");
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
@@ -229,6 +236,9 @@ export default function TaskManagementPage() {
       order.items.forEach(item => {
         if (item.productionPlan && item.productionPlan.length > 0) {
           item.productionPlan.forEach(stage => {
+            // Filtrar tarefas concluídas - elas não devem aparecer para execução
+            if (stage.status === 'Concluído') return;
+            
             const priority = getTaskPriority(order.deliveryDate);
             
             tasksList.push({
@@ -244,7 +254,9 @@ export default function TaskManagementPage() {
               durationDays: stage.durationDays || 1,
               customer: order.customer.name,
               priority: priority,
-              location: undefined, // Pode ser atribuído baseado no recurso
+              assignedResource: undefined, // Será preenchido pela atribuição
+              assignedResourceName: undefined,
+              location: undefined,
             });
           });
         }
@@ -289,9 +301,18 @@ export default function TaskManagementPage() {
   // Filtered tasks
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
+      // Filtrar tarefas concluídas - elas não devem aparecer
+      if (task.status === 'Concluído') return false;
+      
       const statusMatch = statusFilter === "all" || task.status === statusFilter;
       const priorityMatch = priorityFilter === "all" || task.priority === priorityFilter;
-      const resourceMatch = resourceFilter === "all" || task.assignedResource === resourceFilter;
+      
+      let resourceMatch = true;
+      if (resourceFilter === "unassigned") {
+        resourceMatch = !task.assignedResource;
+      } else if (resourceFilter !== "all") {
+        resourceMatch = task.assignedResource === resourceFilter;
+      }
       
       return statusMatch && priorityMatch && resourceMatch;
     });
@@ -323,12 +344,14 @@ export default function TaskManagementPage() {
   // Statistics
   const stats = useMemo(() => {
     const total = filteredTasks.length;
-    const completed = filteredTasks.filter(t => t.status === 'Concluído').length;
+    const completed = 0; // Não mostramos concluídas, então sempre 0
     const inProgress = filteredTasks.filter(t => t.status === 'Em Andamento').length;
     const pending = filteredTasks.filter(t => t.status === 'Pendente').length;
     const highPriority = filteredTasks.filter(t => t.priority === 'alta').length;
+    const assigned = filteredTasks.filter(t => t.assignedResource).length;
+    const unassigned = filteredTasks.filter(t => !t.assignedResource).length;
     
-    return { total, completed, inProgress, pending, highPriority };
+    return { total, completed, inProgress, pending, highPriority, assigned, unassigned };
   }, [filteredTasks]);
 
   // Export functions
@@ -454,6 +477,57 @@ export default function TaskManagementPage() {
     setResourceFilter("all");
   };
 
+  // Handlers para atribuição de recursos
+  const handleAssignResource = (task: Task) => {
+    setSelectedTask(task);
+    setSelectedResourceForAssign(task.assignedResource || "");
+    setIsAssignDialogOpen(true);
+  };
+
+  const handleSaveAssignment = async () => {
+    if (!selectedTask) return;
+
+    try {
+      // Encontrar o recurso selecionado
+      const selectedResource = resources.find(r => r.id === selectedResourceForAssign);
+      
+      // Atualizar a tarefa localmente
+      const updatedTasks = tasks.map(task => {
+        if (task.id === selectedTask.id) {
+          return {
+            ...task,
+            assignedResource: selectedResourceForAssign || undefined,
+            assignedResourceName: selectedResource?.name || undefined,
+            location: selectedResource?.location || undefined,
+          };
+        }
+        return task;
+      });
+
+      setTasks(updatedTasks);
+
+      // Aqui você pode adicionar a lógica para salvar no Firebase se necessário
+      // Por exemplo, salvar as atribuições em uma coleção separada
+
+      toast({
+        title: "Recurso atribuído!",
+        description: `Tarefa "${selectedTask.stageName}" foi atribuída ao recurso "${selectedResource?.name || 'Nenhum'}".`,
+      });
+
+      setIsAssignDialogOpen(false);
+      setSelectedTask(null);
+      setSelectedResourceForAssign("");
+
+    } catch (error) {
+      console.error("Error assigning resource:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao atribuir recurso",
+        description: "Não foi possível salvar a atribuição.",
+      });
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -498,7 +572,7 @@ export default function TaskManagementPage() {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Tarefas</CardTitle>
@@ -518,7 +592,7 @@ export default function TaskManagementPage() {
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
             <p className="text-xs text-muted-foreground">
-              {stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}% do total
+              Não exibidas na lista
             </p>
           </CardContent>
         </Card>
@@ -551,12 +625,23 @@ export default function TaskManagementPage() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Alta Prioridade</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <CardTitle className="text-sm font-medium">Não Atribuídas</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{stats.highPriority}</div>
-            <p className="text-xs text-muted-foreground">Requer atenção urgente</p>
+            <div className="text-2xl font-bold text-orange-600">{stats.unassigned}</div>
+            <p className="text-xs text-muted-foreground">Precisam de recurso</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Atribuídas</CardTitle>
+            <UserCheck className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{stats.assigned}</div>
+            <p className="text-xs text-muted-foreground">Com recursos definidos</p>
           </CardContent>
         </Card>
       </div>
@@ -645,6 +730,12 @@ export default function TaskManagementPage() {
                               {task.location}
                             </span>
                           )}
+                          {task.assignedResourceName && (
+                            <span className="flex items-center gap-1">
+                              <UserCheck className="h-3 w-3" />
+                              {task.assignedResourceName}
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -674,7 +765,6 @@ export default function TaskManagementPage() {
                   <SelectItem value="all">Todos os Status</SelectItem>
                   <SelectItem value="Pendente">Pendente</SelectItem>
                   <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                  <SelectItem value="Concluído">Concluído</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -689,6 +779,17 @@ export default function TaskManagementPage() {
                   <SelectItem value="baixa">Baixa</SelectItem>
                 </SelectContent>
               </Select>
+
+              <Select value={resourceFilter} onValueChange={setResourceFilter}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Recurso Atribuído" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os Status</SelectItem>
+                  <SelectItem value="Pendente">Pendente</SelectItem>
+                  <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                  <SelectItem value="Concluído">Concluído</SelectItem>
+                              </Select>
 
               <Button variant="ghost" onClick={clearFilters}>
                 <Filter className="mr-2 h-4 w-4" />
@@ -756,14 +857,37 @@ export default function TaskManagementPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
+                            {task.assignedResourceName ? (
+                              <div className="flex items-center gap-2">
+                                <UserCheck className="h-4 w-4 text-green-600" />
+                                <span className="text-sm">{task.assignedResourceName}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4 text-orange-500" />
+                                <span className="text-sm text-muted-foreground">Não atribuído</span>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>
                             {task.startDate ? format(task.startDate, "dd/MM/yyyy") : "A definir"}
                           </TableCell>
                           <TableCell>{task.durationDays} dia(s)</TableCell>
+                          <TableCell className="text-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleAssignResource(task)}
+                            >
+                              <Edit3 className="h-4 w-4 mr-1" />
+                              {task.assignedResource ? 'Alterar' : 'Atribuir'}
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center h-24">
+                      <TableCell colSpan={10} className="text-center h-24">
                         Nenhuma tarefa encontrada com os filtros atuais.
                       </TableCell>
                     </TableRow>
