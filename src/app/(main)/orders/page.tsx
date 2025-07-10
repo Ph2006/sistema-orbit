@@ -189,18 +189,58 @@ const addBusinessDays = (startDate: Date, days: number): Date => {
   return currentDate;
 };
 
-const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
-  if (isSameDay(startDate, endDate)) return 1;
+// Função atualizada para calcular dias úteis com decimais
+const addBusinessDaysDecimal = (startDate: Date, days: number): Date => {
+  if (days === 0) return new Date(startDate);
+  
+  let currentDate = new Date(startDate);
+  let remainingDays = Math.abs(days);
+  const isAdding = days > 0;
+  
+  // Se for menos de 1 dia, retorna a mesma data
+  if (remainingDays < 1) {
+    return new Date(startDate);
+  }
+  
+  // Calcular dias inteiros
+  const wholeDays = Math.floor(remainingDays);
+  
+  // Adicionar os dias inteiros
+  let daysAdded = 0;
+  while (daysAdded < wholeDays) {
+    currentDate = addDays(currentDate, isAdding ? 1 : -1);
+    if (isBusinessDay(currentDate)) {
+      daysAdded++;
+    }
+  }
+  
+  // Se há fração decimal maior que 0.5, adicionar mais um dia útil
+  const fraction = remainingDays - wholeDays;
+  if (fraction > 0.5) {
+    do {
+      currentDate = addDays(currentDate, isAdding ? 1 : -1);
+    } while (!isBusinessDay(currentDate));
+  }
+  
+  return currentDate;
+};
+
+// Função para contar dias úteis considerando decimais
+const countBusinessDaysBetweenDecimal = (startDate: Date, endDate: Date): number => {
+  if (isSameDay(startDate, endDate)) return 0.5; // Mesmo dia = 0.5 dias
+  
   let count = 0;
   let currentDate = new Date(startDate);
   const end = new Date(endDate);
-  while (currentDate <= end) {
+  
+  while (currentDate < end) {
+    currentDate = addDays(currentDate, 1);
     if (isBusinessDay(currentDate)) {
       count++;
     }
-    currentDate = addDays(currentDate, 1);
   }
-  return count;
+  
+  return count + 0.5; // Adiciona 0.5 para o dia inicial
 };
 
 const getNextBusinessDay = (fromDate: Date): Date => {
@@ -221,16 +261,19 @@ interface BusinessDayInfoProps {
 function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
   if (!startDate || !endDate) return null;
   
-  const actualDuration = countBusinessDaysBetween(startDate, endDate);
-  const isCorrect = actualDuration === expectedDuration;
+  const actualDuration = isSameDay(startDate, endDate) ? 0.5 : countBusinessDaysBetweenDecimal(startDate, endDate);
+  const expectedDecimal = Number(expectedDuration) || 0.5;
+  const isCorrect = Math.abs(actualDuration - expectedDecimal) < 0.1; // Tolerância de 0.1 dia
   
   return (
     <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
       <div className="flex items-center gap-2">
         <span className="font-medium">Dias úteis:</span>
-        <span>{actualDuration}</span>
-        {expectedDuration && expectedDuration !== actualDuration && (
-          <span className="text-yellow-600">(esperado: {expectedDuration})</span>
+        <span>{actualDuration.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+        {expectedDecimal && Math.abs(actualDuration - expectedDecimal) >= 0.1 && (
+          <span className="text-yellow-600">
+            (esperado: {expectedDecimal.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
+          </span>
         )}
       </div>
       {!isCorrect && (
@@ -246,6 +289,11 @@ function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayIn
       {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
         <p className="text-red-600 mt-1">
           ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
+        </p>
+      )}
+      {isSameDay(startDate, endDate) && (
+        <p className="text-blue-600 mt-1">
+          ℹ️ Tarefa executada no mesmo dia (0,5 dias úteis)
         </p>
       )}
     </div>
@@ -802,104 +850,131 @@ export default function OrdersPage() {
         if (field === 'startDate' || field === 'completedDate') {
             currentStage[field] = value ? new Date(value) : null;
         } else if (field === 'durationDays') {
-            currentStage[field] = value === '' ? undefined : Number(value);
+            // Aceitar valores decimais
+            const numValue = value === '' ? undefined : Number(value);
+            currentStage[field] = numValue;
         }
         
         // Recalcular datas baseado no campo alterado
         if (field === 'startDate' && currentStage.startDate) {
-            const duration = Math.max(1, Number(currentStage.durationDays) || 1);
-            if (duration === 1) {
-                currentStage.completedDate = new Date(currentStage.startDate);
+            const duration = Math.max(0.5, Number(currentStage.durationDays) || 0.5);
+            
+            if (duration <= 0.5) {
+              // Menos ou igual a 0.5 dias = termina no mesmo dia
+              currentStage.completedDate = new Date(currentStage.startDate);
+            } else if (duration <= 1) {
+              // Entre 0.5 e 1 dia = termina no mesmo dia útil
+              currentStage.completedDate = new Date(currentStage.startDate);
             } else {
-                currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
+              // Mais de 1 dia = usar a função de cálculo
+              currentStage.completedDate = addBusinessDaysDecimal(currentStage.startDate, duration - 0.5);
             }
             
             // Recalcular todas as etapas seguintes
             for (let i = stageIndex + 1; i < newPlan.length; i++) {
-                const stage = newPlan[i];
-                const previousStage = newPlan[i - 1];
+              const stage = newPlan[i];
+              const previousStage = newPlan[i - 1];
+              
+              if (previousStage.completedDate) {
+                // A próxima tarefa começa no próximo dia útil após a conclusão da anterior
+                stage.startDate = getNextBusinessDay(previousStage.completedDate);
                 
-                if (previousStage.completedDate) {
-                    stage.startDate = addBusinessDays(previousStage.completedDate, 1);
-                    const duration = Math.max(1, Number(stage.durationDays) || 1);
-                    if (duration === 1) {
-                        stage.completedDate = new Date(stage.startDate);
-                    } else {
-                        stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
-                    }
+                const stageDuration = Math.max(0.5, Number(stage.durationDays) || 0.5);
+                
+                if (stageDuration <= 0.5) {
+                  stage.completedDate = new Date(stage.startDate);
+                } else if (stageDuration <= 1) {
+                  stage.completedDate = new Date(stage.startDate);
                 } else {
-                    stage.startDate = null;
-                    stage.completedDate = null;
+                  stage.completedDate = addBusinessDaysDecimal(stage.startDate, stageDuration - 0.5);
                 }
+              } else {
+                stage.startDate = null;
+                stage.completedDate = null;
+              }
             }
-        } 
-        else if (field === 'completedDate' && currentStage.completedDate) {
-            const duration = Math.max(1, Number(currentStage.durationDays) || 1);
-            if (duration === 1) {
-                currentStage.startDate = new Date(currentStage.completedDate);
+          } 
+          else if (field === 'completedDate' && currentStage.completedDate) {
+            const duration = Math.max(0.5, Number(currentStage.durationDays) || 0.5);
+            
+            if (duration <= 1) {
+              // 1 dia ou menos = início e fim no mesmo dia
+              currentStage.startDate = new Date(currentStage.completedDate);
             } else {
-                currentStage.startDate = addBusinessDays(currentStage.completedDate, -(duration - 1));
+              // Mais de 1 dia = calcular data de início
+              currentStage.startDate = addBusinessDaysDecimal(currentStage.completedDate, -(duration - 0.5));
             }
             
             // Recalcular todas as etapas seguintes
             for (let i = stageIndex + 1; i < newPlan.length; i++) {
-                const stage = newPlan[i];
-                const previousStage = newPlan[i - 1];
+              const stage = newPlan[i];
+              const previousStage = newPlan[i - 1];
+              
+              if (previousStage.completedDate) {
+                stage.startDate = getNextBusinessDay(previousStage.completedDate);
                 
-                if (previousStage.completedDate) {
-                    stage.startDate = addBusinessDays(previousStage.completedDate, 1);
-                    const duration = Math.max(1, Number(stage.durationDays) || 1);
-                    if (duration === 1) {
-                        stage.completedDate = new Date(stage.startDate);
-                    } else {
-                        stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
-                    }
+                const stageDuration = Math.max(0.5, Number(stage.durationDays) || 0.5);
+                
+                if (stageDuration <= 0.5) {
+                  stage.completedDate = new Date(stage.startDate);
+                } else if (stageDuration <= 1) {
+                  stage.completedDate = new Date(stage.startDate);
                 } else {
-                    stage.startDate = null;
-                    stage.completedDate = null;
+                  stage.completedDate = addBusinessDaysDecimal(stage.startDate, stageDuration - 0.5);
                 }
+              } else {
+                stage.startDate = null;
+                stage.completedDate = null;
+              }
             }
-        }
-        else if (field === 'durationDays') {
+          }
+          else if (field === 'durationDays') {
             if (currentStage.startDate) {
-                const duration = Math.max(1, Number(currentStage.durationDays) || 1);
-                if (duration === 1) {
-                    currentStage.completedDate = new Date(currentStage.startDate);
-                } else {
-                    currentStage.completedDate = addBusinessDays(currentStage.startDate, duration - 1);
-                }
+              const duration = Math.max(0.5, Number(currentStage.durationDays) || 0.5);
+              
+              if (duration <= 0.5) {
+                currentStage.completedDate = new Date(currentStage.startDate);
+              } else if (duration <= 1) {
+                currentStage.completedDate = new Date(currentStage.startDate);
+              } else {
+                currentStage.completedDate = addBusinessDaysDecimal(currentStage.startDate, duration - 0.5);
+              }
+              
+              // Recalcular todas as etapas seguintes
+              for (let i = stageIndex + 1; i < newPlan.length; i++) {
+                const stage = newPlan[i];
+                const previousStage = newPlan[i - 1];
                 
-                // Recalcular todas as etapas seguintes
-                for (let i = stageIndex + 1; i < newPlan.length; i++) {
-                    const stage = newPlan[i];
-                    const previousStage = newPlan[i - 1];
-                    
-                    if (previousStage.completedDate) {
-                        stage.startDate = addBusinessDays(previousStage.completedDate, 1);
-                        const duration = Math.max(1, Number(stage.durationDays) || 1);
-                        if (duration === 1) {
-                            stage.completedDate = new Date(stage.startDate);
-                        } else {
-                            stage.completedDate = addBusinessDays(stage.startDate, duration - 1);
-                        }
-                    } else {
-                        stage.startDate = null;
-                        stage.completedDate = null;
-                    }
+                if (previousStage.completedDate) {
+                  stage.startDate = getNextBusinessDay(previousStage.completedDate);
+                  
+                  const stageDuration = Math.max(0.5, Number(stage.durationDays) || 0.5);
+                  
+                  if (stageDuration <= 0.5) {
+                    stage.completedDate = new Date(stage.startDate);
+                  } else if (stageDuration <= 1) {
+                    stage.completedDate = new Date(stage.startDate);
+                  } else {
+                    stage.completedDate = addBusinessDaysDecimal(stage.startDate, stageDuration - 0.5);
+                  }
+                } else {
+                  stage.startDate = null;
+                  stage.completedDate = null;
                 }
+              }
             }
-        }
-        
-        // Se removeu a data de início, limpar todas as datas seguintes
-        if (field === 'startDate' && !value) {
+          }
+          
+          // Se removeu a data de início, limpar todas as datas seguintes
+          if (field === 'startDate' && !value) {
             for (let i = stageIndex; i < newPlan.length; i++) {
-                newPlan[i].startDate = null;
-                newPlan[i].completedDate = null;
+              newPlan[i].startDate = null;
+              newPlan[i].completedDate = null;
             }
-        }
-        
-        setEditedPlan(newPlan);
-    };
+          }
+          
+          setEditedPlan(newPlan);
+        };
 
     const dashboardStats = useMemo(() => {
         const totalOrders = orders.length;
