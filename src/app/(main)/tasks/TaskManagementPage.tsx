@@ -278,6 +278,7 @@ const getResourceTypeLabel = (type: string) => {
     'ferramenta': 'Ferramenta',
     'espaco': 'Espaço',
     'mao_de_obra': 'Mão de Obra'
+    }
   };
 
   const selectedTasksCount = tasks.filter(task => task.selected).length;
