@@ -49,7 +49,7 @@ const teamMemberSchema = z.object({
 const resourceSchema = z.object({
     id: z.string(),
     name: z.string().min(3, { message: "O nome do recurso é obrigatório." }),
-    type: z.enum(["maquina", "equipamento", "veiculo", "ferramenta", "espaco"], { required_error: "Selecione um tipo." }),
+    type: z.enum(["maquina", "equipamento", "veiculo", "ferramenta", "espaco", "mao_de_obra"], { required_error: "Selecione um tipo." }),
     description: z.string().optional(),
     capacity: z.number().min(1, { message: "A capacidade deve ser maior que 0." }),
     status: z.enum(["disponivel", "ocupado", "manutencao", "inativo"], { required_error: "Selecione um status." }),
@@ -759,7 +759,9 @@ export default function CompanyPage() {
                           resources.map((resource) => (
                             <TableRow key={resource.id}>
                               <TableCell className="font-medium">{resource.name}</TableCell>
-                              <TableCell className="capitalize">{resource.type}</TableCell>
+                              <TableCell className="capitalize">
+                                {resource.type === 'mao_de_obra' ? 'Mão de Obra' : resource.type}
+                              </TableCell>
                               <TableCell>{resource.capacity}</TableCell>
                               <TableCell>{getStatusBadge(resource.status)}</TableCell>
                               <TableCell>{resource.location || "-"}</TableCell>
@@ -882,7 +884,7 @@ export default function CompanyPage() {
                   <FormItem>
                     <FormLabel>Nome do Recurso</FormLabel>
                     <FormControl>
-                      <Input placeholder="Ex: Máquina de Corte CNC" {...field} />
+                      <Input placeholder="Ex: Soldador Especializado, Máquina CNC" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -902,6 +904,7 @@ export default function CompanyPage() {
                         <SelectItem value="veiculo">Veículo</SelectItem>
                         <SelectItem value="ferramenta">Ferramenta</SelectItem>
                         <SelectItem value="espaco">Espaço</SelectItem>
+                        <SelectItem value="mao_de_obra">Mão de Obra</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -912,7 +915,7 @@ export default function CompanyPage() {
                 <FormItem>
                   <FormLabel>Descrição</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="Descrição detalhada do recurso" {...field} />
+                    <Textarea placeholder="Ex: Soldador com 10 anos de experiência, certificado em solda TIG" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
