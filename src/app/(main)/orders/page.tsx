@@ -1345,8 +1345,8 @@ const OrdersPage = () => {
                 {filteredOrders.length > 0 ? (
                   filteredOrders.map((order) => (
                     <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.quotationNumber}</TableCell>
-                      <TableCell>{order.customer.name}</TableCell>
+                      <TableCell className="font-medium">{order.quotationNumber || ''}</TableCell>
+                      <TableCell>{order.customer?.name || ''}</TableCell>
                       <TableCell>{order.internalOS || 'N/A'}</TableCell>
                       <TableCell>{order.projectName || 'N/A'}</TableCell>
                       <TableCell>
@@ -1405,7 +1405,7 @@ const OrdersPage = () => {
                           <Select
                             onValueChange={(value) => {
                               const selectedCustomer = customers.find(c => c.id === value);
-                              field.onChange(selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : null);
+                              field.onChange(selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name } : { id: "", name: "" });
                             }}
                             value={field.value?.id || ""}
                             disabled={!isEditing}
