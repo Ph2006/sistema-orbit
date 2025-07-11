@@ -38,6 +38,137 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Calendar } from "@/components/ui/calendar";
+
+// Funções utilitárias para dias úteis fracionados
+const addBusinessDaysFractional = (startDate: Date, days: number): Date => {
+  if (days === 0) return new Date(startDate);
+  let currentDate = new Date(startDate);
+  const wholeDays = Math.floor(Math.abs(days));
+  const fractionalPart = Math.abs(days) - wholeDays;
+  const isAdding = days > 0;
+  let remainingWholeDays = wholeDays;
+  while (remainingWholeDays > 0) {
+    currentDate = addDays(currentDate, isAdding ? 1 : -1);
+    if (isBusinessDay(currentDate)) {
+      remainingWholeDays--;
+    }
+  }
+  if (fractionalPart > 0) {
+    if (isAdding && !isBusinessDay(currentDate)) {
+      while (!isBusinessDay(currentDate)) {
+        currentDate = addDays(currentDate, 1);
+      }
+    }
+    if (!isAdding && !isBusinessDay(currentDate)) {
+      while (!isBusinessDay(currentDate)) {
+        currentDate = addDays(currentDate, -1);
+      }
+    }
+    const hoursToAdd = fractionalPart * 8;
+    const millisecondsToAdd = hoursToAdd * 60 * 60 * 1000;
+    if (isAdding) {
+      currentDate = new Date(currentDate.getTime() + millisecondsToAdd);
+    } else {
+      currentDate = new Date(currentDate.getTime() - millisecondsToAdd);
+    }
+  }
+  return currentDate;
+};
+
+const countBusinessDaysFractionalBetween = (startDate: Date, endDate: Date): number => {
+  if (isSameDay(startDate, endDate)) {
+    const timeDiff = endDate.getTime() - startDate.getTime();
+    const hoursDiff = timeDiff / (1000 * 60 * 60);
+    return Math.max(0.125, hoursDiff / 8);
+  }
+  let count = 0;
+  let currentDate = new Date(startDate);
+  const end = new Date(endDate);
+  while (currentDate < end) {
+    const nextDay = addDays(currentDate, 1);
+    nextDay.setHours(0, 0, 0, 0);
+    if (nextDay <= end) {
+      if (isBusinessDay(currentDate)) {
+        count++;
+      }
+      currentDate = nextDay;
+    } else {
+      break;
+    }
+  }
+  if (isBusinessDay(end)) {
+    const dayStart = new Date(end);
+    dayStart.setHours(0, 0, 0, 0);
+    if (currentDate <= dayStart) {
+      const timeDiff = end.getTime() - Math.max(currentDate.getTime(), dayStart.getTime());
+      const hoursDiff = timeDiff / (1000 * 60 * 60);
+      count += Math.max(0, hoursDiff / 8);
+    }
+  }
+  return Math.max(0.125, count);
+};
+
+const formatDuration = (days: number | undefined): string => {
+  if (!days) return '0 dias';
+  if (days < 1) {
+    const hours = Math.round(days * 8);
+    return `${hours} hora${hours !== 1 ? 's' : ''}`;
+  }
+  const wholeDays = Math.floor(days);
+  const remainingHours = Math.round((days - wholeDays) * 8);
+  if (remainingHours === 0) {
+    return `${wholeDays} dia${wholeDays !== 1 ? 's' : ''}`;
+  } else {
+    return `${wholeDays} dia${wholeDays !== 1 ? 's' : ''} e ${remainingHours}h`;
+  }
+};
+
+const normalizeDuration = (value: string | number): number => {
+  const num = typeof value === 'string' ? parseFloat(value.replace(',', '.')) : value;
+  return isNaN(num) ? 1 : Math.max(0.125, Math.round(num * 8) / 8);
+};
+
+interface BusinessDayInfoProps {
+  startDate: Date | null;
+  endDate: Date | null;
+  expectedDuration: number;
+}
+
+function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
+  if (!startDate || !endDate) return null;
+  const actualDuration = countBusinessDaysFractionalBetween(startDate, endDate);
+  const tolerance = 0.125;
+  const isCorrect = Math.abs(actualDuration - expectedDuration) <= tolerance;
+  return (
+    <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+      <div className="flex items-center gap-2">
+        <span className="font-medium">Duração real:</span>
+        <span className="font-mono">{formatDuration(actualDuration)}</span>
+        {expectedDuration && !isCorrect && (
+          <span className="text-yellow-600">(esperado: {formatDuration(expectedDuration)})</span>
+        )}
+      </div>
+      {!isCorrect && (
+        <p className="text-yellow-600 mt-1">
+          ⚠️ A duração real difere significativamente da planejada
+        </p>
+      )}
+      {isBusinessDay(startDate) && isBusinessDay(endDate) && (
+        <p className="text-green-600 mt-1">
+          ✓ Datas em dias úteis
+        </p>
+      )}
+      {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
+        <p className="text-red-600 mt-1">
+          ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
+        </p>
+      )}
+      <p className="text-muted-foreground mt-1 text-xs">
+        💡 Frações: 0,5 = meio dia, 0,25 = 2 horas, 1,5 = 1 dia e meio
+      </p>
+    </div>
+  );
+}
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -50,7 +181,7 @@ const productionStageSchema = z.object({
     status: z.string(),
     startDate: z.date().nullable().optional(),
     completedDate: z.date().nullable().optional(),
-    durationDays: z.coerce.number().min(0).optional(),
+    durationDays: z.coerce.number().min(0.125, "A duração mínima é de 1 hora (0.125 dias)").optional(),
 });
 
 const orderItemSchema = z.object({
@@ -165,6 +296,46 @@ const brazilianHolidays = [
 ];
 
 // Funções utilitárias para cálculo de dias úteis
+// Função utilitária para calcular o peso total dos itens
+// Função para calcular o progresso de um item
+const calculateItemProgress = (item: { productionPlan?: { status?: string }[] }): number => {
+  if (!item.productionPlan || item.productionPlan.length === 0) return 0;
+  const total = item.productionPlan.length;
+  const completed = item.productionPlan.filter(p => p.status === 'Concluído').length;
+  return Math.round((completed / total) * 100);
+};
+
+// Função para calcular o progresso de um pedido
+const calculateOrderProgress = (order: { items?: { productionPlan?: { status?: string }[] }[] }): number => {
+  if (!order.items || order.items.length === 0) return 0;
+  const itemProgresses = order.items.map(calculateItemProgress);
+  const avg = itemProgresses.reduce((acc, val) => acc + val, 0) / itemProgresses.length;
+  return Math.round(avg);
+};
+
+// Função para mapear status do pedido
+const mapOrderStatus = (status: string): string => {
+  const valid = [
+    "Aguardando Produção",
+    "Em Produção",
+    "Pronto para Entrega",
+    "Concluído",
+    "Cancelado",
+    "Atrasado",
+  ];
+  if (valid.includes(status)) return status;
+  if (status === 'Finalizado') return 'Concluído';
+  if (status === 'Cancelada') return 'Cancelado';
+  return status || 'Aguardando Produção';
+};
+const calculateTotalWeight = (items: { quantity?: number; unitWeight?: number }[]): number => {
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((acc, item) => {
+    const qty = Number(item.quantity) || 0;
+    const weight = Number(item.unitWeight) || 0;
+    return acc + qty * weight;
+  }, 0);
+};
 const isHoliday = (date: Date): boolean => {
   return brazilianHolidays.some(holiday => isSameDay(holiday, date));
 };
@@ -210,103 +381,6 @@ const getNextBusinessDay = (fromDate: Date): Date => {
   }
   return nextDay;
 };
-
-// Componente para exibir informações de dias úteis
-interface BusinessDayInfoProps {
-  startDate: Date | null;
-  endDate: Date | null;
-  expectedDuration: number;
-}
-
-function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
-  if (!startDate || !endDate) return null;
-  
-  const actualDuration = countBusinessDaysBetween(startDate, endDate);
-  const isCorrect = actualDuration === expectedDuration;
-  
-  return (
-    <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
-      <div className="flex items-center gap-2">
-        <span className="font-medium">Dias úteis:</span>
-        <span>{actualDuration}</span>
-        {expectedDuration && expectedDuration !== actualDuration && (
-          <span className="text-yellow-600">(esperado: {expectedDuration})</span>
-        )}
-      </div>
-      {!isCorrect && (
-        <p className="text-yellow-600 mt-1">
-          ⚠️ A duração atual não corresponde aos dias definidos
-        </p>
-      )}
-      {isBusinessDay(startDate) && isBusinessDay(endDate) && (
-        <p className="text-green-600 mt-1">
-          ✓ Datas em dias úteis
-        </p>
-      )}
-      {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
-        <p className="text-red-600 mt-1">
-          ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
-        </p>
-      )}
-    </div>
-  );
-}
-
-const calculateTotalWeight = (items: OrderItem[]): number => {
-    if (!items || !Array.isArray(items)) return 0;
-    return items.reduce((acc, item) => {
-        const quantity = Number(item.quantity) || 0;
-        const unitWeight = Number(item.unitWeight) || 0;
-        return acc + (quantity * unitWeight);
-    }, 0);
-};
-
-const calculateItemProgress = (item: OrderItem): number => {
-    if (item.productionPlan && item.productionPlan.length > 0) {
-        const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
-        return (completedStages / item.productionPlan.length) * 100;
-    }
-
-    if (item.code && item.code.trim() !== "") {
-        return 0;
-    }
-    
-    return 100;
-};
-
-const calculateOrderProgress = (order: Order): number => {
-    if (!order.items || order.items.length === 0) {
-        return 0;
-    }
-    const totalProgress = order.items.reduce((acc, item) => acc + calculateItemProgress(item), 0);
-    return totalProgress / order.items.length;
-};
-
-const mapOrderStatus = (status?: string): string => {
-    if (!status) return "Não definido";
-    const lowerStatus = status.toLowerCase().trim();
-    
-    const statusMap: { [key: string]: string } = {
-        'in production': 'Em Produção',
-        'em produção': 'Em Produção',
-        'in progress': 'Em Produção',
-        'in-progress': 'Em Produção',
-        'em progresso': 'Em Produção',
-        'awaiting production': 'Aguardando Produção',
-        'aguardando produção': 'Aguardando Produção',
-        'pending': 'Aguardando Produção',
-        'completed': 'Concluído',
-        'concluído': 'Concluído',
-        'finished': 'Concluído',
-        'cancelled': 'Cancelado',
-        'cancelado': 'Cancelado',
-        'ready': 'Pronto para Entrega',
-        'pronto para entrega': 'Pronto para Entrega'
-    };
-
-    return statusMap[lowerStatus] || status;
-};
-
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
     switch (status) {
         case "Em Produção":
