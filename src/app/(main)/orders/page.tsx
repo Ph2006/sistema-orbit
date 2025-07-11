@@ -6,16 +6,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { useAuth } from "../layout"; // Ajuste o caminho conforme necessário
+import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-// ========================================
-// UI COMPONENTS (Importações)
-// Mova estas importações para um arquivo de índice de componentes ou importe diretamente onde são usadas.
-// Ex: import { Button } from "@/components/ui/button";
-// ========================================
+// UI COMPONENTS
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -35,29 +31,21 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { StatCard } from "@/components/dashboard/stat-card"; // Exemplo de componente customizado
+import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 
-// ========================================
-// ICONS (Importações)
-// Mova estas importações para um arquivo de índice de ícones.
-// Ex: import { Search, Package } from "lucide-react";
-// ========================================
-import { 
-  Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, 
-  CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, 
-  FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, 
-  Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, 
-  PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck 
+// ICONS
+import { 
+  Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, 
+  CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, 
+  FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, 
+  Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, 
+  PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck 
 } from "lucide-react";
 
-// ========================================
 // TYPES & SCHEMAS
-// Crie um arquivo para isso: src/types/orderTypes.ts
-// ========================================
-// src/types/orderTypes.ts
 export const productionStageSchema = z.object({
   stageName: z.string(),
   status: z.string(),
@@ -82,7 +70,7 @@ export const orderItemSchema = z.object({
 
 export const orderStatusEnum = z.enum([
   "Aguardando Produção",
-  "Em Produção", 
+  "Em Produção", 
   "Pronto para Entrega",
   "Concluído",
   "Cancelado",
@@ -146,31 +134,25 @@ export type Order = {
   };
 };
 
-// ========================================
 // CONSTANTS & UTILITIES
-// Crie um arquivo para isso: src/lib/constants.ts e src/lib/utils.ts (ou src/utils/dateCalculations.ts)
-// ========================================
-// src/lib/constants.ts
 export const brazilianHolidays = [
-  // Adicione suas datas de feriados aqui
   new Date(2024, 0, 1), // Confraternização Universal
-  new Date(2024, 1, 13), // Carnaval (exemplo, pode variar)
+  new Date(2024, 1, 13), // Carnaval
   new Date(2024, 2, 29), // Sexta-feira Santa
   new Date(2024, 3, 21), // Tiradentes
   new Date(2024, 4, 1), // Dia do Trabalho
-  new Date(2024, 4, 30), // Corpus Christi (exemplo, pode variar)
+  new Date(2024, 4, 30), // Corpus Christi
   new Date(2024, 8, 7), // Independência do Brasil
   new Date(2024, 9, 12), // Nossa Senhora Aparecida
   new Date(2024, 10, 2), // Finados
   new Date(2024, 10, 15), // Proclamação da República
   new Date(2024, 11, 25), // Natal
-  // Adicione feriados de 2025
   new Date(2025, 0, 1), // Confraternização Universal
-  new Date(2025, 2, 4), // Carnaval (exemplo, pode variar)
+  new Date(2025, 2, 4), // Carnaval
   new Date(2025, 3, 18), // Sexta-feira Santa
   new Date(2025, 3, 21), // Tiradentes
   new Date(2025, 4, 1), // Dia do Trabalho
-  new Date(2025, 5, 19), // Corpus Christi (exemplo, pode variar)
+  new Date(2025, 5, 19), // Corpus Christi
   new Date(2025, 8, 7), // Independência do Brasil
   new Date(2025, 9, 12), // Nossa Senhora Aparecida
   new Date(2025, 10, 2), // Finados
@@ -178,7 +160,6 @@ export const brazilianHolidays = [
   new Date(2025, 11, 25), // Natal
 ];
 
-// src/utils/dateCalculations.ts (ou combine com lib/utils.ts)
 export const isHoliday = (date: Date): boolean => {
   return brazilianHolidays.some(holiday => isSameDay(date, holiday));
 };
@@ -202,7 +183,7 @@ export const addBusinessDaysDecimal = (startDate: Date, days: number): Date => {
         daysAdded++;
       }
     }
-  } else { // Handle negative days for subtraction
+  } else {
     while (daysAdded > days) {
       currentDate = addDays(currentDate, -1);
       if (isBusinessDay(currentDate)) {
@@ -221,7 +202,6 @@ export const getNextBusinessDay = (date: Date): Date => {
   return nextDay;
 };
 
-// src/utils/orderCalculations.ts
 export const calculateTotalWeight = (items: OrderItem[]): number => {
   return items.reduce((total, item) => {
     const quantity = Number(item.quantity) || 0;
@@ -230,24 +210,13 @@ export const calculateTotalWeight = (items: OrderItem[]): number => {
   }, 0);
 };
 
-// ========================================
 // CUSTOM HOOKS
-// Crie um arquivo para cada hook. Ex: src/hooks/useOrders.ts, src/hooks/useCustomers.ts
-// ========================================
-// src/hooks/useOrders.ts
-import { useState, useEffect, useCallback } from "react";
-import { collection, getDocs, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { useToast } from "@/hooks/use-toast"; // Assumindo que este hook já existe
-import { Order, OrderItem } from "@/types/orderTypes";
-import { calculateTotalWeight } from "@/utils/orderCalculations"; // Importe a utilidade
-
-export const useOrders = (user: any, authLoading: boolean) => {
+const useOrders = (user: any, authLoading: boolean) => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const { toast } = useToast();
 
-  const fetchOrders = useCallback(async () => {
+  const fetchOrders = React.useCallback(async () => {
     setLoadingOrders(true);
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
@@ -271,7 +240,7 @@ export const useOrders = (user: any, authLoading: boolean) => {
         } as Order;
       });
       setOrders(ordersData);
-      return ordersData; // Retorna os dados para uso em outras partes
+      return ordersData;
     } catch (error) {
       console.error("Error fetching orders:", error);
       toast({
@@ -329,7 +298,7 @@ export const useOrders = (user: any, authLoading: boolean) => {
 
       await updateDoc(orderRef, dataToSave);
       toast({ title: "Pedido atualizado!", description: "Os dados do pedido foram salvos com sucesso." });
-      await fetchOrders(); // Re-fetch all orders to ensure state is consistent
+      await fetchOrders();
       return true;
     } catch (error) {
       console.error("Error updating order:", error);
@@ -354,24 +323,12 @@ export const useOrders = (user: any, authLoading: boolean) => {
   return { orders, loadingOrders, fetchOrders, updateOrder, deleteOrder };
 };
 
-// src/hooks/useCustomers.ts
-import { useState, useEffect, useCallback } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { useToast } from "@/hooks/use-toast"; // Assumindo que este hook já existe
-
-type Customer = {
-  id: string;
-  name: string;
-  // Adicione outros campos do cliente se necessário
-};
-
-export const useCustomers = (user: any, authLoading: boolean) => {
-  const [customers, setCustomers] = useState<Customer[]>([]);
+const useCustomers = (user: any, authLoading: boolean) => {
+  const [customers, setCustomers] = useState<{id: string; name: string}[]>([]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const { toast } = useToast();
 
-  const fetchCustomers = useCallback(async () => {
+  const fetchCustomers = React.useCallback(async () => {
     setLoadingCustomers(true);
     try {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
@@ -401,15 +358,7 @@ export const useCustomers = (user: any, authLoading: boolean) => {
   return { customers, loadingCustomers, fetchCustomers };
 };
 
-// src/hooks/useProductionProgress.ts
-import { useState, useCallback } from "react";
-import { doc, getDoc, updateDoc, Timestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { useToast } from "@/hooks/use-toast";
-import { ProductionStage, Order, OrderItem } from "@/types/orderTypes";
-import { addBusinessDaysDecimal, getNextBusinessDay } from "@/utils/dateCalculations";
-
-export const useProductionProgress = () => {
+const useProductionProgress = () => {
   const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
   const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
   const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
@@ -419,7 +368,7 @@ export const useProductionProgress = () => {
 
   const { toast } = useToast();
 
-  const openProgressModal = useCallback(async (item: OrderItem) => {
+  const openProgressModal = React.useCallback(async (item: OrderItem) => {
     setItemToTrack(item);
     setIsProgressModalOpen(true);
     setEditedPlan([]);
@@ -467,7 +416,7 @@ export const useProductionProgress = () => {
     }
   }, [toast]);
 
-  const saveProgress = useCallback(async (selectedOrder: Order, item: OrderItem, currentEditedPlan: ProductionStage[], fetchOrders: () => Promise<Order[]>, setSelectedOrder: (order: Order) => void, formReset: (data: any) => void) => {
+  const saveProgress = React.useCallback(async (selectedOrder: Order, item: OrderItem, currentEditedPlan: ProductionStage[], fetchOrders: () => Promise<Order[]>, setSelectedOrder: (order: Order) => void, formReset: (data: any) => void) => {
     if (!selectedOrder || !item) return;
 
     try {
@@ -494,7 +443,7 @@ export const useProductionProgress = () => {
             completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
           }));
         }
-        const { id, product_code, ...restOfItem } = orderItem as any; // Destructure to avoid overwriting id and product_code
+        const { id, product_code, ...restOfItem } = orderItem as any;
         return {...restOfItem, id: orderItem.id, productionPlan: planForFirestore };
       });
 
@@ -514,7 +463,7 @@ export const useProductionProgress = () => {
           if (item.productionPlan && item.productionPlan.length > 0) {
               return item.productionPlan.every((p: any) => p.status === 'Concluído');
           }
-          return true; // Consider items without a plan as completed
+          return true;
         }
       );
 
@@ -547,7 +496,7 @@ export const useProductionProgress = () => {
     }
   }, [toast]);
 
-  const handlePlanChange = useCallback((stageIndex: number, field: 'startDate' | 'completedDate' | 'durationDays', value: any) => {
+  const handlePlanChange = React.useCallback((stageIndex: number, field: 'startDate' | 'completedDate' | 'durationDays', value: any) => {
     setEditedPlan(prevPlan => {
       let newPlan = JSON.parse(JSON.stringify(prevPlan));
       const currentStage = newPlan[stageIndex];
@@ -559,7 +508,6 @@ export const useProductionProgress = () => {
         currentStage[field] = numValue;
       }
 
-      // Recalculate dates based on changes
       if (field === 'startDate' && currentStage.startDate) {
         const duration = Number(currentStage.durationDays) || 1;
         if (duration < 1) {
@@ -644,7 +592,6 @@ export const useProductionProgress = () => {
         }
       }
       
-      // If start date is cleared, clear all subsequent dates
       if (field === 'startDate' && !value) {
         for (let i = stageIndex; i < newPlan.length; i++) {
           newPlan[i].startDate = null;
@@ -655,7 +602,7 @@ export const useProductionProgress = () => {
     });
   }, []);
 
-  const addStageToPlan = useCallback(() => {
+  const addStageToPlan = React.useCallback(() => {
     const trimmedName = newStageNameForPlan.trim();
     if (!trimmedName) {
       toast({
@@ -676,11 +623,11 @@ export const useProductionProgress = () => {
     setNewStageNameForPlan("");
   }, [newStageNameForPlan, toast]);
 
-  const removeStageFromPlan = useCallback((indexToRemove: number) => {
+  const removeStageFromPlan = React.useCallback((indexToRemove: number) => {
     setEditedPlan(prev => prev.filter((_, index) => index !== indexToRemove));
   }, []);
 
-  const copyProgress = useCallback((itemToCopy: OrderItem) => {
+  const copyProgress = React.useCallback((itemToCopy: OrderItem) => {
     setProgressClipboard(itemToCopy);
     toast({
       title: "Progresso copiado!",
@@ -688,11 +635,11 @@ export const useProductionProgress = () => {
     });
   }, [toast]);
 
-  const cancelCopy = useCallback(() => {
+  const cancelCopy = React.useCallback(() => {
     setProgressClipboard(null);
   }, []);
 
-  const pasteProgress = useCallback(async (targetItem: OrderItem, selectedOrder: Order, fetchOrders: () => Promise<Order[]>, setSelectedOrder: (order: Order) => void, formReset: (data: any) => void) => {
+  const pasteProgress = React.useCallback(async (targetItem: OrderItem, selectedOrder: Order, fetchOrders: () => Promise<Order[]>, setSelectedOrder: (order: Order) => void, formReset: (data: any) => void) => {
     if (!progressClipboard || !selectedOrder) {
       toast({ variant: "destructive", title: "Erro", description: "Nenhum progresso na área de transferência." });
       return;
@@ -768,21 +715,10 @@ export const useProductionProgress = () => {
   };
 };
 
-// src/hooks/usePdfGenerator.ts
-import { useCallback } from "react";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-import { format } from "date-fns";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { useToast } from "@/hooks/use-toast";
-import { Order, OrderItem, CompanyData } from "@/types/orderTypes";
-import { calculateTotalWeight } from "@/utils/orderCalculations";
-
-export const usePdfGenerator = () => {
+const usePdfGenerator = () => {
   const { toast } = useToast();
 
-  const generatePackingSlip = useCallback(async (selectedOrder: Order, selectedItems: Set<string>) => {
+  const generatePackingSlip = React.useCallback(async (selectedOrder: Order, selectedItems: Set<string>) => {
     if (!selectedOrder || selectedItems.size === 0) return;
 
     toast({ title: "Gerando Romaneio...", description: "Por favor, aguarde." });
@@ -901,7 +837,7 @@ export const usePdfGenerator = () => {
     }
   }, [toast]);
 
-  const exportSchedule = useCallback(async (selectedOrder: Order) => {
+  const exportSchedule = React.useCallback(async (selectedOrder: Order) => {
     if (!selectedOrder) return;
 
     toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
@@ -981,7 +917,6 @@ export const usePdfGenerator = () => {
       }
       yPos = Math.max(leftColumnY, rightColumnY) + 10;
 
-      // Table for items and their production plans
       for (const item of selectedOrder.items) {
         if (item.productionPlan && item.productionPlan.length > 0) {
           docPdf.setFontSize(11).setFont(undefined, 'bold');
@@ -1035,10 +970,7 @@ export const usePdfGenerator = () => {
   return { generatePackingSlip, exportSchedule };
 };
 
-// ========================================
 // MAIN COMPONENT
-// Mova para src/app/dashboard/orders/page.tsx (ou similar)
-// ========================================
 const OrdersPage = () => {
   const { user, authLoading } = useAuth();
   const { toast } = useToast();
@@ -1081,7 +1013,6 @@ const OrdersPage = () => {
   } = useProductionProgress();
   const { generatePackingSlip, exportSchedule } = usePdfGenerator();
 
-
   const form = useForm<z.infer<typeof orderSchema>>({
     resolver: zodResolver(orderSchema),
     defaultValues: {
@@ -1103,18 +1034,12 @@ const OrdersPage = () => {
     name: "items",
   });
 
-  // ========================================
-  // EVENT HANDLERS (Principais)
-  // Alguns handlers foram movidos para os hooks, aqui ficam os que dependem do estado local do componente principal.
-  // ========================================
-
   useEffect(() => {
     if (selectedOrder) {
       form.reset({
         ...selectedOrder,
         status: selectedOrder.status as any,
         documents: selectedOrder.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
-        // Garante que as datas dos itens sejam objetos Date
         items: selectedOrder.items.map(item => ({
           ...item,
           itemDeliveryDate: item.itemDeliveryDate ? new Date(item.itemDeliveryDate) : undefined,
@@ -1140,7 +1065,6 @@ const OrdersPage = () => {
     if (!selectedOrder) return;
     const success = await updateOrder(selectedOrder.id, values);
     if (success) {
-      // Atualiza o selectedOrder localmente para refletir as mudanças imediatamente
       const updatedOrderForState: Order = {
         ...selectedOrder,
         quotationNumber: values.quotationNumber!,
@@ -1161,7 +1085,7 @@ const OrdersPage = () => {
             completedDate: p.completedDate ? new Date(p.completedDate) : undefined,
           })) as any
         })),
-        totalWeight: calculateTotalWeight(values.items), // Recalculate total weight
+        totalWeight: calculateTotalWeight(values.items),
       };
       setSelectedOrder(updatedOrderForState);
       form.reset({
@@ -1193,13 +1117,9 @@ const OrdersPage = () => {
   };
 
   const handlePasteProgress = async (targetItem: OrderItem) => {
-    if (!selectedOrder) return; // Add check for selectedOrder
+    if (!selectedOrder) return;
     await pasteProgress(targetItem, selectedOrder, fetchOrders, setSelectedOrder, form.reset);
   };
-
-  // ========================================
-  // FILTER & SELECTION HANDLERS
-  // ========================================
 
   const clearFilters = () => {
     setSearchQuery("");
@@ -1228,10 +1148,6 @@ const OrdersPage = () => {
       setSelectedItems(new Set());
     }
   };
-
-  // ========================================
-  // MEMOIZED VALUES
-  // ========================================
 
   const filteredOrders = useMemo(() => {
     let currentOrders = orders;
@@ -1278,22 +1194,20 @@ const OrdersPage = () => {
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
       case "Aguardando Produção": return "outline";
-      case "Em Produção": return "default"; // blue
-      case "Pronto para Entrega": return "secondary"; // green
-      case "Concluído": return "success"; // custom success variant if you have one
+      case "Em Produção": return "default";
+      case "Pronto para Entrega": return "secondary";
+      case "Concluído": return "secondary";
       case "Cancelado": return "destructive";
-      case "Atrasado": return "warning"; // custom warning variant
+      case "Atrasado": return "destructive";
       default: return "outline";
     }
   };
 
-  // Funções de cálculo para o dashboard (podem ser movidas para um utilitário se usadas em outros lugares)
   const totalOrders = orders.length;
   const ordersInProgress = orders.filter(o => o.status === "Em Produção").length;
   const ordersCompleted = orders.filter(o => o.status === "Concluído").length;
   const totalWeightAllOrders = calculateTotalWeight(orders.flatMap(order => order.items));
 
-  // Renderização do componente principal
   if (authLoading || loadingOrders || loadingCustomers) {
     return (
       <div className="flex flex-col space-y-3 p-8">
@@ -1312,7 +1226,6 @@ const OrdersPage = () => {
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">Pedidos</h2>
         <div className="flex items-center space-x-2">
-          {/* Botões de ação aqui, se houver */}
         </div>
       </div>
       <Separator />
@@ -1482,7 +1395,6 @@ const OrdersPage = () => {
                     <CardTitle>Informações Gerais</CardTitle>
                   </CardHeader>
                   <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* ... (campos do formulário principal: Cliente, Nº Pedido, OS Interna, etc.) */}
                     <FormField
                       control={form.control}
                       name="customer"
@@ -1724,7 +1636,6 @@ const OrdersPage = () => {
                           )}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* ... (campos de cada item: Descrição, Quantidade, Peso Unitário) */}
                           <FormField
                             control={form.control}
                             name={`items.${index}.code`}
@@ -2047,8 +1958,6 @@ const OrdersPage = () => {
                             }
                             if (value === 'Em Produção' && !newPlan[index].startDate) {
                                newPlan[index].startDate = new Date();
-                            } else if (value !== 'Em Produção' && newPlan[index].startDate) {
-                              // If changing from "Em Produção" and start date was set, consider clearing if status isn't active
                             }
                             setEditedPlan(newPlan);
                           }}
@@ -2150,7 +2059,3 @@ const OrdersPage = () => {
         </DialogContent>
       </Dialog>
     </div>
-  );
-};
-
-export default OrdersPage;
