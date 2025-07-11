@@ -38,205 +38,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Calendar } from "@/components/ui/calendar";
-
-// Função utilitária para converter data de forma segura
-const safeToDate = (dateValue: any): Date | null => {
-  if (!dateValue) return null;
-  
-  // Se já é uma Date válida
-  if (dateValue instanceof Date) {
-    return isNaN(dateValue.getTime()) ? null : dateValue;
-  }
-  
-  // Se é um Timestamp do Firestore
-  if (dateValue && typeof dateValue.toDate === 'function') {
-    try {
-      const converted = dateValue.toDate();
-      return isNaN(converted.getTime()) ? null : converted;
-    } catch (e) {
-      console.warn("Error converting Firestore timestamp:", e);
-      return null;
-    }
-  }
-  
-  // Se é uma string ou número
-  if (typeof dateValue === 'string' || typeof dateValue === 'number') {
-    try {
-      const converted = new Date(dateValue);
-      return isNaN(converted.getTime()) ? null : converted;
-    } catch (e) {
-      console.warn("Error converting date string/number:", e);
-      return null;
-    }
-  }
-  
-  return null;
-};
-
-// Função utilitária para garantir que uma data seja válida antes de usar
-const ensureValidDate = (date: any): Date | undefined => {
-  const validDate = safeToDate(date);
-  return validDate || undefined;
-};
-
-// Função utilitária para formatar data de forma segura
-const safeFormatDate = (date: any, formatStr: string = "dd/MM/yyyy"): string => {
-  const validDate = safeToDate(date);
-  if (!validDate) return 'N/A';
-  
-  try {
-    return format(validDate, formatStr);
-  } catch (e) {
-    console.warn("Error formatting date:", e);
-    return 'N/A';
-  }
-};
-
-// Função utilitária para verificar se duas datas são iguais de forma segura
-const safeDateComparison = (date1: any, date2: any): boolean => {
-  const validDate1 = safeToDate(date1);
-  const validDate2 = safeToDate(date2);
-  
-  if (!validDate1 || !validDate2) return false;
-  
-  try {
-    return isSameDay(validDate1, validDate2);
-  } catch (e) {
-    console.warn("Error comparing dates:", e);
-    return false;
-  }
-};
-
-// Funções utilitárias para dias úteis fracionados
-const addBusinessDaysFractional = (startDate: Date, days: number): Date => {
-  if (days === 0) return new Date(startDate);
-  let currentDate = new Date(startDate);
-  const wholeDays = Math.floor(Math.abs(days));
-  const fractionalPart = Math.abs(days) - wholeDays;
-  const isAdding = days > 0;
-  let remainingWholeDays = wholeDays;
-  while (remainingWholeDays > 0) {
-    currentDate = addDays(currentDate, isAdding ? 1 : -1);
-    if (isBusinessDay(currentDate)) {
-      remainingWholeDays--;
-    }
-  }
-  if (fractionalPart > 0) {
-    if (isAdding && !isBusinessDay(currentDate)) {
-      while (!isBusinessDay(currentDate)) {
-        currentDate = addDays(currentDate, 1);
-      }
-    }
-    if (!isAdding && !isBusinessDay(currentDate)) {
-      while (!isBusinessDay(currentDate)) {
-        currentDate = addDays(currentDate, -1);
-      }
-    }
-    const hoursToAdd = fractionalPart * 8;
-    const millisecondsToAdd = hoursToAdd * 60 * 60 * 1000;
-    if (isAdding) {
-      currentDate = new Date(currentDate.getTime() + millisecondsToAdd);
-    } else {
-      currentDate = new Date(currentDate.getTime() - millisecondsToAdd);
-    }
-  }
-  return currentDate;
-};
-
-const countBusinessDaysFractionalBetween = (startDate: Date, endDate: Date): number => {
-  if (isSameDay(startDate, endDate)) {
-    const timeDiff = endDate.getTime() - startDate.getTime();
-    const hoursDiff = timeDiff / (1000 * 60 * 60);
-    return Math.max(0.125, hoursDiff / 8);
-  }
-  let count = 0;
-  let currentDate = new Date(startDate);
-  const end = new Date(endDate);
-  while (currentDate < end) {
-    const nextDay = addDays(currentDate, 1);
-    nextDay.setHours(0, 0, 0, 0);
-    if (nextDay <= end) {
-      if (isBusinessDay(currentDate)) {
-        count++;
-      }
-      currentDate = nextDay;
-    } else {
-      break;
-    }
-  }
-  if (isBusinessDay(end)) {
-    const dayStart = new Date(end);
-    dayStart.setHours(0, 0, 0, 0);
-    if (currentDate <= dayStart) {
-      const timeDiff = end.getTime() - Math.max(currentDate.getTime(), dayStart.getTime());
-      const hoursDiff = timeDiff / (1000 * 60 * 60);
-      count += Math.max(0, hoursDiff / 8);
-    }
-  }
-  return Math.max(0.125, count);
-};
-
-const formatDuration = (days: number | undefined): string => {
-  if (!days) return '0 dias';
-  if (days < 1) {
-    const hours = Math.round(days * 8);
-    return `${hours} hora${hours !== 1 ? 's' : ''}`;
-  }
-  const wholeDays = Math.floor(days);
-  const remainingHours = Math.round((days - wholeDays) * 8);
-  if (remainingHours === 0) {
-    return `${wholeDays} dia${wholeDays !== 1 ? 's' : ''}`;
-  } else {
-    return `${wholeDays} dia${wholeDays !== 1 ? 's' : ''} e ${remainingHours}h`;
-  }
-};
-
-const normalizeDuration = (value: string | number): number => {
-  const num = typeof value === 'string' ? parseFloat(value.replace(',', '.')) : value;
-  return isNaN(num) ? 1 : Math.max(0.125, Math.round(num * 8) / 8);
-};
-
-interface BusinessDayInfoProps {
-  startDate: Date | null;
-  endDate: Date | null;
-  expectedDuration: number;
-}
-
-function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
-  if (!startDate || !endDate) return null;
-  const actualDuration = countBusinessDaysFractionalBetween(startDate, endDate);
-  const tolerance = 0.125;
-  const isCorrect = Math.abs(actualDuration - expectedDuration) <= tolerance;
-  return (
-    <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
-      <div className="flex items-center gap-2">
-        <span className="font-medium">Duração real:</span>
-        <span className="font-mono">{formatDuration(actualDuration)}</span>
-        {expectedDuration && !isCorrect && (
-          <span className="text-yellow-600">(esperado: {formatDuration(expectedDuration)})</span>
-        )}
-      </div>
-      {!isCorrect && (
-        <p className="text-yellow-600 mt-1">
-          ⚠️ A duração real difere significativamente da planejada
-        </p>
-      )}
-      {isBusinessDay(startDate) && isBusinessDay(endDate) && (
-        <p className="text-green-600 mt-1">
-          ✓ Datas em dias úteis
-        </p>
-      )}
-      {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
-        <p className="text-red-600 mt-1">
-          ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
-        </p>
-      )}
-      <p className="text-muted-foreground mt-1 text-xs">
-        💡 Frações: 0,5 = meio dia, 0,25 = 2 horas, 1,5 = 1 dia e meio
-      </p>
-    </div>
-  );
-}
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -249,7 +50,7 @@ const productionStageSchema = z.object({
     status: z.string(),
     startDate: z.date().nullable().optional(),
     completedDate: z.date().nullable().optional(),
-    durationDays: z.coerce.number().min(0.125, "A duração mínima é de 1 hora (0.125 dias)").optional(),
+    durationDays: z.coerce.number().min(0).optional(),
 });
 
 const orderItemSchema = z.object({
@@ -364,76 +165,12 @@ const brazilianHolidays = [
 ];
 
 // Funções utilitárias para cálculo de dias úteis
-// Função utilitária para calcular o peso total dos itens
-// Função para calcular o progresso de um item
-const calculateItemProgress = (item: { productionPlan?: { status?: string }[] }): number => {
-  if (!item.productionPlan || item.productionPlan.length === 0) return 0;
-  const total = item.productionPlan.length;
-  const completed = item.productionPlan.filter(p => p.status === 'Concluído').length;
-  return Math.round((completed / total) * 100);
-};
-
-// Função para calcular o progresso de um pedido
-const calculateOrderProgress = (order: { items?: { productionPlan?: { status?: string }[] }[] }): number => {
-  if (!order.items || order.items.length === 0) return 0;
-  const itemProgresses = order.items.map(calculateItemProgress);
-  const avg = itemProgresses.reduce((acc, val) => acc + val, 0) / itemProgresses.length;
-  return Math.round(avg);
-};
-
-// Função para mapear status do pedido
-const mapOrderStatus = (status: string): string => {
-  const valid = [
-    "Aguardando Produção",
-    "Em Produção",
-    "Pronto para Entrega",
-    "Concluído",
-    "Cancelado",
-    "Atrasado",
-  ];
-  if (valid.includes(status)) return status;
-  if (status === 'Finalizado') return 'Concluído';
-  if (status === 'Cancelada') return 'Cancelado';
-  return status || 'Aguardando Produção';
-};
-
-const calculateTotalWeight = (items: { quantity?: number; unitWeight?: number }[]): number => {
-  if (!Array.isArray(items)) return 0;
-  return items.reduce((acc, item) => {
-    const qty = Number(item.quantity) || 0;
-    const weight = Number(item.unitWeight) || 0;
-    return acc + qty * weight;
-  }, 0);
-};
-
 const isHoliday = (date: Date): boolean => {
-  try {
-    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
-      return false;
-    }
-    return brazilianHolidays.some(holiday => {
-      try {
-        return safeDateComparison(holiday, date);
-      } catch (e) {
-        return false;
-      }
-    });
-  } catch (e) {
-    console.warn("Error checking holiday:", e);
-    return false;
-  }
+  return brazilianHolidays.some(holiday => isSameDay(holiday, date));
 };
 
 const isBusinessDay = (date: Date): boolean => {
-  try {
-    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
-      return false;
-    }
-    return !isWeekend(date) && !isHoliday(date);
-  } catch (e) {
-    console.warn("Error checking business day:", e);
-    return false;
-  }
+  return !isWeekend(date) && !isHoliday(date);
 };
 
 const addBusinessDays = (startDate: Date, days: number): Date => {
@@ -472,6 +209,102 @@ const getNextBusinessDay = (fromDate: Date): Date => {
     nextDay = addDays(nextDay, 1);
   }
   return nextDay;
+};
+
+// Componente para exibir informações de dias úteis
+interface BusinessDayInfoProps {
+  startDate: Date | null;
+  endDate: Date | null;
+  expectedDuration: number;
+}
+
+function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
+  if (!startDate || !endDate) return null;
+  
+  const actualDuration = countBusinessDaysBetween(startDate, endDate);
+  const isCorrect = actualDuration === expectedDuration;
+  
+  return (
+    <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+      <div className="flex items-center gap-2">
+        <span className="font-medium">Dias úteis:</span>
+        <span>{actualDuration}</span>
+        {expectedDuration && expectedDuration !== actualDuration && (
+          <span className="text-yellow-600">(esperado: {expectedDuration})</span>
+        )}
+      </div>
+      {!isCorrect && (
+        <p className="text-yellow-600 mt-1">
+          ⚠️ A duração atual não corresponde aos dias definidos
+        </p>
+      )}
+      {isBusinessDay(startDate) && isBusinessDay(endDate) && (
+        <p className="text-green-600 mt-1">
+          ✓ Datas em dias úteis
+        </p>
+      )}
+      {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
+        <p className="text-red-600 mt-1">
+          ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
+        </p>
+      )}
+    </div>
+  );
+}
+
+const calculateTotalWeight = (items: OrderItem[]): number => {
+    if (!items || !Array.isArray(items)) return 0;
+    return items.reduce((acc, item) => {
+        const quantity = Number(item.quantity) || 0;
+        const unitWeight = Number(item.unitWeight) || 0;
+        return acc + (quantity * unitWeight);
+    }, 0);
+};
+
+const calculateItemProgress = (item: OrderItem): number => {
+    if (item.productionPlan && item.productionPlan.length > 0) {
+        const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
+        return (completedStages / item.productionPlan.length) * 100;
+    }
+
+    if (item.code && item.code.trim() !== "") {
+        return 0;
+    }
+    
+    return 100;
+};
+
+const calculateOrderProgress = (order: Order): number => {
+    if (!order.items || order.items.length === 0) {
+        return 0;
+    }
+    const totalProgress = order.items.reduce((acc, item) => acc + calculateItemProgress(item), 0);
+    return totalProgress / order.items.length;
+};
+
+const mapOrderStatus = (status?: string): string => {
+    if (!status) return "Não definido";
+    const lowerStatus = status.toLowerCase().trim();
+    
+    const statusMap: { [key: string]: string } = {
+        'in production': 'Em Produção',
+        'em produção': 'Em Produção',
+        'in progress': 'Em Produção',
+        'in-progress': 'Em Produção',
+        'em progresso': 'Em Produção',
+        'awaiting production': 'Aguardando Produção',
+        'aguardando produção': 'Aguardando Produção',
+        'pending': 'Aguardando Produção',
+        'completed': 'Concluído',
+        'concluído': 'Concluído',
+        'finished': 'Concluído',
+        'cancelled': 'Cancelado',
+        'cancelado': 'Cancelado',
+        'ready': 'Pronto para Entrega',
+        'pronto para entrega': 'Pronto para Entrega'
+    };
+
+    return statusMap[lowerStatus] || status;
 };
 
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
@@ -571,7 +404,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                             <TableCell>
                                 <DocumentStatusIcons documents={order.documents} />
                             </TableCell>
-                            <TableCell>{safeFormatDate(order.deliveryDate)}</TableCell>
+                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
                             <TableCell className="text-right font-medium">
                                 {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                             </TableCell>
@@ -596,24 +429,6 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
 }
 
 export default function OrdersPage() {
-    // Validação inicial para prevenir erros de data
-    useEffect(() => {
-        // Interceptar erros globais relacionados a datas
-        const originalError = console.error;
-        console.error = (...args) => {
-            const message = args.join(' ');
-            if (message.includes('getTime') && message.includes('not a function')) {
-                console.warn('Date error intercepted and handled:', args);
-                return;
-            }
-            originalError.apply(console, args);
-        };
-
-        return () => {
-            console.error = originalError;
-        };
-    }, []);
-
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -684,8 +499,8 @@ export default function OrdersPage() {
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
-                const createdAtDate = safeToDate(data.createdAt) || new Date();
-                const deliveryDate = safeToDate(data.deliveryDate);
+                const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
+                const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
                 
                 const enrichedItems = (data.items || []).map((item: any, index: number) => {
                     const itemCode = item.code || item.product_code || '';
@@ -709,9 +524,9 @@ export default function OrdersPage() {
 
                     let finalProductionPlan = (item.productionPlan || []).map((p: any) => ({
                         ...p,
-                        startDate: safeToDate(p.startDate),
-                        completedDate: safeToDate(p.completedDate),
-                        }));
+                        startDate: p.startDate?.toDate ? p.startDate.toDate() : null,
+                        completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
+                    }));
 
                     if (finalProductionPlan.length === 0) {
                         if (productData && productData.productionPlanTemplate && productData.productionPlanTemplate.length > 0) {
@@ -727,10 +542,10 @@ export default function OrdersPage() {
 
                     return {
                         ...enrichedItem,
-                        itemDeliveryDate: safeToDate(item.itemDeliveryDate) || deliveryDate,
+                        itemDeliveryDate: item.itemDeliveryDate?.toDate() || deliveryDate,
                         shippingList: item.shippingList || '',
                         invoiceNumber: item.invoiceNumber || '',
-                        shippingDate: safeToDate(item.shippingDate),
+                        shippingDate: item.shippingDate?.toDate() || null,
                     };
                 });
 
@@ -739,13 +554,7 @@ export default function OrdersPage() {
                 today.setHours(0, 0, 0, 0);
 
                 if (deliveryDate && deliveryDate < today && !['Concluído', 'Cancelado'].includes(finalStatus)) {
-                    try {
-                        if (deliveryDate.getTime() < today.getTime()) {
-                            finalStatus = 'Atrasado';
-                        }
-                    } catch (e) {
-                        console.warn("Error checking if order is late:", e);
-                    }
+                    finalStatus = 'Atrasado';
                 }
                 
                 let customerInfo: CustomerInfo = { id: '', name: 'Cliente não informado' };
@@ -908,61 +717,46 @@ export default function OrdersPage() {
     }, [orders]);
 
     const filteredOrders = useMemo(() => {
-                const filteredOrders = orders.filter(order => {
-                    const query = searchQuery.toLowerCase();
-                    const customerName = order.customer?.name?.toLowerCase() || '';
-                    const status = order.status?.toLowerCase() || '';
-                    const quotationNumber = order.quotationNumber?.toString() || '';
-                    const internalOS = order.internalOS?.toLowerCase() || '';
-                    const projectName = order.projectName?.toLowerCase() || '';
+        const filtered = orders.filter(order => {
+            const query = searchQuery.toLowerCase();
+            const customerName = order.customer?.name?.toLowerCase() || '';
+            const status = order.status?.toLowerCase() || '';
+            const quotationNumber = order.quotationNumber?.toString() || '';
+            const internalOS = order.internalOS?.toLowerCase() || '';
+            const projectName = order.projectName?.toLowerCase() || '';
 
-                    const textMatch = quotationNumber.includes(query) ||
-                        customerName.includes(query) ||
-                        status.includes(query) ||
-                        internalOS.includes(query) ||
-                        projectName.includes(query);
+            const textMatch = quotationNumber.includes(query) ||
+                customerName.includes(query) ||
+                status.includes(query) ||
+                internalOS.includes(query) ||
+                projectName.includes(query);
 
-                    const statusMatch = statusFilter === 'all' || order.status === statusFilter;
-                    const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
-                    const dateMatch = !dateFilter || (order.deliveryDate && safeDateComparison(order.deliveryDate, dateFilter));
+            const statusMatch = statusFilter === 'all' || order.status === statusFilter;
+            const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
+            const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
 
-                    return textMatch && statusMatch && customerMatch && dateMatch;
-                });
+            return textMatch && statusMatch && customerMatch && dateMatch;
+        });
 
-                return filtered.sort((a, b) => {
-                    const aIsCompleted = a.status === 'Concluído';
-                    const bIsCompleted = b.status === 'Concluído';
+        return filtered.sort((a, b) => {
+            const aIsCompleted = a.status === 'Concluído';
+            const bIsCompleted = b.status === 'Concluído';
 
-                    if (aIsCompleted && !bIsCompleted) return 1;
-                    if (!aIsCompleted && bIsCompleted) return -1;
-                    
-                    const aDate = safeToDate(a.deliveryDate);
-                    const bDate = safeToDate(b.deliveryDate);
+            if (aIsCompleted && !bIsCompleted) return 1;
+            if (!aIsCompleted && bIsCompleted) return -1;
+            
+            const aDate = a.deliveryDate;
+            const bDate = b.deliveryDate;
 
-                    if (aDate && !bDate) return -1;
-                    if (!aDate && bDate) return 1;
-                    if (aDate && bDate) {
-                        try {
-                            const dateComparison = aDate.getTime() - bDate.getTime();
-                            if (dateComparison !== 0) return dateComparison;
-                        } catch (e) {
-                            console.warn("Error comparing delivery dates:", e);
-                        }
-                    }
+            if (aDate && !bDate) return -1;
+            if (!aDate && bDate) return 1;
+            if (aDate && bDate) {
+                const dateComparison = aDate.getTime() - bDate.getTime();
+                if (dateComparison !== 0) return dateComparison;
+            }
 
-                    const aCreated = safeToDate(a.createdAt);
-                    const bCreated = safeToDate(b.createdAt);
-                    
-                    if (aCreated && bCreated) {
-                        try {
-                            return bCreated.getTime() - aCreated.getTime();
-                        } catch (e) {
-                            console.warn("Error comparing created dates:", e);
-                        }
-                    }
-                    
-                    return 0;
-                });
+            return b.createdAt.getTime() - a.createdAt.getTime();
+        });
     }, [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
     
     const watchedItems = form.watch("items");
@@ -1778,10 +1572,10 @@ export default function OrdersPage() {
             </div>
 
             <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) { setIsEditing(false); setSelectedItems(new Set()); setProgressClipboard(null); } }}>
-                <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
+                <SheetContent className="w-full sm:max-w-4xl">
                     {selectedOrder && (
-                        <div className="h-full flex flex-col">
-                            <SheetHeader className="sticky top-0 bg-background border-b pb-4 mb-4 z-10">
+                        <div>
+                            <SheetHeader>
                                 <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
                                 <SheetDescription>
                                     Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
@@ -1790,9 +1584,9 @@ export default function OrdersPage() {
                             
                             {isEditing ? (
                                 <Form {...form}>
-                                    <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col flex-1">
-                                        <div className="flex-1 overflow-y-auto">
-                                            <div className="space-y-6 pb-20">
+                                    <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-[calc(100%-4rem)]">
+                                        <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
+                                            <div className="space-y-6">
                                                 <Card className="p-4 bg-secondary/50">
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                                                         <FormField control={form.control} name="customer" render={({ field }) => (
@@ -1874,7 +1668,7 @@ export default function OrdersPage() {
                                                                         <FormControl>
                                                                             <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
                                                                                 <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                {field.value ? safeFormatDate(field.value) : <span>Selecione</span>}
+                                                                                {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
                                                                             </Button>
                                                                         </FormControl>
                                                                     </PopoverTrigger>
@@ -1980,7 +1774,7 @@ export default function OrdersPage() {
                                                                                         </FormControl>
                                                                                     </PopoverTrigger>
                                                                                     <PopoverContent className="w-auto p-0">
-                                                                                        <Calendar mode="single" selected={ensureValidDate(field.value)} onSelect={field.onChange} initialFocus />
+                                                                                        <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
                                                                                     </PopoverContent>
                                                                                 </Popover>
                                                                                 <FormMessage />
@@ -2014,12 +1808,12 @@ export default function OrdersPage() {
                                                                                                 <FormControl>
                                                                                                     <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
                                                                                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                                        {field.value ? safeFormatDate(field.value) : <span>Selecione</span>}
+                                                                                                        {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
                                                                                                     </Button>
                                                                                                 </FormControl>
                                                                                             </PopoverTrigger>
                                                                                             <PopoverContent className="w-auto p-0">
-                                                                                                <Calendar mode="single" selected={ensureValidDate(field.value)} onSelect={field.onChange} initialFocus />
+                                                                                                <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
                                                                                             </PopoverContent>
                                                                                         </Popover>
                                                                                         <FormMessage />
@@ -2034,21 +1828,19 @@ export default function OrdersPage() {
                                                     </CardContent>
                                                 </Card>
                                             </div>
-                                        </div>
-                                        <div className="sticky bottom-0 bg-background border-t pt-4 mt-4">
-                                            <div className="flex justify-between items-center">
-                                                <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
-                                                <Button type="submit" disabled={form.formState.isSubmitting}>
-                                                    {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
-                                                </Button>
-                                            </div>
-                                        </div>
+                                        </ScrollArea>
+                                        <SheetFooter className="py-4 border-t">
+                                            <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
+                                            <Button type="submit" disabled={form.formState.isSubmitting}>
+                                                {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                                            </Button>
+                                        </SheetFooter>
                                     </form>
                                 </Form>
                             ) : (
                                 <>
-                                    <div className="flex-1 overflow-y-auto">
-                                        <div className="space-y-6 pb-20">
+                                    <ScrollArea className="h-[calc(100vh-12rem)]">
+                                        <div className="space-y-6 py-6 pr-6">
                                             <Card>
                                                 <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
                                                 <CardContent className="space-y-3 text-sm">
@@ -2061,11 +1853,11 @@ export default function OrdersPage() {
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
-                                                        <span>{safeFormatDate(selectedOrder.createdAt)}</span>
+                                                        <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
-                                                        <span>{safeFormatDate(selectedOrder.deliveryDate) || 'A definir'}</span>
+                                                        <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground flex items-center"><FolderGit2 className="mr-2 h-4 w-4" />Pasta no Drive</span>
@@ -2153,14 +1945,14 @@ export default function OrdersPage() {
                                                                         {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
                                                                         {item.itemDeliveryDate && (
                                                                             <span className="block text-xs text-muted-foreground">
-                                                                                Entrega: {safeFormatDate(item.itemDeliveryDate, 'dd/MM/yy')}
+                                                                                Entrega: {format(item.itemDeliveryDate, 'dd/MM/yy')}
                                                                             </span>
                                                                         )}
                                                                         {itemProgress === 100 && (item.shippingList || item.invoiceNumber || item.shippingDate) && (
                                                                             <div className="mt-1 pt-1 border-t border-dashed border-muted-foreground/20 text-xs text-muted-foreground space-y-0.5">
                                                                                 {item.shippingList && <p>LE: <span className="font-semibold">{item.shippingList}</span></p>}
                                                                                 {item.invoiceNumber && <p>NF-e: <span className="font-semibold">{item.invoiceNumber}</span></p>}
-                                                                                {item.shippingDate && <p>Envio: <span className="font-semibold">{safeFormatDate(item.shippingDate, 'dd/MM/yy')}</span></p>}
+                                                                                {item.shippingDate && <p>Envio: <span className="font-semibold">{format(item.shippingDate, 'dd/MM/yy')}</span></p>}
                                                                             </div>
                                                                         )}
                                                                     </TableCell>
@@ -2224,37 +2016,35 @@ export default function OrdersPage() {
                                                 </CardContent>
                                             </Card>
                                         </div>
-                                    </div>
-                                    <div className="sticky bottom-0 bg-background border-t pt-4 mt-4">
-                                        <div className="flex flex-wrap gap-2 sm:justify-between items-center">
-                                            <div className="flex gap-2 flex-wrap">
-                                                <Button 
-                                                    onClick={handleGeneratePackingSlip} 
-                                                    disabled={selectedItems.size === 0}
-                                                >
-                                                    <FileText className="mr-2 h-4 w-4" />
-                                                    Emitir Romaneio ({selectedItems.size})
-                                                </Button>
-                                                 <Button 
-                                                    onClick={handleExportSchedule}
-                                                    variant="outline"
-                                                >
-                                                    <GanttChart className="mr-2 h-4 w-4" />
-                                                    Exportar Cronograma
-                                                </Button>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <Button onClick={() => setIsEditing(true)}>
-                                                    <Edit className="mr-2 h-4 w-4" />
-                                                    Editar Pedido
-                                                </Button>
-                                                <Button variant="destructive" onClick={() => selectedOrder && handleDeleteClick(selectedOrder)}>
-                                                    <Trash2 className="mr-2 h-4 w-4" />
-                                                    Excluir
-                                                </Button>
-                                            </div>
+                                    </ScrollArea>
+                                    <SheetFooter className="pt-4 pr-6 border-t flex flex-wrap gap-2 sm:justify-between items-center">
+                                        <div className="flex gap-2 flex-wrap">
+                                            <Button 
+                                                onClick={handleGeneratePackingSlip} 
+                                                disabled={selectedItems.size === 0}
+                                            >
+                                                <FileText className="mr-2 h-4 w-4" />
+                                                Emitir Romaneio ({selectedItems.size})
+                                            </Button>
+                                             <Button 
+                                                onClick={handleExportSchedule}
+                                                variant="outline"
+                                            >
+                                                <GanttChart className="mr-2 h-4 w-4" />
+                                                Exportar Cronograma
+                                            </Button>
                                         </div>
-                                    </div>
+                                        <div className="flex items-center gap-2">
+                                            <Button onClick={() => setIsEditing(true)}>
+                                                <Edit className="mr-2 h-4 w-4" />
+                                                Editar Pedido
+                                            </Button>
+                                            <Button variant="destructive" onClick={() => selectedOrder && handleDeleteClick(selectedOrder)}>
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Excluir
+                                            </Button>
+                                        </div>
+                                    </SheetFooter>
                                 </>
                             )}
                         </div>
@@ -2372,13 +2162,13 @@ export default function OrdersPage() {
                                         )}
                                       >
                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.startDate ? safeFormatDate(stage.startDate) : <span>Escolha a data</span>}
+                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
                                       </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-auto p-0">
                                       <Calendar 
                                         mode="single" 
-                                        selected={ensureValidDate(stage.startDate)} 
+                                        selected={stage.startDate ? new Date(stage.startDate) : undefined} 
                                         onSelect={(date) => handlePlanChange(index, 'startDate', date)} 
                                         initialFocus 
                                         modifiers={{
@@ -2421,13 +2211,13 @@ export default function OrdersPage() {
                                         )}
                                       >
                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.completedDate ? safeFormatDate(stage.completedDate) : <span>Escolha a data</span>}
+                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
                                       </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-auto p-0">
                                       <Calendar 
                                         mode="single" 
-                                        selected={ensureValidDate(stage.completedDate)} 
+                                        selected={stage.completedDate ? new Date(stage.completedDate) : undefined} 
                                         onSelect={(date) => handlePlanChange(index, 'completedDate', date)} 
                                         initialFocus 
                                         modifiers={{
