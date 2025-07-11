@@ -203,9 +203,10 @@ export const getNextBusinessDay = (date: Date): Date => {
 };
 
 export const calculateTotalWeight = (items: OrderItem[]): number => {
+  if (!items || items.length === 0) return 0;
   return items.reduce((total, item) => {
-    const quantity = Number(item.quantity) || 0;
-    const unitWeight = Number(item.unitWeight) || 0;
+    const quantity = Number(item?.quantity) || 0;
+    const unitWeight = Number(item?.unitWeight) || 0;
     return total + (quantity * unitWeight);
   }, 0);
 };
@@ -1150,15 +1151,15 @@ const OrdersPage = () => {
   };
 
   const filteredOrders = useMemo(() => {
-    let currentOrders = orders;
+    let currentOrders = orders || [];
 
     if (searchQuery) {
       currentOrders = currentOrders.filter(order =>
-        order.quotationNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.quotationNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.customer?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         order.internalOS?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         order.projectName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.items.some(item => item.description.toLowerCase().includes(searchQuery.toLowerCase()))
+        (order.items || []).some(item => item.description?.toLowerCase().includes(searchQuery.toLowerCase()))
       );
     }
 
@@ -1167,7 +1168,7 @@ const OrdersPage = () => {
     }
 
     if (customerFilter !== "all") {
-      currentOrders = currentOrders.filter(order => order.customer.id === customerFilter);
+      currentOrders = currentOrders.filter(order => order.customer?.id === customerFilter);
     }
 
     if (dateFilter) {
@@ -1206,7 +1207,7 @@ const OrdersPage = () => {
   const totalOrders = orders.length;
   const ordersInProgress = orders.filter(o => o.status === "Em Produção").length;
   const ordersCompleted = orders.filter(o => o.status === "Concluído").length;
-  const totalWeightAllOrders = calculateTotalWeight(orders.flatMap(order => order.items));
+  const totalWeightAllOrders = calculateTotalWeight(orders.flatMap(order => order.items || []));
 
   if (authLoading || loadingOrders || loadingCustomers) {
     return (
@@ -1357,7 +1358,7 @@ const OrdersPage = () => {
                       <TableCell>
                         {order.deliveryDate ? format(order.deliveryDate, 'dd/MM/yyyy') : 'N/A'}
                       </TableCell>
-                      <TableCell>{order.totalWeight.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg</TableCell>
+                      <TableCell>{(order.totalWeight || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg</TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" onClick={() => handleViewOrder(order)}>
                           <Search className="h-4 w-4" />
