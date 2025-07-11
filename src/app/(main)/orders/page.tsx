@@ -407,11 +407,33 @@ const calculateTotalWeight = (items: { quantity?: number; unitWeight?: number }[
 };
 
 const isHoliday = (date: Date): boolean => {
-  return brazilianHolidays.some(holiday => isSameDay(holiday, date));
+  try {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+      return false;
+    }
+    return brazilianHolidays.some(holiday => {
+      try {
+        return safeDateComparison(holiday, date);
+      } catch (e) {
+        return false;
+      }
+    });
+  } catch (e) {
+    console.warn("Error checking holiday:", e);
+    return false;
+  }
 };
 
 const isBusinessDay = (date: Date): boolean => {
-  return !isWeekend(date) && !isHoliday(date);
+  try {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+      return false;
+    }
+    return !isWeekend(date) && !isHoliday(date);
+  } catch (e) {
+    console.warn("Error checking business day:", e);
+    return false;
+  }
 };
 
 const addBusinessDays = (startDate: Date, days: number): Date => {
@@ -549,7 +571,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                             <TableCell>
                                 <DocumentStatusIcons documents={order.documents} />
                             </TableCell>
-                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
+                            <TableCell>{safeFormatDate(order.deliveryDate)}</TableCell>
                             <TableCell className="text-right font-medium">
                                 {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                             </TableCell>
@@ -574,6 +596,24 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
 }
 
 export default function OrdersPage() {
+    // Validação inicial para prevenir erros de data
+    useEffect(() => {
+        // Interceptar erros globais relacionados a datas
+        const originalError = console.error;
+        console.error = (...args) => {
+            const message = args.join(' ');
+            if (message.includes('getTime') && message.includes('not a function')) {
+                console.warn('Date error intercepted and handled:', args);
+                return;
+            }
+            originalError.apply(console, args);
+        };
+
+        return () => {
+            console.error = originalError;
+        };
+    }, []);
+
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -699,7 +739,13 @@ export default function OrdersPage() {
                 today.setHours(0, 0, 0, 0);
 
                 if (deliveryDate && deliveryDate < today && !['Concluído', 'Cancelado'].includes(finalStatus)) {
-                    finalStatus = 'Atrasado';
+                    try {
+                        if (deliveryDate.getTime() < today.getTime()) {
+                            finalStatus = 'Atrasado';
+                        }
+                    } catch (e) {
+                        console.warn("Error checking if order is late:", e);
+                    }
                 }
                 
                 let customerInfo: CustomerInfo = { id: '', name: 'Cliente não informado' };
@@ -862,46 +908,61 @@ export default function OrdersPage() {
     }, [orders]);
 
     const filteredOrders = useMemo(() => {
-        const filtered = orders.filter(order => {
-            const query = searchQuery.toLowerCase();
-            const customerName = order.customer?.name?.toLowerCase() || '';
-            const status = order.status?.toLowerCase() || '';
-            const quotationNumber = order.quotationNumber?.toString() || '';
-            const internalOS = order.internalOS?.toLowerCase() || '';
-            const projectName = order.projectName?.toLowerCase() || '';
+                const filteredOrders = orders.filter(order => {
+                    const query = searchQuery.toLowerCase();
+                    const customerName = order.customer?.name?.toLowerCase() || '';
+                    const status = order.status?.toLowerCase() || '';
+                    const quotationNumber = order.quotationNumber?.toString() || '';
+                    const internalOS = order.internalOS?.toLowerCase() || '';
+                    const projectName = order.projectName?.toLowerCase() || '';
 
-            const textMatch = quotationNumber.includes(query) ||
-                customerName.includes(query) ||
-                status.includes(query) ||
-                internalOS.includes(query) ||
-                projectName.includes(query);
+                    const textMatch = quotationNumber.includes(query) ||
+                        customerName.includes(query) ||
+                        status.includes(query) ||
+                        internalOS.includes(query) ||
+                        projectName.includes(query);
 
-            const statusMatch = statusFilter === 'all' || order.status === statusFilter;
-            const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
-            const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
+                    const statusMatch = statusFilter === 'all' || order.status === statusFilter;
+                    const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
+                    const dateMatch = !dateFilter || (order.deliveryDate && safeDateComparison(order.deliveryDate, dateFilter));
 
-            return textMatch && statusMatch && customerMatch && dateMatch;
-        });
+                    return textMatch && statusMatch && customerMatch && dateMatch;
+                });
 
-        return filtered.sort((a, b) => {
-            const aIsCompleted = a.status === 'Concluído';
-            const bIsCompleted = b.status === 'Concluído';
+                return filtered.sort((a, b) => {
+                    const aIsCompleted = a.status === 'Concluído';
+                    const bIsCompleted = b.status === 'Concluído';
 
-            if (aIsCompleted && !bIsCompleted) return 1;
-            if (!aIsCompleted && bIsCompleted) return -1;
-            
-            const aDate = a.deliveryDate;
-            const bDate = b.deliveryDate;
+                    if (aIsCompleted && !bIsCompleted) return 1;
+                    if (!aIsCompleted && bIsCompleted) return -1;
+                    
+                    const aDate = safeToDate(a.deliveryDate);
+                    const bDate = safeToDate(b.deliveryDate);
 
-            if (aDate && !bDate) return -1;
-            if (!aDate && bDate) return 1;
-            if (aDate && bDate) {
-                const dateComparison = aDate.getTime() - bDate.getTime();
-                if (dateComparison !== 0) return dateComparison;
-            }
+                    if (aDate && !bDate) return -1;
+                    if (!aDate && bDate) return 1;
+                    if (aDate && bDate) {
+                        try {
+                            const dateComparison = aDate.getTime() - bDate.getTime();
+                            if (dateComparison !== 0) return dateComparison;
+                        } catch (e) {
+                            console.warn("Error comparing delivery dates:", e);
+                        }
+                    }
 
-            return b.createdAt.getTime() - a.createdAt.getTime();
-        });
+                    const aCreated = safeToDate(a.createdAt);
+                    const bCreated = safeToDate(b.createdAt);
+                    
+                    if (aCreated && bCreated) {
+                        try {
+                            return bCreated.getTime() - aCreated.getTime();
+                        } catch (e) {
+                            console.warn("Error comparing created dates:", e);
+                        }
+                    }
+                    
+                    return 0;
+                });
     }, [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
     
     const watchedItems = form.watch("items");
@@ -1813,7 +1874,7 @@ export default function OrdersPage() {
                                                                         <FormControl>
                                                                             <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
                                                                                 <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                                {field.value ? safeFormatDate(field.value) : <span>Selecione</span>}
                                                                             </Button>
                                                                         </FormControl>
                                                                     </PopoverTrigger>
@@ -1919,7 +1980,7 @@ export default function OrdersPage() {
                                                                                         </FormControl>
                                                                                     </PopoverTrigger>
                                                                                     <PopoverContent className="w-auto p-0">
-                                                                                        <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                                        <Calendar mode="single" selected={ensureValidDate(field.value)} onSelect={field.onChange} initialFocus />
                                                                                     </PopoverContent>
                                                                                 </Popover>
                                                                                 <FormMessage />
@@ -1953,12 +2014,12 @@ export default function OrdersPage() {
                                                                                                 <FormControl>
                                                                                                     <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
                                                                                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                                        {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                                                                        {field.value ? safeFormatDate(field.value) : <span>Selecione</span>}
                                                                                                     </Button>
                                                                                                 </FormControl>
                                                                                             </PopoverTrigger>
                                                                                             <PopoverContent className="w-auto p-0">
-                                                                                                <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                                                                                <Calendar mode="single" selected={ensureValidDate(field.value)} onSelect={field.onChange} initialFocus />
                                                                                             </PopoverContent>
                                                                                         </Popover>
                                                                                         <FormMessage />
@@ -2000,11 +2061,11 @@ export default function OrdersPage() {
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data do Pedido</span>
-                                                        <span>{selectedOrder.createdAt ? format(selectedOrder.createdAt, 'dd/MM/yyyy') : 'N/A'}</span>
+                                                        <span>{safeFormatDate(selectedOrder.createdAt)}</span>
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground flex items-center"><CalendarDays className="mr-2 h-4 w-4" />Data de Entrega</span>
-                                                        <span>{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'dd/MM/yyyy') : 'A definir'}</span>
+                                                        <span>{safeFormatDate(selectedOrder.deliveryDate) || 'A definir'}</span>
                                                     </div>
                                                     <div className="flex justify-between items-center">
                                                         <span className="font-medium text-muted-foreground flex items-center"><FolderGit2 className="mr-2 h-4 w-4" />Pasta no Drive</span>
@@ -2092,14 +2153,14 @@ export default function OrdersPage() {
                                                                         {(item.code || item.product_code) && <span className="block text-xs text-muted-foreground">Cód: {item.code || item.product_code}</span>}
                                                                         {item.itemDeliveryDate && (
                                                                             <span className="block text-xs text-muted-foreground">
-                                                                                Entrega: {format(item.itemDeliveryDate, 'dd/MM/yy')}
+                                                                                Entrega: {safeFormatDate(item.itemDeliveryDate, 'dd/MM/yy')}
                                                                             </span>
                                                                         )}
                                                                         {itemProgress === 100 && (item.shippingList || item.invoiceNumber || item.shippingDate) && (
                                                                             <div className="mt-1 pt-1 border-t border-dashed border-muted-foreground/20 text-xs text-muted-foreground space-y-0.5">
                                                                                 {item.shippingList && <p>LE: <span className="font-semibold">{item.shippingList}</span></p>}
                                                                                 {item.invoiceNumber && <p>NF-e: <span className="font-semibold">{item.invoiceNumber}</span></p>}
-                                                                                {item.shippingDate && <p>Envio: <span className="font-semibold">{format(item.shippingDate, 'dd/MM/yy')}</span></p>}
+                                                                                {item.shippingDate && <p>Envio: <span className="font-semibold">{safeFormatDate(item.shippingDate, 'dd/MM/yy')}</span></p>}
                                                                             </div>
                                                                         )}
                                                                     </TableCell>
@@ -2311,13 +2372,13 @@ export default function OrdersPage() {
                                         )}
                                       >
                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                        {stage.startDate ? safeFormatDate(stage.startDate) : <span>Escolha a data</span>}
                                       </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-auto p-0">
                                       <Calendar 
                                         mode="single" 
-                                        selected={stage.startDate ? new Date(stage.startDate) : undefined} 
+                                        selected={ensureValidDate(stage.startDate)} 
                                         onSelect={(date) => handlePlanChange(index, 'startDate', date)} 
                                         initialFocus 
                                         modifiers={{
@@ -2360,13 +2421,13 @@ export default function OrdersPage() {
                                         )}
                                       >
                                         <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                        {stage.completedDate ? safeFormatDate(stage.completedDate) : <span>Escolha a data</span>}
                                       </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-auto p-0">
                                       <Calendar 
                                         mode="single" 
-                                        selected={stage.completedDate ? new Date(stage.completedDate) : undefined} 
+                                        selected={ensureValidDate(stage.completedDate)} 
                                         onSelect={(date) => handlePlanChange(index, 'completedDate', date)} 
                                         initialFocus 
                                         modifiers={{
