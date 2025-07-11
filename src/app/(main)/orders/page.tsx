@@ -43,10 +43,12 @@ import { Calendar } from "@/components/ui/calendar";
 const safeToDate = (dateValue: any): Date | null => {
   if (!dateValue) return null;
   
+  // Se já é uma Date válida
   if (dateValue instanceof Date) {
     return isNaN(dateValue.getTime()) ? null : dateValue;
   }
   
+  // Se é um Timestamp do Firestore
   if (dateValue && typeof dateValue.toDate === 'function') {
     try {
       const converted = dateValue.toDate();
@@ -57,6 +59,7 @@ const safeToDate = (dateValue: any): Date | null => {
     }
   }
   
+  // Se é uma string ou número
   if (typeof dateValue === 'string' || typeof dateValue === 'number') {
     try {
       const converted = new Date(dateValue);
@@ -68,6 +71,40 @@ const safeToDate = (dateValue: any): Date | null => {
   }
   
   return null;
+};
+
+// Função utilitária para garantir que uma data seja válida antes de usar
+const ensureValidDate = (date: any): Date | undefined => {
+  const validDate = safeToDate(date);
+  return validDate || undefined;
+};
+
+// Função utilitária para formatar data de forma segura
+const safeFormatDate = (date: any, formatStr: string = "dd/MM/yyyy"): string => {
+  const validDate = safeToDate(date);
+  if (!validDate) return 'N/A';
+  
+  try {
+    return format(validDate, formatStr);
+  } catch (e) {
+    console.warn("Error formatting date:", e);
+    return 'N/A';
+  }
+};
+
+// Função utilitária para verificar se duas datas são iguais de forma segura
+const safeDateComparison = (date1: any, date2: any): boolean => {
+  const validDate1 = safeToDate(date1);
+  const validDate2 = safeToDate(date2);
+  
+  if (!validDate1 || !validDate2) return false;
+  
+  try {
+    return isSameDay(validDate1, validDate2);
+  } catch (e) {
+    console.warn("Error comparing dates:", e);
+    return false;
+  }
 };
 
 // Funções utilitárias para dias úteis fracionados
