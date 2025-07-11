@@ -604,7 +604,7 @@ const useProductionProgress = () => {
   }, []);
 
   const addStageToPlan = React.useCallback(() => {
-    const trimmedName = newStageNameForPlan.trim();
+    const trimmedName = (newStageNameForPlan || '').trim();
     if (!trimmedName) {
       toast({
         variant: "destructive",
@@ -1037,21 +1037,38 @@ const OrdersPage = () => {
 
   useEffect(() => {
     if (selectedOrder) {
-      form.reset({
+      const safeOrder = {
         ...selectedOrder,
+        quotationNumber: selectedOrder.quotationNumber || "",
+        internalOS: selectedOrder.internalOS || "",
+        projectName: selectedOrder.projectName || "",
+        driveLink: selectedOrder.driveLink || "",
         status: selectedOrder.status as any,
+        customer: selectedOrder.customer || { id: "", name: "" },
         documents: selectedOrder.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
-        items: selectedOrder.items.map(item => ({
+        items: (selectedOrder.items || []).map(item => ({
           ...item,
+          id: item.id || `item-${Date.now()}-${Math.random()}`,
+          code: item.code || "",
+          description: item.description || "",
+          quantity: Number(item.quantity) || 0,
+          unitWeight: Number(item.unitWeight) || 0,
+          shippingList: item.shippingList || "",
+          invoiceNumber: item.invoiceNumber || "",
           itemDeliveryDate: item.itemDeliveryDate ? new Date(item.itemDeliveryDate) : undefined,
           shippingDate: item.shippingDate ? new Date(item.shippingDate) : undefined,
           productionPlan: (item.productionPlan || []).map(p => ({
             ...p,
+            stageName: p.stageName || "",
+            status: p.status || "Pendente",
+            durationDays: Number(p.durationDays) || 0,
             startDate: p.startDate ? new Date(p.startDate) : undefined,
             completedDate: p.completedDate ? new Date(p.completedDate) : undefined,
           }))
         })),
-      });
+      };
+      
+      form.reset(safeOrder);
     }
   }, [selectedOrder, form]);
 
@@ -1842,7 +1859,16 @@ const OrdersPage = () => {
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() => append({ id: `new-item-${Date.now()}`, description: "", quantity: 0, unitWeight: 0, productionPlan: [] })}
+                        onClick={() => append({ 
+                          id: `new-item-${Date.now()}-${Math.random()}`, 
+                          code: "",
+                          description: "", 
+                          quantity: 0, 
+                          unitWeight: 0, 
+                          shippingList: "",
+                          invoiceNumber: "",
+                          productionPlan: [] 
+                        })}
                         className="w-full"
                       >
                         <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Item
@@ -1905,7 +1931,7 @@ const OrdersPage = () => {
       <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Acompanhamento de Progresso - {itemToTrack?.description}</DialogTitle>
+            <DialogTitle>Acompanhamento de Progresso - {itemToTrack?.description || 'Item'}</DialogTitle>
             <DialogDescription>
               Monitore e atualize o status das etapas de produção para este item.
             </DialogDescription>
@@ -1935,23 +1961,23 @@ const OrdersPage = () => {
                 </TableHeader>
                 <TableBody>
                   {editedPlan.map((stage, index) => (
-                    <TableRow key={index}>
+                    <TableRow key={`stage-${index}`}>
                       <TableCell>
                         <Input
-                          value={stage.stageName}
+                          value={stage.stageName || ''}
                           onChange={(e) => {
                             const newPlan = [...editedPlan];
-                            newPlan[index].stageName = e.target.value;
+                            newPlan[index].stageName = e.target.value || '';
                             setEditedPlan(newPlan);
                           }}
                         />
                       </TableCell>
                       <TableCell>
                         <Select
-                          value={stage.status}
+                          value={stage.status || 'Pendente'}
                           onValueChange={(value) => {
                             const newPlan = [...editedPlan];
-                            newPlan[index].status = value;
+                            newPlan[index].status = value || 'Pendente';
                             if (value === 'Concluído' && !newPlan[index].completedDate) {
                                newPlan[index].completedDate = new Date();
                             } else if (value !== 'Concluído' && newPlan[index].completedDate) {
@@ -2026,7 +2052,7 @@ const OrdersPage = () => {
                       <TableCell>
                         <Input
                           type="number"
-                          value={stage.durationDays ?? ''}
+                          value={stage.durationDays !== undefined ? String(stage.durationDays) : ''}
                           onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
                         />
                       </TableCell>
@@ -2044,8 +2070,8 @@ const OrdersPage = () => {
             <div className="flex items-center gap-2 mt-4">
               <Input
                 placeholder="Nome da nova etapa"
-                value={newStageNameForPlan}
-                onChange={(e) => setNewStageNameForPlan(e.target.value)}
+                value={newStageNameForPlan || ''}
+                onChange={(e) => setNewStageNameForPlan(e.target.value || '')}
                 className="flex-grow"
               />
               <Button onClick={addStageToPlan}>
