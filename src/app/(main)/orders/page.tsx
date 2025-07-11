@@ -39,6 +39,37 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Calendar } from "@/components/ui/calendar";
 
+// Função utilitária para converter data de forma segura
+const safeToDate = (dateValue: any): Date | null => {
+  if (!dateValue) return null;
+  
+  if (dateValue instanceof Date) {
+    return isNaN(dateValue.getTime()) ? null : dateValue;
+  }
+  
+  if (dateValue && typeof dateValue.toDate === 'function') {
+    try {
+      const converted = dateValue.toDate();
+      return isNaN(converted.getTime()) ? null : converted;
+    } catch (e) {
+      console.warn("Error converting Firestore timestamp:", e);
+      return null;
+    }
+  }
+  
+  if (typeof dateValue === 'string' || typeof dateValue === 'number') {
+    try {
+      const converted = new Date(dateValue);
+      return isNaN(converted.getTime()) ? null : converted;
+    } catch (e) {
+      console.warn("Error converting date string/number:", e);
+      return null;
+    }
+  }
+  
+  return null;
+};
+
 // Funções utilitárias para dias úteis fracionados
 const addBusinessDaysFractional = (startDate: Date, days: number): Date => {
   if (days === 0) return new Date(startDate);
@@ -328,6 +359,7 @@ const mapOrderStatus = (status: string): string => {
   if (status === 'Cancelada') return 'Cancelado';
   return status || 'Aguardando Produção';
 };
+
 const calculateTotalWeight = (items: { quantity?: number; unitWeight?: number }[]): number => {
   if (!Array.isArray(items)) return 0;
   return items.reduce((acc, item) => {
@@ -336,6 +368,7 @@ const calculateTotalWeight = (items: { quantity?: number; unitWeight?: number }[
     return acc + qty * weight;
   }, 0);
 };
+
 const isHoliday = (date: Date): boolean => {
   return brazilianHolidays.some(holiday => isSameDay(holiday, date));
 };
@@ -381,6 +414,7 @@ const getNextBusinessDay = (fromDate: Date): Date => {
   }
   return nextDay;
 };
+
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
     switch (status) {
         case "Em Produção":
@@ -573,8 +607,8 @@ export default function OrdersPage() {
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             ordersList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
-                const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
-                const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
+                const createdAtDate = safeToDate(data.createdAt) || new Date();
+                const deliveryDate = safeToDate(data.deliveryDate);
                 
                 const enrichedItems = (data.items || []).map((item: any, index: number) => {
                     const itemCode = item.code || item.product_code || '';
@@ -598,9 +632,9 @@ export default function OrdersPage() {
 
                     let finalProductionPlan = (item.productionPlan || []).map((p: any) => ({
                         ...p,
-                        startDate: p.startDate?.toDate ? p.startDate.toDate() : null,
-                        completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
-                    }));
+                        startDate: safeToDate(p.startDate),
+                        completedDate: safeToDate(p.completedDate),
+                        }));
 
                     if (finalProductionPlan.length === 0) {
                         if (productData && productData.productionPlanTemplate && productData.productionPlanTemplate.length > 0) {
@@ -616,10 +650,10 @@ export default function OrdersPage() {
 
                     return {
                         ...enrichedItem,
-                        itemDeliveryDate: item.itemDeliveryDate?.toDate() || deliveryDate,
+                        itemDeliveryDate: safeToDate(item.itemDeliveryDate) || deliveryDate,
                         shippingList: item.shippingList || '',
                         invoiceNumber: item.invoiceNumber || '',
-                        shippingDate: item.shippingDate?.toDate() || null,
+                        shippingDate: safeToDate(item.shippingDate),
                     };
                 });
 
@@ -1646,10 +1680,10 @@ export default function OrdersPage() {
             </div>
 
             <Sheet open={isSheetOpen} onOpenChange={(open) => { setIsSheetOpen(open); if (!open) { setIsEditing(false); setSelectedItems(new Set()); setProgressClipboard(null); } }}>
-                <SheetContent className="w-full sm:max-w-4xl">
+                <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
                     {selectedOrder && (
-                        <div>
-                            <SheetHeader>
+                        <div className="h-full flex flex-col">
+                            <SheetHeader className="sticky top-0 bg-background border-b pb-4 mb-4 z-10">
                                 <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
                                 <SheetDescription>
                                     Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
@@ -1658,9 +1692,9 @@ export default function OrdersPage() {
                             
                             {isEditing ? (
                                 <Form {...form}>
-                                    <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col h-[calc(100%-4rem)]">
-                                        <ScrollArea className="flex-1 pr-6 -mr-6 py-6">
-                                            <div className="space-y-6">
+                                    <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col flex-1">
+                                        <div className="flex-1 overflow-y-auto">
+                                            <div className="space-y-6 pb-20">
                                                 <Card className="p-4 bg-secondary/50">
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                                                         <FormField control={form.control} name="customer" render={({ field }) => (
@@ -1902,19 +1936,21 @@ export default function OrdersPage() {
                                                     </CardContent>
                                                 </Card>
                                             </div>
-                                        </ScrollArea>
-                                        <SheetFooter className="py-4 border-t">
-                                            <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
-                                            <Button type="submit" disabled={form.formState.isSubmitting}>
-                                                {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
-                                            </Button>
-                                        </SheetFooter>
+                                        </div>
+                                        <div className="sticky bottom-0 bg-background border-t pt-4 mt-4">
+                                            <div className="flex justify-between items-center">
+                                                <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancelar</Button>
+                                                <Button type="submit" disabled={form.formState.isSubmitting}>
+                                                    {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                                                </Button>
+                                            </div>
+                                        </div>
                                     </form>
                                 </Form>
                             ) : (
                                 <>
-                                    <ScrollArea className="h-[calc(100vh-12rem)]">
-                                        <div className="space-y-6 py-6 pr-6">
+                                    <div className="flex-1 overflow-y-auto">
+                                        <div className="space-y-6 pb-20">
                                             <Card>
                                                 <CardHeader><CardTitle>Detalhes do Pedido</CardTitle></CardHeader>
                                                 <CardContent className="space-y-3 text-sm">
@@ -2090,35 +2126,37 @@ export default function OrdersPage() {
                                                 </CardContent>
                                             </Card>
                                         </div>
-                                    </ScrollArea>
-                                    <SheetFooter className="pt-4 pr-6 border-t flex flex-wrap gap-2 sm:justify-between items-center">
-                                        <div className="flex gap-2 flex-wrap">
-                                            <Button 
-                                                onClick={handleGeneratePackingSlip} 
-                                                disabled={selectedItems.size === 0}
-                                            >
-                                                <FileText className="mr-2 h-4 w-4" />
-                                                Emitir Romaneio ({selectedItems.size})
-                                            </Button>
-                                             <Button 
-                                                onClick={handleExportSchedule}
-                                                variant="outline"
-                                            >
-                                                <GanttChart className="mr-2 h-4 w-4" />
-                                                Exportar Cronograma
-                                            </Button>
+                                    </div>
+                                    <div className="sticky bottom-0 bg-background border-t pt-4 mt-4">
+                                        <div className="flex flex-wrap gap-2 sm:justify-between items-center">
+                                            <div className="flex gap-2 flex-wrap">
+                                                <Button 
+                                                    onClick={handleGeneratePackingSlip} 
+                                                    disabled={selectedItems.size === 0}
+                                                >
+                                                    <FileText className="mr-2 h-4 w-4" />
+                                                    Emitir Romaneio ({selectedItems.size})
+                                                </Button>
+                                                 <Button 
+                                                    onClick={handleExportSchedule}
+                                                    variant="outline"
+                                                >
+                                                    <GanttChart className="mr-2 h-4 w-4" />
+                                                    Exportar Cronograma
+                                                </Button>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Button onClick={() => setIsEditing(true)}>
+                                                    <Edit className="mr-2 h-4 w-4" />
+                                                    Editar Pedido
+                                                </Button>
+                                                <Button variant="destructive" onClick={() => selectedOrder && handleDeleteClick(selectedOrder)}>
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Excluir
+                                                </Button>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <Button onClick={() => setIsEditing(true)}>
-                                                <Edit className="mr-2 h-4 w-4" />
-                                                Editar Pedido
-                                            </Button>
-                                            <Button variant="destructive" onClick={() => selectedOrder && handleDeleteClick(selectedOrder)}>
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                Excluir
-                                            </Button>
-                                        </div>
-                                    </SheetFooter>
+                                    </div>
                                 </>
                             )}
                         </div>
