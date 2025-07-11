@@ -2059,3 +2059,7 @@ const OrdersPage = () => {
         </DialogContent>
       </Dialog>
     </div>
+  );
+};
+
+export default OrdersPage;
