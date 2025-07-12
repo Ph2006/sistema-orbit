@@ -2063,8 +2063,7 @@ export default function OrdersPage() {
                         <div className="flex items-center gap-2">
                           <CalendarIcon className="h-4 w-4 text-blue-600" />
                           <p className="text-sm text-blue-800">
-                            <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), 
-                            excluindo feriados nacionais brasileiros.
+                            <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
                           </p>
                         </div>
                       </div>
@@ -2137,15 +2136,20 @@ export default function OrdersPage() {
                                   <Label>Duração (dias úteis)</Label>
                                   <Input
                                     type="number"
-                                    step="1"
-                                    min="1"
-                                    placeholder="Ex: 3"
+                                    step="0.125"
+                                    min="0.125"
+                                    placeholder="Ex: 1.5 (1 dia e meio)"
                                     value={stage.durationDays ?? ''}
                                     onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
                                   />
                                   <p className="text-xs text-muted-foreground">
-                                    Apenas dias úteis (seg-sex, exceto feriados)
+                                    Aceita decimais: 0.5 = meio dia, 1.5 = 1 dia e meio
                                   </p>
+                                  {stage.durationDays && stage.durationDays < 1 && (
+                                    <p className="text-xs text-blue-600">
+                                      ℹ️ Duração menor que 1 dia - será executada no mesmo dia
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
@@ -2176,25 +2180,20 @@ export default function OrdersPage() {
                                           holiday: (date) => isHoliday(date)
                                         }}
                                         modifiersStyles={{
-                                          weekend: { 
-                                            backgroundColor: '#fef3c7', 
-                                            color: '#d97706' 
-                                          },
-                                          holiday: { 
-                                            backgroundColor: '#fecaca', 
-                                            color: '#dc2626' 
-                                          }
+                                          weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
+                                          holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
                                         }}
                                       />
                                       <div className="p-3 border-t text-xs text-muted-foreground">
                                         <p>🟡 Finais de semana | 🔴 Feriados</p>
+                                        <p className="mt-1">* Datas serão ajustadas automaticamente para o próximo dia útil</p>
                                       </div>
                                     </PopoverContent>
                                   </Popover>
                                   {stage.startDate && !isBusinessDay(stage.startDate) && (
-                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                    <p className="text-xs text-orange-600 flex items-center gap-1">
                                       <AlertTriangle className="h-3 w-3" />
-                                      Esta data cai em fim de semana ou feriado
+                                      Data será ajustada automaticamente para o próximo dia útil
                                     </p>
                                   )}
                                 </div>
@@ -2225,25 +2224,20 @@ export default function OrdersPage() {
                                           holiday: (date) => isHoliday(date)
                                         }}
                                         modifiersStyles={{
-                                          weekend: { 
-                                            backgroundColor: '#fef3c7', 
-                                            color: '#d97706' 
-                                          },
-                                          holiday: { 
-                                            backgroundColor: '#fecaca', 
-                                            color: '#dc2626' 
-                                          }
+                                          weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
+                                          holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
                                         }}
                                       />
                                       <div className="p-3 border-t text-xs text-muted-foreground">
                                         <p>🟡 Finais de semana | 🔴 Feriados</p>
+                                        <p className="mt-1">* Datas serão ajustadas automaticamente para o dia útil anterior</p>
                                       </div>
                                     </PopoverContent>
                                   </Popover>
                                   {stage.completedDate && !isBusinessDay(stage.completedDate) && (
-                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                    <p className="text-xs text-orange-600 flex items-center gap-1">
                                       <AlertTriangle className="h-3 w-3" />
-                                      Esta data cai em fim de semana ou feriado
+                                      Data será ajustada automaticamente para o dia útil anterior
                                     </p>
                                   )}
                                 </div>
