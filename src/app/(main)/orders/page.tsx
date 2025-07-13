@@ -1874,17 +1874,30 @@ export default function OrdersPage() {
                             </SelectContent>
                         </Select>
 
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button variant={"outline"} className={cn("w-[240px] justify-start text-left font-normal", !dateFilter && "text-muted-foreground")}>
-                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {dateFilter ? format(dateFilter, "dd/MM/yyyy") : <span>Data de Entrega</span>}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0">
-                                <Calendar mode="single" selected={dateFilter} onSelect={setDateFilter} initialFocus />
-                            </PopoverContent>
-                        </Popover>
+                        <div className="flex items-center gap-2">
+                            <Input
+                                type="date"
+                                value={dateFilter ? format(dateFilter, "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                    console.log('🔥 FILTRO DATA ALTERADO:', e.target.value);
+                                    if (e.target.value) {
+                                        setDateFilter(new Date(e.target.value));
+                                    } else {
+                                        setDateFilter(undefined);
+                                    }
+                                }}
+                                className="w-[180px]"
+                                placeholder="Data de Entrega"
+                            />
+                            <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => setDateFilter(undefined)}
+                                className="px-3"
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
                         
                         {hasActiveFilters && (
                             <Button variant="ghost" onClick={clearFilters}>
@@ -2019,19 +2032,21 @@ export default function OrdersPage() {
                         <FormField control={form.control} name="deliveryDate" render={({ field }) => (
                           <FormItem>
                             <FormLabel>Data de Entrega</FormLabel>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <FormControl>
-                                  <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
-                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                    {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
-                                  </Button>
-                                </FormControl>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-auto p-0">
-                                <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
-                              </PopoverContent>
-                            </Popover>
+                            <FormControl>
+                              <Input
+                                type="date"
+                                value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                  console.log('🔥 DATA ENTREGA ALTERADA:', e.target.value);
+                                  if (e.target.value) {
+                                    field.onChange(new Date(e.target.value));
+                                  } else {
+                                    field.onChange(null);
+                                  }
+                                }}
+                                className="w-full"
+                              />
+                            </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}/>
@@ -2119,25 +2134,27 @@ export default function OrdersPage() {
                                       <FormMessage />
                                     </FormItem>
                                   )}/>
-                                  <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Entrega do Item</FormLabel>
-                                      <Popover>
-                                        <PopoverTrigger asChild>
+                                                                        <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel>Entrega do Item</FormLabel>
                                           <FormControl>
-                                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
-                                              <CalendarIcon className="mr-2 h-4 w-4" />
-                                              {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
-                                            </Button>
+                                            <Input
+                                              type="date"
+                                              value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                              onChange={(e) => {
+                                                console.log('🔥 DATA ENTREGA ITEM ALTERADA:', e.target.value);
+                                                if (e.target.value) {
+                                                  field.onChange(new Date(e.target.value));
+                                                } else {
+                                                  field.onChange(null);
+                                                }
+                                              }}
+                                              className="w-full"
+                                            />
                                           </FormControl>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0">
-                                          <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
-                                        </PopoverContent>
-                                      </Popover>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}/>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}/>
                                 </div>
                                 {itemProgress === 100 && (
                                   <>
@@ -2161,19 +2178,21 @@ export default function OrdersPage() {
                                       <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
                                         <FormItem>
                                           <FormLabel>Data de Envio</FormLabel>
-                                          <Popover>
-                                            <PopoverTrigger asChild>
-                                              <FormControl>
-                                                <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
-                                                  <CalendarIcon className="mr-2 h-4 w-4" />
-                                                  {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
-                                                </Button>
-                                              </FormControl>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0">
-                                              <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
-                                            </PopoverContent>
-                                          </Popover>
+                                          <FormControl>
+                                            <Input
+                                              type="date"
+                                              value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                              onChange={(e) => {
+                                                console.log('🔥 DATA ENVIO ALTERADA:', e.target.value);
+                                                if (e.target.value) {
+                                                  field.onChange(new Date(e.target.value));
+                                                } else {
+                                                  field.onChange(null);
+                                                }
+                                              }}
+                                              className="w-full"
+                                            />
+                                          </FormControl>
                                           <FormMessage />
                                         </FormItem>
                                       )}/>
