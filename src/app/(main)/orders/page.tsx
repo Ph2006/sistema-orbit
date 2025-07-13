@@ -10,8 +10,6 @@ import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import QRCode from 'qrcode';
-import { QrCode } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -2006,7 +2004,8 @@ export default function OrdersPage() {
                           />
                           <span className="text-sm text-muted-foreground">Selecionar todos</span>
                         </div>
-                      </CardHeader>
+                      </div>
+                    </CardHeader>
                     <CardContent className="space-y-4">
                       {selectedOrder.items.map((item, index) => {
                         const itemProgress = calculateItemProgress(item);
@@ -2166,7 +2165,7 @@ export default function OrdersPage() {
                         {isFetchingPlan ? (
                           <div className="flex justify-center items-center h-48">
                             <div className="text-center">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-current mr-2 mb-2"></div>
+                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
                               <p>Buscando plano de fabricação...</p>
                             </div>
                           </div>
