@@ -1,0 +1,36 @@
+// ===== CRIAR ARQUIVO: /app/apontamento/page.tsx =====
+
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { doc, getDoc, updateDoc, setDoc, Timestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { 
+  CheckCircle, 
+  PlayCircle, 
+  Clock, 
+  MapPin, 
+  Camera,
+  User,
+  Calendar,
+  Package,
+  AlertTriangle,
+  Smartphone,
+  QrCode
+} from "lucide-react";
+import { format } from "date-fns";
+
+// ... TODO O CÓDIGO DO SEGUNDO ARTEFATO (AppointmentPage) ...
+
+export default function AppointmentPage() {
+  // ... código completo do segundo artefato
+}
