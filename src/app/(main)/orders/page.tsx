@@ -230,33 +230,44 @@ interface BusinessDayInfoProps {
 function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
   if (!startDate || !endDate) return null;
   
-  const actualDuration = countBusinessDaysBetween(startDate, endDate);
-  const isCorrect = actualDuration === expectedDuration;
+  const expectedDurationNum = Number(expectedDuration) || 0;
+  const isSameDate = isSameDay(startDate, endDate);
+  const isNextDay = !isSameDate && isSameDay(endDate, addDays(startDate, 1));
   
   return (
-    <div className={`text-xs mt-2 p-2 rounded ${isCorrect ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-yellow-50 text-yellow-700 border border-yellow-200'}`}>
+    <div className="text-xs mt-2 p-2 rounded bg-blue-50 text-blue-700 border border-blue-200">
       <div className="flex items-center gap-2">
-        <span className="font-medium">Dias úteis:</span>
-        <span>{actualDuration}</span>
-        {expectedDuration && expectedDuration !== actualDuration && (
-          <span className="text-yellow-600">(esperado: {expectedDuration})</span>
-        )}
+        <span className="font-medium">Duração:</span>
+        <span>{expectedDurationNum} dia(s)</span>
       </div>
-      {!isCorrect && (
-        <p className="text-yellow-600 mt-1">
-          ⚠️ A duração atual não corresponde aos dias definidos
+      
+      {isSameDate && (
+        <p className="text-blue-600 mt-1">
+          ✓ Tarefa executada no mesmo dia (acúmulo &lt; 1 dia)
         </p>
       )}
-      {isBusinessDay(startDate) && isBusinessDay(endDate) && (
+      
+      {isNextDay && (
         <p className="text-green-600 mt-1">
-          ✓ Datas em dias úteis
+          ✓ Tarefa termina no próximo dia (acúmulo excedeu 1 dia)
         </p>
       )}
-      {(!isBusinessDay(startDate) || !isBusinessDay(endDate)) && (
-        <p className="text-red-600 mt-1">
-          ⚠️ Atenção: data de início ou fim cai em fim de semana/feriado
+      
+      {!isBusinessDay(startDate) && (
+        <p className="text-orange-600 mt-1">
+          ⚠️ Data de início será ajustada para próximo dia útil
         </p>
       )}
+      
+      {!isBusinessDay(endDate) && (
+        <p className="text-orange-600 mt-1">
+          ⚠️ Data de fim será ajustada para dia útil
+        </p>
+      )}
+      
+      <p className="text-blue-600 mt-1 text-xs">
+        💡 Tarefas se acumulam no mesmo dia até somar ≥ 1 dia, então a tarefa que exceder termina no próximo dia útil
+      </p>
     </div>
   );
 }
@@ -811,7 +822,6 @@ export default function OrdersPage() {
       if (field === 'startDate' || field === 'completedDate') {
         currentStage[field] = value ? new Date(value) : null;
       } else if (field === 'durationDays') {
-        // Suporte para valores decimais
         const numValue = value === '' ? 0 : parseFloat(value);
         currentStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
       }
@@ -820,89 +830,99 @@ export default function OrdersPage() {
         if (isBusinessDay(date)) return new Date(date);
         return direction === 'next' ? getNextBusinessDay(date) : getPreviousBusinessDay(date);
       };
-      
-      if (field === 'startDate' && currentStage.startDate) {
-        currentStage.startDate = ensureBusinessDay(currentStage.startDate, 'next');
-        const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
-        if (duration <= 1) {
-          currentStage.completedDate = new Date(currentStage.startDate);
-        } else {
-          currentStage.completedDate = addBusinessDays(currentStage.startDate, Math.ceil(duration) - 1);
-        }
-        for (let i = stageIndex + 1; i < newPlan.length; i++) {
+
+      // Função para recalcular todas as datas em sequência CORRIGIDA
+      const recalculateSequentialDates = () => {
+        let currentWorkingDate = null;
+        let dailyAccumulation = 0; // Acúmulo do dia atual
+        
+        for (let i = 0; i < newPlan.length; i++) {
           const stage = newPlan[i];
-          const previousStage = newPlan[i - 1];
-          if (previousStage.completedDate) {
-            stage.startDate = getNextBusinessDay(previousStage.completedDate);
-            const duration = Math.max(0.125, Number(stage.durationDays) || 1);
-            if (duration <= 1) {
-              stage.completedDate = new Date(stage.startDate);
+          const duration = Math.max(0.125, Number(stage.durationDays) || 0);
+          
+          if (i === 0) {
+            // Primeira etapa - define o dia de trabalho inicial
+            if (stage.startDate) {
+              currentWorkingDate = ensureBusinessDay(stage.startDate, 'next');
+            } else if (field === 'startDate' && stageIndex === 0 && value) {
+              currentWorkingDate = ensureBusinessDay(new Date(value), 'next');
             } else {
-              stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration) - 1);
-            }
-          } else {
-            stage.startDate = null;
-            stage.completedDate = null;
-          }
-        }
-      } 
-      else if (field === 'completedDate' && currentStage.completedDate) {
-        currentStage.completedDate = ensureBusinessDay(currentStage.completedDate, 'previous');
-        const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
-        if (duration <= 1) {
-          currentStage.startDate = new Date(currentStage.completedDate);
-        } else {
-          currentStage.startDate = addBusinessDays(currentStage.completedDate, -(Math.ceil(duration) - 1));
-        }
-        for (let i = stageIndex + 1; i < newPlan.length; i++) {
-          const stage = newPlan[i];
-          const previousStage = newPlan[i - 1];
-          if (previousStage.completedDate) {
-            stage.startDate = getNextBusinessDay(previousStage.completedDate);
-            const duration = Math.max(0.125, Number(stage.durationDays) || 1);
-            if (duration <= 1) {
-              stage.completedDate = new Date(stage.startDate);
-            } else {
-              stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration) - 1);
-            }
-          } else {
-            stage.startDate = null;
-            stage.completedDate = null;
-          }
-        }
-      }
-      else if (field === 'durationDays') {
-        if (currentStage.startDate) {
-          const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
-          if (duration <= 1) {
-            currentStage.completedDate = new Date(currentStage.startDate);
-          } else {
-            currentStage.completedDate = addBusinessDays(currentStage.startDate, Math.ceil(duration) - 1);
-          }
-          for (let i = stageIndex + 1; i < newPlan.length; i++) {
-            const stage = newPlan[i];
-            const previousStage = newPlan[i - 1];
-            if (previousStage.completedDate) {
-              stage.startDate = getNextBusinessDay(previousStage.completedDate);
-              const duration = Math.max(0.125, Number(stage.durationDays) || 1);
-              if (duration <= 1) {
-                stage.completedDate = new Date(stage.startDate);
-              } else {
-                stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration) - 1);
+              // Se não há data de início, limpa todas as datas
+              for (let j = 0; j < newPlan.length; j++) {
+                newPlan[j].startDate = null;
+                newPlan[j].completedDate = null;
               }
-            } else {
-              stage.startDate = null;
-              stage.completedDate = null;
+              return;
             }
+            
+            // Reset do acúmulo para o novo dia
+            dailyAccumulation = 0;
+          }
+          
+          // Define início da tarefa
+          stage.startDate = new Date(currentWorkingDate);
+          
+          // Adiciona a duração da tarefa atual ao acúmulo
+          dailyAccumulation += duration;
+          
+          // Verifica se o acúmulo excedeu 1 dia
+          if (dailyAccumulation >= 1) {
+            // A tarefa termina no próximo dia útil
+            stage.completedDate = getNextBusinessDay(currentWorkingDate);
+            
+            // Atualiza o dia de trabalho para o próximo dia útil
+            currentWorkingDate = getNextBusinessDay(currentWorkingDate);
+            
+            // Calcula o novo acúmulo para o próximo dia
+            // O resto da divisão por 1 representa a fração que "sobrou"
+            dailyAccumulation = dailyAccumulation % 1;
+            
+            // Se o resto é 0, significa que terminou exatamente no fim do dia
+            // Se há resto, esse resto vai para o próximo dia
+          } else {
+            // A tarefa termina no mesmo dia (acúmulo ainda < 1)
+            stage.completedDate = new Date(currentWorkingDate);
           }
         }
-      }
-      if (field === 'startDate' && !value && stageIndex === 0) {
+      };
+      
+      if (field === 'startDate' && stageIndex === 0) {
+        // Mudança na data de início da primeira etapa - recalcula tudo
+        recalculateSequentialDates();
+      } else if (field === 'completedDate' && currentStage.completedDate) {
+        // Mudança na data de conclusão - ajusta a data para dia útil e recalcula as seguintes
+        currentStage.completedDate = ensureBusinessDay(currentStage.completedDate, 'previous');
+        
+        // Recalcula as etapas seguintes baseado na nova data de conclusão
+        let nextWorkingDate = getNextBusinessDay(currentStage.completedDate);
+        let dailyAccumulation = 0;
+        
+        for (let i = stageIndex + 1; i < newPlan.length; i++) {
+          const stage = newPlan[i];
+          const duration = Math.max(0.125, Number(stage.durationDays) || 1);
+          
+          stage.startDate = new Date(nextWorkingDate);
+          dailyAccumulation += duration;
+          
+          if (dailyAccumulation >= 1) {
+            stage.completedDate = getNextBusinessDay(nextWorkingDate);
+            nextWorkingDate = getNextBusinessDay(nextWorkingDate);
+            dailyAccumulation = dailyAccumulation % 1;
+          } else {
+            stage.completedDate = new Date(nextWorkingDate);
+          }
+        }
+      } else if (field === 'durationDays') {
+        // Mudança na duração - recalcula a sequência
+        recalculateSequentialDates();
+      } else if (field === 'startDate' && !value && stageIndex === 0) {
+        // Limpeza da data de início da primeira etapa
         for (let i = 0; i < newPlan.length; i++) {
           newPlan[i].startDate = null;
           newPlan[i].completedDate = null;
         }
       }
+      
       setEditedPlan(newPlan);
     };
 
