@@ -2398,10 +2398,7 @@ export default function OrdersPage() {
                                     </TooltipContent>
                                   </Tooltip>
                                 </TooltipProvider>
-                                <Button variant="outline" size="sm" onClick={() => handleGenerateTimesheet(item)}>
-                                  <QrCode className="mr-2 h-4 w-4" />
-                                  Folha de Apontamento
-                                </Button>
+
                                 <Button variant="outline" size="sm" onClick={() => handleOpenProgressModal(item)}>
                                   <GanttChart className="mr-2 h-4 w-4" />
                                   Progresso
@@ -2598,111 +2595,66 @@ export default function OrdersPage() {
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                                 <div className="space-y-2">
                                   <Label>Data de Início</Label>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button 
-                                        variant={"outline"} 
-                                        className={cn(
-                                          "w-full justify-start text-left font-normal", 
-                                          !stage.startDate && "text-muted-foreground",
-                                          stage.startDate && !isBusinessDay(stage.startDate) && "border-yellow-500 bg-yellow-50"
-                                        )}
-                                        type="button"
-                                      >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start" side="bottom">
-                                      <Calendar 
-                                        mode="single" 
-                                        selected={stage.startDate ? new Date(stage.startDate) : undefined} 
-                                        onSelect={(date) => {
-                                          if (date) {
-                                            // CORREÇÃO: Adicionar pequeno delay para garantir que o evento seja processado
-                                            setTimeout(() => {
-                                              handlePlanChange(index, 'startDate', date);
-                                            }, 10);
-                                          }
-                                        }} 
-                                        initialFocus 
-                                        modifiers={{
-                                          weekend: (date) => isWeekend(date),
-                                          holiday: (date) => isHoliday(date)
-                                        }}
-                                        modifiersStyles={{
-                                          weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
-                                          holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
-                                        }}
-                                        className="rounded-md border"
-                                        // CORREÇÃO: Garantir que não está desabilitado
-                                        disabled={false}
-                                      />
-                                      <div className="p-3 border-t text-xs text-muted-foreground">
-                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
-                                        <p className="mt-1">* Datas serão ajustadas automaticamente para o próximo dia útil</p>
+                                  {stage.status === 'Concluído' ? (
+                                    <div className="w-full p-2 border rounded-md bg-green-50 border-green-200">
+                                      <div className="flex items-center gap-2">
+                                        <CalendarIcon className="h-4 w-4 text-green-600" />
+                                        <span className="text-green-800 font-medium">
+                                          {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : 'Não definida'}
+                                        </span>
+                                        <CheckCircle className="h-4 w-4 text-green-600 ml-auto" />
                                       </div>
-                                    </PopoverContent>
-                                  </Popover>
-                                  {stage.startDate && !isBusinessDay(stage.startDate) && (
+                                    </div>
+                                  ) : (
+                                    <Input
+                                      type="date"
+                                      value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          console.log('📅 Data de início alterada:', e.target.value);
+                                          handlePlanChange(index, 'startDate', new Date(e.target.value));
+                                        }
+                                      }}
+                                      className="w-full"
+                                    />
+                                  )}
+                                  {stage.startDate && !isBusinessDay(stage.startDate) && stage.status !== 'Concluído' && (
                                     <p className="text-xs text-orange-600 flex items-center gap-1">
                                       <AlertTriangle className="h-3 w-3" />
-                                      Data será ajustada automaticamente para o próximo dia útil
+                                      Data será ajustada para próximo dia útil
                                     </p>
                                   )}
                                 </div>
+                                
                                 <div className="space-y-2">
                                   <Label>Data de Conclusão</Label>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button 
-                                        variant={"outline"} 
-                                        className={cn(
-                                          "w-full justify-start text-left font-normal", 
-                                          !stage.completedDate && "text-muted-foreground",
-                                          stage.completedDate && !isBusinessDay(stage.completedDate) && "border-yellow-500 bg-yellow-50"
-                                        )}
-                                        type="button"
-                                      >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start" side="bottom">
-                                      <Calendar 
-                                        mode="single" 
-                                        selected={stage.completedDate ? new Date(stage.completedDate) : undefined} 
-                                        onSelect={(date) => {
-                                          if (date) {
-                                            // CORREÇÃO: Adicionar pequeno delay para garantir que o evento seja processado
-                                            setTimeout(() => {
-                                              handlePlanChange(index, 'completedDate', date);
-                                            }, 10);
-                                          }
-                                        }} 
-                                        initialFocus 
-                                        modifiers={{
-                                          weekend: (date) => isWeekend(date),
-                                          holiday: (date) => isHoliday(date)
-                                        }}
-                                        modifiersStyles={{
-                                          weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
-                                          holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
-                                        }}
-                                        className="rounded-md border"
-                                        // CORREÇÃO: Garantir que não está desabilitado
-                                        disabled={false}
-                                      />
-                                      <div className="p-3 border-t text-xs text-muted-foreground">
-                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
-                                        <p className="mt-1">* Datas serão ajustadas automaticamente para o dia útil anterior</p>
+                                  {stage.status === 'Concluído' ? (
+                                    <div className="w-full p-2 border rounded-md bg-green-50 border-green-200">
+                                      <div className="flex items-center gap-2">
+                                        <CalendarIcon className="h-4 w-4 text-green-600" />
+                                        <span className="text-green-800 font-medium">
+                                          {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : 'Não definida'}
+                                        </span>
+                                        <CheckCircle className="h-4 w-4 text-green-600 ml-auto" />
                                       </div>
-                                    </PopoverContent>
-                                  </Popover>
-                                  {stage.completedDate && !isBusinessDay(stage.completedDate) && (
+                                    </div>
+                                  ) : (
+                                    <Input
+                                      type="date"
+                                      value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          console.log('📅 Data de conclusão alterada:', e.target.value);
+                                          handlePlanChange(index, 'completedDate', new Date(e.target.value));
+                                        }
+                                      }}
+                                      className="w-full"
+                                    />
+                                  )}
+                                  {stage.completedDate && !isBusinessDay(stage.completedDate) && stage.status !== 'Concluído' && (
                                     <p className="text-xs text-orange-600 flex items-center gap-1">
                                       <AlertTriangle className="h-3 w-3" />
-                                      Data será ajustada automaticamente para o dia útil anterior
+                                      Data será ajustada para dia útil anterior
                                     </p>
                                   )}
                                 </div>
