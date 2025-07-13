@@ -10,6 +10,7 @@ import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import QRCode from 'qrcode';
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -833,7 +834,7 @@ export default function OrdersPage() {
 
       // Função para recalcular todas as datas em sequência CORRIGIDA
       const recalculateSequentialDates = () => {
-        let currentWorkingDate = null;
+        let currentWorkingDate: Date | null = null;
         let dailyAccumulation = 0; // Acúmulo do dia atual
         
         for (let i = 0; i < newPlan.length; i++) {
@@ -860,13 +861,15 @@ export default function OrdersPage() {
           }
           
           // Define início da tarefa
-          stage.startDate = new Date(currentWorkingDate);
+          if (currentWorkingDate) {
+            stage.startDate = new Date(currentWorkingDate);
+          }
           
           // Adiciona a duração da tarefa atual ao acúmulo
           dailyAccumulation += duration;
           
           // Verifica se o acúmulo excedeu 1 dia
-          if (dailyAccumulation >= 1) {
+          if (dailyAccumulation >= 1 && currentWorkingDate) {
             // A tarefa termina no próximo dia útil
             stage.completedDate = getNextBusinessDay(currentWorkingDate);
             
@@ -879,7 +882,7 @@ export default function OrdersPage() {
             
             // Se o resto é 0, significa que terminou exatamente no fim do dia
             // Se há resto, esse resto vai para o próximo dia
-          } else {
+          } else if (currentWorkingDate) {
             // A tarefa termina no mesmo dia (acúmulo ainda < 1)
             stage.completedDate = new Date(currentWorkingDate);
           }
@@ -1000,11 +1003,11 @@ export default function OrdersPage() {
 
             let textX = 65;
             let textY = yPos;
-            docPdf.setFontSize(18).setFont(undefined, 'bold');
+            docPdf.setFontSize(18).setFont('helvetica', 'bold');
             docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
             textY += 6;
             
-            docPdf.setFontSize(9).setFont(undefined, 'normal');
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
             if (companyData.endereco) {
                 const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
                 docPdf.text(addressLines, textX, textY);
@@ -1015,11 +1018,11 @@ export default function OrdersPage() {
             }
             
             yPos = 55;
-            docPdf.setFontSize(14).setFont(undefined, 'bold');
+            docPdf.setFontSize(14).setFont('helvetica', 'bold');
             docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
     
-            docPdf.setFontSize(11).setFont(undefined, 'normal');
+            docPdf.setFontSize(11).setFont('helvetica', 'normal');
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
             docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
             yPos += 7;
@@ -1067,13 +1070,13 @@ export default function OrdersPage() {
                 finalY = 15;
             }
     
-            docPdf.setFontSize(12).setFont(undefined, 'bold');
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
             docPdf.text(
                 `Peso Total dos Itens: ${totalWeightOfSelection.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, 
                 pageWidth - 15, finalY + 15, { align: 'right' }
             );
 
-            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
             docPdf.text('Recebido por:', 15, footerStartY);
             docPdf.line(40, footerStartY, 120, footerStartY);
             docPdf.text('Data:', 15, footerStartY + 10);
@@ -1117,11 +1120,11 @@ export default function OrdersPage() {
             // Informações da empresa ao lado da logo
             let companyInfoX = 65;
             let companyInfoY = yPos + 5;
-            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
             docPdf.text(companyData.nomeFantasia || 'Sua Empresa', companyInfoX, companyInfoY);
             companyInfoY += 6;
             
-            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
             if (companyData.endereco) {
                 const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - companyInfoX - 15);
                 docPdf.text(addressLines, companyInfoX, companyInfoY);
@@ -1142,20 +1145,20 @@ export default function OrdersPage() {
             yPos = 45;
 
             // Título do documento
-            docPdf.setFontSize(16).setFont(undefined, 'bold');
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
             docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
 
             // Informações do pedido em duas colunas
-            docPdf.setFontSize(10).setFont(undefined, 'normal');
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
             
             // Coluna esquerda
             const leftColumnX = 15;
             let leftColumnY = yPos;
-            docPdf.setFont(undefined, 'bold');
+            docPdf.setFont('helvetica', 'bold');
             docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
             leftColumnY += 6;
-            docPdf.setFont(undefined, 'normal');
+            docPdf.setFont('helvetica', 'normal');
             docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
             leftColumnY += 5;
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
@@ -1247,7 +1250,7 @@ export default function OrdersPage() {
             
             if (finalY + 30 < pageHeight - 20) {
                 yPos = finalY + 15;
-                docPdf.setFontSize(8).setFont(undefined, 'italic');
+                docPdf.setFontSize(8).setFont('helvetica', 'italic');
                 docPdf.text(
                     `Documento gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
                     pageWidth / 2,
@@ -1484,6 +1487,190 @@ export default function OrdersPage() {
         };
         setEditedPlan([...editedPlan, newStage]);
         setNewStageNameForPlan("");
+    };
+
+    const handleGenerateTimesheet = async (item: OrderItem) => {
+        if (!selectedOrder) return;
+
+        toast({ title: "Gerando Folha de Apontamento...", description: "Por favor, aguarde." });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            let yPos = 15;
+
+            // Header com logo e informações da empresa
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+
+            // Informações da empresa
+            let companyInfoX = 65;
+            let companyInfoY = yPos + 5;
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', companyInfoX, companyInfoY);
+            companyInfoY += 6;
+            
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - companyInfoX - 15);
+                docPdf.text(addressLines, companyInfoX, companyInfoY);
+                companyInfoY += (addressLines.length * 3);
+            }
+
+            yPos = 45;
+
+            // Título
+            docPdf.setFontSize(18).setFont('helvetica', 'bold');
+            docPdf.text('FOLHA DE APONTAMENTO DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+
+            // Informações do pedido
+            docPdf.setFontSize(11).setFont('helvetica', 'normal');
+            docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
+            docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
+            
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
+            docPdf.text(`OS: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 15;
+
+            // Dados do item
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('DADOS DO ITEM:', 15, yPos);
+            yPos += 8;
+
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
+            docPdf.text(`Código: ${item.code || 'N/A'}`, 15, yPos);
+            yPos += 5;
+            docPdf.text(`Descrição: ${item.description}`, 15, yPos);
+            yPos += 5;
+            docPdf.text(`Quantidade: ${item.quantity}`, 15, yPos);
+            docPdf.text(`Peso Unit.: ${(Number(item.unitWeight) || 0).toLocaleString('pt-BR')} kg`, pageWidth / 2, yPos);
+            yPos += 15;
+
+            // QR Code com dados do item
+            const qrData = JSON.stringify({
+                orderId: selectedOrder.id,
+                itemId: item.id,
+                orderNumber: selectedOrder.quotationNumber,
+                itemCode: item.code,
+                itemDescription: item.description,
+                quantity: item.quantity
+            });
+
+            try {
+                const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
+                    width: 100,
+                    margin: 1,
+                    color: { dark: '#000000', light: '#FFFFFF' }
+                });
+                
+                docPdf.addImage(qrCodeDataUrl, 'PNG', pageWidth - 35, yPos, 25, 25);
+                
+                docPdf.setFontSize(8);
+                docPdf.text('QR Code para', pageWidth - 35, yPos + 30, { align: 'left' });
+                docPdf.text('rastreamento', pageWidth - 35, yPos + 34, { align: 'left' });
+            } catch (e) {
+                console.error("Error generating QR code:", e);
+            }
+
+            // Tabela de etapas de produção
+            if (item.productionPlan && item.productionPlan.length > 0) {
+                docPdf.setFontSize(12).setFont('helvetica', 'bold');
+                docPdf.text('ETAPAS DE PRODUÇÃO:', 15, yPos + 10);
+                yPos += 20;
+
+                const tableBody = item.productionPlan.map((stage: any) => [
+                    stage.stageName,
+                    stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : '',
+                    stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : '',
+                    stage.status,
+                    '', // Coluna para assinatura
+                ]);
+
+                autoTable(docPdf, {
+                    startY: yPos,
+                    head: [['Etapa', 'Início', 'Fim', 'Status', 'Assinatura Responsável']],
+                    body: tableBody,
+                    styles: { fontSize: 9, cellPadding: 3 },
+                    headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
+                    columnStyles: {
+                        0: { cellWidth: 60 },
+                        1: { cellWidth: 25, halign: 'center' },
+                        2: { cellWidth: 25, halign: 'center' },
+                        3: { cellWidth: 30, halign: 'center' },
+                        4: { cellWidth: 50 },
+                    }
+                });
+
+                yPos = (docPdf as any).lastAutoTable.finalY + 15;
+            }
+
+            // Seção de apontamentos
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('REGISTRO DE APONTAMENTOS:', 15, yPos);
+            yPos += 10;
+
+            // Tabela de apontamentos em branco
+            const appointmentRows = Array(8).fill(['', '', '', '', '', '']);
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Data', 'Hora Início', 'Hora Fim', 'Funcionário', 'Etapa/Atividade', 'Observações']],
+                body: appointmentRows,
+                styles: { fontSize: 9, cellPadding: 4, minCellHeight: 8 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
+                columnStyles: {
+                    0: { cellWidth: 25, halign: 'center' },
+                    1: { cellWidth: 20, halign: 'center' },
+                    2: { cellWidth: 20, halign: 'center' },
+                    3: { cellWidth: 35 },
+                    4: { cellWidth: 35 },
+                    5: { cellWidth: 55 },
+                }
+            });
+
+            // Rodapé
+            const finalY = (docPdf as any).lastAutoTable.finalY;
+            const pageHeight = docPdf.internal.pageSize.height;
+            
+            if (finalY + 30 < pageHeight - 20) {
+                yPos = finalY + 15;
+                docPdf.setFontSize(8).setFont('helvetica', 'italic');
+                docPdf.text(
+                    `Documento gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    yPos,
+                    { align: 'center' }
+                );
+            }
+
+            // Salvar o PDF
+            const filename = `Apontamento_${selectedOrder.quotationNumber}_${item.code || 'Item'}_${format(new Date(), 'yyyyMMdd')}.pdf`;
+            docPdf.save(filename);
+
+            toast({
+                title: "Folha gerada com sucesso!",
+                description: `Arquivo ${filename} foi baixado.`,
+            });
+
+        } catch (error) {
+            console.error("Error generating timesheet:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar folha",
+                description: "Não foi possível gerar a folha de apontamento.",
+            });
+        }
     };
 
     return (
@@ -2051,6 +2238,10 @@ export default function OrdersPage() {
                                     </TooltipContent>
                                   </Tooltip>
                                 </TooltipProvider>
+                                <Button variant="outline" size="sm" onClick={() => handleGenerateTimesheet(item)}>
+                                  <QrCode className="mr-2 h-4 w-4" />
+                                  Folha de Apontamento
+                                </Button>
                                 <Button variant="outline" size="sm" onClick={() => handleOpenProgressModal(item)}>
                                   <GanttChart className="mr-2 h-4 w-4" />
                                   Progresso
