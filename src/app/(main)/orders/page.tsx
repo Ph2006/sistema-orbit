@@ -834,7 +834,15 @@ export default function OrdersPage() {
       
       // Atualiza o campo específico
       if (field === 'startDate' || field === 'completedDate') {
-        currentStage[field] = value ? new Date(value) : null;
+        // Se value é uma string (vem do input date), converte para Date
+        // Se é null, mantém null
+        if (value === null || value === '') {
+          currentStage[field] = null;
+        } else if (typeof value === 'string') {
+          currentStage[field] = new Date(value);
+        } else {
+          currentStage[field] = value ? new Date(value) : null;
+        }
       } else if (field === 'durationDays') {
         const numValue = value === '' ? 0 : parseFloat(value);
         currentStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
@@ -964,7 +972,7 @@ export default function OrdersPage() {
         // Mudança na duração - recalcula tudo
         console.log('🎯 Alteração na duração - recalculando cronograma completo'); // Debug
         recalculateAllDates();
-      } else if (field === 'startDate' && !value && stageIndex === 0) {
+      } else if (field === 'startDate' && !currentStage.startDate && stageIndex === 0) {
         // Limpeza da data de início da primeira etapa - limpa tudo
         console.log('🎯 Limpando data inicial - removendo todas as datas'); // Debug
         for (let i = 0; i < newPlan.length; i++) {
@@ -2610,9 +2618,11 @@ export default function OrdersPage() {
                                       type="date"
                                       value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
+                                        console.log('🔧 Data de início alterada:', e.target.value);
                                         if (e.target.value) {
-                                          console.log('📅 Data de início alterada:', e.target.value);
-                                          handlePlanChange(index, 'startDate', new Date(e.target.value));
+                                          handlePlanChange(index, 'startDate', e.target.value);
+                                        } else {
+                                          handlePlanChange(index, 'startDate', null);
                                         }
                                       }}
                                       className="w-full"
@@ -2643,9 +2653,11 @@ export default function OrdersPage() {
                                       type="date"
                                       value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
+                                        console.log('🔧 Data de conclusão alterada:', e.target.value);
                                         if (e.target.value) {
-                                          console.log('📅 Data de conclusão alterada:', e.target.value);
-                                          handlePlanChange(index, 'completedDate', new Date(e.target.value));
+                                          handlePlanChange(index, 'completedDate', e.target.value);
+                                        } else {
+                                          handlePlanChange(index, 'completedDate', null);
                                         }
                                       }}
                                       className="w-full"
