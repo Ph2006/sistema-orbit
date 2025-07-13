@@ -817,9 +817,12 @@ export default function OrdersPage() {
     };
 
     const handlePlanChange = (stageIndex: number, field: string, value: any) => {
+      console.log('🔧 Alterando:', { stageIndex, field, value }); // Debug
+      
       let newPlan = JSON.parse(JSON.stringify(editedPlan));
       const currentStage = newPlan[stageIndex];
       
+      // Atualiza o campo específico
       if (field === 'startDate' || field === 'completedDate') {
         currentStage[field] = value ? new Date(value) : null;
       } else if (field === 'durationDays') {
@@ -829,13 +832,18 @@ export default function OrdersPage() {
         currentStage[field] = value;
       }
       
+      console.log('📋 Plano antes do recálculo:', newPlan); // Debug
+      
+      // Função auxiliar para garantir dia útil
       const ensureBusinessDay = (date: Date, direction = 'next'): Date => {
         if (isBusinessDay(date)) return new Date(date);
         return direction === 'next' ? getNextBusinessDay(date) : getPreviousBusinessDay(date);
       };
 
-      // Função CORRIGIDA para recalcular todas as datas em sequência
-      const recalculateSequentialDates = () => {
+      // Função CORRIGIDA para recalcular sequencialmente
+      const recalculateAllDates = () => {
+        console.log('🔄 Iniciando recálculo sequencial'); // Debug
+        
         let currentWorkingDate: Date | null = null;
         let dailyAccumulation = 0;
         
@@ -843,88 +851,129 @@ export default function OrdersPage() {
           const stage = newPlan[i];
           const duration = Math.max(0.125, Number(stage.durationDays) || 1);
           
+          console.log(`📅 Processando etapa ${i + 1}: ${stage.stageName}, duração: ${duration}`); // Debug
+          
           if (i === 0) {
-            // Primeira etapa - usa a data de início definida
+            // Primeira etapa - precisa ter data de início definida
             if (stage.startDate) {
               currentWorkingDate = ensureBusinessDay(new Date(stage.startDate), 'next');
               stage.startDate = new Date(currentWorkingDate);
+              dailyAccumulation = 0;
+              console.log(`📌 Primeira etapa iniciando em: ${currentWorkingDate.toLocaleDateString()}`); // Debug
             } else {
               // Se não há data de início, limpa todas as datas
+              console.log('⚠️ Sem data de início - limpando todas as datas'); // Debug
               for (let j = 0; j < newPlan.length; j++) {
                 newPlan[j].startDate = null;
                 newPlan[j].completedDate = null;
               }
-              setEditedPlan(newPlan);
               return;
             }
-            dailyAccumulation = 0;
           } else {
-            // Etapas subsequentes - começam no dia de trabalho atual
+            // Etapas subsequentes começam no dia de trabalho atual
             if (currentWorkingDate) {
               stage.startDate = new Date(currentWorkingDate);
+              console.log(`🔗 Etapa ${i + 1} iniciando em: ${currentWorkingDate.toLocaleDateString()}`); // Debug
             }
           }
           
-          // Adiciona a duração da tarefa atual ao acúmulo
+          // Adiciona duração ao acúmulo do dia
           dailyAccumulation += duration;
+          console.log(`⏱️ Acúmulo atual: ${dailyAccumulation} dias`); // Debug
           
-          // Verifica se o acúmulo excedeu 1 dia
+          // Verifica se excedeu 1 dia de trabalho
           if (dailyAccumulation >= 1 && currentWorkingDate) {
-            // A tarefa termina no próximo dia útil
-            const nextBusinessDay = getNextBusinessDay(currentWorkingDate);
+            // Tarefa termina no próximo dia útil
+            const nextBusinessDay = getNextBusinessDay(new Date(currentWorkingDate));
             stage.completedDate = new Date(nextBusinessDay);
             
-            // Atualiza o dia de trabalho para o próximo dia útil
+            // Atualiza o dia de trabalho para o próximo
             currentWorkingDate = new Date(nextBusinessDay);
             
-            // Calcula o novo acúmulo para o próximo dia
+            // Calcula o resto para o próximo dia
             dailyAccumulation = dailyAccumulation - 1;
+            
+            console.log(`✅ Etapa ${i + 1} termina em: ${nextBusinessDay.toLocaleDateString()}, resto: ${dailyAccumulation}`); // Debug
           } else if (currentWorkingDate) {
-            // A tarefa termina no mesmo dia (acúmulo ainda < 1)
+            // Tarefa termina no mesmo dia
             stage.completedDate = new Date(currentWorkingDate);
+            console.log(`📍 Etapa ${i + 1} termina no mesmo dia: ${currentWorkingDate.toLocaleDateString()}`); // Debug
           }
         }
       };
       
-      // Aplica o recálculo baseado no tipo de mudança
-      if (field === 'startDate' && stageIndex === 0) {
-        // Mudança na data de início da primeira etapa - recalcula tudo
-        recalculateSequentialDates();
-      } else if (field === 'completedDate' && currentStage.completedDate) {
-        // Mudança na data de conclusão - ajusta e recalcula as seguintes
-        currentStage.completedDate = ensureBusinessDay(new Date(currentStage.completedDate), 'previous');
+      // Função para recalcular etapas a partir de um índice específico
+      const recalculateFromIndex = (fromIndex: number) => {
+        console.log(`🔄 Recalculando a partir da etapa ${fromIndex + 1}`); // Debug
         
-        // Recalcula as etapas seguintes
-        let nextWorkingDate = getNextBusinessDay(new Date(currentStage.completedDate));
+        // Pega a data de conclusão da etapa anterior como base
+        const previousStage = newPlan[fromIndex - 1];
+        if (!previousStage || !previousStage.completedDate) {
+          console.log('⚠️ Etapa anterior sem data de conclusão - recalculando tudo'); // Debug
+          recalculateAllDates();
+          return;
+        }
+        
+        let currentWorkingDate = getNextBusinessDay(new Date(previousStage.completedDate));
         let dailyAccumulation = 0;
         
-        for (let i = stageIndex + 1; i < newPlan.length; i++) {
+        for (let i = fromIndex; i < newPlan.length; i++) {
           const stage = newPlan[i];
           const duration = Math.max(0.125, Number(stage.durationDays) || 1);
           
-          stage.startDate = new Date(nextWorkingDate);
+          stage.startDate = new Date(currentWorkingDate);
           dailyAccumulation += duration;
           
           if (dailyAccumulation >= 1) {
-            const nextDay = getNextBusinessDay(nextWorkingDate);
+            const nextDay = getNextBusinessDay(new Date(currentWorkingDate));
             stage.completedDate = new Date(nextDay);
-            nextWorkingDate = new Date(nextDay);
+            currentWorkingDate = new Date(nextDay);
             dailyAccumulation = dailyAccumulation - 1;
           } else {
-            stage.completedDate = new Date(nextWorkingDate);
+            stage.completedDate = new Date(currentWorkingDate);
           }
+          
+          console.log(`🔧 Recalculada etapa ${i + 1}: ${stage.startDate?.toLocaleDateString()} → ${stage.completedDate?.toLocaleDateString()}`); // Debug
+        }
+      };
+      
+      // Decide qual estratégia de recálculo usar
+      if (field === 'startDate' && stageIndex === 0) {
+        // Mudança na data de início da primeira etapa - recalcula tudo
+        console.log('🎯 Alteração na data inicial - recalculando cronograma completo'); // Debug
+        recalculateAllDates();
+      } else if (field === 'completedDate' && currentStage.completedDate) {
+        // Mudança na data de conclusão - ajusta para dia útil e recalcula seguintes
+        console.log('🎯 Alteração na data de conclusão'); // Debug
+        currentStage.completedDate = ensureBusinessDay(new Date(currentStage.completedDate), 'previous');
+        
+        if (stageIndex < newPlan.length - 1) {
+          recalculateFromIndex(stageIndex + 1);
         }
       } else if (field === 'durationDays') {
-        // Mudança na duração - recalcula a sequência
-        recalculateSequentialDates();
+        // Mudança na duração - recalcula tudo
+        console.log('🎯 Alteração na duração - recalculando cronograma completo'); // Debug
+        recalculateAllDates();
       } else if (field === 'startDate' && !value && stageIndex === 0) {
-        // Limpeza da data de início da primeira etapa
+        // Limpeza da data de início da primeira etapa - limpa tudo
+        console.log('🎯 Limpando data inicial - removendo todas as datas'); // Debug
         for (let i = 0; i < newPlan.length; i++) {
           newPlan[i].startDate = null;
           newPlan[i].completedDate = null;
         }
+      } else if (field === 'status') {
+        // Mudança de status - não afeta datas, apenas atualiza
+        console.log('🎯 Alteração de status - sem recálculo de datas'); // Debug
+      } else {
+        // Para outros campos (como startDate de etapas que não a primeira)
+        // Recalcula a partir da etapa atual
+        if (stageIndex > 0 && field === 'startDate') {
+          console.log('🎯 Alteração de data de etapa intermediária - recalculando a partir desta etapa'); // Debug
+          recalculateFromIndex(stageIndex);
+        }
       }
       
+      console.log('📋 Plano após recálculo:', newPlan); // Debug
       setEditedPlan(newPlan);
     };
 
