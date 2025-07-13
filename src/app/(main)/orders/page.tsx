@@ -992,6 +992,7 @@ export default function OrdersPage() {
       }
       
       console.log('📋 Plano após recálculo:', newPlan); // Debug
+      console.log('✅ ATUALIZANDO STATE editedPlan com:', newPlan[stageIndex]);
       setEditedPlan(newPlan);
     };
 
@@ -2526,7 +2527,15 @@ export default function OrdersPage() {
                             </div>
                           </div>
                         ) : (editedPlan && editedPlan.length > 0) ? (
-                          editedPlan.map((stage, index) => (
+                          editedPlan.map((stage, index) => {
+                            console.log('🎨 RENDERIZANDO ETAPA:', {
+                              index,
+                              stageName: stage.stageName,
+                              startDate: stage.startDate,
+                              completedDate: stage.completedDate,
+                              status: stage.status
+                            });
+                            return (
                             <Card key={index} className="p-4 relative">
                               <Button
                                 type="button"
@@ -2550,9 +2559,8 @@ export default function OrdersPage() {
                                   <Select 
                                     value={stage.status} 
                                     onValueChange={(value) => {
-                                      const newPlan = [...editedPlan];
-                                      newPlan[index] = { ...newPlan[index], status: value };
-                                      setEditedPlan(newPlan);
+                                      console.log('🔧 Status alterado:', { index, value });
+                                      handlePlanChange(index, 'status', value);
                                     }}
                                   >
                                     <SelectTrigger>
@@ -2618,7 +2626,12 @@ export default function OrdersPage() {
                                       type="date"
                                       value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
-                                        console.log('🔧 Data de início alterada:', e.target.value);
+                                        console.log('🔧 EVENTO CHANGE DATA INÍCIO:', {
+                                          index,
+                                          value: e.target.value,
+                                          stageName: stage.stageName,
+                                          currentDate: stage.startDate
+                                        });
                                         if (e.target.value) {
                                           handlePlanChange(index, 'startDate', e.target.value);
                                         } else {
@@ -2653,7 +2666,12 @@ export default function OrdersPage() {
                                       type="date"
                                       value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
-                                        console.log('🔧 Data de conclusão alterada:', e.target.value);
+                                        console.log('🔧 EVENTO CHANGE DATA CONCLUSÃO:', {
+                                          index,
+                                          value: e.target.value,
+                                          stageName: stage.stageName,
+                                          currentDate: stage.completedDate
+                                        });
                                         if (e.target.value) {
                                           handlePlanChange(index, 'completedDate', e.target.value);
                                         } else {
@@ -2688,7 +2706,8 @@ export default function OrdersPage() {
                                 </div>
                               )}
                             </Card>
-                          ))
+                          );
+                          })
                         ) : (
                           <div className="text-center text-muted-foreground py-8">
                             <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
