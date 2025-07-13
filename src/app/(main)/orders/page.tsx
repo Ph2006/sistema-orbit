@@ -474,7 +474,6 @@ export default function OrdersPage() {
     const [isFetchingPlan, setIsFetchingPlan] = useState(false);
     const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
     const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
-    const [planRenderKey, setPlanRenderKey] = useState(0);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -833,192 +832,36 @@ export default function OrdersPage() {
         }
     };
 
-    // Função para forçar re-renderização
-    const forceRerender = () => {
-        setPlanRenderKey(prev => prev + 1);
-    };
+
 
     const handlePlanChange = (stageIndex: number, field: string, value: any) => {
       console.log('🔧 Alterando:', { stageIndex, field, value }); // Debug
       
-      // Cria uma nova instância do array para garantir que o React detecte a mudança
-      const newPlan = editedPlan.map((stage, index) => {
-        if (index === stageIndex) {
-          // Cria uma nova instância do objeto stage
-          const updatedStage = { ...stage };
-          
-          // Atualiza o campo específico
-          if (field === 'startDate' || field === 'completedDate') {
-            // Se value é uma string (vem do input date), converte para Date
-            // Se é null, mantém null
-            if (value === null || value === '') {
-              updatedStage[field] = null;
-            } else if (typeof value === 'string') {
-              updatedStage[field] = new Date(value);
-            } else {
-              updatedStage[field] = value ? new Date(value) : null;
-            }
-          } else if (field === 'durationDays') {
-            const numValue = value === '' ? 0 : parseFloat(value);
-            updatedStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
-          } else {
-            updatedStage[field] = value;
-          }
-          
-          return updatedStage;
-        }
-        return stage;
-      });
+      // Cria uma nova instância do array imutável
+      const newPlan = [...editedPlan];
+      const updatedStage = { ...newPlan[stageIndex] };
       
-      console.log('📋 Plano antes do recálculo:', newPlan); // Debug
-      
-      // Função auxiliar para garantir dia útil
-      const ensureBusinessDay = (date: Date, direction = 'next'): Date => {
-        if (isBusinessDay(date)) return new Date(date);
-        return direction === 'next' ? getNextBusinessDay(date) : getPreviousBusinessDay(date);
-      };
-
-      // Função CORRIGIDA para recalcular sequencialmente
-      const recalculateAllDates = () => {
-        console.log('🔄 Iniciando recálculo sequencial'); // Debug
-        
-        let currentWorkingDate: Date | null = null;
-        let dailyAccumulation = 0;
-        
-        for (let i = 0; i < newPlan.length; i++) {
-          const stage = newPlan[i];
-          const duration = Math.max(0.125, Number(stage.durationDays) || 1);
-          
-          console.log(`📅 Processando etapa ${i + 1}: ${stage.stageName}, duração: ${duration}`); // Debug
-          
-          if (i === 0) {
-            // Primeira etapa - precisa ter data de início definida
-            if (stage.startDate) {
-              currentWorkingDate = ensureBusinessDay(new Date(stage.startDate), 'next');
-              stage.startDate = new Date(currentWorkingDate);
-              dailyAccumulation = 0;
-              console.log(`📌 Primeira etapa iniciando em: ${currentWorkingDate.toLocaleDateString()}`); // Debug
-            } else {
-              // Se não há data de início, limpa todas as datas
-              console.log('⚠️ Sem data de início - limpando todas as datas'); // Debug
-              for (let j = 0; j < newPlan.length; j++) {
-                newPlan[j].startDate = null;
-                newPlan[j].completedDate = null;
-              }
-              return;
-            }
-          } else {
-            // Etapas subsequentes começam no dia de trabalho atual
-            if (currentWorkingDate) {
-              stage.startDate = new Date(currentWorkingDate);
-              console.log(`🔗 Etapa ${i + 1} iniciando em: ${currentWorkingDate.toLocaleDateString()}`); // Debug
-            }
-          }
-          
-          // Adiciona duração ao acúmulo do dia
-          dailyAccumulation += duration;
-          console.log(`⏱️ Acúmulo atual: ${dailyAccumulation} dias`); // Debug
-          
-          // Verifica se excedeu 1 dia de trabalho
-          if (dailyAccumulation >= 1 && currentWorkingDate) {
-            // Tarefa termina no próximo dia útil
-            const nextBusinessDay = getNextBusinessDay(new Date(currentWorkingDate));
-            stage.completedDate = new Date(nextBusinessDay);
-            
-            // Atualiza o dia de trabalho para o próximo
-            currentWorkingDate = new Date(nextBusinessDay);
-            
-            // Calcula o resto para o próximo dia
-            dailyAccumulation = dailyAccumulation - 1;
-            
-            console.log(`✅ Etapa ${i + 1} termina em: ${nextBusinessDay.toLocaleDateString()}, resto: ${dailyAccumulation}`); // Debug
-          } else if (currentWorkingDate) {
-            // Tarefa termina no mesmo dia
-            stage.completedDate = new Date(currentWorkingDate);
-            console.log(`📍 Etapa ${i + 1} termina no mesmo dia: ${currentWorkingDate.toLocaleDateString()}`); // Debug
-          }
-        }
-      };
-      
-      // Função para recalcular etapas a partir de um índice específico
-      const recalculateFromIndex = (fromIndex: number) => {
-        console.log(`🔄 Recalculando a partir da etapa ${fromIndex + 1}`); // Debug
-        
-        // Pega a data de conclusão da etapa anterior como base
-        const previousStage = newPlan[fromIndex - 1];
-        if (!previousStage || !previousStage.completedDate) {
-          console.log('⚠️ Etapa anterior sem data de conclusão - recalculando tudo'); // Debug
-          recalculateAllDates();
-          return;
-        }
-        
-        let currentWorkingDate = getNextBusinessDay(new Date(previousStage.completedDate));
-        let dailyAccumulation = 0;
-        
-        for (let i = fromIndex; i < newPlan.length; i++) {
-          const stage = newPlan[i];
-          const duration = Math.max(0.125, Number(stage.durationDays) || 1);
-          
-          stage.startDate = new Date(currentWorkingDate);
-          dailyAccumulation += duration;
-          
-          if (dailyAccumulation >= 1) {
-            const nextDay = getNextBusinessDay(new Date(currentWorkingDate));
-            stage.completedDate = new Date(nextDay);
-            currentWorkingDate = new Date(nextDay);
-            dailyAccumulation = dailyAccumulation - 1;
-          } else {
-            stage.completedDate = new Date(currentWorkingDate);
-          }
-          
-          console.log(`🔧 Recalculada etapa ${i + 1}: ${stage.startDate?.toLocaleDateString()} → ${stage.completedDate?.toLocaleDateString()}`); // Debug
-        }
-      };
-      
-      // Decide qual estratégia de recálculo usar
-      if (field === 'startDate' && stageIndex === 0) {
-        // Mudança na data de início da primeira etapa - recalcula tudo
-        console.log('🎯 Alteração na data inicial - recalculando cronograma completo'); // Debug
-        recalculateAllDates();
-      } else if (field === 'completedDate' && newPlan[stageIndex].completedDate) {
-        // Mudança na data de conclusão - ajusta para dia útil e recalcula seguintes
-        console.log('🎯 Alteração na data de conclusão'); // Debug
-        newPlan[stageIndex].completedDate = ensureBusinessDay(new Date(newPlan[stageIndex].completedDate!), 'previous');
-        
-        if (stageIndex < newPlan.length - 1) {
-          recalculateFromIndex(stageIndex + 1);
+      // Atualiza o campo específico sem processamento excessivo
+      if (field === 'startDate' || field === 'completedDate') {
+        if (value === null || value === '') {
+          updatedStage[field] = null;
+        } else {
+          updatedStage[field] = new Date(value);
         }
       } else if (field === 'durationDays') {
-        // Mudança na duração - recalcula tudo
-        console.log('🎯 Alteração na duração - recalculando cronograma completo'); // Debug
-        recalculateAllDates();
-      } else if (field === 'startDate' && !newPlan[stageIndex].startDate && stageIndex === 0) {
-        // Limpeza da data de início da primeira etapa - limpa tudo
-        console.log('🎯 Limpando data inicial - removendo todas as datas'); // Debug
-        for (let i = 0; i < newPlan.length; i++) {
-          newPlan[i].startDate = null;
-          newPlan[i].completedDate = null;
-        }
-      } else if (field === 'status') {
-        // Mudança de status - não afeta datas, apenas atualiza
-        console.log('🎯 Alteração de status - sem recálculo de datas'); // Debug
+        const numValue = value === '' ? 0 : parseFloat(value);
+        updatedStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
       } else {
-        // Para outros campos (como startDate de etapas que não a primeira)
-        // Recalcula a partir da etapa atual
-        if (stageIndex > 0 && field === 'startDate') {
-          console.log('🎯 Alteração de data de etapa intermediária - recalculando a partir desta etapa'); // Debug
-          recalculateFromIndex(stageIndex);
-        }
+        updatedStage[field] = value;
       }
       
-      console.log('📋 Plano após recálculo:', newPlan); // Debug
-      console.log('✅ ATUALIZANDO STATE editedPlan com nova instância'); // Debug
+      // Atualiza o array com a nova instância
+      newPlan[stageIndex] = updatedStage;
       
-      // Força uma nova renderização criando uma nova instância do array
-      setEditedPlan([...newPlan]);
+      console.log('📋 Atualizando plano com:', newPlan); // Debug
       
-      // Força re-renderização imediata
-      forceRerender();
+      // Atualiza o estado com nova referência
+      setEditedPlan(newPlan);
     };
 
     const dashboardStats = useMemo(() => {
@@ -1848,12 +1691,7 @@ export default function OrdersPage() {
         }
     };
 
-    // Debug: monitora mudanças no editedPlan
-    useEffect(() => {
-        console.log('🔥 EDITED PLAN MUDOU:', editedPlan);
-        // Força re-renderização incrementando a key
-        setPlanRenderKey(prev => prev + 1);
-    }, [editedPlan]);
+
 
     return (
         <div className="w-full">
@@ -2568,7 +2406,7 @@ export default function OrdersPage() {
                               status: stage.status
                             });
                             return (
-                            <Card key={`${stage.stageName}-${index}-${planRenderKey}`} className="p-4 relative">
+                            <Card key={`${stage.stageName}-${index}`} className="p-4 relative">
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -2658,17 +2496,8 @@ export default function OrdersPage() {
                                       type="date"
                                       value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
-                                        console.log('🔧 EVENTO CHANGE DATA INÍCIO:', {
-                                          index,
-                                          value: e.target.value,
-                                          stageName: stage.stageName,
-                                          currentDate: stage.startDate
-                                        });
-                                        if (e.target.value) {
-                                          handlePlanChange(index, 'startDate', e.target.value);
-                                        } else {
-                                          handlePlanChange(index, 'startDate', null);
-                                        }
+                                        console.log('📅 Alterando data de início:', e.target.value);
+                                        handlePlanChange(index, 'startDate', e.target.value || null);
                                       }}
                                       className="w-full"
                                     />
@@ -2698,17 +2527,8 @@ export default function OrdersPage() {
                                       type="date"
                                       value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
-                                        console.log('🔧 EVENTO CHANGE DATA CONCLUSÃO:', {
-                                          index,
-                                          value: e.target.value,
-                                          stageName: stage.stageName,
-                                          currentDate: stage.completedDate
-                                        });
-                                        if (e.target.value) {
-                                          handlePlanChange(index, 'completedDate', e.target.value);
-                                        } else {
-                                          handlePlanChange(index, 'completedDate', null);
-                                        }
+                                        console.log('📅 Alterando data de conclusão:', e.target.value);
+                                        handlePlanChange(index, 'completedDate', e.target.value || null);
                                       }}
                                       className="w-full"
                                     />
