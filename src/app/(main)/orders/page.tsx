@@ -2579,106 +2579,119 @@ export default function OrdersPage() {
                                   )}
                                 </div>
                               </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                              <div className="space-y-4 mt-4">
+                                {/* Data de Início - SIMPLES E FUNCIONAL */}
                                 <div className="space-y-2">
-                                  <Label>Data de Início</Label>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button 
-                                        variant={"outline"} 
-                                        className={cn(
-                                          "w-full justify-start text-left font-normal", 
-                                          !stage.startDate && "text-muted-foreground",
-                                          stage.startDate && !isBusinessDay(stage.startDate) && "border-yellow-500 bg-yellow-50"
-                                        )}
-                                      >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                      <Calendar 
-                                        mode="single" 
-                                        selected={stage.startDate ? new Date(stage.startDate) : undefined} 
-                                        onSelect={(date) => {
-                                          console.log('📅 Data selecionada no calendário:', date); // Debug
-                                          if (date) {
-                                            handlePlanChange(index, 'startDate', date);
-                                          }
-                                        }} 
-                                        initialFocus 
-                                        modifiers={{
-                                          weekend: (date) => isWeekend(date),
-                                          holiday: (date) => isHoliday(date)
-                                        }}
-                                        modifiersStyles={{
-                                          weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
-                                          holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
-                                        }}
-                                        disabled={false} // IMPORTANTE: Garante que não está desabilitado
-                                      />
-                                      <div className="p-3 border-t text-xs text-muted-foreground">
-                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
-                                        <p className="mt-1">* Datas serão ajustadas automaticamente para o próximo dia útil</p>
-                                      </div>
-                                    </PopoverContent>
-                                  </Popover>
-                                  {stage.startDate && !isBusinessDay(stage.startDate) && (
-                                    <p className="text-xs text-orange-600 flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" />
-                                      Data será ajustada automaticamente para o próximo dia útil
+                                  <Label className="font-semibold">📅 Data de Início da Etapa</Label>
+                                  <div className="flex gap-2 items-center">
+                                    <Input
+                                      type="date"
+                                      value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
+                                      onChange={(e) => {
+                                        console.log('🔥 ALTERANDO DATA PARA:', e.target.value);
+                                        if (e.target.value) {
+                                          const newDate = new Date(e.target.value);
+                                          console.log('🔥 CHAMANDO handlePlanChange:', { index, field: 'startDate', value: newDate });
+                                          handlePlanChange(index, 'startDate', newDate);
+                                        }
+                                      }}
+                                      className="flex-1"
+                                    />
+                                    <Button 
+                                      type="button"
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={() => {
+                                        console.log('🔥 BOTÃO HOJE CLICADO');
+                                        const today = new Date();
+                                        handlePlanChange(index, 'startDate', today);
+                                      }}
+                                    >
+                                      Hoje
+                                    </Button>
+                                  </div>
+                                  {stage.startDate && (
+                                    <p className="text-sm text-green-600">
+                                      ✅ Data atual: {format(stage.startDate, "dd/MM/yyyy")}
                                     </p>
                                   )}
                                 </div>
+
+                                {/* Data de Conclusão - APENAS LEITURA */}
                                 <div className="space-y-2">
-                                  <Label>Data de Conclusão</Label>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button 
-                                        variant={"outline"} 
-                                        className={cn(
-                                          "w-full justify-start text-left font-normal", 
-                                          !stage.completedDate && "text-muted-foreground",
-                                          stage.completedDate && !isBusinessDay(stage.completedDate) && "border-yellow-500 bg-yellow-50"
-                                        )}
-                                      >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                      <Calendar 
-                                        mode="single" 
-                                        selected={stage.completedDate ? new Date(stage.completedDate) : undefined} 
-                                        onSelect={(date) => {
-                                          console.log('📅 Data de conclusão selecionada:', date); // Debug
-                                          if (date) {
-                                            handlePlanChange(index, 'completedDate', date);
-                                          }
-                                        }} 
-                                        initialFocus 
-                                        modifiers={{
-                                          weekend: (date) => isWeekend(date),
-                                          holiday: (date) => isHoliday(date)
-                                        }}
-                                        modifiersStyles={{
-                                          weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
-                                          holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
-                                        }}
-                                        disabled={false} // IMPORTANTE: Garante que não está desabilitado
-                                      />
-                                      <div className="p-3 border-t text-xs text-muted-foreground">
-                                        <p>🟡 Finais de semana | 🔴 Feriados</p>
-                                        <p className="mt-1">* Datas serão ajustadas automaticamente para o dia útil anterior</p>
-                                      </div>
-                                    </PopoverContent>
-                                  </Popover>
-                                  {stage.completedDate && !isBusinessDay(stage.completedDate) && (
-                                    <p className="text-xs text-orange-600 flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" />
-                                      Data será ajustada automaticamente para o dia útil anterior
+                                  <Label className="font-semibold">🏁 Data de Conclusão (Automática)</Label>
+                                  <Input
+                                    type="date"
+                                    value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
+                                    readOnly
+                                    className="bg-blue-50 border-blue-200"
+                                  />
+                                  {stage.completedDate && (
+                                    <p className="text-sm text-blue-600">
+                                      ✅ Conclusão calculada: {format(stage.completedDate, "dd/MM/yyyy")}
                                     </p>
                                   )}
+                                </div>
+
+                                {/* Duração */}
+                                <div className="space-y-2">
+                                  <Label className="font-semibold">⏱️ Duração (dias úteis)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.5"
+                                    min="0.5"
+                                    placeholder="Ex: 2.5"
+                                    value={stage.durationDays ?? ''}
+                                    onChange={(e) => {
+                                      console.log('🔥 ALTERANDO DURAÇÃO PARA:', e.target.value);
+                                      handlePlanChange(index, 'durationDays', e.target.value);
+                                    }}
+                                    className="w-32"
+                                  />
+                                  <p className="text-xs text-gray-600">
+                                    Use decimais: 0.5 = meio dia, 1.5 = 1 dia e meio
+                                  </p>
+                                </div>
+
+                                {/* Seção de Teste */}
+                                <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded">
+                                  <p className="text-sm font-medium mb-2">🧪 TESTE RÁPIDO:</p>
+                                  <div className="flex gap-2 flex-wrap">
+                                    <Button 
+                                      type="button"
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={() => {
+                                        console.log('🧪 TESTE: Definindo data para 15/04/2025');
+                                        const testDate = new Date('2025-04-15');
+                                        handlePlanChange(index, 'startDate', testDate);
+                                      }}
+                                    >
+                                      Teste: 15/04/2025
+                                    </Button>
+                                    <Button 
+                                      type="button"
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={() => {
+                                        console.log('🧪 TESTE: Alterando duração para 3 dias');
+                                        handlePlanChange(index, 'durationDays', '3');
+                                      }}
+                                    >
+                                      Teste: 3 dias
+                                    </Button>
+                                    <Button 
+                                      type="button"
+                                      variant="outline" 
+                                      size="sm"
+                                      onClick={() => {
+                                        console.log('🧪 ESTADO ATUAL:', stage);
+                                        alert(`Data atual: ${stage.startDate ? format(stage.startDate, 'dd/MM/yyyy') : 'Nenhuma'}`);
+                                      }}
+                                    >
+                                      Ver Estado
+                                    </Button>
+                                  </div>
                                 </div>
                               </div>
                               {stage.startDate && stage.completedDate && (
