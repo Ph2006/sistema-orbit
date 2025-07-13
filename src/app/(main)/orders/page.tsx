@@ -45,6 +45,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { getNextBusinessDay, getPreviousBusinessDay } from './utils/businessDays'; // ajuste o caminho conforme necessário
+import QRCode from 'qrcode';
 
 const productionStageSchema = z.object({
     stageName: z.string(),
@@ -134,6 +135,27 @@ type Order = {
         paintPlan: boolean;
     };
 };
+
+const appointmentSchema = z.object({
+  id: z.string(),
+  orderId: z.string(),
+  itemId: z.string(),
+  stageIndex: z.number(),
+  stageName: z.string(),
+  action: z.enum(['start', 'finish']),
+  timestamp: z.date(),
+  operator: z.object({
+    id: z.string(),
+    name: z.string(),
+    email: z.string().optional(),
+  }),
+  location: z.object({
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+  }).optional(),
+  notes: z.string().optional(),
+  photo: z.string().optional(),
+});
 
 // Feriados nacionais brasileiros para 2024-2025
 const brazilianHolidays = [
@@ -2165,7 +2187,7 @@ export default function OrdersPage() {
                         {isFetchingPlan ? (
                           <div className="flex justify-center items-center h-48">
                             <div className="text-center">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-current mr-2 mb-2"></div>
                               <p>Buscando plano de fabricação...</p>
                             </div>
                           </div>
