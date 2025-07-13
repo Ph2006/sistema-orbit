@@ -1594,295 +1594,531 @@ export default function OrdersPage() {
             Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
           </SheetDescription>
         </SheetHeader>
+
+        {/* Conteúdo principal */}
         {isEditing ? (
+          // MODO DE EDIÇÃO - COM SCROLL CORRIGIDO
           <Form {...form}>
-    <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col flex-1 min-h-0">
-      {/* Área de conteúdo com scroll */}
-      <div className="flex-1 overflow-hidden py-4">
-        <ScrollArea className="h-full pr-4">
-          <div className="space-y-6">
-            {/* Informações Básicas do Pedido */}
-            <Card className="p-4 bg-secondary/50">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <FormField control={form.control} name="customer" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Cliente</FormLabel>
-                    <Select
-                      onValueChange={(value) => {
-                        const selectedCustomer = customers.find(c => c.id === value);
-                        if (selectedCustomer) field.onChange(selectedCustomer);
-                      }}
-                      value={field.value?.id}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione um cliente" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}/>
-                <FormField control={form.control} name="projectName" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Projeto do Cliente</FormLabel>
-                    <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}/>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField control={form.control} name="internalOS" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>OS Interna</FormLabel>
-                    <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}/>
-                <FormField
-                  control={form.control}
-                  name="status"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Status do Pedido</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione um status" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
-                          <SelectItem value="Em Produção">Em Produção</SelectItem>
-                          <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
-                          <SelectItem value="Concluído">Concluído</SelectItem>
-                          <SelectItem value="Cancelado">Cancelado</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-                <FormField control={form.control} name="quotationNumber" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nº Pedido (Compra)</FormLabel>
-                    <FormControl><Input placeholder="Nº do Pedido de Compra do Cliente" {...field} value={field.value ?? ''} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}/>
-                <FormField control={form.control} name="deliveryDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Data de Entrega</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}/>
-              </div>
-              <div className="space-y-4 mt-6">
-                <FormField control={form.control} name="driveLink" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Link da Pasta (Google Drive)</FormLabel>
-                    <FormControl><Input type="url" placeholder="https://drive.google.com/..." {...field} value={field.value ?? ''} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}/>
-              </div>
-            </Card>
-
-            {/* Checklist de Documentos */}
-            <Card>
-              <CardHeader><CardTitle>Checklist de Documentos</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <FormField control={form.control} name="documents.drawings" render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                    <div className="space-y-0.5">
-                      <FormLabel>Desenhos Técnicos</FormLabel>
-                      <FormDescription>Marque se os desenhos foram recebidos e estão na pasta.</FormDescription>
-                    </div>
-                    <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
-                  </FormItem>
-                )}/>
-                <FormField control={form.control} name="documents.inspectionTestPlan" render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                    <div className="space-y-0.5">
-                      <FormLabel>Plano de Inspeção e Testes (PIT)</FormLabel>
-                      <FormDescription>Marque se o plano de inspeção foi recebido.</FormDescription>
-                    </div>
-                    <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
-                  </FormItem>
-                )}/>
-                <FormField control={form.control} name="documents.paintPlan" render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
-                    <div className="space-y-0.5">
-                      <FormLabel>Plano de Pintura</FormLabel>
-                      <FormDescription>Marque se o plano de pintura foi recebido.</FormDescription>
-                    </div>
-                    <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
-                  </FormItem>
-                )}/>
-              </CardContent>
-            </Card>
-
-            {/* Itens do Pedido */}
-            <Card>
-              <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                {fields.map((field, index) => {
-                  const itemProgress = calculateItemProgress(watchedItems[index] || {});
-                  return (
-                    <Card key={field.id} className="p-4 bg-secondary">
-                      <div className="space-y-4">
-                        <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
+            <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col flex-1 min-h-0">
+              {/* Área de conteúdo com scroll */}
+              <div className="flex-1 overflow-hidden py-4">
+                <ScrollArea className="h-full pr-4">
+                  <div className="space-y-6">
+                    {/* Informações Básicas do Pedido */}
+                    <Card className="p-4 bg-secondary/50">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <FormField control={form.control} name="customer" render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Descrição do Item {index + 1}</FormLabel>
-                            <FormControl><Textarea placeholder="Descrição completa do item" {...field} /></FormControl>
+                            <FormLabel>Cliente</FormLabel>
+                            <Select
+                              onValueChange={(value) => {
+                                const selectedCustomer = customers.find(c => c.id === value);
+                                if (selectedCustomer) field.onChange(selectedCustomer);
+                              }}
+                              value={field.value?.id}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecione um cliente" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
                             <FormMessage />
                           </FormItem>
                         )}/>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                        <FormField control={form.control} name="projectName" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Projeto do Cliente</FormLabel>
+                            <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <FormField control={form.control} name="internalOS" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>OS Interna</FormLabel>
+                            <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                        <FormField
+                          control={form.control}
+                          name="status"
+                          render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Código</FormLabel>
-                              <FormControl><Input placeholder="Cód. Produto" {...field} value={field.value || ''} /></FormControl>
+                              <FormLabel>Status do Pedido</FormLabel>
+                              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Selecione um status" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
+                                  <SelectItem value="Em Produção">Em Produção</SelectItem>
+                                  <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
+                                  <SelectItem value="Concluído">Concluído</SelectItem>
+                                  <SelectItem value="Cancelado">Cancelado</SelectItem>
+                                </SelectContent>
+                              </Select>
                               <FormMessage />
                             </FormItem>
-                          )}/>
-                          <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Quantidade</FormLabel>
-                              <FormControl><Input type="number" placeholder="0" {...field} value={field.value ?? ''} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}/>
-                          <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Peso Unit. (kg)</FormLabel>
-                              <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}/>
-                          <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Entrega do Item</FormLabel>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <FormControl>
-                                    <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
-                                      <CalendarIcon className="mr-2 h-4 w-4" />
-                                      {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
-                                    </Button>
-                                  </FormControl>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0">
-                                  <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
-                                </PopoverContent>
-                              </Popover>
-                              <FormMessage />
-                            </FormItem>
-                          )}/>
-                        </div>
-                        {itemProgress === 100 && (
-                          <>
-                            <Separator className="my-2" />
-                            <h5 className="text-sm font-semibold">Informações de Envio (Item Concluído)</h5>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                              <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Lista de Embarque (LE)</FormLabel>
-                                  <FormControl><Input placeholder="Nº da LE" {...field} value={field.value ?? ''} /></FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}/>
-                              <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Nota Fiscal (NF-e)</FormLabel>
-                                  <FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}/>
-                              <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Data de Envio</FormLabel>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <FormControl>
-                                        <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
-                                          <CalendarIcon className="mr-2 h-4 w-4" />
-                                          {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
-                                        </Button>
-                                      </FormControl>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
-                                      <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
-                                    </PopoverContent>
-                                  </Popover>
-                                  <FormMessage />
-                                </FormItem>
-                              )}/>
-                            </div>
-                          </>
-                        )}
+                          )}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                        <FormField control={form.control} name="quotationNumber" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Nº Pedido (Compra)</FormLabel>
+                            <FormControl><Input placeholder="Nº do Pedido de Compra do Cliente" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="deliveryDate" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Data de Entrega</FormLabel>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <FormControl>
+                                  <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
+                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                    {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                  </Button>
+                                </FormControl>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0">
+                                <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                              </PopoverContent>
+                            </Popover>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                      </div>
+                      <div className="space-y-4 mt-6">
+                        <FormField control={form.control} name="driveLink" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Link da Pasta (Google Drive)</FormLabel>
+                            <FormControl><Input type="url" placeholder="https://drive.google.com/..." {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
                       </div>
                     </Card>
-                  );
-                })}
-              </CardContent>
-            </Card>
+
+                    {/* Checklist de Documentos */}
+                    <Card>
+                      <CardHeader><CardTitle>Checklist de Documentos</CardTitle></CardHeader>
+                      <CardContent className="space-y-4">
+                        <FormField control={form.control} name="documents.drawings" render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                              <FormLabel>Desenhos Técnicos</FormLabel>
+                              <FormDescription>Marque se os desenhos foram recebidos e estão na pasta.</FormDescription>
+                            </div>
+                            <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                          </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="documents.inspectionTestPlan" render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                              <FormLabel>Plano de Inspeção e Testes (PIT)</FormLabel>
+                              <FormDescription>Marque se o plano de inspeção foi recebido.</FormDescription>
+                            </div>
+                            <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                          </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="documents.paintPlan" render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                              <FormLabel>Plano de Pintura</FormLabel>
+                              <FormDescription>Marque se o plano de pintura foi recebido.</FormDescription>
+                            </div>
+                            <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                          </FormItem>
+                        )}/>
+                      </CardContent>
+                    </Card>
+
+                    {/* Itens do Pedido */}
+                    <Card>
+                      <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
+                      <CardContent className="space-y-4">
+                        {fields.map((field, index) => {
+                          const itemProgress = calculateItemProgress(watchedItems[index] || {});
+                          return (
+                            <Card key={field.id} className="p-4 bg-secondary">
+                              <div className="space-y-4">
+                                <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Descrição do Item {index + 1}</FormLabel>
+                                    <FormControl><Textarea placeholder="Descrição completa do item" {...field} /></FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}/>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                  <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Código</FormLabel>
+                                      <FormControl><Input placeholder="Cód. Produto" {...field} value={field.value || ''} /></FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}/>
+                                  <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Quantidade</FormLabel>
+                                      <FormControl><Input type="number" placeholder="0" {...field} value={field.value ?? ''} /></FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}/>
+                                  <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Peso Unit. (kg)</FormLabel>
+                                      <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}/>
+                                  <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Entrega do Item</FormLabel>
+                                      <Popover>
+                                        <PopoverTrigger asChild>
+                                          <FormControl>
+                                            <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
+                                              <CalendarIcon className="mr-2 h-4 w-4" />
+                                              {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                            </Button>
+                                          </FormControl>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0">
+                                          <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                        </PopoverContent>
+                                      </Popover>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}/>
+                                </div>
+                                {itemProgress === 100 && (
+                                  <>
+                                    <Separator className="my-2" />
+                                    <h5 className="text-sm font-semibold">Informações de Envio (Item Concluído)</h5>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                      <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel>Lista de Embarque (LE)</FormLabel>
+                                          <FormControl><Input placeholder="Nº da LE" {...field} value={field.value ?? ''} /></FormControl>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}/>
+                                      <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel>Nota Fiscal (NF-e)</FormLabel>
+                                          <FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}/>
+                                      <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel>Data de Envio</FormLabel>
+                                          <Popover>
+                                            <PopoverTrigger asChild>
+                                              <FormControl>
+                                                <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}> 
+                                                  <CalendarIcon className="mr-2 h-4 w-4" />
+                                                  {field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Selecione</span>}
+                                                </Button>
+                                              </FormControl>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-0">
+                                              <Calendar mode="single" selected={field.value ? new Date(field.value) : undefined} onSelect={field.onChange} initialFocus />
+                                            </PopoverContent>
+                                          </Popover>
+                                          <FormMessage />
+                                        </FormItem>
+                                      )}/>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </Card>
+                          );
+                        })}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </ScrollArea>
+              </div>
+              
+              {/* Footer fixo com botões */}
+              <div className="flex-shrink-0 pt-4 border-t bg-background">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="text-sm text-muted-foreground">
+                    Peso Total: <span className="font-semibold">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={form.formState.isSubmitting}>
+                      {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </Form>
+        ) : (
+          // MODO DE VISUALIZAÇÃO - MANTÉM ESTRUTURA ORIGINAL
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex-1 overflow-hidden py-4">
+              <ScrollArea className="h-full pr-4">
+                <div className="space-y-6">
+                  {/* Informações Gerais */}
+                  <Card className="p-6 bg-secondary/50">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Cliente</Label>
+                        <p className="font-medium">{selectedOrder.customer?.name || 'N/A'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Projeto do Cliente</Label>
+                        <p className="font-medium">{selectedOrder.projectName || 'N/A'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">OS Interna</Label>
+                        <p className="font-medium">{selectedOrder.internalOS || 'N/A'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                        <div>
+                          {(() => {
+                            const statusProps = getStatusProps(selectedOrder.status);
+                            return (
+                              <Badge variant={statusProps.variant} className={statusProps.colorClass}>
+                                <statusProps.icon className="mr-2 h-4 w-4" />
+                                {statusProps.label}
+                              </Badge>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Data de Entrega</Label>
+                        <p className="font-medium">{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, "dd/MM/yyyy") : 'A definir'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Peso Total</Label>
+                        <p className="font-medium">{(selectedOrder.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p>
+                      </div>
+                    </div>
+                    {selectedOrder.driveLink && (
+                      <div className="mt-4 pt-4 border-t">
+                        <Label className="text-sm font-medium text-muted-foreground">Pasta no Google Drive</Label>
+                        <div className="mt-2">
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={selectedOrder.driveLink} target="_blank" rel="noopener noreferrer">
+                              <FolderGit2 className="mr-2 h-4 w-4" />
+                              Acessar Pasta
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* Documentos */}
+                  <Card>
+                    <CardHeader><CardTitle>Status dos Documentos</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="flex items-center space-x-2">
+                          <div className={`p-2 rounded-full ${selectedOrder.documents?.drawings ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-medium">Desenhos Técnicos</p>
+                            <p className="text-sm text-muted-foreground">{selectedOrder.documents?.drawings ? 'Recebido' : 'Pendente'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className={`p-2 rounded-full ${selectedOrder.documents?.inspectionTestPlan ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <ClipboardCheck className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-medium">Plano de Inspeção</p>
+                            <p className="text-sm text-muted-foreground">{selectedOrder.documents?.inspectionTestPlan ? 'Recebido' : 'Pendente'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className={`p-2 rounded-full ${selectedOrder.documents?.paintPlan ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <Palette className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-medium">Plano de Pintura</p>
+                            <p className="text-sm text-muted-foreground">{selectedOrder.documents?.paintPlan ? 'Recebido' : 'Pendente'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Lista de Itens */}
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>Itens do Pedido</CardTitle>
+                      <div className="flex items-center gap-2">
+                        {progressClipboard && (
+                          <Button variant="outline" size="sm" onClick={handleCancelCopy}>
+                            <X className="mr-2 h-4 w-4" />
+                            Cancelar Cópia
+                          </Button>
+                        )}
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            checked={selectedItems.size === selectedOrder.items.length && selectedOrder.items.length > 0}
+                            onCheckedChange={handleSelectAll}
+                            aria-label="Selecionar todos os itens"
+                          />
+                          <span className="text-sm text-muted-foreground">Selecionar todos</span>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {selectedOrder.items.map((item, index) => {
+                        const itemProgress = calculateItemProgress(item);
+                        const totalItemWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                        return (
+                          <Card key={item.id} className={`p-4 ${selectedItems.has(item.id!) ? 'ring-2 ring-primary' : ''}`}>
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center space-x-3">
+                                <Checkbox
+                                  checked={selectedItems.has(item.id!)}
+                                  onCheckedChange={() => handleItemSelection(item.id!)}
+                                  aria-label={`Selecionar item ${item.description}`}
+                                />
+                                <div>
+                                  <h4 className="font-medium">{item.description}</h4>
+                                  {item.code && <p className="text-sm text-muted-foreground">Código: {item.code}</p>}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {progressClipboard && (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button variant="outline" size="sm" onClick={() => handlePasteProgress(item)}>
+                                          <ClipboardPaste className="h-4 w-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Colar progresso de "{progressClipboard.description}"</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button variant="outline" size="sm" onClick={() => handleCopyProgress(item)}>
+                                        <Copy className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Copiar progresso deste item</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                                <Button variant="outline" size="sm" onClick={() => handleOpenProgressModal(item)}>
+                                  <GanttChart className="mr-2 h-4 w-4" />
+                                  Progresso
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Quantidade:</span>
+                                <p className="font-medium">{item.quantity}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Peso Unit.:</span>
+                                <p className="font-medium">{(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Peso Total:</span>
+                                <p className="font-medium">{totalItemWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Entrega:</span>
+                                <p className="font-medium">{item.itemDeliveryDate ? format(item.itemDeliveryDate, "dd/MM/yyyy") : 'A definir'}</p>
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm text-muted-foreground">Progresso:</span>
+                                <span className="text-sm font-medium">{Math.round(itemProgress)}%</span>
+                              </div>
+                              <Progress value={itemProgress} className="h-2" />
+                            </div>
+                            {itemProgress === 100 && (item.shippingList || item.invoiceNumber || item.shippingDate) && (
+                              <>
+                                <Separator className="my-3" />
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                  <div>
+                                    <span className="text-muted-foreground">Lista de Embarque:</span>
+                                    <p className="font-medium">{item.shippingList || 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Nota Fiscal:</span>
+                                    <p className="font-medium">{item.invoiceNumber || 'N/A'}</p>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Data de Envio:</span>
+                                    <p className="font-medium">{item.shippingDate ? format(item.shippingDate, "dd/MM/yyyy") : 'N/A'}</p>
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </Card>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                </div>
+              </ScrollArea>
+            </div>
+            
+            {/* Footer de visualização */}
+            <SheetFooter className="flex-shrink-0 pt-4 border-t">
+              <div className="flex items-center justify-between w-full gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  {selectedItems.size > 0 && (
+                    <Button onClick={handleGeneratePackingSlip} variant="outline">
+                      <ReceiptText className="mr-2 h-4 w-4" />
+                      Gerar Romaneio ({selectedItems.size} {selectedItems.size === 1 ? 'item' : 'itens'})
+                    </Button>
+                  )}
+                  <Button onClick={handleExportSchedule} variant="outline">
+                    <CalendarClock className="mr-2 h-4 w-4" />
+                    Exportar Cronograma
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" onClick={() => setIsEditing(true)}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Editar
+                  </Button>
+                  <Button variant="destructive" onClick={() => handleDeleteClick(selectedOrder)}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Excluir
+                  </Button>
+                </div>
+              </div>
+            </SheetFooter>
           </div>
-        </ScrollArea>
-      </div>
-      
-      {/* Footer fixo com botões */}
-      <div className="flex-shrink-0 pt-4 border-t bg-background">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="text-sm text-muted-foreground">
-            Peso Total: <span className="font-semibold">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
-            </Button>
-          </div>
-        </div>
-      </div>
-    </form>
-  </Form>
-) : (
-  // Modo de visualização permanece igual
-  <div className="flex flex-col flex-1 min-h-0">
-    {/* Conteúdo de visualização com ScrollArea */}
-    <div className="flex-1 overflow-hidden py-4">
-      <ScrollArea className="h-full pr-4">
-        {/* Resto do conteúdo de visualização */}
-      </ScrollArea>
-    </div>
-    
-    {/* Footer de visualização se necessário */}
-    <SheetFooter className="flex-shrink-0 pt-4 border-t">
-      {/* Botões de ação */}
-    </SheetFooter>
-  </div>
-)}
+        )}
       </>
     )}
   </SheetContent>
