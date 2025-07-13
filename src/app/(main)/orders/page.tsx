@@ -816,7 +816,7 @@ export default function OrdersPage() {
         }
     };
 
-    const handlePlanChange = (stageIndex, field, value) => {
+    const handlePlanChange = (stageIndex: number, field: string, value: any) => {
       let newPlan = JSON.parse(JSON.stringify(editedPlan));
       const currentStage = newPlan[stageIndex];
       
@@ -825,44 +825,44 @@ export default function OrdersPage() {
       } else if (field === 'durationDays') {
         const numValue = value === '' ? 0 : parseFloat(value);
         currentStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
+      } else {
+        currentStage[field] = value;
       }
       
-      const ensureBusinessDay = (date, direction = 'next') => {
+      const ensureBusinessDay = (date: Date, direction = 'next'): Date => {
         if (isBusinessDay(date)) return new Date(date);
         return direction === 'next' ? getNextBusinessDay(date) : getPreviousBusinessDay(date);
       };
 
-      // Função para recalcular todas as datas em sequência CORRIGIDA
+      // Função CORRIGIDA para recalcular todas as datas em sequência
       const recalculateSequentialDates = () => {
         let currentWorkingDate: Date | null = null;
-        let dailyAccumulation = 0; // Acúmulo do dia atual
+        let dailyAccumulation = 0;
         
         for (let i = 0; i < newPlan.length; i++) {
           const stage = newPlan[i];
-          const duration = Math.max(0.125, Number(stage.durationDays) || 0);
+          const duration = Math.max(0.125, Number(stage.durationDays) || 1);
           
           if (i === 0) {
-            // Primeira etapa - define o dia de trabalho inicial
+            // Primeira etapa - usa a data de início definida
             if (stage.startDate) {
-              currentWorkingDate = ensureBusinessDay(stage.startDate, 'next');
-            } else if (field === 'startDate' && stageIndex === 0 && value) {
-              currentWorkingDate = ensureBusinessDay(new Date(value), 'next');
+              currentWorkingDate = ensureBusinessDay(new Date(stage.startDate), 'next');
+              stage.startDate = new Date(currentWorkingDate);
             } else {
               // Se não há data de início, limpa todas as datas
               for (let j = 0; j < newPlan.length; j++) {
                 newPlan[j].startDate = null;
                 newPlan[j].completedDate = null;
               }
+              setEditedPlan(newPlan);
               return;
             }
-            
-            // Reset do acúmulo para o novo dia
             dailyAccumulation = 0;
-          }
-          
-          // Define início da tarefa
-          if (currentWorkingDate) {
-            stage.startDate = new Date(currentWorkingDate);
+          } else {
+            // Etapas subsequentes - começam no dia de trabalho atual
+            if (currentWorkingDate) {
+              stage.startDate = new Date(currentWorkingDate);
+            }
           }
           
           // Adiciona a duração da tarefa atual ao acúmulo
@@ -871,17 +871,14 @@ export default function OrdersPage() {
           // Verifica se o acúmulo excedeu 1 dia
           if (dailyAccumulation >= 1 && currentWorkingDate) {
             // A tarefa termina no próximo dia útil
-            stage.completedDate = getNextBusinessDay(currentWorkingDate);
+            const nextBusinessDay = getNextBusinessDay(currentWorkingDate);
+            stage.completedDate = new Date(nextBusinessDay);
             
             // Atualiza o dia de trabalho para o próximo dia útil
-            currentWorkingDate = getNextBusinessDay(currentWorkingDate);
+            currentWorkingDate = new Date(nextBusinessDay);
             
             // Calcula o novo acúmulo para o próximo dia
-            // O resto da divisão por 1 representa a fração que "sobrou"
-            dailyAccumulation = dailyAccumulation % 1;
-            
-            // Se o resto é 0, significa que terminou exatamente no fim do dia
-            // Se há resto, esse resto vai para o próximo dia
+            dailyAccumulation = dailyAccumulation - 1;
           } else if (currentWorkingDate) {
             // A tarefa termina no mesmo dia (acúmulo ainda < 1)
             stage.completedDate = new Date(currentWorkingDate);
@@ -889,15 +886,16 @@ export default function OrdersPage() {
         }
       };
       
+      // Aplica o recálculo baseado no tipo de mudança
       if (field === 'startDate' && stageIndex === 0) {
         // Mudança na data de início da primeira etapa - recalcula tudo
         recalculateSequentialDates();
       } else if (field === 'completedDate' && currentStage.completedDate) {
-        // Mudança na data de conclusão - ajusta a data para dia útil e recalcula as seguintes
-        currentStage.completedDate = ensureBusinessDay(currentStage.completedDate, 'previous');
+        // Mudança na data de conclusão - ajusta e recalcula as seguintes
+        currentStage.completedDate = ensureBusinessDay(new Date(currentStage.completedDate), 'previous');
         
-        // Recalcula as etapas seguintes baseado na nova data de conclusão
-        let nextWorkingDate = getNextBusinessDay(currentStage.completedDate);
+        // Recalcula as etapas seguintes
+        let nextWorkingDate = getNextBusinessDay(new Date(currentStage.completedDate));
         let dailyAccumulation = 0;
         
         for (let i = stageIndex + 1; i < newPlan.length; i++) {
@@ -908,9 +906,10 @@ export default function OrdersPage() {
           dailyAccumulation += duration;
           
           if (dailyAccumulation >= 1) {
-            stage.completedDate = getNextBusinessDay(nextWorkingDate);
-            nextWorkingDate = getNextBusinessDay(nextWorkingDate);
-            dailyAccumulation = dailyAccumulation % 1;
+            const nextDay = getNextBusinessDay(nextWorkingDate);
+            stage.completedDate = new Date(nextDay);
+            nextWorkingDate = new Date(nextDay);
+            dailyAccumulation = dailyAccumulation - 1;
           } else {
             stage.completedDate = new Date(nextWorkingDate);
           }
@@ -1489,6 +1488,71 @@ export default function OrdersPage() {
         setNewStageNameForPlan("");
     };
 
+    // Componente para exibir QR Code melhorado
+    const QRCodeDisplay = ({ data, size = 150, label = "QR Code" }: { 
+      data: string; 
+      size?: number; 
+      label?: string; 
+    }) => {
+      const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState<string>('');
+
+      useEffect(() => {
+        const generateQR = async () => {
+          try {
+            setLoading(true);
+            setError('');
+            
+            const url = await QRCode.toDataURL(data, {
+              width: size,
+              margin: 2,
+              color: {
+                dark: '#000000',
+                light: '#FFFFFF'
+              },
+              errorCorrectionLevel: 'M'
+            });
+            
+            setQrCodeUrl(url);
+          } catch (err) {
+            console.error('Erro ao gerar QR Code:', err);
+            setError('Erro ao gerar QR Code');
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        if (data) {
+          generateQR();
+        }
+      }, [data, size]);
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center" style={{ width: size, height: size }}>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        );
+      }
+
+      if (error) {
+        return (
+          <div className="flex items-center justify-center bg-red-50 border border-red-200 rounded p-2" 
+               style={{ width: size, height: size }}>
+            <p className="text-red-600 text-xs text-center">{error}</p>
+          </div>
+        );
+      }
+
+      return (
+        <div className="text-center">
+          <img src={qrCodeUrl} alt={label} className="border rounded mx-auto" />
+          <p className="text-xs text-muted-foreground mt-1">{label}</p>
+        </div>
+      );
+    };
+
     const handleGenerateTimesheet = async (item: OrderItem) => {
         if (!selectedOrder) return;
 
@@ -1557,30 +1621,48 @@ export default function OrdersPage() {
             docPdf.text(`Peso Unit.: ${(Number(item.unitWeight) || 0).toLocaleString('pt-BR')} kg`, pageWidth / 2, yPos);
             yPos += 15;
 
-            // QR Code com dados do item
+            // QR Code MELHORADO com dados mais completos
             const qrData = JSON.stringify({
+                type: 'apontamento_producao',
                 orderId: selectedOrder.id,
                 itemId: item.id,
                 orderNumber: selectedOrder.quotationNumber,
-                itemCode: item.code,
+                itemCode: item.code || 'SEM_CODIGO',
                 itemDescription: item.description,
-                quantity: item.quantity
+                quantity: item.quantity,
+                customer: selectedOrder.customer.name,
+                internalOS: selectedOrder.internalOS || '',
+                timestamp: new Date().toISOString(),
+                // URL para acesso direto (caso você tenha uma página de apontamento)
+                url: `${window.location.origin}/apontamento/${selectedOrder.id}/${item.id}`
             });
 
             try {
                 const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
-                    width: 100,
-                    margin: 1,
-                    color: { dark: '#000000', light: '#FFFFFF' }
+                    width: 120,
+                    margin: 2,
+                    color: { dark: '#000000', light: '#FFFFFF' },
+                    errorCorrectionLevel: 'M'
                 });
                 
-                docPdf.addImage(qrCodeDataUrl, 'PNG', pageWidth - 35, yPos, 25, 25);
+                // Posiciona o QR Code no canto superior direito da seção de dados
+                docPdf.addImage(qrCodeDataUrl, 'PNG', pageWidth - 45, yPos - 25, 30, 30);
                 
-                docPdf.setFontSize(8);
-                docPdf.text('QR Code para', pageWidth - 35, yPos + 30, { align: 'left' });
-                docPdf.text('rastreamento', pageWidth - 35, yPos + 34, { align: 'left' });
+                // Adiciona texto explicativo abaixo do QR Code
+                docPdf.setFontSize(7);
+                docPdf.text('QR Code para', pageWidth - 45, yPos + 8, { align: 'left' });
+                docPdf.text('rastreamento digital', pageWidth - 45, yPos + 12, { align: 'left' });
+                
+                // Log dos dados para debug
+                console.log('QR Code gerado com dados:', qrData);
+                
             } catch (e) {
-                console.error("Error generating QR code:", e);
+                console.error("Erro ao gerar QR code:", e);
+                toast({
+                    variant: "destructive",
+                    title: "Aviso",
+                    description: "QR Code não pôde ser gerado, mas o documento foi criado normalmente.",
+                });
             }
 
             // Tabela de etapas de produção
@@ -1660,7 +1742,7 @@ export default function OrdersPage() {
 
             toast({
                 title: "Folha gerada com sucesso!",
-                description: `Arquivo ${filename} foi baixado.`,
+                description: `Arquivo ${filename} foi baixado. QR Code incluído para rastreamento.`,
             });
 
         } catch (error) {
