@@ -2509,6 +2509,19 @@ export default function OrdersPage() {
                                   {index + 1}
                                 </span>
                                 {stage.stageName}
+                                <Button 
+                                  type="button" 
+                                  variant="ghost" 
+                                  size="sm"
+                                  className="ml-auto"
+                                  onClick={() => {
+                                    console.log('🔍 Estado atual da etapa:', stage);
+                                    console.log('🔍 Plano completo:', editedPlan);
+                                    console.log('🔍 Index da etapa:', index);
+                                  }}
+                                >
+                                  Debug Estado
+                                </Button>
                               </CardTitle>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-2">
@@ -2583,11 +2596,16 @@ export default function OrdersPage() {
                                         {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
                                       </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
+                                    <PopoverContent className="w-auto p-0" align="start">
                                       <Calendar 
                                         mode="single" 
                                         selected={stage.startDate ? new Date(stage.startDate) : undefined} 
-                                        onSelect={(date) => handlePlanChange(index, 'startDate', date)} 
+                                        onSelect={(date) => {
+                                          console.log('📅 Data selecionada no calendário:', date); // Debug
+                                          if (date) {
+                                            handlePlanChange(index, 'startDate', date);
+                                          }
+                                        }} 
                                         initialFocus 
                                         modifiers={{
                                           weekend: (date) => isWeekend(date),
@@ -2597,6 +2615,7 @@ export default function OrdersPage() {
                                           weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
                                           holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
                                         }}
+                                        disabled={false} // IMPORTANTE: Garante que não está desabilitado
                                       />
                                       <div className="p-3 border-t text-xs text-muted-foreground">
                                         <p>🟡 Finais de semana | 🔴 Feriados</p>
@@ -2627,11 +2646,16 @@ export default function OrdersPage() {
                                         {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : <span>Escolha a data</span>}
                                       </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
+                                    <PopoverContent className="w-auto p-0" align="start">
                                       <Calendar 
                                         mode="single" 
                                         selected={stage.completedDate ? new Date(stage.completedDate) : undefined} 
-                                        onSelect={(date) => handlePlanChange(index, 'completedDate', date)} 
+                                        onSelect={(date) => {
+                                          console.log('📅 Data de conclusão selecionada:', date); // Debug
+                                          if (date) {
+                                            handlePlanChange(index, 'completedDate', date);
+                                          }
+                                        }} 
                                         initialFocus 
                                         modifiers={{
                                           weekend: (date) => isWeekend(date),
@@ -2641,6 +2665,7 @@ export default function OrdersPage() {
                                           weekend: { backgroundColor: '#fef3c7', color: '#d97706' },
                                           holiday: { backgroundColor: '#fecaca', color: '#dc2626' }
                                         }}
+                                        disabled={false} // IMPORTANTE: Garante que não está desabilitado
                                       />
                                       <div className="p-3 border-t text-xs text-muted-foreground">
                                         <p>🟡 Finais de semana | 🔴 Feriados</p>
