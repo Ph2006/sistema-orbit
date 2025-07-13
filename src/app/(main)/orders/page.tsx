@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -206,18 +206,24 @@ const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
 };
 
 const getNextBusinessDay = (fromDate) => {
+  console.log('🔍 Buscando próximo dia útil a partir de:', fromDate);
   let nextDay = new Date(fromDate);
   do {
     nextDay.setDate(nextDay.getDate() + 1);
+    console.log('🔍 Testando dia:', nextDay, 'É dia útil?', isBusinessDay(nextDay));
   } while (!isBusinessDay(nextDay));
+  console.log('✅ Próximo dia útil encontrado:', nextDay);
   return nextDay;
 };
 
 const getPreviousBusinessDay = (fromDate) => {
+  console.log('🔍 Buscando dia útil anterior a partir de:', fromDate);
   let prevDay = new Date(fromDate);
   do {
     prevDay.setDate(prevDay.getDate() - 1);
+    console.log('🔍 Testando dia:', prevDay, 'É dia útil?', isBusinessDay(prevDay));
   } while (!isBusinessDay(prevDay));
+  console.log('✅ Dia útil anterior encontrado:', prevDay);
   return prevDay;
 };
 
@@ -468,6 +474,7 @@ export default function OrdersPage() {
     const [isFetchingPlan, setIsFetchingPlan] = useState(false);
     const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
     const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
+    const [planRenderKey, setPlanRenderKey] = useState(0);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -826,29 +833,42 @@ export default function OrdersPage() {
         }
     };
 
+    // Função para forçar re-renderização
+    const forceRerender = () => {
+        setPlanRenderKey(prev => prev + 1);
+    };
+
     const handlePlanChange = (stageIndex: number, field: string, value: any) => {
       console.log('🔧 Alterando:', { stageIndex, field, value }); // Debug
       
-      let newPlan = JSON.parse(JSON.stringify(editedPlan));
-      const currentStage = newPlan[stageIndex];
-      
-      // Atualiza o campo específico
-      if (field === 'startDate' || field === 'completedDate') {
-        // Se value é uma string (vem do input date), converte para Date
-        // Se é null, mantém null
-        if (value === null || value === '') {
-          currentStage[field] = null;
-        } else if (typeof value === 'string') {
-          currentStage[field] = new Date(value);
-        } else {
-          currentStage[field] = value ? new Date(value) : null;
+      // Cria uma nova instância do array para garantir que o React detecte a mudança
+      const newPlan = editedPlan.map((stage, index) => {
+        if (index === stageIndex) {
+          // Cria uma nova instância do objeto stage
+          const updatedStage = { ...stage };
+          
+          // Atualiza o campo específico
+          if (field === 'startDate' || field === 'completedDate') {
+            // Se value é uma string (vem do input date), converte para Date
+            // Se é null, mantém null
+            if (value === null || value === '') {
+              updatedStage[field] = null;
+            } else if (typeof value === 'string') {
+              updatedStage[field] = new Date(value);
+            } else {
+              updatedStage[field] = value ? new Date(value) : null;
+            }
+          } else if (field === 'durationDays') {
+            const numValue = value === '' ? 0 : parseFloat(value);
+            updatedStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
+          } else {
+            updatedStage[field] = value;
+          }
+          
+          return updatedStage;
         }
-      } else if (field === 'durationDays') {
-        const numValue = value === '' ? 0 : parseFloat(value);
-        currentStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
-      } else {
-        currentStage[field] = value;
-      }
+        return stage;
+      });
       
       console.log('📋 Plano antes do recálculo:', newPlan); // Debug
       
@@ -960,10 +980,10 @@ export default function OrdersPage() {
         // Mudança na data de início da primeira etapa - recalcula tudo
         console.log('🎯 Alteração na data inicial - recalculando cronograma completo'); // Debug
         recalculateAllDates();
-      } else if (field === 'completedDate' && currentStage.completedDate) {
+      } else if (field === 'completedDate' && newPlan[stageIndex].completedDate) {
         // Mudança na data de conclusão - ajusta para dia útil e recalcula seguintes
         console.log('🎯 Alteração na data de conclusão'); // Debug
-        currentStage.completedDate = ensureBusinessDay(new Date(currentStage.completedDate), 'previous');
+        newPlan[stageIndex].completedDate = ensureBusinessDay(new Date(newPlan[stageIndex].completedDate!), 'previous');
         
         if (stageIndex < newPlan.length - 1) {
           recalculateFromIndex(stageIndex + 1);
@@ -972,7 +992,7 @@ export default function OrdersPage() {
         // Mudança na duração - recalcula tudo
         console.log('🎯 Alteração na duração - recalculando cronograma completo'); // Debug
         recalculateAllDates();
-      } else if (field === 'startDate' && !currentStage.startDate && stageIndex === 0) {
+      } else if (field === 'startDate' && !newPlan[stageIndex].startDate && stageIndex === 0) {
         // Limpeza da data de início da primeira etapa - limpa tudo
         console.log('🎯 Limpando data inicial - removendo todas as datas'); // Debug
         for (let i = 0; i < newPlan.length; i++) {
@@ -992,8 +1012,13 @@ export default function OrdersPage() {
       }
       
       console.log('📋 Plano após recálculo:', newPlan); // Debug
-      console.log('✅ ATUALIZANDO STATE editedPlan com:', newPlan[stageIndex]);
-      setEditedPlan(newPlan);
+      console.log('✅ ATUALIZANDO STATE editedPlan com nova instância'); // Debug
+      
+      // Força uma nova renderização criando uma nova instância do array
+      setEditedPlan([...newPlan]);
+      
+      // Força re-renderização imediata
+      forceRerender();
     };
 
     const dashboardStats = useMemo(() => {
@@ -1823,6 +1848,13 @@ export default function OrdersPage() {
         }
     };
 
+    // Debug: monitora mudanças no editedPlan
+    useEffect(() => {
+        console.log('🔥 EDITED PLAN MUDOU:', editedPlan);
+        // Força re-renderização incrementando a key
+        setPlanRenderKey(prev => prev + 1);
+    }, [editedPlan]);
+
     return (
         <div className="w-full">
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -2536,7 +2568,7 @@ export default function OrdersPage() {
                               status: stage.status
                             });
                             return (
-                            <Card key={index} className="p-4 relative">
+                            <Card key={`${stage.stageName}-${index}-${planRenderKey}`} className="p-4 relative">
                               <Button
                                 type="button"
                                 variant="ghost"
