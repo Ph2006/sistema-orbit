@@ -53,6 +53,7 @@ const productionStageSchema = z.object({
     startDate: z.date().nullable().optional(),
     completedDate: z.date().nullable().optional(),
     durationDays: z.coerce.number().min(0).optional(),
+    useBusinessDays: z.boolean().optional().default(true), // true = dias úteis, false = dias corridos
 });
 
 const orderItemSchema = z.object({
@@ -860,6 +861,126 @@ export default function OrdersPage() {
       
       console.log('📋 Atualizando plano com:', newPlan); // Debug
       
+      // Sistema de recálculo automático
+      const recalculateDates = () => {
+        console.log('🔄 Iniciando recálculo automático de datas'); // Debug
+        
+        // Função para calcular próximo dia útil ou corrido
+        const getNextDate = (fromDate: Date, isBusinessDaysOnly: boolean = true): Date => {
+          if (isBusinessDaysOnly) {
+            return getNextBusinessDay(fromDate);
+          } else {
+            // Dias corridos - apenas adiciona 1 dia
+            const nextDay = new Date(fromDate);
+            nextDay.setDate(nextDay.getDate() + 1);
+            return nextDay;
+          }
+        };
+        
+        // Função para adicionar duração a uma data
+        const addDurationToDate = (startDate: Date, duration: number, isBusinessDaysOnly: boolean = true): Date => {
+          if (isBusinessDaysOnly) {
+            return addBusinessDays(startDate, Math.ceil(duration));
+          } else {
+            // Dias corridos
+            const resultDate = new Date(startDate);
+            resultDate.setDate(resultDate.getDate() + Math.ceil(duration));
+            return resultDate;
+          }
+        };
+        
+        let currentWorkingDate: Date | null = null;
+        let dailyAccumulation = 0;
+        
+        for (let i = 0; i < newPlan.length; i++) {
+          const stage = newPlan[i];
+          const duration = Math.max(0.125, Number(stage.durationDays) || 1);
+          
+                     // Usa o campo useBusinessDays (true = dias úteis, false = dias corridos)
+           const useBusinessDaysOnly = stage.useBusinessDays !== false; // Default para true
+           
+           console.log(`📅 Processando etapa ${i + 1}: ${stage.stageName}, duração: ${duration}, dias úteis: ${useBusinessDaysOnly}`);
+          
+          if (i === 0) {
+            // Primeira etapa - usa data de início definida pelo usuário
+            if (stage.startDate) {
+              currentWorkingDate = new Date(stage.startDate);
+              
+                             // Ajusta para dia útil apenas se usar dias úteis
+               if (useBusinessDaysOnly && !isBusinessDay(currentWorkingDate)) {
+                 currentWorkingDate = getNextBusinessDay(currentWorkingDate);
+                 stage.startDate = new Date(currentWorkingDate);
+               }
+              
+              dailyAccumulation = 0;
+              console.log(`📌 Primeira etapa iniciando em: ${currentWorkingDate.toLocaleDateString()}`);
+            } else {
+              // Se não há data de início, limpa todas as datas
+              console.log('⚠️ Sem data de início - limpando todas as datas');
+              for (let j = 0; j < newPlan.length; j++) {
+                newPlan[j].startDate = null;
+                newPlan[j].completedDate = null;
+              }
+              return;
+            }
+          } else {
+                         // Etapas subsequentes começam após a conclusão da anterior
+             if (currentWorkingDate) {
+               if (!useBusinessDaysOnly) {
+                 // Para dias corridos, inicia no próximo dia
+                 stage.startDate = new Date(currentWorkingDate);
+                 stage.startDate.setDate(stage.startDate.getDate() + 1);
+               } else {
+                 // Para dias úteis, próximo dia útil
+                 stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
+               }
+               console.log(`🔗 Etapa ${i + 1} iniciando em: ${stage.startDate.toLocaleDateString()}`);
+             }
+          }
+          
+                     // Calcula data de conclusão
+           if (stage.startDate) {
+             if (!useBusinessDaysOnly) {
+               // Dias corridos: conta todos os dias
+               stage.completedDate = addDurationToDate(stage.startDate, duration, false);
+             } else {
+              // Horários normais: soma duração considerando acúmulo e dias úteis
+              dailyAccumulation += duration;
+              
+              if (dailyAccumulation >= 1) {
+                // Tarefa excede 1 dia - termina em dia útil futuro
+                const daysToAdd = Math.ceil(dailyAccumulation);
+                stage.completedDate = addBusinessDays(stage.startDate, daysToAdd);
+                
+                // Atualiza data de trabalho atual
+                currentWorkingDate = new Date(stage.completedDate);
+                
+                // Calcula resto para próxima etapa
+                dailyAccumulation = dailyAccumulation - daysToAdd;
+              } else {
+                // Tarefa termina no mesmo dia
+                stage.completedDate = new Date(stage.startDate);
+                currentWorkingDate = new Date(stage.startDate);
+              }
+            }
+            
+                         // Para dias corridos, atualiza a data de trabalho
+             if (!useBusinessDaysOnly) {
+               currentWorkingDate = new Date(stage.completedDate);
+               dailyAccumulation = 0; // Reset do acúmulo para dias corridos
+             }
+            
+            console.log(`✅ Etapa ${i + 1} termina em: ${stage.completedDate.toLocaleDateString()}`);
+          }
+        }
+      };
+      
+      // Executa recálculo quando necessário
+      if (field === 'startDate' || field === 'durationDays') {
+        console.log('🎯 Executando recálculo automático');
+        recalculateDates();
+      }
+      
       // Atualiza o estado com nova referência
       setEditedPlan(newPlan);
     };
@@ -1233,6 +1354,7 @@ export default function OrdersPage() {
                     startDate: stage.startDate ? new Date(stage.startDate) : null,
                     completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
                     durationDays: stage.durationDays ?? productTemplateMap.get(stage.stageName) ?? 0,
+                    useBusinessDays: stage.useBusinessDays ?? true, // Default para dias úteis se não especificado
                 }));
             } else {
                 finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, durationDays]) => ({
@@ -1241,6 +1363,7 @@ export default function OrdersPage() {
                     status: "Pendente",
                     startDate: null,
                     completedDate: null,
+                    useBusinessDays: true, // Default para dias úteis
                 }));
             }
             setEditedPlan(finalPlan);
@@ -1419,6 +1542,7 @@ export default function OrdersPage() {
             startDate: null,
             completedDate: null,
             durationDays: 0,
+            useBusinessDays: true, // Default para dias úteis
         };
         setEditedPlan([...editedPlan, newStage]);
         setNewStageNameForPlan("");
@@ -2459,7 +2583,7 @@ export default function OrdersPage() {
                                   </Select>
                                 </div>
                                 <div className="space-y-2">
-                                  <Label>Duração (dias úteis)</Label>
+                                  <Label>Duração</Label>
                                   <Input
                                     type="number"
                                     step="0.125"
@@ -2476,6 +2600,51 @@ export default function OrdersPage() {
                                       ℹ️ Duração menor que 1 dia - será executada no mesmo dia
                                     </p>
                                   )}
+                                </div>
+                              </div>
+
+                              {/* Nova seção para tipo de cronograma */}
+                              <div className="grid grid-cols-1 gap-4 mt-4">
+                                <div className="space-y-2">
+                                  <Label>Tipo de Cronograma</Label>
+                                  <Select 
+                                    value={stage.useBusinessDays === false ? "corridos" : "uteis"} 
+                                    onValueChange={(value) => {
+                                      const useBusinessDays = value === "uteis";
+                                      console.log('📅 Tipo de cronograma alterado:', { index, useBusinessDays });
+                                      handlePlanChange(index, 'useBusinessDays', useBusinessDays);
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Selecione o tipo de cronograma" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="uteis">
+                                        <div className="flex items-center gap-2">
+                                          <CalendarDays className="h-4 w-4 text-blue-500" />
+                                          <div>
+                                            <div className="font-medium">Dias Úteis</div>
+                                            <div className="text-xs text-muted-foreground">Segunda a sexta, exclui feriados</div>
+                                          </div>
+                                        </div>
+                                      </SelectItem>
+                                      <SelectItem value="corridos">
+                                        <div className="flex items-center gap-2">
+                                          <CalendarIcon className="h-4 w-4 text-orange-500" />
+                                          <div>
+                                            <div className="font-medium">Dias Corridos</div>
+                                            <div className="text-xs text-muted-foreground">Todos os dias, incluindo fins de semana</div>
+                                          </div>
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <div className={`text-xs p-2 rounded border ${stage.useBusinessDays === false ? 'bg-orange-50 border-orange-200 text-orange-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+                                    {stage.useBusinessDays === false 
+                                      ? "⚡ Tarefa urgente - conta todos os dias incluindo fins de semana e feriados"
+                                      : "📅 Tarefa normal - conta apenas dias úteis (seg-sex), excluindo feriados"
+                                    }
+                                  </div>
                                 </div>
                               </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
