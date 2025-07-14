@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -530,6 +531,39 @@ export default function ProductsPage() {
       productionPlanTemplate: planTemplate
     });
     setIsFormOpen(true);
+  };
+  
+  const handleDuplicateClick = (product: Product) => {
+    // Gera um novo código baseado no original
+    const originalCode = product.code;
+    const duplicatedCode = `${originalCode}_COPIA`;
+    
+    // Verifica se já existe um produto com esse código
+    let finalCode = duplicatedCode;
+    let counter = 1;
+    while (products.some(p => p.code === finalCode)) {
+      finalCode = `${originalCode}_COPIA_${counter}`;
+      counter++;
+    }
+    
+    setSelectedProduct(null); // Limpa a seleção para criar um novo produto
+    const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        : []);
+    
+    form.reset({
+      code: finalCode,
+      description: `${product.description} (Cópia)`,
+      unitPrice: product.unitPrice,
+      unitWeight: product.unitWeight || 0,
+      productionPlanTemplate: planTemplate
+    });
+    setIsFormOpen(true);
+    
+    toast({
+      title: "Produto duplicado!",
+      description: `Os dados de "${product.description}" foram copiados. Ajuste o código e descrição conforme necessário.`,
+    });
   };
   
   const handleDeleteClick = (product: Product) => {
@@ -1139,7 +1173,7 @@ export default function ProductsPage() {
                                 <TableHead>Descrição</TableHead>
                                 <TableHead className="w-[140px] text-right">Preço Unitário (R$)</TableHead>
                                 <TableHead className="w-[120px] text-center">Lead Time</TableHead>
-                                <TableHead className="w-[100px] text-center">Ações</TableHead>
+                                <TableHead className="w-[140px] text-center">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -1166,6 +1200,10 @@ export default function ProductsPage() {
                                                 <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
                                                     <Pencil className="h-4 w-4" />
                                                     <span className="sr-only">Editar</span>
+                                                </Button>
+                                                <Button variant="ghost" size="icon" onClick={() => handleDuplicateClick(product)}>
+                                                    <Copy className="h-4 w-4" />
+                                                    <span className="sr-only">Duplicar</span>
                                                 </Button>
                                                 <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteClick(product)}>
                                                     <Trash2 className="h-4 w-4" />
