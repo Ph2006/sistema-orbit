@@ -807,22 +807,27 @@ export default function QuotationsPage() {
                     return acc + itemWeight;
                 }, 0);
 
-                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Lead Time', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
-                const body = items.map(item => [
-                    item.code || '-',
-                    item.description,
-                    item.quantity,
-                    item.unitWeight ? `${item.unitWeight.toLocaleString('pt-BR')} kg` : '-',
-                    item.leadTimeDays ? `${item.leadTimeDays} dias` : '-',
-                    item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                    (item.taxRate || 0).toLocaleString('pt-BR'),
-                    calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                ]);
+                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
+                const body = items.map(item => {
+                    const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                    return [
+                        item.code || '-',
+                        item.description,
+                        item.quantity,
+                        item.unitWeight ? `${item.unitWeight.toLocaleString('pt-BR')} kg` : '-',
+                        itemTotalWeight > 0 ? `${itemTotalWeight.toLocaleString('pt-BR')} kg` : '-',
+                        item.leadTimeDays ? `${item.leadTimeDays} dias` : '-',
+                        item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                        (item.taxRate || 0).toLocaleString('pt-BR'),
+                        calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                    ];
+                });
 
                 // Adicionar linha de totais
                 body.push([
                     '', 
                     'TOTAL:', 
+                    '', 
                     '', 
                     totalWeight > 0 ? `${totalWeight.toLocaleString('pt-BR')} kg` : '-', 
                     '', 
@@ -837,14 +842,15 @@ export default function QuotationsPage() {
                     styles: { fontSize: 8 },
                     headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
                     columnStyles: {
-                        0: { cellWidth: 35 },
+                        0: { cellWidth: 30 },
                         1: { cellWidth: 'auto' },
                         2: { cellWidth: 15, halign: 'right' },
                         3: { cellWidth: 25, halign: 'right' },
-                        4: { cellWidth: 25, halign: 'center' },
-                        5: { cellWidth: 35, halign: 'right' },
-                        6: { cellWidth: 25, halign: 'right' },
-                        7: { cellWidth: 40, halign: 'right' },
+                        4: { cellWidth: 25, halign: 'right' },
+                        5: { cellWidth: 20, halign: 'center' },
+                        6: { cellWidth: 30, halign: 'right' },
+                        7: { cellWidth: 20, halign: 'right' },
+                        8: { cellWidth: 35, halign: 'right' },
                     },
                     didParseCell: function (data: any) {
                         // Destacar a linha de total (última linha)
@@ -912,19 +918,23 @@ export default function QuotationsPage() {
                     [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
                     ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
                     [],
-                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Lead Time (dias)', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.'],
-                    ...items.map(item => [
-                        item.description,
-                        item.code,
-                        item.quantity,
-                        item.unitWeight || 0,
-                        item.leadTimeDays || 0,
-                        item.unitPrice,
-                        item.taxRate || 0,
-                        calculateItemTotals(item).totalWithTax
-                    ]),
+                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.'],
+                    ...items.map(item => {
+                        const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                        return [
+                            item.description,
+                            item.code,
+                            item.quantity,
+                            item.unitWeight || 0,
+                            itemTotalWeight,
+                            item.leadTimeDays || 0,
+                            item.unitPrice,
+                            item.taxRate || 0,
+                            calculateItemTotals(item).totalWithTax
+                        ];
+                    }),
                     [],
-                    ['TOTAL:', '', '', totalWeightExcel > 0 ? totalWeightExcel : '', '', '', 'Valor Total:', grandTotal],
+                    ['TOTAL:', '', '', '', totalWeightExcel > 0 ? totalWeightExcel : '', '', '', 'Valor Total:', grandTotal],
                     [],
                     ['Serviços Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
