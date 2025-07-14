@@ -751,12 +751,13 @@ export default function QuotationsPage() {
                 docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
                 y += 10;
     
-                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
+                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Lead Time', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
                 const body = items.map(item => [
                     item.code || '-',
                     item.description,
                     item.quantity,
                     item.unitWeight ? `${item.unitWeight.toLocaleString('pt-BR')} kg` : '-',
+                    item.leadTimeDays ? `${item.leadTimeDays} dias` : '-',
                     item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                     (item.taxRate || 0).toLocaleString('pt-BR'),
                     calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
@@ -772,9 +773,10 @@ export default function QuotationsPage() {
                         1: { cellWidth: 'auto' },
                         2: { cellWidth: 15, halign: 'right' },
                         3: { cellWidth: 25, halign: 'right' },
-                        4: { cellWidth: 35, halign: 'right' },
-                        5: { cellWidth: 25, halign: 'right' },
-                        6: { cellWidth: 40, halign: 'right' },
+                        4: { cellWidth: 25, halign: 'center' },
+                        5: { cellWidth: 35, halign: 'right' },
+                        6: { cellWidth: 25, halign: 'right' },
+                        7: { cellWidth: 40, halign: 'right' },
                     }
                 });
                 y = (docPdf as any).lastAutoTable.finalY + 10;
@@ -831,17 +833,19 @@ export default function QuotationsPage() {
                     [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
                     ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
                     [],
-                    ['Item', 'Código', 'Qtd', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.'],
+                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Lead Time (dias)', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.'],
                     ...items.map(item => [
                         item.description,
                         item.code,
                         item.quantity,
+                        item.unitWeight || 0,
+                        item.leadTimeDays || 0,
                         item.unitPrice,
                         item.taxRate || 0,
                         calculateItemTotals(item).totalWithTax
                     ]),
                     [],
-                    ['', '', '', '', 'Valor Total:', grandTotal],
+                    ['', '', '', '', '', '', 'Valor Total:', grandTotal],
                     [],
                     ['Serviços Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
