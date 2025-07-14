@@ -251,13 +251,13 @@ function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayIn
       
       {isSameDate && (
         <p className="text-blue-600 mt-1">
-          ✓ Tarefa executada no mesmo dia (acúmulo &lt; 1 dia)
+          ✓ Tarefa executada no mesmo dia (duração ≤ 1 dia)
         </p>
       )}
       
-      {isNextDay && (
+      {isNextDay && expectedDurationNum > 1 && (
         <p className="text-green-600 mt-1">
-          ✓ Tarefa termina no próximo dia (acúmulo excedeu 1 dia)
+          ✓ Tarefa termina no próximo dia (duração &gt; 1 dia)
         </p>
       )}
       
@@ -274,7 +274,7 @@ function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayIn
       )}
       
       <p className="text-blue-600 mt-1 text-xs">
-        💡 Tarefas se acumulam no mesmo dia até somar ≥ 1 dia, então a tarefa que exceder termina no próximo dia útil
+        💡 Tarefas com duração ≤ 1 dia terminam no mesmo dia. Tarefas maiores que 1 dia terminam em dias subsequentes
       </p>
     </div>
   );
@@ -899,11 +899,21 @@ export default function OrdersPage() {
         
         if (!useBusinessDaysOnly) {
           // Dias corridos
-          currentStage.completedDate = new Date(currentStage.startDate);
-          currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration));
+          if (duration <= 1) {
+            // Tarefas de 1 dia ou menos terminam no mesmo dia
+            currentStage.completedDate = new Date(currentStage.startDate);
+          } else {
+            currentStage.completedDate = new Date(currentStage.startDate);
+            currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration));
+          }
         } else {
           // Dias úteis
-          currentStage.completedDate = addBusinessDays(currentStage.startDate, Math.ceil(duration));
+          if (duration <= 1) {
+            // Tarefas de 1 dia ou menos terminam no mesmo dia
+            currentStage.completedDate = new Date(currentStage.startDate);
+          } else {
+            currentStage.completedDate = addBusinessDays(currentStage.startDate, Math.ceil(duration));
+          }
         }
       }
       
@@ -921,12 +931,23 @@ export default function OrdersPage() {
             stage.startDate = new Date(currentWorkingDate);
             stage.startDate.setDate(stage.startDate.getDate() + 1);
             
-            stage.completedDate = new Date(stage.startDate);
-            stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
+            if (duration <= 1) {
+              // Tarefas de 1 dia ou menos terminam no mesmo dia
+              stage.completedDate = new Date(stage.startDate);
+            } else {
+              stage.completedDate = new Date(stage.startDate);
+              stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
+            }
           } else {
             // Dias úteis
             stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
-            stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration));
+            
+            if (duration <= 1) {
+              // Tarefas de 1 dia ou menos terminam no mesmo dia
+              stage.completedDate = new Date(stage.startDate);
+            } else {
+              stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration));
+            }
           }
           
           currentWorkingDate = new Date(stage.completedDate);
@@ -987,8 +1008,13 @@ export default function OrdersPage() {
         if (stage.startDate) {
           if (!useBusinessDaysOnly) {
             // Dias corridos - conta todos os dias incluindo fins de semana
-            stage.completedDate = new Date(stage.startDate);
-            stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
+            if (duration <= 1) {
+              // Tarefas de 1 dia ou menos terminam no mesmo dia
+              stage.completedDate = new Date(stage.startDate);
+            } else {
+              stage.completedDate = new Date(stage.startDate);
+              stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
+            }
             currentWorkingDate = new Date(stage.completedDate);
             dailyAccumulation = 0;
           } else {
@@ -1005,6 +1031,7 @@ export default function OrdersPage() {
               currentWorkingDate = new Date(stage.completedDate);
               dailyAccumulation = dailyAccumulation - daysToAdd;
             } else {
+              // Tarefas que se acumulam e ainda não atingiram 1 dia terminam no mesmo dia
               stage.completedDate = new Date(stage.startDate);
               currentWorkingDate = new Date(stage.startDate);
             }
