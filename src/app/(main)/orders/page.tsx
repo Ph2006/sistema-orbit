@@ -861,7 +861,7 @@ export default function OrdersPage() {
       
       console.log('📋 Atualizando plano com:', newPlan); // Debug
       
-      // Sistema de recálculo automático
+      // Sistema de recálculo automático - MELHORADO
       const recalculateDates = () => {
         console.log('🔄 Iniciando recálculo automático de datas'); // Debug
         
@@ -896,54 +896,51 @@ export default function OrdersPage() {
           const stage = newPlan[i];
           const duration = Math.max(0.125, Number(stage.durationDays) || 1);
           
-                     // Usa o campo useBusinessDays (true = dias úteis, false = dias corridos)
-           const useBusinessDaysOnly = stage.useBusinessDays !== false; // Default para true
-           
-           console.log(`📅 Processando etapa ${i + 1}: ${stage.stageName}, duração: ${duration}, dias úteis: ${useBusinessDaysOnly}`);
+          // Usa o campo useBusinessDays (true = dias úteis, false = dias corridos)
+          const useBusinessDaysOnly = stage.useBusinessDays !== false; // Default para true
+          
+          console.log(`📅 Processando etapa ${i + 1}: ${stage.stageName}, duração: ${duration}, dias úteis: ${useBusinessDaysOnly}`);
           
           if (i === 0) {
-            // Primeira etapa - usa data de início definida pelo usuário
+            // Primeira etapa - PRESERVA data de início definida pelo usuário
             if (stage.startDate) {
               currentWorkingDate = new Date(stage.startDate);
               
-                             // Ajusta para dia útil apenas se usar dias úteis
-               if (useBusinessDaysOnly && !isBusinessDay(currentWorkingDate)) {
-                 currentWorkingDate = getNextBusinessDay(currentWorkingDate);
-                 stage.startDate = new Date(currentWorkingDate);
-               }
+              // NÃO ajusta automaticamente se o usuário está definindo manualmente
+              // Apenas mostra aviso visual se necessário
               
               dailyAccumulation = 0;
               console.log(`📌 Primeira etapa iniciando em: ${currentWorkingDate.toLocaleDateString()}`);
             } else {
               // Se não há data de início, limpa todas as datas
               console.log('⚠️ Sem data de início - limpando todas as datas');
-              for (let j = 0; j < newPlan.length; j++) {
+              for (let j = 1; j < newPlan.length; j++) { // Mantém a primeira etapa
                 newPlan[j].startDate = null;
                 newPlan[j].completedDate = null;
               }
               return;
             }
           } else {
-                         // Etapas subsequentes começam após a conclusão da anterior
-             if (currentWorkingDate) {
-               if (!useBusinessDaysOnly) {
-                 // Para dias corridos, inicia no próximo dia
-                 stage.startDate = new Date(currentWorkingDate);
-                 stage.startDate.setDate(stage.startDate.getDate() + 1);
-               } else {
-                 // Para dias úteis, próximo dia útil
-                 stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
-               }
-               console.log(`🔗 Etapa ${i + 1} iniciando em: ${stage.startDate.toLocaleDateString()}`);
-             }
+            // Etapas subsequentes começam após a conclusão da anterior
+            if (currentWorkingDate) {
+              if (!useBusinessDaysOnly) {
+                // Para dias corridos, inicia no próximo dia
+                stage.startDate = new Date(currentWorkingDate);
+                stage.startDate.setDate(stage.startDate.getDate() + 1);
+              } else {
+                // Para dias úteis, próximo dia útil
+                stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
+              }
+              console.log(`🔗 Etapa ${i + 1} iniciando em: ${stage.startDate.toLocaleDateString()}`);
+            }
           }
           
-                     // Calcula data de conclusão
-           if (stage.startDate) {
-             if (!useBusinessDaysOnly) {
-               // Dias corridos: conta todos os dias
-               stage.completedDate = addDurationToDate(stage.startDate, duration, false);
-             } else {
+          // Calcula data de conclusão
+          if (stage.startDate) {
+            if (!useBusinessDaysOnly) {
+              // Dias corridos: conta todos os dias
+              stage.completedDate = addDurationToDate(stage.startDate, duration, false);
+            } else {
               // Horários normais: soma duração considerando acúmulo e dias úteis
               dailyAccumulation += duration;
               
@@ -964,20 +961,24 @@ export default function OrdersPage() {
               }
             }
             
-                         // Para dias corridos, atualiza a data de trabalho
-             if (!useBusinessDaysOnly) {
-               currentWorkingDate = new Date(stage.completedDate);
-               dailyAccumulation = 0; // Reset do acúmulo para dias corridos
-             }
+            // Para dias corridos, atualiza a data de trabalho
+            if (!useBusinessDaysOnly) {
+              currentWorkingDate = new Date(stage.completedDate);
+              dailyAccumulation = 0; // Reset do acúmulo para dias corridos
+            }
             
             console.log(`✅ Etapa ${i + 1} termina em: ${stage.completedDate.toLocaleDateString()}`);
           }
         }
       };
       
-      // Executa recálculo quando necessário
-      if (field === 'startDate' || field === 'durationDays') {
-        console.log('🎯 Executando recálculo automático');
+      // Executa recálculo APENAS quando necessário e não está editando data manualmente
+      if (field === 'durationDays' || field === 'useBusinessDays') {
+        console.log('🎯 Executando recálculo automático por alteração de duração/tipo');
+        recalculateDates();
+      } else if (field === 'startDate' && stageIndex === 0) {
+        // Para primeira etapa, apenas recalcula as seguintes se já tem data
+        console.log('🎯 Recalculando etapas subsequentes após alteração da primeira');
         recalculateDates();
       }
       
