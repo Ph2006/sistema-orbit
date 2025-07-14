@@ -861,23 +861,88 @@ export default function OrdersPage() {
       // Atualiza o array com a nova instância
       newPlan[stageIndex] = updatedStage;
       
-      // RECÁLCULO SIMPLIFICADO - SÓ QUANDO NECESSÁRIO
-      if (field === 'durationDays' || field === 'useBusinessDays') {
-        console.log('🎯 Recalculando por alteração de duração/tipo');
+      // RECÁLCULO AUTOMÁTICO INTELIGENTE
+      if (field === 'durationDays') {
+        console.log('🎯 Recalculando por alteração de duração na etapa:', stageIndex);
+        // Quando altera duração, recalcula a data de conclusão da etapa atual e todas as seguintes
+        recalculateFromStage(newPlan, stageIndex);
+      } else if (field === 'useBusinessDays') {
+        console.log('🎯 Recalculando por alteração de tipo de cronograma');
+        // Quando altera tipo de cronograma, recalcula tudo
         recalculateFromFirstStage(newPlan);
-      } else if (field === 'startDate' && stageIndex === 0) {
-        // APENAS quando alterar data da PRIMEIRA etapa
-        console.log('🎯 Recalculando a partir da primeira etapa');
-        recalculateFromFirstStage(newPlan);
+      } else if (field === 'startDate') {
+        console.log('🎯 Recalculando a partir da etapa alterada:', stageIndex);
+        // Quando altera data de início, recalcula a data de conclusão e etapas seguintes
+        recalculateFromStage(newPlan, stageIndex);
+      } else if (field === 'status' && value === 'Concluído') {
+        console.log('🎯 Etapa marcada como concluída - definindo data de conclusão');
+        // Quando marca como concluído, define data de conclusão como hoje se não estiver definida
+        if (!updatedStage.completedDate) {
+          updatedStage.completedDate = new Date();
+        }
+        newPlan[stageIndex] = updatedStage;
       }
       
       // Atualiza o estado
       setEditedPlan(newPlan);
     };
 
-    // Função simplificada de recálculo
+    // Função para recalcular a partir de uma etapa específica
+    const recalculateFromStage = (plan: ProductionStage[], fromIndex: number) => {
+      console.log('🔄 Recalculando cronograma a partir da etapa:', fromIndex);
+      
+      // Primeiro recalcula a data de conclusão da etapa atual
+      const currentStage = plan[fromIndex];
+      if (currentStage.startDate) {
+        const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
+        const useBusinessDaysOnly = currentStage.useBusinessDays !== false;
+        
+        if (!useBusinessDaysOnly) {
+          // Dias corridos
+          currentStage.completedDate = new Date(currentStage.startDate);
+          currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration));
+        } else {
+          // Dias úteis
+          currentStage.completedDate = addBusinessDays(currentStage.startDate, Math.ceil(duration));
+        }
+      }
+      
+      // Agora recalcula todas as etapas subsequentes
+      let currentWorkingDate = currentStage.completedDate;
+      
+      for (let i = fromIndex + 1; i < plan.length; i++) {
+        const stage = plan[i];
+        const duration = Math.max(0.125, Number(stage.durationDays) || 1);
+        const useBusinessDaysOnly = stage.useBusinessDays !== false;
+        
+        if (currentWorkingDate) {
+          if (!useBusinessDaysOnly) {
+            // Dias corridos
+            stage.startDate = new Date(currentWorkingDate);
+            stage.startDate.setDate(stage.startDate.getDate() + 1);
+            
+            stage.completedDate = new Date(stage.startDate);
+            stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
+          } else {
+            // Dias úteis
+            stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
+            stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration));
+          }
+          
+          currentWorkingDate = new Date(stage.completedDate);
+          
+          console.log(`✅ Etapa ${i + 1}: ${stage.stageName} | Início: ${stage.startDate.toLocaleDateString()} | Fim: ${stage.completedDate.toLocaleDateString()} | Duração: ${duration} dias | Tipo: ${useBusinessDaysOnly ? 'Úteis' : 'Corridos'}`);
+        } else {
+          // Se não há data de trabalho, limpa as datas
+          stage.startDate = null;
+          stage.completedDate = null;
+        }
+      }
+    };
+
+    // Função simplificada de recálculo completo
     const recalculateFromFirstStage = (plan: ProductionStage[]) => {
-      console.log('🔄 Recalculando cronograma...');
+      console.log('🔄 Recalculando cronograma completo...');
       
       let currentWorkingDate: Date | null = null;
       let dailyAccumulation = 0;
@@ -918,10 +983,10 @@ export default function OrdersPage() {
           }
         }
         
-        // Calcula data de conclusão
+        // SEMPRE calcula data de conclusão baseada na duração
         if (stage.startDate) {
           if (!useBusinessDaysOnly) {
-            // Dias corridos
+            // Dias corridos - conta todos os dias incluindo fins de semana
             stage.completedDate = new Date(stage.startDate);
             stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
             currentWorkingDate = new Date(stage.completedDate);
@@ -944,6 +1009,8 @@ export default function OrdersPage() {
               currentWorkingDate = new Date(stage.startDate);
             }
           }
+          
+          console.log(`✅ Etapa ${i + 1}: ${stage.stageName} | Início: ${stage.startDate.toLocaleDateString()} | Fim: ${stage.completedDate.toLocaleDateString()} | Duração: ${duration} dias | Tipo: ${useBusinessDaysOnly ? 'Úteis' : 'Corridos'}`);
         }
       }
     };
