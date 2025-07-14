@@ -847,7 +847,11 @@ export default function OrdersPage() {
         if (value === null || value === '') {
           updatedStage[field] = null;
         } else {
-          updatedStage[field] = new Date(value);
+          // CORREÇÃO: Trata o fuso horário corretamente para evitar mostrar dia anterior
+          const dateValue = new Date(value);
+          // Ajusta para o fuso horário local para evitar problemas de UTC
+          const localDate = new Date(dateValue.getTime() + dateValue.getTimezoneOffset() * 60000);
+          updatedStage[field] = localDate;
         }
       } else if (field === 'durationDays') {
         const numValue = value === '' ? 0 : parseFloat(value);
@@ -864,6 +868,13 @@ export default function OrdersPage() {
       // Sistema de recálculo automático - MELHORADO
       const recalculateDates = () => {
         console.log('🔄 Iniciando recálculo automático de datas'); // Debug
+        console.log('📋 Estado atual das etapas ANTES do recálculo:', JSON.stringify(newPlan.map(p => ({
+          nome: p.stageName,
+          inicio: p.startDate,
+          fim: p.completedDate,
+          duracao: p.durationDays,
+          diasUteis: p.useBusinessDays
+        })), null, 2)); // Debug
         
         // Função para calcular próximo dia útil ou corrido
         const getNextDate = (fromDate: Date, isBusinessDaysOnly: boolean = true): Date => {
@@ -882,7 +893,7 @@ export default function OrdersPage() {
           if (isBusinessDaysOnly) {
             return addBusinessDays(startDate, Math.ceil(duration));
           } else {
-            // Dias corridos
+            // Dias corridos - adiciona exatamente a duração especificada
             const resultDate = new Date(startDate);
             resultDate.setDate(resultDate.getDate() + Math.ceil(duration));
             return resultDate;
@@ -932,6 +943,12 @@ export default function OrdersPage() {
                 stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
               }
               console.log(`🔗 Etapa ${i + 1} iniciando em: ${stage.startDate.toLocaleDateString()}`);
+            } else {
+              // Se não há data de trabalho anterior, limpa as datas subsequentes
+              stage.startDate = null;
+              stage.completedDate = null;
+              console.log(`⚠️ Etapa ${i + 1} sem data de início - limpando datas`);
+              continue;
             }
           }
           
@@ -942,7 +959,13 @@ export default function OrdersPage() {
               stage.completedDate = addDurationToDate(stage.startDate, duration, false);
             } else {
               // Horários normais: soma duração considerando acúmulo e dias úteis
-              dailyAccumulation += duration;
+              if (i === 0) {
+                // Primeira etapa: inicia novo acúmulo
+                dailyAccumulation = duration;
+              } else {
+                // Etapas subsequentes: soma à duração acumulada
+                dailyAccumulation += duration;
+              }
               
               if (dailyAccumulation >= 1) {
                 // Tarefa excede 1 dia - termina em dia útil futuro
@@ -970,19 +993,28 @@ export default function OrdersPage() {
             console.log(`✅ Etapa ${i + 1} termina em: ${stage.completedDate.toLocaleDateString()}`);
           }
         }
+        
+        console.log('📋 Estado das etapas APÓS o recálculo:', JSON.stringify(newPlan.map(p => ({
+          nome: p.stageName,
+          inicio: p.startDate,
+          fim: p.completedDate,
+          duracao: p.durationDays,
+          diasUteis: p.useBusinessDays
+        })), null, 2)); // Debug
       };
       
-      // Executa recálculo APENAS quando necessário e não está editando data manualmente
+      // Executa recálculo AUTOMATICAMENTE quando necessário
       if (field === 'durationDays' || field === 'useBusinessDays') {
         console.log('🎯 Executando recálculo automático por alteração de duração/tipo');
         recalculateDates();
-      } else if (field === 'startDate' && stageIndex === 0) {
-        // Para primeira etapa, apenas recalcula as seguintes se já tem data
-        console.log('🎯 Recalculando etapas subsequentes após alteração da primeira');
+      } else if (field === 'startDate') {
+        // Para qualquer alteração de data de início, recalcula todas as etapas subsequentes
+        console.log('🎯 Recalculando etapas subsequentes após alteração de data de início. Etapa alterada:', stageIndex);
         recalculateDates();
       }
       
       // Atualiza o estado com nova referência
+      console.log('🔄 Estado atualizado:', newPlan);
       setEditedPlan(newPlan);
     };
 
@@ -2664,7 +2696,7 @@ export default function OrdersPage() {
                                   ) : (
                                     <Input
                                       type="date"
-                                      value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
+                                      value={stage.startDate ? format(new Date(stage.startDate), "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
                                         console.log('📅 Alterando data de início:', e.target.value);
                                         handlePlanChange(index, 'startDate', e.target.value || null);
@@ -2695,7 +2727,7 @@ export default function OrdersPage() {
                                   ) : (
                                     <Input
                                       type="date"
-                                      value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
+                                      value={stage.completedDate ? format(new Date(stage.completedDate), "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
                                         console.log('📅 Alterando data de conclusão:', e.target.value);
                                         handlePlanChange(index, 'completedDate', e.target.value || null);
