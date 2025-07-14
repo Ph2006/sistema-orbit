@@ -482,6 +482,10 @@ export default function OrdersPage() {
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [customerFilter, setCustomerFilter] = useState<string>("all");
     const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+    
+    // View states
+    const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+    const [calendarDate, setCalendarDate] = useState(new Date());
 
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
@@ -808,6 +812,173 @@ export default function OrdersPage() {
     };
 
     const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter;
+
+    // Organiza os pedidos por data de entrega para visualização em calendário
+    const ordersByDate = useMemo(() => {
+        const grouped = new Map<string, Order[]>();
+        
+        filteredOrders.forEach(order => {
+            if (order.deliveryDate) {
+                const dateKey = format(order.deliveryDate, 'yyyy-MM-dd');
+                if (!grouped.has(dateKey)) {
+                    grouped.set(dateKey, []);
+                }
+                grouped.get(dateKey)!.push(order);
+            }
+        });
+        
+        return grouped;
+    }, [filteredOrders]);
+
+    // Gera os dias do mês atual para o calendário
+    const generateCalendarDays = (date: Date) => {
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startDate = new Date(firstDay);
+        startDate.setDate(startDate.getDate() - firstDay.getDay()); // Começa no domingo
+        
+        const days = [];
+        const current = new Date(startDate);
+        
+        // Gera 42 dias (6 semanas) para preencher o calendário
+        for (let i = 0; i < 42; i++) {
+            days.push(new Date(current));
+            current.setDate(current.getDate() + 1);
+        }
+        
+        return { days, firstDay, lastDay };
+    };
+
+    const { days: calendarDays, firstDay, lastDay } = generateCalendarDays(calendarDate);
+
+    // Componente de calendário
+    const CalendarView = () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        return (
+            <div className="bg-white rounded-lg border">
+                {/* Header do calendário */}
+                <div className="flex items-center justify-between p-4 border-b">
+                    <h2 className="text-lg font-semibold">
+                        {calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                    </h2>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                const newDate = new Date(calendarDate);
+                                newDate.setMonth(newDate.getMonth() - 1);
+                                setCalendarDate(newDate);
+                            }}
+                        >
+                            ←
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCalendarDate(new Date())}
+                        >
+                            Hoje
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                const newDate = new Date(calendarDate);
+                                newDate.setMonth(newDate.getMonth() + 1);
+                                setCalendarDate(newDate);
+                            }}
+                        >
+                            →
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Dias da semana */}
+                <div className="grid grid-cols-7 border-b">
+                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
+                        <div key={day} className="p-2 text-center text-sm font-medium text-muted-foreground border-r last:border-r-0">
+                            {day}
+                        </div>
+                    ))}
+                </div>
+
+                {/* Grid do calendário */}
+                <div className="grid grid-cols-7">
+                    {calendarDays.map((day, index) => {
+                        const dateKey = format(day, 'yyyy-MM-dd');
+                        const ordersForDay = ordersByDate.get(dateKey) || [];
+                        const isCurrentMonth = day.getMonth() === calendarDate.getMonth();
+                        const isToday = isSameDay(day, today);
+                        const isPast = day < today;
+                        
+                        return (
+                            <div
+                                key={index}
+                                className={cn(
+                                    "min-h-[120px] p-1 border-r border-b last:border-r-0",
+                                    !isCurrentMonth && "bg-muted/20",
+                                    isToday && "bg-blue-50"
+                                )}
+                            >
+                                <div className={cn(
+                                    "text-sm mb-1 p-1",
+                                    !isCurrentMonth && "text-muted-foreground",
+                                    isToday && "font-bold text-blue-600",
+                                    isPast && isCurrentMonth && "text-muted-foreground"
+                                )}>
+                                    {day.getDate()}
+                                </div>
+                                
+                                <div className="space-y-1">
+                                    {ordersForDay.slice(0, 3).map(order => {
+                                        const statusProps = getStatusProps(order.status);
+                                        let bgColor = "bg-gray-600"; // Default
+                                        
+                                        if (statusProps.colorClass.includes('bg-green-600')) bgColor = "bg-green-600";
+                                        else if (statusProps.colorClass.includes('bg-blue-500')) bgColor = "bg-blue-500";
+                                        else if (statusProps.colorClass.includes('bg-orange-500')) bgColor = "bg-orange-500";
+                                        else if (statusProps.colorClass.includes('bg-red-')) bgColor = "bg-red-600";
+                                        
+                                        return (
+                                            <div
+                                                key={order.id}
+                                                className={cn(
+                                                    "text-xs p-1 rounded cursor-pointer hover:opacity-80 truncate",
+                                                    bgColor,
+                                                    "text-white"
+                                                )}
+                                                onClick={() => handleViewOrder(order)}
+                                                title={`${order.quotationNumber} - ${order.customer.name} - ${order.status}`}
+                                            >
+                                                <div className="font-medium truncate">
+                                                    {order.quotationNumber}
+                                                </div>
+                                                <div className="text-white/90 truncate text-[10px]">
+                                                    {order.customer.name}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    
+                                    {ordersForDay.length > 3 && (
+                                        <div className="text-xs text-muted-foreground p-1">
+                                            +{ordersForDay.length - 3} mais
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
 
     const handleDeleteClick = (order: Order) => {
         setOrderToDelete(order);
@@ -1879,14 +2050,39 @@ export default function OrdersPage() {
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de Produção</h1>
-                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                            placeholder="Buscar por nº, OS, projeto, cliente..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-9 w-80"
-                        />
+                    <div className="flex items-center gap-4">
+                        {/* Botões de visualização */}
+                        <div className="flex items-center rounded-lg border p-1">
+                            <Button
+                                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                                size="sm"
+                                onClick={() => setViewMode('list')}
+                                className="h-8"
+                            >
+                                <ListChecks className="mr-2 h-4 w-4" />
+                                Lista
+                            </Button>
+                            <Button
+                                variant={viewMode === 'calendar' ? 'default' : 'ghost'}
+                                size="sm"
+                                onClick={() => setViewMode('calendar')}
+                                className="h-8"
+                            >
+                                <CalendarDays className="mr-2 h-4 w-4" />
+                                Calendário
+                            </Button>
+                        </div>
+                        
+                        {/* Campo de busca */}
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Buscar por nº, OS, projeto, cliente..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-9 w-80"
+                            />
+                        </div>
                     </div>
                 </div>
 
@@ -1978,23 +2174,79 @@ export default function OrdersPage() {
                     </div>
                 </Card>
 
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Lista de Pedidos</CardTitle>
-                        <CardDescription>Acompanhe todos os pedidos de produção aprovados.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {isLoading ? (
-                            <div className="space-y-4">
-                                <Skeleton className="h-10 w-full" />
-                                <Skeleton className="h-10 w-full" />
-                                <Skeleton className="h-10 w-full" />
+                {viewMode === 'list' ? (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Lista de Pedidos</CardTitle>
+                            <CardDescription>Acompanhe todos os pedidos de produção aprovados.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {isLoading ? (
+                                <div className="space-y-4">
+                                    <Skeleton className="h-10 w-full" />
+                                    <Skeleton className="h-10 w-full" />
+                                    <Skeleton className="h-10 w-full" />
+                                </div>
+                            ) : (
+                               <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
+                            )}
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Calendário de Entregas</CardTitle>
+                                    <CardDescription>
+                                        Visualize os pedidos organizados por data de entrega. 
+                                        {filteredOrders.length > 0 && (
+                                            <span className="ml-2">
+                                                {filteredOrders.filter(o => o.deliveryDate).length} de {filteredOrders.length} pedidos com data definida
+                                            </span>
+                                        )}
+                                    </CardDescription>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-green-600"></div>
+                                        <span>Concluído</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-blue-500"></div>
+                                        <span>Pronto</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-gray-600"></div>
+                                        <span>Em Produção</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-orange-500"></div>
+                                        <span>Atrasado</span>
+                                    </div>
+                                </div>
                             </div>
-                        ) : (
-                           <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
-                        )}
-                    </CardContent>
-                </Card>
+                        </CardHeader>
+                        <CardContent>
+                            {isLoading ? (
+                                <div className="space-y-4">
+                                    <Skeleton className="h-10 w-full" />
+                                    <Skeleton className="h-40 w-full" />
+                                </div>
+                            ) : filteredOrders.filter(o => o.deliveryDate).length === 0 ? (
+                                <div className="text-center py-12">
+                                    <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
+                                    <h3 className="text-lg font-medium mb-2">Nenhum pedido com data de entrega</h3>
+                                    <p className="text-muted-foreground">
+                                        Os pedidos aparecerão no calendário quando tiverem data de entrega definida.
+                                    </p>
+                                </div>
+                            ) : (
+                                <CalendarView />
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
             </div>
 
             <Sheet open={isSheetOpen} onOpenChange={(open) => { 
