@@ -155,6 +155,14 @@ export default function QuotationsPage() {
     const { user, loading: authLoading } = useAuth();
     const router = useRouter();
 
+    // Estados para controle de senha
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [passwordInput, setPasswordInput] = useState("");
+    const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(true);
+    const [passwordAttempts, setPasswordAttempts] = useState(0);
+    const CORRECT_PASSWORD = "OP4484210640";
+    const MAX_ATTEMPTS = 3;
+
     // State for the temporary item form
     const emptyItem: Item = { description: "", quantity: 1, unitPrice: 0, code: '', unitWeight: 0, taxRate: 0, notes: '' };
     const [currentItem, setCurrentItem] = useState<Item>(emptyItem);
@@ -167,6 +175,48 @@ export default function QuotationsPage() {
     // Generate Order Dialog State
     const [isGenerateOrderDialogOpen, setIsGenerateOrderDialogOpen] = useState(false);
     const [quotationToConvert, setQuotationToConvert] = useState<Quotation | null>(null);
+
+    // Função para verificar a senha
+    const handlePasswordSubmit = () => {
+        if (passwordInput === CORRECT_PASSWORD) {
+            setIsAuthenticated(true);
+            setIsPasswordDialogOpen(false);
+            setPasswordInput("");
+            setPasswordAttempts(0);
+            toast({
+                title: "Acesso autorizado",
+                description: "Bem-vindo à seção de orçamentos.",
+            });
+        } else {
+            const newAttempts = passwordAttempts + 1;
+            setPasswordAttempts(newAttempts);
+            setPasswordInput("");
+            
+            if (newAttempts >= MAX_ATTEMPTS) {
+                toast({
+                    variant: "destructive",
+                    title: "Acesso negado",
+                    description: "Muitas tentativas incorretas. Redirecionando...",
+                });
+                setTimeout(() => {
+                    router.push('/');
+                }, 2000);
+            } else {
+                toast({
+                    variant: "destructive",
+                    title: "Senha incorreta",
+                    description: `Tentativa ${newAttempts} de ${MAX_ATTEMPTS}. Tente novamente.`,
+                });
+            }
+        }
+    };
+
+    // Função para lidar com o pressionamento da tecla Enter
+    const handlePasswordKeyPress = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handlePasswordSubmit();
+        }
+    };
 
     const form = useForm<z.infer<typeof quotationSchema>>({
         resolver: zodResolver(quotationSchema),
@@ -341,12 +391,12 @@ export default function QuotationsPage() {
     };
 
     useEffect(() => {
-        if (!authLoading && user) {
+        if (!authLoading && user && isAuthenticated) {
             fetchCustomers();
             fetchProducts();
             fetchQuotations();
         }
-    }, [user, authLoading]);
+    }, [user, authLoading, isAuthenticated]);
     
     const onSubmit = async (values: z.infer<typeof quotationSchema>) => {
         try {
@@ -751,6 +801,12 @@ export default function QuotationsPage() {
                 docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
                 y += 10;
     
+                // Calcular peso total
+                const totalWeight = items.reduce((acc, item) => {
+                    const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                    return acc + itemWeight;
+                }, 0);
+
                 const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Lead Time', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
                 const body = items.map(item => [
                     item.code || '-',
@@ -761,6 +817,18 @@ export default function QuotationsPage() {
                     item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                     (item.taxRate || 0).toLocaleString('pt-BR'),
                     calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                ]);
+
+                // Adicionar linha de totais
+                body.push([
+                    '', 
+                    'TOTAL:', 
+                    '', 
+                    totalWeight > 0 ? `${totalWeight.toLocaleString('pt-BR')} kg` : '-', 
+                    '', 
+                    '', 
+                    '', 
+                    grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
                 ]);
                 autoTable(docPdf, {
                     startY: y,
@@ -777,12 +845,16 @@ export default function QuotationsPage() {
                         5: { cellWidth: 35, halign: 'right' },
                         6: { cellWidth: 25, halign: 'right' },
                         7: { cellWidth: 40, halign: 'right' },
+                    },
+                    didParseCell: function (data: any) {
+                        // Destacar a linha de total (última linha)
+                        if (data.row.index === body.length - 1) {
+                            data.cell.styles.fontStyle = 'bold';
+                            data.cell.styles.fillColor = [240, 240, 240];
+                        }
                     }
                 });
                 y = (docPdf as any).lastAutoTable.finalY + 10;
-                
-                docPdf.setFontSize(12).setFont(undefined, 'bold').text(`Valor Total: ${grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, pageWidth - 15, y, { align: 'right' });
-                y += 10;
     
                 if (includedServices && includedServices.length > 0) {
                     if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
@@ -824,6 +896,13 @@ export default function QuotationsPage() {
     
             } else if (formatType === 'excel') {
                 const XLSX = await import('xlsx');
+
+                // Calcular peso total para Excel
+                const totalWeightExcel = items.reduce((acc, item) => {
+                    const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                    return acc + itemWeight;
+                }, 0);
+
                 const ws_data = [
                     [companyData.nomeFantasia || ''],
                     [companyData.endereco || ''],
@@ -845,7 +924,7 @@ export default function QuotationsPage() {
                         calculateItemTotals(item).totalWithTax
                     ]),
                     [],
-                    ['', '', '', '', '', '', 'Valor Total:', grandTotal],
+                    ['TOTAL:', '', '', totalWeightExcel > 0 ? totalWeightExcel : '', '', '', 'Valor Total:', grandTotal],
                     [],
                     ['Serviços Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
@@ -911,6 +990,59 @@ export default function QuotationsPage() {
 
         return { approvalRate, issuedValue, approvedValue, totalCount };
     }, [quotations]);
+
+    // Se não estiver autenticado, mostra modal de senha
+    if (!isAuthenticated) {
+        return (
+            <Dialog open={isPasswordDialogOpen} onOpenChange={() => {}}>
+                <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+                    <DialogHeader>
+                        <DialogTitle className="text-center">Acesso Restrito</DialogTitle>
+                        <DialogDescription className="text-center">
+                            Esta seção requer uma senha de acesso.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label htmlFor="password" className="text-sm font-medium">
+                                Senha de Acesso
+                            </label>
+                            <Input
+                                id="password"
+                                type="password"
+                                placeholder="Digite a senha..."
+                                value={passwordInput}
+                                onChange={(e) => setPasswordInput(e.target.value)}
+                                onKeyPress={handlePasswordKeyPress}
+                                className="w-full"
+                            />
+                        </div>
+                        {passwordAttempts > 0 && (
+                            <div className="text-sm text-destructive">
+                                Tentativa {passwordAttempts} de {MAX_ATTEMPTS} - Senha incorreta
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button 
+                            variant="outline" 
+                            onClick={() => router.push('/')}
+                            className="w-full"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button 
+                            onClick={handlePasswordSubmit}
+                            disabled={!passwordInput || passwordAttempts >= MAX_ATTEMPTS}
+                            className="w-full"
+                        >
+                            Acessar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        );
+    }
 
     return (
         <>
