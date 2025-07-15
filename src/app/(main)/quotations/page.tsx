@@ -1165,7 +1165,7 @@ export default function QuotationsPage() {
             </div>
 
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-                <DialogContent className="max-w-5xl">
+                <DialogContent className="max-w-7xl">
                     <DialogHeader>
                         <DialogTitle>{selectedQuotation ? "Editar Orçamento" : "Novo Orçamento"}</DialogTitle>
                         <DialogDescription>Preencha os detalhes do orçamento.</DialogDescription>
@@ -1325,25 +1325,33 @@ export default function QuotationsPage() {
 
                                     {watchedItems.length > 0 && (
                                         <Card>
-                                            <CardHeader>
-                                                <CardTitle>Itens Adicionados</CardTitle>
-                                                <CardDescription>
-                                                    Use o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
-                                                </CardDescription>
-                                            </CardHeader>
+                                                                                                                    <CardHeader>
+                                                                <CardTitle className="flex items-center gap-3">
+                                                                    Itens Adicionados
+                                                                    {editIndex !== null && (
+                                                                        <Badge variant="secondary" className="bg-blue-100 text-blue-800 px-3 py-1">
+                                                                            🔧 Editando linha {editIndex + 1}
+                                                                        </Badge>
+                                                                    )}
+                                                                </CardTitle>
+                                                                <CardDescription>
+                                                                    Use o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
+                                                                    {editIndex !== null && " Clique no ✓ para salvar ou ✗ para cancelar a edição."}
+                                                                </CardDescription>
+                                                            </CardHeader>
                                             <CardContent>
                                                 <Table>
                                                     <TableHeader>
                                                         <TableRow>
-                                                            <TableHead className="w-[120px]">Código</TableHead>
-                                                            <TableHead className="min-w-[300px]">Descrição</TableHead>
-                                                            <TableHead className="w-[80px]">Qtd.</TableHead>
-                                                            <TableHead className="w-[100px]">Peso Unit.</TableHead>
-                                                            <TableHead className="w-[140px]">Preço Unit. s/ Imp.</TableHead>
-                                                            <TableHead className="w-[100px]">Imposto (%)</TableHead>
-                                                            <TableHead className="w-[120px]">Lead Time</TableHead>
-                                                            <TableHead className="w-[160px]">Total c/ Imp.</TableHead>
-                                                            <TableHead className="w-[140px] text-right">Ações</TableHead>
+                                                            <TableHead className="w-[140px]">Código</TableHead>
+                                                            <TableHead className="min-w-[400px]">Descrição</TableHead>
+                                                            <TableHead className="w-[100px]">Qtd.</TableHead>
+                                                            <TableHead className="w-[120px]">Peso Unit.</TableHead>
+                                                            <TableHead className="w-[160px]">Preço Unit. s/ Imp.</TableHead>
+                                                            <TableHead className="w-[120px]">Imposto (%)</TableHead>
+                                                            <TableHead className="w-[140px]">Lead Time</TableHead>
+                                                            <TableHead className="w-[180px]">Total c/ Imp.</TableHead>
+                                                            <TableHead className="w-[160px] text-right">Ações</TableHead>
                                                         </TableRow>
                                                     </TableHeader>
                                                     <TableBody>
@@ -1353,88 +1361,88 @@ export default function QuotationsPage() {
                                                             
                                                             if (isEditing) {
                                                                 return (
-                                                                    <TableRow key={index} className="bg-secondary">
-                                                                        <TableCell className="p-2">
+                                                                    <TableRow key={index} className="bg-blue-50 border-2 border-blue-300 shadow-sm">
+                                                                        <TableCell className="p-3">
                                                                             <Input 
                                                                                 placeholder="Código" 
                                                                                 value={currentItem.code || ''} 
                                                                                 onChange={e => handleCurrentItemChange('code', e.target.value)}
-                                                                                className="h-10 text-sm w-full"
+                                                                                className="h-12 text-base w-full font-medium"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell className="p-2">
+                                                                        <TableCell className="p-3">
                                                                             <Textarea 
                                                                                 placeholder="Descrição detalhada do produto..." 
                                                                                 value={currentItem.description}
                                                                                 onChange={e => handleCurrentItemChange('description', e.target.value)}
-                                                                                className="min-h-[60px] text-sm resize-none w-full"
+                                                                                className="min-h-[80px] text-base resize-none w-full font-medium"
                                                                                 rows={3}
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell className="p-2">
+                                                                        <TableCell className="p-3">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 placeholder="1" 
                                                                                 value={currentItem.quantity} 
                                                                                 onChange={e => handleCurrentItemChange('quantity', e.target.value)}
-                                                                                className="h-10 text-sm w-full"
+                                                                                className="h-12 text-base w-full font-medium text-center"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell className="p-2">
+                                                                        <TableCell className="p-3">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 step="0.01" 
                                                                                 placeholder="0.00" 
                                                                                 value={currentItem.unitWeight || ''} 
                                                                                 onChange={e => handleCurrentItemChange('unitWeight', e.target.value)}
-                                                                                className="h-10 text-sm w-full"
+                                                                                className="h-12 text-base w-full font-medium text-center"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell className="p-2">
+                                                                        <TableCell className="p-3">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 step="0.01" 
                                                                                 placeholder="0.00" 
                                                                                 value={currentItem.unitPrice} 
                                                                                 onChange={e => handleCurrentItemChange('unitPrice', e.target.value)}
-                                                                                className="h-10 text-sm w-full"
+                                                                                className="h-12 text-base w-full font-medium text-right"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell className="p-2">
+                                                                        <TableCell className="p-3">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 step="0.01" 
                                                                                 placeholder="0" 
                                                                                 value={currentItem.taxRate || ''} 
                                                                                 onChange={e => handleCurrentItemChange('taxRate', e.target.value)}
-                                                                                className="h-10 text-sm w-full"
+                                                                                className="h-12 text-base w-full font-medium text-center"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell className="p-2">
+                                                                        <TableCell className="p-3">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 placeholder="0" 
                                                                                 value={currentItem.leadTimeDays || ''} 
                                                                                 onChange={e => handleCurrentItemChange('leadTimeDays', e.target.value)}
-                                                                                className="h-10 text-sm w-full"
+                                                                                className="h-12 text-base w-full font-medium text-center"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell className="p-2">
-                                                                            <div className="text-sm font-medium text-center">
+                                                                        <TableCell className="p-3">
+                                                                            <div className="text-base font-bold text-center bg-green-50 p-2 rounded border">
                                                                                 {calculateItemTotals(currentItem).totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
                                                                             </div>
                                                                         </TableCell>
-                                                                        <TableCell className="text-right p-2">
-                                                                            <div className="flex items-center justify-center gap-1">
+                                                                        <TableCell className="text-right p-3">
+                                                                            <div className="flex items-center justify-center gap-2">
                                                                                 <Button 
                                                                                     type="button" 
                                                                                     variant="ghost" 
                                                                                     size="icon"
                                                                                     onClick={handleUpdateItem}
                                                                                     title="Salvar alterações"
-                                                                                    className="h-9 w-9 text-green-600 hover:text-green-700"
+                                                                                    className="h-11 w-11 text-green-600 hover:text-green-700 hover:bg-green-50 border border-green-200"
                                                                                 >
-                                                                                    <Check className="h-4 w-4" />
+                                                                                    <Check className="h-5 w-5" />
                                                                                 </Button>
                                                                                 <Button 
                                                                                     type="button" 
@@ -1442,9 +1450,9 @@ export default function QuotationsPage() {
                                                                                     size="icon"
                                                                                     onClick={handleCancelEdit}
                                                                                     title="Cancelar edição"
-                                                                                    className="h-9 w-9 text-red-600 hover:text-red-700"
+                                                                                    className="h-11 w-11 text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200"
                                                                                 >
-                                                                                    <X className="h-4 w-4" />
+                                                                                    <X className="h-5 w-5" />
                                                                                 </Button>
                                                                             </div>
                                                                         </TableCell>
@@ -1454,31 +1462,31 @@ export default function QuotationsPage() {
                                                             
                                                             return (
                                                                 <TableRow key={index}>
-                                                                    <TableCell className="font-mono text-sm p-2">{item.code || '-'}</TableCell>
-                                                                    <TableCell className="font-medium p-2">
-                                                                        <div className="whitespace-normal break-words">
+                                                                    <TableCell className="font-mono text-base p-3 font-medium">{item.code || '-'}</TableCell>
+                                                                    <TableCell className="font-medium p-3 text-base">
+                                                                        <div className="whitespace-normal break-words leading-relaxed">
                                                                             {item.description}
                                                                         </div>
                                                                     </TableCell>
-                                                                    <TableCell className="text-center p-2">{item.quantity}</TableCell>
-                                                                    <TableCell className="text-center p-2">
+                                                                    <TableCell className="text-center p-3 text-base font-medium">{item.quantity}</TableCell>
+                                                                    <TableCell className="text-center p-3">
                                                                         {item.unitWeight && item.unitWeight > 0 ? (
-                                                                            <span className="text-sm">{item.unitWeight.toFixed(2)} kg</span>
+                                                                            <span className="text-base font-medium">{item.unitWeight.toFixed(2)} kg</span>
                                                                         ) : (
-                                                                            <span className="text-muted-foreground text-xs">-</span>
+                                                                            <span className="text-muted-foreground text-sm">-</span>
                                                                         )}
                                                                     </TableCell>
-                                                                    <TableCell className="text-right p-2">{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
-                                                                    <TableCell className="text-center p-2">{item.taxRate || 0}%</TableCell>
-                                                                    <TableCell className="text-center p-2">
+                                                                    <TableCell className="text-right p-3 text-base font-medium">{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
+                                                                    <TableCell className="text-center p-3 text-base font-medium">{item.taxRate || 0}%</TableCell>
+                                                                    <TableCell className="text-center p-3">
                                                                         {item.leadTimeDays ? (
-                                                                            <Badge variant="outline">{item.leadTimeDays} dias</Badge>
+                                                                            <Badge variant="outline" className="text-sm">{item.leadTimeDays} dias</Badge>
                                                                         ) : (
-                                                                            <span className="text-muted-foreground text-xs">N/A</span>
+                                                                            <span className="text-muted-foreground text-sm">N/A</span>
                                                                         )}
                                                                     </TableCell>
-                                                                    <TableCell className="text-right font-medium p-2">{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
-                                                                    <TableCell className="text-right p-2">
+                                                                    <TableCell className="text-right font-bold p-3 text-base">{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
+                                                                    <TableCell className="text-right p-3">
                                                                         <div className="flex items-center justify-center gap-1">
                                                                             <Button 
                                                                                 type="button" 
@@ -1486,7 +1494,7 @@ export default function QuotationsPage() {
                                                                                 size="icon"
                                                                                 onClick={() => handleDuplicateItem(index)}
                                                                                 title="Duplicar item"
-                                                                                className="h-8 w-8"
+                                                                                className="h-9 w-9 hover:bg-blue-50"
                                                                             >
                                                                                 <Copy className="h-4 w-4" />
                                                                             </Button>
@@ -1496,7 +1504,7 @@ export default function QuotationsPage() {
                                                                                 size="icon" 
                                                                                 onClick={() => handleEditItem(index)}
                                                                                 title="Editar item"
-                                                                                className="h-8 w-8"
+                                                                                className="h-9 w-9 hover:bg-orange-50"
                                                                             >
                                                                                 <Pencil className="h-4 w-4" />
                                                                             </Button>
@@ -1504,7 +1512,7 @@ export default function QuotationsPage() {
                                                                                 type="button" 
                                                                                 variant="ghost" 
                                                                                 size="icon" 
-                                                                                className="text-destructive hover:text-destructive h-8 w-8" 
+                                                                                className="text-destructive hover:text-destructive hover:bg-red-50 h-9 w-9" 
                                                                                 onClick={() => remove(index)}
                                                                                 title="Remover item"
                                                                             >
