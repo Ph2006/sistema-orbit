@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil, FileDown, AlertTriangle, GanttChart, BrainCircuit, X, XCircle } from "lucide-react";
+import { PlusCircle, Trash2, FileSignature, Search, CalendarIcon, Copy, FileClock, Hourglass, CheckCircle, PackageCheck, Ban, FileUp, History, Pencil, FileDown, AlertTriangle, GanttChart, BrainCircuit, X, XCircle, Folder, FolderOpen, ArrowLeft } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -173,6 +173,10 @@ export default function MaterialsPage() {
     const [selectedCuttingPlan, setSelectedCuttingPlan] = useState<CuttingPlan | null>(null);
     const [cuttingPlanToDelete, setCuttingPlanToDelete] = useState<CuttingPlan | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+    
+    // New state for folder navigation
+    const [selectedOrderFolder, setSelectedOrderFolder] = useState<string | null>(null);
+    
     const { user, loading: authLoading } = useAuth();
     const { toast } = useToast();
 
@@ -278,6 +282,11 @@ export default function MaterialsPage() {
     useEffect(() => {
         if (user && !authLoading) { fetchRequisitions(); }
     }, [user, authLoading, fetchRequisitions]);
+
+    // Clear search when switching tabs or changing folder
+    useEffect(() => {
+        setSearchQuery("");
+    }, [activeTab, selectedOrderFolder]);
     
     // Corrected useEffect for customer linking
     useEffect(() => {
@@ -311,8 +320,24 @@ export default function MaterialsPage() {
         setSelectedCuttingPlan(plan);
         setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() });
         setEditCutIndex(null);
-        if (plan) { cuttingPlanForm.reset(plan); } 
-        else { cuttingPlanForm.reset({ planNumber: "", createdAt: new Date(), stockLength: 6000, kerf: 3, items: [] }); }
+        if (plan) { 
+            cuttingPlanForm.reset(plan); 
+        } else { 
+            // If we have a selected order folder, pre-populate the form with that order
+            const initialValues: any = { 
+                planNumber: "", 
+                createdAt: new Date(), 
+                stockLength: 6000, 
+                kerf: 3, 
+                items: [] 
+            };
+            
+            if (selectedOrderFolder && selectedOrderFolder !== 'no-order') {
+                initialValues.orderId = selectedOrderFolder;
+            }
+            
+            cuttingPlanForm.reset(initialValues); 
+        }
         setIsCuttingPlanFormOpen(true);
     };
 
@@ -548,18 +573,65 @@ export default function MaterialsPage() {
     const filteredRequisitions = useMemo(() => requisitions.filter(r => searchQuery === "" || r.requisitionNumber?.toLowerCase().includes(searchQuery.toLowerCase()) || r.requestedBy?.toLowerCase().includes(searchQuery.toLowerCase()) || r.status.toLowerCase().includes(searchQuery.toLowerCase()) || r.items.some(i => i.description.toLowerCase().includes(searchQuery.toLowerCase()))), [requisitions, searchQuery]);
     
     const filteredCuttingPlans = useMemo(() => {
-        return cuttingPlansList.filter(p => {
-            if (searchQuery === "") return true;
+        let filtered = cuttingPlansList;
+        
+        // Filter by selected order folder if one is selected
+        if (selectedOrderFolder) {
+            if (selectedOrderFolder === 'no-order') {
+                filtered = filtered.filter(p => !p.orderId);
+            } else {
+                filtered = filtered.filter(p => p.orderId === selectedOrderFolder);
+            }
+        }
+        
+        // Apply search filter
+        if (searchQuery) {
             const query = searchQuery.toLowerCase();
-            const order = orders.find(o => o.id === p.orderId);
-            return (
-                p.planNumber?.toLowerCase().includes(query) ||
-                order?.internalOS?.toLowerCase().includes(query) ||
-                p.materialDescription?.toLowerCase().includes(query) ||
-                p.customer?.name?.toLowerCase().includes(query)
-            );
+            filtered = filtered.filter(p => {
+                const order = orders.find(o => o.id === p.orderId);
+                return (
+                    p.planNumber?.toLowerCase().includes(query) ||
+                    order?.internalOS?.toLowerCase().includes(query) ||
+                    p.materialDescription?.toLowerCase().includes(query) ||
+                    p.customer?.name?.toLowerCase().includes(query)
+                );
+            });
+        }
+        
+        return filtered;
+    }, [cuttingPlansList, searchQuery, orders, selectedOrderFolder]);
+
+    // Group cutting plans by order for folder view
+    const cuttingPlanFolders = useMemo(() => {
+        const folders = new Map<string, { order: OrderInfo; plansCount: number }>();
+        
+        cuttingPlansList.forEach(plan => {
+            if (plan.orderId) {
+                const order = orders.find(o => o.id === plan.orderId);
+                if (order) {
+                    const existing = folders.get(plan.orderId);
+                    folders.set(plan.orderId, {
+                        order,
+                        plansCount: existing ? existing.plansCount + 1 : 1
+                    });
+                }
+            }
         });
-    }, [cuttingPlansList, searchQuery, orders]);
+        
+        // Also include plans without order in a special folder
+        const plansWithoutOrder = cuttingPlansList.filter(p => !p.orderId);
+        if (plansWithoutOrder.length > 0) {
+            folders.set('no-order', {
+                order: { id: 'no-order', internalOS: 'Sem OS', customerName: 'Não vinculado', customerId: '' },
+                plansCount: plansWithoutOrder.length
+            });
+        }
+        
+        return Array.from(folders.entries()).map(([orderId, data]) => ({
+            orderId,
+            ...data
+        }));
+    }, [cuttingPlansList, orders]);
 
     const overdueItems = useMemo(() => {
         return requisitions.flatMap(req => 
@@ -640,7 +712,16 @@ export default function MaterialsPage() {
                      <div className="flex items-center gap-2">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input placeholder="Buscar..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 w-64"/>
+                            <Input 
+                                placeholder={
+                                    activeTab === 'cuttingPlans' && selectedOrderFolder 
+                                        ? `Buscar na OS ${cuttingPlanFolders.find(f => f.orderId === selectedOrderFolder)?.order.internalOS || 'N/A'}...`
+                                        : "Buscar..."
+                                } 
+                                value={searchQuery} 
+                                onChange={(e) => setSearchQuery(e.target.value)} 
+                                className="pl-9 w-64"
+                            />
                         </div>
                         {activeTab === 'requisitions' ? (
                             <Button onClick={() => handleOpenRequisitionForm()} disabled={isLoadingData}>
@@ -775,45 +856,140 @@ export default function MaterialsPage() {
 
                     <TabsContent value="cuttingPlans">
                         <Card>
-                             <CardHeader>
-                                <CardTitle>Planos de Corte</CardTitle>
-                                <CardDescription>Gerencie todos os planos de otimização de corte.</CardDescription>
+                             <CardHeader className="flex flex-row items-center justify-between">
+                                <div>
+                                    <CardTitle>
+                                        {selectedOrderFolder ? (
+                                            <div className="flex items-center gap-2">
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon" 
+                                                    onClick={() => setSelectedOrderFolder(null)}
+                                                    className="mr-2"
+                                                >
+                                                    <ArrowLeft className="h-4 w-4" />
+                                                </Button>
+                                                Planos de Corte - OS {cuttingPlanFolders.find(f => f.orderId === selectedOrderFolder)?.order.internalOS || 'N/A'}
+                                            </div>
+                                        ) : (
+                                            "Planos de Corte por OS"
+                                        )}
+                                    </CardTitle>
+                                    <CardDescription>
+                                        {selectedOrderFolder 
+                                            ? "Planos de corte para esta ordem de serviço"
+                                            : "Selecione uma OS para visualizar os planos de corte"
+                                        }
+                                    </CardDescription>
+                                </div>
                             </CardHeader>
                             <CardContent>
                                 {isLoading ? <Skeleton className="h-64 w-full" /> : (
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Nº do Plano</TableHead>
-                                                <TableHead>OS Interna</TableHead>
-                                                <TableHead>Material</TableHead>
-                                                <TableHead>Cliente Vinculado</TableHead>
-                                                <TableHead>Data Criação</TableHead>
-                                                <TableHead className="text-right">Ações</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {filteredCuttingPlans.length > 0 ? (
-                                                filteredCuttingPlans.map(plan => {
-                                                    const orderInfo = orders.find(o => o.id === plan.orderId);
-                                                    return (
-                                                        <TableRow key={plan.id}>
-                                                            <TableCell className="font-medium">{plan.planNumber}</TableCell>
-                                                            <TableCell>{orderInfo?.internalOS || 'N/A'}</TableCell>
-                                                            <TableCell>{plan.materialDescription}</TableCell>
-                                                            <TableCell>{plan.customer?.name || orderInfo?.customerName || 'N/A'}</TableCell>
-                                                            <TableCell>{format(plan.createdAt, 'dd/MM/yyyy')}</TableCell>
-                                                            <TableCell className="text-right">
-                                                              <Button variant="ghost" size="icon" onClick={() => handleExportCutPlanPDF(plan)}><FileDown className="h-4 w-4" /></Button>
-                                                              <Button variant="ghost" size="icon" onClick={() => handleOpenCuttingPlanForm(plan)}><Pencil className="h-4 w-4" /></Button>
-                                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteCuttingPlan(plan)}><Trash2 className="h-4 w-4" /></Button>
+                                    <>
+                                                                {!selectedOrderFolder ? (
+                            // Folder view - show OS folders
+                            <>
+                                {/* Statistics */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                    <StatCard 
+                                        title="OS's com Planos" 
+                                        value={cuttingPlanFolders.length.toString()} 
+                                        icon={Folder} 
+                                        description="Ordens de serviço com planos de corte" 
+                                    />
+                                    <StatCard 
+                                        title="Total de Planos" 
+                                        value={cuttingPlansList.length.toString()} 
+                                        icon={GanttChart} 
+                                        description="Planos de corte no sistema" 
+                                    />
+                                    <StatCard 
+                                        title="Planos Sem OS" 
+                                        value={cuttingPlansList.filter(p => !p.orderId).length.toString()} 
+                                        icon={AlertTriangle} 
+                                        description="Planos não vinculados a OS" 
+                                    />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {cuttingPlanFolders.map(folder => (
+                                                    <Card 
+                                                        key={folder.orderId}
+                                                        className="cursor-pointer hover:shadow-md transition-shadow"
+                                                        onClick={() => setSelectedOrderFolder(folder.orderId)}
+                                                    >
+                                                        <CardContent className="flex items-center p-6">
+                                                            <div className="flex items-center space-x-4 w-full">
+                                                                <div className="flex-shrink-0">
+                                                                    <Folder className="h-8 w-8 text-blue-500" />
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <h3 className="font-medium text-sm text-gray-900 truncate">
+                                                                        OS {folder.order.internalOS}
+                                                                    </h3>
+                                                                    <p className="text-sm text-gray-500 truncate">
+                                                                        {folder.order.customerName}
+                                                                    </p>
+                                                                    <div className="flex items-center mt-1">
+                                                                        <Badge variant="secondary" className="text-xs">
+                                                                            {folder.plansCount} plano{folder.plansCount !== 1 ? 's' : ''}
+                                                                        </Badge>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </CardContent>
+                                                    </Card>
+                                                ))}
+                                                {cuttingPlanFolders.length === 0 && (
+                                                    <div className="col-span-full text-center py-8">
+                                                        <p className="text-gray-500">Nenhuma OS com planos de corte encontrada.</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            </>
+                                        ) : (
+                                            // Plan view - show plans in selected folder
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>Nº do Plano</TableHead>
+                                                        <TableHead>Material</TableHead>
+                                                        <TableHead>Data Criação</TableHead>
+                                                        <TableHead>Entrega Prevista</TableHead>
+                                                        <TableHead className="text-right">Ações</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {filteredCuttingPlans.length > 0 ? (
+                                                        filteredCuttingPlans.map(plan => (
+                                                            <TableRow key={plan.id}>
+                                                                <TableCell className="font-medium">{plan.planNumber}</TableCell>
+                                                                <TableCell>{plan.materialDescription || 'N/A'}</TableCell>
+                                                                <TableCell>{format(plan.createdAt, 'dd/MM/yyyy')}</TableCell>
+                                                                <TableCell>{plan.deliveryDate ? format(plan.deliveryDate, 'dd/MM/yyyy') : 'N/A'}</TableCell>
+                                                                <TableCell className="text-right">
+                                                                  <Button variant="ghost" size="icon" onClick={() => handleExportCutPlanPDF(plan)} title="Exportar PDF">
+                                                                    <FileDown className="h-4 w-4" />
+                                                                  </Button>
+                                                                  <Button variant="ghost" size="icon" onClick={() => handleOpenCuttingPlanForm(plan)} title="Editar">
+                                                                    <Pencil className="h-4 w-4" />
+                                                                  </Button>
+                                                                  <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteCuttingPlan(plan)} title="Excluir">
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                  </Button>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))
+                                                    ) : (
+                                                        <TableRow>
+                                                            <TableCell colSpan={5} className="h-24 text-center">
+                                                                Nenhum plano de corte encontrado para esta OS.
                                                             </TableCell>
                                                         </TableRow>
-                                                    )
-                                                })
-                                            ) : ( <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum plano de corte encontrado.</TableCell></TableRow> )}
-                                        </TableBody>
-                                    </Table>
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        )}
+                                    </>
                                 )}
                             </CardContent>
                         </Card>
