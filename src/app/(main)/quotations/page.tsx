@@ -1335,15 +1335,15 @@ export default function QuotationsPage() {
                                                 <Table>
                                                     <TableHeader>
                                                         <TableRow>
-                                                            <TableHead className="w-[100px]">Código</TableHead>
-                                                            <TableHead>Descrição</TableHead>
-                                                            <TableHead className="w-[60px]">Qtd.</TableHead>
-                                                            <TableHead className="w-[80px]">Peso Unit.</TableHead>
-                                                            <TableHead className="w-[120px]">Preço Unit. s/ Imp.</TableHead>
-                                                            <TableHead className="w-[80px]">Imposto (%)</TableHead>
-                                                            <TableHead className="w-[100px]">Lead Time</TableHead>
-                                                            <TableHead className="w-[150px]">Total c/ Imp.</TableHead>
-                                                            <TableHead className="w-[120px] text-right">Ações</TableHead>
+                                                            <TableHead className="w-[120px]">Código</TableHead>
+                                                            <TableHead className="min-w-[300px]">Descrição</TableHead>
+                                                            <TableHead className="w-[80px]">Qtd.</TableHead>
+                                                            <TableHead className="w-[100px]">Peso Unit.</TableHead>
+                                                            <TableHead className="w-[140px]">Preço Unit. s/ Imp.</TableHead>
+                                                            <TableHead className="w-[100px]">Imposto (%)</TableHead>
+                                                            <TableHead className="w-[120px]">Lead Time</TableHead>
+                                                            <TableHead className="w-[160px]">Total c/ Imp.</TableHead>
+                                                            <TableHead className="w-[140px] text-right">Ações</TableHead>
                                                         </TableRow>
                                                     </TableHeader>
                                                     <TableBody>
@@ -1354,85 +1354,85 @@ export default function QuotationsPage() {
                                                             if (isEditing) {
                                                                 return (
                                                                     <TableRow key={index} className="bg-secondary">
-                                                                        <TableCell>
+                                                                        <TableCell className="p-2">
                                                                             <Input 
                                                                                 placeholder="Código" 
                                                                                 value={currentItem.code || ''} 
                                                                                 onChange={e => handleCurrentItemChange('code', e.target.value)}
-                                                                                className="h-8 text-sm"
+                                                                                className="h-10 text-sm w-full"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell>
+                                                                        <TableCell className="p-2">
                                                                             <Textarea 
-                                                                                placeholder="Descrição" 
+                                                                                placeholder="Descrição detalhada do produto..." 
                                                                                 value={currentItem.description}
                                                                                 onChange={e => handleCurrentItemChange('description', e.target.value)}
-                                                                                className="min-h-[32px] text-sm resize-none"
-                                                                                rows={2}
+                                                                                className="min-h-[60px] text-sm resize-none w-full"
+                                                                                rows={3}
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell>
+                                                                        <TableCell className="p-2">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 placeholder="1" 
                                                                                 value={currentItem.quantity} 
                                                                                 onChange={e => handleCurrentItemChange('quantity', e.target.value)}
-                                                                                className="h-8 text-sm"
+                                                                                className="h-10 text-sm w-full"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell>
+                                                                        <TableCell className="p-2">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 step="0.01" 
                                                                                 placeholder="0.00" 
                                                                                 value={currentItem.unitWeight || ''} 
                                                                                 onChange={e => handleCurrentItemChange('unitWeight', e.target.value)}
-                                                                                className="h-8 text-sm"
+                                                                                className="h-10 text-sm w-full"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell>
+                                                                        <TableCell className="p-2">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 step="0.01" 
                                                                                 placeholder="0.00" 
                                                                                 value={currentItem.unitPrice} 
                                                                                 onChange={e => handleCurrentItemChange('unitPrice', e.target.value)}
-                                                                                className="h-8 text-sm"
+                                                                                className="h-10 text-sm w-full"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell>
+                                                                        <TableCell className="p-2">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 step="0.01" 
                                                                                 placeholder="0" 
                                                                                 value={currentItem.taxRate || ''} 
                                                                                 onChange={e => handleCurrentItemChange('taxRate', e.target.value)}
-                                                                                className="h-8 text-sm"
+                                                                                className="h-10 text-sm w-full"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell>
+                                                                        <TableCell className="p-2">
                                                                             <Input 
                                                                                 type="number" 
                                                                                 placeholder="0" 
                                                                                 value={currentItem.leadTimeDays || ''} 
                                                                                 onChange={e => handleCurrentItemChange('leadTimeDays', e.target.value)}
-                                                                                className="h-8 text-sm"
+                                                                                className="h-10 text-sm w-full"
                                                                             />
                                                                         </TableCell>
-                                                                        <TableCell>
-                                                                            <span className="text-sm font-medium">
+                                                                        <TableCell className="p-2">
+                                                                            <div className="text-sm font-medium text-center">
                                                                                 {calculateItemTotals(currentItem).totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-                                                                            </span>
+                                                                            </div>
                                                                         </TableCell>
-                                                                        <TableCell className="text-right">
-                                                                            <div className="flex items-center gap-1">
+                                                                        <TableCell className="text-right p-2">
+                                                                            <div className="flex items-center justify-center gap-1">
                                                                                 <Button 
                                                                                     type="button" 
                                                                                     variant="ghost" 
                                                                                     size="icon"
                                                                                     onClick={handleUpdateItem}
                                                                                     title="Salvar alterações"
-                                                                                    className="h-8 w-8 text-green-600 hover:text-green-700"
+                                                                                    className="h-9 w-9 text-green-600 hover:text-green-700"
                                                                                 >
                                                                                     <Check className="h-4 w-4" />
                                                                                 </Button>
@@ -1442,7 +1442,7 @@ export default function QuotationsPage() {
                                                                                     size="icon"
                                                                                     onClick={handleCancelEdit}
                                                                                     title="Cancelar edição"
-                                                                                    className="h-8 w-8 text-red-600 hover:text-red-700"
+                                                                                    className="h-9 w-9 text-red-600 hover:text-red-700"
                                                                                 >
                                                                                     <X className="h-4 w-4" />
                                                                                 </Button>
@@ -1454,41 +1454,60 @@ export default function QuotationsPage() {
                                                             
                                                             return (
                                                                 <TableRow key={index}>
-                                                                    <TableCell className="font-mono text-sm">{item.code || '-'}</TableCell>
-                                                                    <TableCell className="font-medium">{item.description}</TableCell>
-                                                                    <TableCell>{item.quantity}</TableCell>
-                                                                    <TableCell>
+                                                                    <TableCell className="font-mono text-sm p-2">{item.code || '-'}</TableCell>
+                                                                    <TableCell className="font-medium p-2">
+                                                                        <div className="whitespace-normal break-words">
+                                                                            {item.description}
+                                                                        </div>
+                                                                    </TableCell>
+                                                                    <TableCell className="text-center p-2">{item.quantity}</TableCell>
+                                                                    <TableCell className="text-center p-2">
                                                                         {item.unitWeight && item.unitWeight > 0 ? (
                                                                             <span className="text-sm">{item.unitWeight.toFixed(2)} kg</span>
                                                                         ) : (
                                                                             <span className="text-muted-foreground text-xs">-</span>
                                                                         )}
                                                                     </TableCell>
-                                                                    <TableCell>{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
-                                                                    <TableCell>{item.taxRate || 0}%</TableCell>
-                                                                    <TableCell>
+                                                                    <TableCell className="text-right p-2">{item.unitPrice.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
+                                                                    <TableCell className="text-center p-2">{item.taxRate || 0}%</TableCell>
+                                                                    <TableCell className="text-center p-2">
                                                                         {item.leadTimeDays ? (
                                                                             <Badge variant="outline">{item.leadTimeDays} dias</Badge>
                                                                         ) : (
                                                                             <span className="text-muted-foreground text-xs">N/A</span>
                                                                         )}
                                                                     </TableCell>
-                                                                    <TableCell>{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
-                                                                    <TableCell className="text-right">
-                                                                        <div className="flex items-center gap-1">
+                                                                    <TableCell className="text-right font-medium p-2">{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
+                                                                    <TableCell className="text-right p-2">
+                                                                        <div className="flex items-center justify-center gap-1">
                                                                             <Button 
                                                                                 type="button" 
                                                                                 variant="ghost" 
                                                                                 size="icon"
                                                                                 onClick={() => handleDuplicateItem(index)}
                                                                                 title="Duplicar item"
+                                                                                className="h-8 w-8"
                                                                             >
                                                                                 <Copy className="h-4 w-4" />
                                                                             </Button>
-                                                                            <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}>
+                                                                            <Button 
+                                                                                type="button" 
+                                                                                variant="ghost" 
+                                                                                size="icon" 
+                                                                                onClick={() => handleEditItem(index)}
+                                                                                title="Editar item"
+                                                                                className="h-8 w-8"
+                                                                            >
                                                                                 <Pencil className="h-4 w-4" />
                                                                             </Button>
-                                                                            <Button type="button" variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => remove(index)}>
+                                                                            <Button 
+                                                                                type="button" 
+                                                                                variant="ghost" 
+                                                                                size="icon" 
+                                                                                className="text-destructive hover:text-destructive h-8 w-8" 
+                                                                                onClick={() => remove(index)}
+                                                                                title="Remover item"
+                                                                            >
                                                                                 <Trash2 className="h-4 w-4" />
                                                                             </Button>
                                                                         </div>
