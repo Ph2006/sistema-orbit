@@ -923,9 +923,9 @@ export default function MaterialsPage() {
                                                                     <Folder className="h-8 w-8 text-blue-500" />
                                                                 </div>
                                                                 <div className="flex-1 min-w-0">
-                                                                    <h3 className="font-medium text-sm text-gray-900 truncate">
-                                                                        OS {folder.order.internalOS}
-                                                                    </h3>
+                                                                                                                                        <h3 className="font-medium text-sm text-gray-100 truncate">
+                                                                         OS {folder.order.internalOS}
+                                                                     </h3>
                                                                     <p className="text-sm text-gray-500 truncate">
                                                                         {folder.order.customerName}
                                                                     </p>
