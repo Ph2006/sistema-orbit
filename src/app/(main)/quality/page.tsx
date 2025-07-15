@@ -3943,6 +3943,15 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
     const [editMeasurementIndex, setEditMeasurementIndex] = useState<number | null>(null);
     const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>('');
+    
+    // Debug: Verificar se fieldArrayProps está funcionando
+    useEffect(() => {
+        console.log('fieldArrayProps atualizado:', {
+            fieldsCount: fieldArrayProps.fields.length,
+            updateFunction: typeof fieldArrayProps.update,
+            fields: fieldArrayProps.fields
+        });
+    }, [fieldArrayProps.fields]);
 
     const watchedPhotos = form.watch("photos", []);
 
@@ -4115,19 +4124,25 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     
     const handleEditMeasurement = (index: number) => {
         const measurementToEdit = fieldArrayProps.fields[index];
+        console.log('Editando medição:', measurementToEdit); // Debug
         setNewMeasurement({
-            dimensionName: measurementToEdit.dimensionName,
-            nominalValue: measurementToEdit.nominalValue.toString(),
-            toleranceMin: measurementToEdit.toleranceMin?.toString() ?? '',
-            toleranceMax: measurementToEdit.toleranceMax?.toString() ?? '',
-            measuredValue: measurementToEdit.measuredValue.toString(),
-            instrumentUsed: measurementToEdit.instrumentUsed,
+            dimensionName: measurementToEdit.dimensionName || '',
+            nominalValue: measurementToEdit.nominalValue ? measurementToEdit.nominalValue.toString() : '',
+            toleranceMin: measurementToEdit.toleranceMin ? measurementToEdit.toleranceMin.toString() : '',
+            toleranceMax: measurementToEdit.toleranceMax ? measurementToEdit.toleranceMax.toString() : '',
+            measuredValue: measurementToEdit.measuredValue ? measurementToEdit.measuredValue.toString() : '',
+            instrumentUsed: measurementToEdit.instrumentUsed || '',
         });
         setEditMeasurementIndex(index);
+        console.log('Estado após carregar para edição:', { index, editMeasurementIndex }); // Debug
     };
 
     const handleUpdateMeasurement = () => {
-        if (editMeasurementIndex === null) return;
+        console.log('Tentando atualizar medição:', { editMeasurementIndex, newMeasurement }); // Debug
+        if (editMeasurementIndex === null) {
+            console.log('Erro: editMeasurementIndex é null'); // Debug
+            return;
+        }
         
         const nominal = parseFloat(newMeasurement.nominalValue);
         const measured = parseFloat(newMeasurement.measuredValue);
@@ -4187,7 +4202,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             }
         }
         
-        fieldArrayProps.update(editMeasurementIndex, {
+        const updatedMeasurement = {
             ...fieldArrayProps.fields[editMeasurementIndex],
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
@@ -4196,15 +4211,21 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
             result: result,
-        });
+        };
+        
+        console.log('Atualizando medição com dados:', updatedMeasurement); // Debug
+        fieldArrayProps.update(editMeasurementIndex, updatedMeasurement);
 
         setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
         setEditMeasurementIndex(null);
+        console.log('Medição atualizada com sucesso!'); // Debug
     };
     
     const handleCancelEdit = () => {
+        console.log('Cancelando edição'); // Debug
         setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
         setEditMeasurementIndex(null);
+        console.log('Edição cancelada, estado limpo'); // Debug
     };
 
     return (<>
@@ -4250,14 +4271,36 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                     <TableCell>{field.measuredValue}</TableCell><TableCell>{field.instrumentUsed}</TableCell>
                     <TableCell><Badge variant={getStatusVariant(field.result)}>{field.result}</Badge></TableCell>
                     <TableCell className="flex items-center">
-                        <Button type="button" variant="ghost" size="icon" onClick={() => handleEditMeasurement(index)}><Pencil className="h-4 w-4" /></Button>
+                        <Button 
+                            type="button" 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => {
+                                console.log('Clicou para editar medição index:', index); // Debug
+                                handleEditMeasurement(index);
+                            }}
+                        >
+                            <Pencil className="h-4 w-4" />
+                        </Button>
                         <Button type="button" variant="ghost" size="icon" onClick={() => fieldArrayProps.remove(index)}><Trash2 className="h-4 w-4 text-destructive"/></Button>
                     </TableCell>
                 </TableRow>))}
             </TableBody></Table>
             )}
-            <div className="mt-4 space-y-4 p-4 border rounded-md">
-                <h4 className="font-medium">{editMeasurementIndex !== null ? 'Editar Medição' : 'Adicionar Nova Medição'}</h4>
+            <div className={`mt-4 space-y-4 p-4 border rounded-md ${editMeasurementIndex !== null ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                <h4 className="font-medium flex items-center gap-2">
+                    {editMeasurementIndex !== null ? (
+                        <>
+                            <Pencil className="h-4 w-4 text-blue-600" />
+                            Editar Medição #{editMeasurementIndex + 1}
+                        </>
+                    ) : (
+                        <>
+                            <PlusCircle className="h-4 w-4 text-green-600" />
+                            Adicionar Nova Medição
+                        </>
+                    )}
+                </h4>
                 <div>
                     <Label>Nome da Dimensão</Label>
                     <Input value={newMeasurement.dimensionName} onChange={(e) => setNewMeasurement({...newMeasurement, dimensionName: e.target.value})} placeholder="Ex: Diâmetro externo"/>
@@ -4294,8 +4337,23 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                     </Select>
                 </div>
                  <div className="flex justify-end mt-4 gap-2">
-                    {editMeasurementIndex !== null && <Button type="button" variant="outline" size="sm" onClick={handleCancelEdit}>Cancelar</Button>}
-                    <Button type="button" size="sm" onClick={editMeasurementIndex !== null ? handleUpdateMeasurement : handleAddMeasurement}>
+                    {editMeasurementIndex !== null && (
+                        <Button type="button" variant="outline" size="sm" onClick={handleCancelEdit}>
+                            Cancelar
+                        </Button>
+                    )}
+                    <Button 
+                        type="button" 
+                        size="sm" 
+                        onClick={() => {
+                            console.log('Clicou no botão:', editMeasurementIndex !== null ? 'Atualizar' : 'Adicionar'); // Debug
+                            if (editMeasurementIndex !== null) {
+                                handleUpdateMeasurement();
+                            } else {
+                                handleAddMeasurement();
+                            }
+                        }}
+                    >
                         <PlusCircle className="mr-2 h-4 w-4" />
                         {editMeasurementIndex !== null ? 'Atualizar Medição' : 'Adicionar Medição'}
                     </Button>
