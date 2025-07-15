@@ -3699,25 +3699,25 @@ export default function QualityPage() {
                     <ScrollArea className="flex-1 p-1 pr-4">
                         <div className="space-y-4 p-2">
                             {dialogType === 'material' && (
-                                <MaterialInspectionForm form={materialInspectionForm} orders={orders} teamMembers={teamMembers} />
+                                <MaterialInspectionForm form={materialInspectionForm} orders={orders} teamMembers={teamMembers} selectedInspection={selectedInspection} />
                             )}
                             {dialogType === 'dimensional' && (
-                                <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement, update: updateMeasurement }} calibrations={calibrations} toast={toast} />
+                                <DimensionalReportForm form={dimensionalReportForm} orders={orders} teamMembers={teamMembers} fieldArrayProps={{ fields: measurementFields, append: appendMeasurement, remove: removeMeasurement, update: updateMeasurement }} calibrations={calibrations} toast={toast} selectedInspection={selectedInspection} />
                             )}
                              {dialogType === 'welding' && (
-                                 <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} />
+                                 <WeldingInspectionForm form={weldingInspectionForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} selectedInspection={selectedInspection} />
                             )}
-                             {dialogType === 'painting' && (
-                                <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} />
+                                                          {dialogType === 'painting' && (
+                                 <PaintingReportForm form={paintingReportForm} orders={orders} teamMembers={teamMembers} selectedInspection={selectedInspection} />
                             )}
                              {dialogType === 'liquidPenetrant' && (
-                                 <LiquidPenetrantForm form={liquidPenetrantForm} orders={orders} teamMembers={teamMembers} />
+                                 <LiquidPenetrantForm form={liquidPenetrantForm} orders={orders} teamMembers={teamMembers} selectedInspection={selectedInspection} />
                             )}
                             {dialogType === 'ultrasound' && (
-                                <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} fieldArrayProps={{ fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult }} />
+                                <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} fieldArrayProps={{ fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult }} selectedInspection={selectedInspection} />
                             )}
                              {dialogType === 'lessonsLearned' && (
-                                <LessonsLearnedForm form={lessonsLearnedForm} orders={orders} teamMembers={teamMembers} />
+                                <LessonsLearnedForm form={lessonsLearnedForm} orders={orders} teamMembers={teamMembers} selectedInspection={selectedInspection} />
                             )}
                         </div>
                     </ScrollArea>
@@ -3737,11 +3737,18 @@ export default function QualityPage() {
 
 
 // --- SUB-COMPONENTS FOR FORMS ---
-function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+function MaterialInspectionForm({ form, orders, teamMembers, selectedInspection }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], selectedInspection?: any }) {
     const { toast } = useToast();
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
-    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    
+    // Só limpa o itemId se não estiver editando um relatório existente
+    const isEditingExistingReport = !!selectedInspection;
+    useEffect(() => { 
+        if (!isEditingExistingReport) {
+            form.setValue('itemId', ''); 
+        }
+    }, [watchedOrderId, form, isEditingExistingReport]);
 
     const watchedPhotos = form.watch("photos", []);
 
@@ -3904,7 +3911,7 @@ function MaterialInspectionForm({ form, orders, teamMembers }: { form: any, orde
     </>);
 }
 
-function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, calibrations, toast }: any) {
+function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, calibrations, toast, selectedInspection }: any) {
     // ✅ ADICIONAR ESTE DEBUG TEMPORÁRIO
     useEffect(() => {
         if (calibrations.length > 0) {
@@ -3929,7 +3936,17 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     const watchedOrderId = form.watch("orderId");
     const watchedItemId = form.watch("itemId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
-    useEffect(() => { form.setValue('itemId', ''); form.setValue('partIdentifier', ''); }, [watchedOrderId, form]);
+    
+    // Buscar a inspeção sendo editada a partir dos props do componente pai
+    const isEditingExistingReport = !!selectedInspection;
+    
+    useEffect(() => { 
+        // Só limpa o itemId se não estiver editando um relatório existente
+        if (!isEditingExistingReport) {
+            form.setValue('itemId', ''); 
+            form.setValue('partIdentifier', ''); 
+        }
+    }, [watchedOrderId, form, isEditingExistingReport]);
     
     const selectedItemInfo = useMemo(() => {
         if (!watchedItemId) return null;
@@ -4552,10 +4569,17 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     </>);
 }
 
-function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[] }) {
+function WeldingInspectionForm({ form, orders, teamMembers, calibrations, selectedInspection }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[], selectedInspection?: any }) {
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
-    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    
+    // Só limpa o itemId se não estiver editando um relatório existente
+    const isEditingExistingReport = !!selectedInspection;
+    useEffect(() => { 
+        if (!isEditingExistingReport) {
+            form.setValue('itemId', ''); 
+        }
+    }, [watchedOrderId, form, isEditingExistingReport]);
     const inspectionType = form.watch("inspectionType");
 
     const watchedPhotos = form.watch("photos", []);
@@ -4741,18 +4765,32 @@ function WeldingInspectionForm({ form, orders, teamMembers, calibrations }: { fo
     </div>);
 }
 
-function PaintingReportForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+function PaintingReportForm({ form, orders, teamMembers, selectedInspection }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], selectedInspection?: any }) {
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
-    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    
+    // Só limpa o itemId se não estiver editando um relatório existente
+    const isEditingExistingReport = !!selectedInspection;
+    useEffect(() => { 
+        if (!isEditingExistingReport) {
+            form.setValue('itemId', ''); 
+        }
+    }, [watchedOrderId, form, isEditingExistingReport]);
 
     return (<div>Formulário de Pintura aqui</div>);
 }
 
-function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+function LiquidPenetrantForm({ form, orders, teamMembers, selectedInspection }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], selectedInspection?: any }) {
   const watchedOrderId = form.watch("orderId");
   const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
-  useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+  
+  // Só limpa o itemId se não estiver editando um relatório existente
+  const isEditingExistingReport = !!selectedInspection;
+  useEffect(() => { 
+      if (!isEditingExistingReport) {
+          form.setValue('itemId', ''); 
+      }
+  }, [watchedOrderId, form, isEditingExistingReport]);
   const watchedPhotos = form.watch("photos", []);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -4938,16 +4976,20 @@ function LiquidPenetrantForm({ form, orders, teamMembers }: { form: any, orders:
     </div>);
 }
 
-function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, fieldArrayProps }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[], toast: any, fieldArrayProps: any }) {
+function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, fieldArrayProps, selectedInspection }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], calibrations: Calibration[], toast: any, fieldArrayProps: any, selectedInspection?: any }) {
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => {
         if (!watchedOrderId) return [];
         return orders.find(o => o.id === watchedOrderId)?.items || [];
     }, [watchedOrderId, orders]);
     
+    // Só limpa o itemId se não estiver editando um relatório existente
+    const isEditingExistingReport = !!selectedInspection;
     useEffect(() => {
-        form.setValue('itemId', '');
-    }, [watchedOrderId, form]);
+        if (!isEditingExistingReport) {
+            form.setValue('itemId', '');
+        }
+    }, [watchedOrderId, form, isEditingExistingReport]);
     
     const [newResult, setNewResult] = useState<Partial<UltrasoundResult>>({ jointCode: '', evaluationResult: 'Conforme' });
     const [editResultIndex, setEditResultIndex] = useState<number | null>(null);
@@ -5204,10 +5246,17 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
     );
 }
 
-function LessonsLearnedForm({ form, orders, teamMembers }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[] }) {
+function LessonsLearnedForm({ form, orders, teamMembers, selectedInspection }: { form: any, orders: OrderInfo[], teamMembers: TeamMember[], selectedInspection?: any }) {
     const watchedOrderId = form.watch("orderId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
-    useEffect(() => { form.setValue('itemId', ''); }, [watchedOrderId, form]);
+    
+    // Só limpa o itemId se não estiver editando um relatório existente
+    const isEditingExistingReport = !!selectedInspection;
+    useEffect(() => { 
+        if (!isEditingExistingReport) {
+            form.setValue('itemId', ''); 
+        }
+    }, [watchedOrderId, form, isEditingExistingReport]);
     const analysisToolOptions = ["5 Porquês", "Diagrama de Ishikawa", "Análise de Causa Raiz (RCA)", "FTA (Análise de Árvore de Falhas)", "FMEA (Análise de Modos e Efeitos de Falha)", "Outro"];
     return (
         <div className="space-y-4">
