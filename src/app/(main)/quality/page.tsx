@@ -3941,17 +3941,11 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     }, [watchedItemId, form]);
     
     const [newMeasurement, setNewMeasurement] = useState({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
-    const [editMeasurementIndex, setEditMeasurementIndex] = useState<number | null>(null);
+    const [editingIndex, setEditingIndex] = useState<number | null>(null);
+    const [editingData, setEditingData] = useState<any>(null);
     const [selectedInstrumentId, setSelectedInstrumentId] = useState<string>('');
     
-    // Debug: Verificar se fieldArrayProps está funcionando
-    useEffect(() => {
-        console.log('fieldArrayProps atualizado:', {
-            fieldsCount: fieldArrayProps.fields.length,
-            updateFunction: typeof fieldArrayProps.update,
-            fields: fieldArrayProps.fields
-        });
-    }, [fieldArrayProps.fields]);
+
 
     const watchedPhotos = form.watch("photos", []);
 
@@ -4124,8 +4118,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     
     const handleEditMeasurement = (index: number) => {
         const measurementToEdit = fieldArrayProps.fields[index];
-        console.log('Editando medição:', measurementToEdit); // Debug
-        setNewMeasurement({
+        setEditingData({
             dimensionName: measurementToEdit.dimensionName || '',
             nominalValue: measurementToEdit.nominalValue ? measurementToEdit.nominalValue.toString() : '',
             toleranceMin: measurementToEdit.toleranceMin ? measurementToEdit.toleranceMin.toString() : '',
@@ -4133,21 +4126,18 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             measuredValue: measurementToEdit.measuredValue ? measurementToEdit.measuredValue.toString() : '',
             instrumentUsed: measurementToEdit.instrumentUsed || '',
         });
-        setEditMeasurementIndex(index);
-        console.log('Estado após carregar para edição:', { index, editMeasurementIndex }); // Debug
+        setEditingIndex(index);
     };
 
-    const handleUpdateMeasurement = () => {
-        console.log('Tentando atualizar medição:', { editMeasurementIndex, newMeasurement }); // Debug
-        if (editMeasurementIndex === null) {
-            console.log('Erro: editMeasurementIndex é null'); // Debug
+    const handleSaveInlineEdit = () => {
+        if (editingIndex === null || !editingData) {
             return;
         }
         
-        const nominal = parseFloat(newMeasurement.nominalValue);
-        const measured = parseFloat(newMeasurement.measuredValue);
+        const nominal = parseFloat(editingData.nominalValue);
+        const measured = parseFloat(editingData.measuredValue);
 
-        if (!newMeasurement.dimensionName || isNaN(nominal) || isNaN(measured) || !newMeasurement.instrumentUsed) {
+        if (!editingData.dimensionName || isNaN(nominal) || isNaN(measured) || !editingData.instrumentUsed) {
             toast({
                 variant: "destructive",
                 title: "Campos obrigatórios",
@@ -4160,13 +4150,13 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         let result: "Conforme" | "Não Conforme" = "Conforme";
         
         // Verificar tolerâncias se foram preenchidas
-        if (newMeasurement.toleranceMin || newMeasurement.toleranceMax) {
+        if (editingData.toleranceMin || editingData.toleranceMax) {
             let lowerBound = nominal;
             let upperBound = nominal;
             
             // Processar tolerância 1
-            if (newMeasurement.toleranceMin) {
-                const tol1 = newMeasurement.toleranceMin.trim();
+            if (editingData.toleranceMin) {
+                const tol1 = editingData.toleranceMin.trim();
                 if (tol1.startsWith('+')) {
                     upperBound = nominal + Math.abs(parseFloat(tol1.substring(1)));
                 } else if (tol1.startsWith('-')) {
@@ -4180,8 +4170,8 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             }
             
             // Processar tolerância 2
-            if (newMeasurement.toleranceMax) {
-                const tol2 = newMeasurement.toleranceMax.trim();
+            if (editingData.toleranceMax) {
+                const tol2 = editingData.toleranceMax.trim();
                 if (tol2.startsWith('+')) {
                     upperBound = nominal + Math.abs(parseFloat(tol2.substring(1)));
                 } else if (tol2.startsWith('-')) {
@@ -4189,7 +4179,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                 } else {
                     // Se não tem sinal, assume como ±
                     const tolValue = Math.abs(parseFloat(tol2));
-                    if (!newMeasurement.toleranceMin) {
+                    if (!editingData.toleranceMin) {
                         lowerBound = nominal - tolValue;
                         upperBound = nominal + tolValue;
                     }
@@ -4203,29 +4193,26 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         }
         
         const updatedMeasurement = {
-            ...fieldArrayProps.fields[editMeasurementIndex],
-            dimensionName: newMeasurement.dimensionName,
+            ...fieldArrayProps.fields[editingIndex],
+            dimensionName: editingData.dimensionName,
             nominalValue: nominal,
-            toleranceMin: newMeasurement.toleranceMin || undefined,
-            toleranceMax: newMeasurement.toleranceMax || undefined,
+            toleranceMin: editingData.toleranceMin || undefined,
+            toleranceMax: editingData.toleranceMax || undefined,
             measuredValue: measured,
-            instrumentUsed: newMeasurement.instrumentUsed,
+            instrumentUsed: editingData.instrumentUsed,
             result: result,
         };
         
-        console.log('Atualizando medição com dados:', updatedMeasurement); // Debug
-        fieldArrayProps.update(editMeasurementIndex, updatedMeasurement);
+        fieldArrayProps.update(editingIndex, updatedMeasurement);
 
-        setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
-        setEditMeasurementIndex(null);
-        console.log('Medição atualizada com sucesso!'); // Debug
+        // Limpar estado de edição
+        setEditingIndex(null);
+        setEditingData(null);
     };
     
-    const handleCancelEdit = () => {
-        console.log('Cancelando edição'); // Debug
-        setNewMeasurement({ dimensionName: '', nominalValue: '', toleranceMin: '', toleranceMax: '', measuredValue: '', instrumentUsed: '' });
-        setEditMeasurementIndex(null);
-        console.log('Edição cancelada, estado limpo'); // Debug
+    const handleCancelInlineEdit = () => {
+        setEditingIndex(null);
+        setEditingData(null);
     };
 
     return (<>
@@ -4262,44 +4249,149 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
         <Card><CardHeader><CardTitle className="text-base">Medições</CardTitle></CardHeader>
         <CardContent>
             {fieldArrayProps.fields.length > 0 && (
-            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tolerância 1</TableHead><TableHead>Tolerância 2</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <Table><TableHeader><TableRow><TableHead>Dimensão</TableHead><TableHead>Nominal</TableHead><TableHead>Tolerância 1</TableHead><TableHead>Tolerância 2</TableHead><TableHead>Medido</TableHead><TableHead>Instrumento</TableHead><TableHead>Resultado</TableHead><TableHead>Ações</TableHead></TableRow></TableHeader>
             <TableBody>
                 {fieldArrayProps.fields.map((field: any, index: number) => (
-                <TableRow key={field.id}>
-                    <TableCell>{field.dimensionName}</TableCell><TableCell>{field.nominalValue}</TableCell>
-                    <TableCell>{field.toleranceMin ?? '-'}</TableCell><TableCell>{field.toleranceMax ?? '-'}</TableCell>
-                    <TableCell>{field.measuredValue}</TableCell><TableCell>{field.instrumentUsed}</TableCell>
-                    <TableCell><Badge variant={getStatusVariant(field.result)}>{field.result}</Badge></TableCell>
-                    <TableCell className="flex items-center">
-                        <Button 
-                            type="button" 
-                            variant="ghost" 
-                            size="icon" 
-                            onClick={() => {
-                                console.log('Clicou para editar medição index:', index); // Debug
-                                handleEditMeasurement(index);
-                            }}
-                        >
-                            <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button type="button" variant="ghost" size="icon" onClick={() => fieldArrayProps.remove(index)}><Trash2 className="h-4 w-4 text-destructive"/></Button>
-                    </TableCell>
+                <TableRow key={field.id} className={editingIndex === index ? 'bg-blue-50 border-blue-200' : ''}>
+                    {editingIndex === index ? (
+                        // Modo de edição inline
+                        <>
+                            <TableCell>
+                                <Input 
+                                    value={editingData?.dimensionName || ''} 
+                                    onChange={(e) => setEditingData({...editingData, dimensionName: e.target.value})}
+                                    className="w-full min-w-[120px]"
+                                    placeholder="Nome da dimensão"
+                                />
+                            </TableCell>
+                            <TableCell>
+                                <Input 
+                                    type="number" 
+                                    step="any"
+                                    value={editingData?.nominalValue || ''} 
+                                    onChange={(e) => setEditingData({...editingData, nominalValue: e.target.value})}
+                                    className="w-full min-w-[80px]"
+                                    placeholder="Nominal"
+                                />
+                            </TableCell>
+                            <TableCell>
+                                <Input 
+                                    value={editingData?.toleranceMin || ''} 
+                                    onChange={(e) => setEditingData({...editingData, toleranceMin: e.target.value})}
+                                    className="w-full min-w-[80px]"
+                                    placeholder="+0.1 ou -0.05"
+                                />
+                            </TableCell>
+                            <TableCell>
+                                <Input 
+                                    value={editingData?.toleranceMax || ''} 
+                                    onChange={(e) => setEditingData({...editingData, toleranceMax: e.target.value})}
+                                    className="w-full min-w-[80px]"
+                                    placeholder="+0.2 ou -0.1"
+                                />
+                            </TableCell>
+                            <TableCell>
+                                <Input 
+                                    type="number" 
+                                    step="any"
+                                    value={editingData?.measuredValue || ''} 
+                                    onChange={(e) => setEditingData({...editingData, measuredValue: e.target.value})}
+                                    className="w-full min-w-[80px]"
+                                    placeholder="Medido"
+                                />
+                            </TableCell>
+                            <TableCell>
+                                <Select 
+                                    value={editingData?.instrumentUsed || ''} 
+                                    onValueChange={(value) => setEditingData({...editingData, instrumentUsed: value})}
+                                >
+                                    <SelectTrigger className="w-full min-w-[120px]">
+                                        <SelectValue placeholder="Instrumento" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {calibrations.length > 0 ? (
+                                            calibrations.map(cal => 
+                                                <SelectItem key={cal.id} value={cal.equipmentName}>
+                                                    {cal.equipmentName} ({cal.internalCode})
+                                                </SelectItem>
+                                            )
+                                        ) : (
+                                            <SelectItem value="none" disabled>Cadastre na aba 'Calibração'</SelectItem>
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant="secondary">Editando...</Badge>
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-1">
+                                    <Button 
+                                        type="button" 
+                                        variant="ghost" 
+                                        size="icon"
+                                        onClick={handleSaveInlineEdit}
+                                        className="text-green-600 hover:text-green-700"
+                                        title="Salvar"
+                                    >
+                                        <CheckCircle className="h-4 w-4" />
+                                    </Button>
+                                    <Button 
+                                        type="button" 
+                                        variant="ghost" 
+                                        size="icon"
+                                        onClick={handleCancelInlineEdit}
+                                        className="text-red-600 hover:text-red-700"
+                                        title="Cancelar"
+                                    >
+                                        <XCircle className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </TableCell>
+                        </>
+                    ) : (
+                        // Modo de visualização normal
+                        <>
+                            <TableCell>{field.dimensionName}</TableCell>
+                            <TableCell>{field.nominalValue}</TableCell>
+                            <TableCell>{field.toleranceMin ?? '-'}</TableCell>
+                            <TableCell>{field.toleranceMax ?? '-'}</TableCell>
+                            <TableCell>{field.measuredValue}</TableCell>
+                            <TableCell>{field.instrumentUsed}</TableCell>
+                            <TableCell><Badge variant={getStatusVariant(field.result)}>{field.result}</Badge></TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-1">
+                                    <Button 
+                                        type="button" 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        onClick={() => handleEditMeasurement(index)}
+                                        disabled={editingIndex !== null && editingIndex !== index}
+                                        title={editingIndex !== null && editingIndex !== index ? "Termine a edição atual primeiro" : "Editar"}
+                                    >
+                                        <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button 
+                                        type="button" 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        onClick={() => fieldArrayProps.remove(index)}
+                                        disabled={editingIndex !== null}
+                                        title={editingIndex !== null ? "Termine a edição para excluir" : "Excluir"}
+                                    >
+                                        <Trash2 className="h-4 w-4 text-destructive"/>
+                                    </Button>
+                                </div>
+                            </TableCell>
+                        </>
+                    )}
                 </TableRow>))}
             </TableBody></Table>
             )}
-            <div className={`mt-4 space-y-4 p-4 border rounded-md ${editMeasurementIndex !== null ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+            <div className="mt-4 space-y-4 p-4 border rounded-md border-gray-200">
                 <h4 className="font-medium flex items-center gap-2">
-                    {editMeasurementIndex !== null ? (
-                        <>
-                            <Pencil className="h-4 w-4 text-blue-600" />
-                            Editar Medição #{editMeasurementIndex + 1}
-                        </>
-                    ) : (
-                        <>
-                            <PlusCircle className="h-4 w-4 text-green-600" />
-                            Adicionar Nova Medição
-                        </>
-                    )}
+                    <PlusCircle className="h-4 w-4 text-green-600" />
+                    Adicionar Nova Medição
                 </h4>
                 <div>
                     <Label>Nome da Dimensão</Label>
@@ -4336,26 +4428,15 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                         </SelectContent>
                     </Select>
                 </div>
-                 <div className="flex justify-end mt-4 gap-2">
-                    {editMeasurementIndex !== null && (
-                        <Button type="button" variant="outline" size="sm" onClick={handleCancelEdit}>
-                            Cancelar
-                        </Button>
-                    )}
+                 <div className="flex justify-end mt-4">
                     <Button 
                         type="button" 
                         size="sm" 
-                        onClick={() => {
-                            console.log('Clicou no botão:', editMeasurementIndex !== null ? 'Atualizar' : 'Adicionar'); // Debug
-                            if (editMeasurementIndex !== null) {
-                                handleUpdateMeasurement();
-                            } else {
-                                handleAddMeasurement();
-                            }
-                        }}
+                        onClick={handleAddMeasurement}
+                        disabled={editingIndex !== null}
                     >
                         <PlusCircle className="mr-2 h-4 w-4" />
-                        {editMeasurementIndex !== null ? 'Atualizar Medição' : 'Adicionar Medição'}
+                        {editingIndex !== null ? 'Termine a edição para adicionar' : 'Adicionar Medição'}
                     </Button>
                 </div>
             </div>
