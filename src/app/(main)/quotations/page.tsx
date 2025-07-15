@@ -140,6 +140,21 @@ const calculateLeadTime = (product: Product): number => {
     return Math.round(totalDays);
 };
 
+// Função utilitária para normalizar valores de item
+const normalizeItemValues = (item: any): Item => {
+    return {
+        ...item,
+        quantity: Number(item.quantity) || 0,
+        unitPrice: Number(item.unitPrice) || 0,
+        unitWeight: Number(item.unitWeight) || 0,
+        taxRate: Number(item.taxRate) || 0,
+        leadTimeDays: item.leadTimeDays ? Number(item.leadTimeDays) || 0 : undefined,
+        code: item.code || '',
+        description: item.description || '',
+        notes: item.notes || '',
+    };
+};
+
 export default function QuotationsPage() {
     const [quotations, setQuotations] = useState<Quotation[]>([]);
     const [customers, setCustomers] = useState<Customer[]>([]);
@@ -475,7 +490,21 @@ export default function QuotationsPage() {
     };
 
     const handleCurrentItemChange = (field: keyof Item, value: any) => {
-        setCurrentItem(prev => ({...prev, [field]: value}));
+        let processedValue = value;
+        
+        // Converter campos numéricos para number se necessário
+        if (['quantity', 'unitPrice', 'unitWeight', 'taxRate', 'leadTimeDays'].includes(field)) {
+            // Se o valor é uma string vazia, manter como vazio para o input
+            if (value === '') {
+                processedValue = '';
+            } else {
+                // Converter para número, ou 0 se inválido
+                const numValue = Number(value);
+                processedValue = isNaN(numValue) ? 0 : numValue;
+            }
+        }
+        
+        setCurrentItem(prev => ({...prev, [field]: processedValue}));
     };
 
     // Função para adicionar produto do catálogo ao item atual
@@ -484,9 +513,9 @@ export default function QuotationsPage() {
         setCurrentItem({
             code: product.code,
             description: product.description,
-            quantity: currentItem.quantity || 1,
-            unitPrice: product.unitPrice,
-            unitWeight: product.unitWeight || 0,
+            quantity: Number(currentItem.quantity) || 1,
+            unitPrice: Number(product.unitPrice) || 0,
+            unitWeight: Number(product.unitWeight) || 0,
             taxRate: 0,
             leadTimeDays: leadTime > 0 ? leadTime : undefined,
             notes: ''
@@ -500,7 +529,8 @@ export default function QuotationsPage() {
     };
 
     const handleAddItem = () => {
-        const result = itemSchema.safeParse(currentItem);
+        const normalizedItem = normalizeItemValues(currentItem);
+        const result = itemSchema.safeParse(normalizedItem);
         if (!result.success) {
             const firstError = result.error.errors[0];
             toast({
@@ -510,13 +540,14 @@ export default function QuotationsPage() {
             });
             return;
         }
-        append(currentItem);
+        append(normalizedItem);
         setCurrentItem(emptyItem);
     };
 
     const handleUpdateItem = () => {
         if (editIndex === null) return;
-         const result = itemSchema.safeParse(currentItem);
+        const normalizedItem = normalizeItemValues(currentItem);
+        const result = itemSchema.safeParse(normalizedItem);
         if (!result.success) {
             const firstError = result.error.errors[0];
             toast({
@@ -526,13 +557,15 @@ export default function QuotationsPage() {
             });
             return;
         }
-        update(editIndex, currentItem);
+        update(editIndex, normalizedItem);
         setCurrentItem(emptyItem);
         setEditIndex(null);
     };
 
     const handleEditItem = (index: number) => {
-        setCurrentItem(watchedItems[index]);
+        const item = watchedItems[index];
+        // Normalizar valores antes de editar
+        setCurrentItem(normalizeItemValues(item));
         setEditIndex(index);
     };
 
@@ -814,7 +847,7 @@ export default function QuotationsPage() {
                         item.code || '-',
                         item.description,
                         item.quantity,
-                        item.unitWeight ? `${item.unitWeight.toLocaleString('pt-BR')} kg` : '-',
+                        item.unitWeight && Number(item.unitWeight) > 0 ? `${Number(item.unitWeight).toLocaleString('pt-BR')} kg` : '-',
                         itemTotalWeight > 0 ? `${itemTotalWeight.toLocaleString('pt-BR')} kg` : '-',
                         item.leadTimeDays ? `${item.leadTimeDays} dias` : '-',
                         item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
@@ -1470,8 +1503,8 @@ export default function QuotationsPage() {
                                                                     </TableCell>
                                                                     <TableCell className="text-center p-3 text-base font-medium">{item.quantity}</TableCell>
                                                                     <TableCell className="text-center p-3">
-                                                                        {item.unitWeight && item.unitWeight > 0 ? (
-                                                                            <span className="text-base font-medium">{item.unitWeight.toFixed(2)} kg</span>
+                                                                        {item.unitWeight && Number(item.unitWeight) > 0 ? (
+                                                                            <span className="text-base font-medium">{Number(item.unitWeight).toFixed(2)} kg</span>
                                                                         ) : (
                                                                             <span className="text-muted-foreground text-sm">-</span>
                                                                         )}
