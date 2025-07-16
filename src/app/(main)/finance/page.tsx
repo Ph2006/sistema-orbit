@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Download, Lock, Eye, EyeOff, TrendingUp, TrendingDown, DollarSign, FileText, Calculator, Target, AlertTriangle, CheckCircle, Package } from "lucide-react";
-import { collection, getDocs } from "firebase/firestore";
+import { Download, Lock, Eye, EyeOff, TrendingUp, TrendingDown, DollarSign, FileText, Calculator, Target, AlertTriangle, CheckCircle, Package, Plus, Edit, Save, X } from "lucide-react";
+import { collection, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -21,6 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Separator } from "@/components/ui/separator";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 // Tipos de dados
 interface OrderFinancialData {
@@ -101,6 +103,13 @@ export default function FinancePage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Estados para lançamento manual de receita
+  const [isRevenueModalOpen, setIsRevenueModalOpen] = useState(false);
+  const [selectedOrderForRevenue, setSelectedOrderForRevenue] = useState<any>(null);
+  const [manualGrossRevenue, setManualGrossRevenue] = useState('');
+  const [manualTaxAmount, setManualTaxAmount] = useState('');
+  const [isSavingRevenue, setIsSavingRevenue] = useState(false);
+  
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
@@ -130,6 +139,13 @@ export default function FinancePage() {
             customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
             status: data.status || 'Indefinido',
             deliveryDate: data.deliveryDate?.toDate ? data.deliveryDate.toDate() : null,
+            // Incluir dados de receita manual se existirem
+            manualRevenue: data.manualRevenue ? {
+              grossRevenue: Number(data.manualRevenue.grossRevenue) || 0,
+              taxAmount: Number(data.manualRevenue.taxAmount) || 0,
+              lastUpdate: data.manualRevenue.lastUpdate?.toDate ? data.manualRevenue.lastUpdate.toDate() : null,
+              updatedBy: data.manualRevenue.updatedBy || null,
+            } : null,
             costEntries: (data.costEntries || []).map((entry: any) => ({
               ...entry,
               entryDate: entry.entryDate?.toDate ? entry.entryDate.toDate() : null,
@@ -197,7 +213,13 @@ export default function FinancePage() {
       let netRevenue = 0;
       let quotationItems: any[] = [];
 
-      if (quotation && quotation.items) {
+      // Primeiro, verificar se há receita manual salva na OS
+      if (order.manualRevenue) {
+        grossRevenue = Number(order.manualRevenue.grossRevenue) || 0;
+        taxAmount = Number(order.manualRevenue.taxAmount) || 0;
+        netRevenue = grossRevenue - taxAmount;
+      } else if (quotation && quotation.items) {
+        // Se não há receita manual, usar dados do orçamento
         quotationItems = quotation.items;
         grossRevenue = quotation.items.reduce((sum: number, item: any) => sum + item.totalWithTax, 0);
         taxAmount = quotation.items.reduce((sum: number, item: any) => sum + item.taxAmount, 0);
@@ -274,7 +296,106 @@ export default function FinancePage() {
     });
   };
 
-  // Carregar dados
+  // Função para salvar receita manual
+  const handleSaveManualRevenue = async () => {
+    if (!selectedOrderForRevenue) return;
+    
+    const grossValue = parseFloat(manualGrossRevenue);
+    const taxValue = parseFloat(manualTaxAmount);
+    
+    if (isNaN(grossValue) || grossValue <= 0) {
+      toast({
+        variant: "destructive",
+        title: "Erro de validação",
+        description: "O valor da receita bruta deve ser um número válido maior que zero.",
+      });
+      return;
+    }
+    
+    if (isNaN(taxValue) || taxValue < 0) {
+      toast({
+        variant: "destructive",
+        title: "Erro de validação", 
+        description: "O valor dos impostos deve ser um número válido maior ou igual a zero.",
+      });
+      return;
+    }
+    
+    if (taxValue >= grossValue) {
+      toast({
+        variant: "destructive",
+        title: "Erro de validação",
+        description: "O valor dos impostos não pode ser maior ou igual à receita bruta.",
+      });
+      return;
+    }
+    
+    setIsSavingRevenue(true);
+    
+    try {
+      const orderRef = doc(db, "companies", "mecald", "orders", selectedOrderForRevenue.id);
+      
+      const manualRevenueData = {
+        grossRevenue: grossValue,
+        taxAmount: taxValue,
+        lastUpdate: new Date(),
+        updatedBy: user?.email || 'Sistema',
+      };
+      
+      await updateDoc(orderRef, {
+        manualRevenue: manualRevenueData
+      });
+      
+      toast({
+        title: "Receita salva com sucesso!",
+        description: `Receita bruta: ${grossValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Impostos: ${taxValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+      });
+      
+      // Recarregar dados
+      const [ordersData, quotationsData] = await Promise.all([
+        fetchOrders(),
+        fetchQuotations()
+      ]);
+      
+      setOrders(ordersData);
+      setQuotations(quotationsData);
+      
+      const processedData = processFinancialData(ordersData, quotationsData);
+      setFinancialData(processedData);
+      
+      // Fechar modal e limpar estados
+      setIsRevenueModalOpen(false);
+      setSelectedOrderForRevenue(null);
+      setManualGrossRevenue('');
+      setManualTaxAmount('');
+      
+    } catch (error) {
+      console.error("Erro ao salvar receita manual:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar receita",
+        description: "Não foi possível salvar os dados da receita. Tente novamente.",
+      });
+    } finally {
+      setIsSavingRevenue(false);
+    }
+  };
+
+  // Função para abrir modal de receita manual
+  const handleOpenRevenueModal = (order: any) => {
+    setSelectedOrderForRevenue(order);
+    
+    // Se já existem dados de receita manual, pré-preencher
+    if (order.manualRevenue) {
+      setManualGrossRevenue(order.manualRevenue.grossRevenue.toString());
+      setManualTaxAmount(order.manualRevenue.taxAmount.toString());
+    } else {
+      setManualGrossRevenue('');
+      setManualTaxAmount('');
+    }
+    
+    setIsRevenueModalOpen(true);
+  };
   useEffect(() => {
     const loadData = async () => {
       if (!user || !isAuthenticated) return;
@@ -775,6 +896,11 @@ export default function FinancePage() {
                       <div className="flex items-center gap-4">
                         <span className="font-bold text-primary">OS: {data.internalOS}</span>
                         <span className="text-muted-foreground">{data.customerName}</span>
+                        {data.grossRevenue === 0 && (
+                          <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-300">
+                            💰 Sem Receita
+                          </Badge>
+                        )}
                         <Badge 
                           variant={getMarginBadge(data.grossMargin).variant}
                           className={getMarginBadge(data.grossMargin).color}
@@ -788,6 +914,21 @@ export default function FinancePage() {
                         <span className={`font-semibold ${data.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           Lucro: {data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </span>
+                        {data.grossRevenue === 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const order = orders.find(o => o.id === data.id);
+                              if (order) handleOpenRevenueModal(order);
+                            }}
+                            className="ml-2 h-6 px-2 text-xs"
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Lançar Receita
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </AccordionTrigger>
@@ -798,6 +939,37 @@ export default function FinancePage() {
                         <h4 className="font-semibold mb-4 flex items-center gap-2">
                           <DollarSign className="h-4 w-4" />
                           Resumo Financeiro
+                          {data.grossRevenue > 0 && orders.find(o => o.id === data.id)?.manualRevenue && (
+                            <Badge variant="secondary" className="text-xs ml-2">Manual</Badge>
+                          )}
+                          {data.grossRevenue === 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const order = orders.find(o => o.id === data.id);
+                                if (order) handleOpenRevenueModal(order);
+                              }}
+                              className="ml-auto h-6 px-2 text-xs"
+                            >
+                              <Plus className="h-3 w-3 mr-1" />
+                              Lançar Receita
+                            </Button>
+                          )}
+                          {data.grossRevenue > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const order = orders.find(o => o.id === data.id);
+                                if (order) handleOpenRevenueModal(order);
+                              }}
+                              className="ml-auto h-6 px-2 text-xs"
+                            >
+                              <Edit className="h-3 w-3 mr-1" />
+                              Editar
+                            </Button>
+                          )}
                         </h4>
                         <div className="space-y-3">
                           <div className="grid grid-cols-2 gap-4 text-sm">
