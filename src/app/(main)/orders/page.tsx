@@ -898,9 +898,9 @@ export default function OrdersPage() {
         if (totalOrdersToShow === 0) {
             return (
                 <div className="text-center py-12">
-                    <Package className="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
-                    <h3 className="text-lg font-medium mb-2">Nenhum pedido para exibir no Kanban</h3>
-                    <p className="text-muted-foreground">
+                    <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                    <h3 className="text-lg font-medium mb-2 text-gray-700">Nenhum pedido para exibir no Kanban</h3>
+                    <p className="text-gray-600">
                         Os pedidos aparecerão aqui quando tiverem data de entrega definida ou estiverem concluídos.
                         {hasActiveFilters && (
                             <span className="block mt-2 text-sm">
@@ -930,15 +930,19 @@ export default function OrdersPage() {
                                     {/* Header da coluna */}
                                     <div className={`rounded-lg border-2 p-4 mb-4 ${
                                         isCompleted 
-                                            ? 'bg-green-50 border-green-200' 
-                                            : 'bg-blue-50 border-blue-200'
+                                            ? 'bg-green-50 border-green-300' 
+                                            : 'bg-blue-50 border-blue-300'
                                     }`}>
                                         <div className="flex items-center justify-between mb-2">
-                                            <h3 className="font-semibold text-lg flex items-center gap-2">
+                                            <h3 className={`font-semibold text-lg flex items-center gap-2 ${
+                                                isCompleted 
+                                                    ? 'text-green-800' 
+                                                    : 'text-blue-800'
+                                            }`}>
                                                 {isCompleted ? (
-                                                    <CheckCircle className="h-5 w-5 text-green-600" />
+                                                    <CheckCircle className="h-5 w-5 text-green-700" />
                                                 ) : (
-                                                    <CalendarDays className="h-5 w-5 text-blue-600" />
+                                                    <CalendarDays className="h-5 w-5 text-blue-700" />
                                                 )}
                                                 {monthLabel}
                                             </h3>
@@ -946,7 +950,11 @@ export default function OrdersPage() {
                                                 {monthData.orders.length}
                                             </Badge>
                                         </div>
-                                        <div className="text-sm text-muted-foreground">
+                                        <div className={`text-sm ${
+                                            isCompleted 
+                                                ? 'text-green-700' 
+                                                : 'text-blue-700'
+                                        }`}>
                                             <div className="flex items-center gap-1">
                                                 <Weight className="h-4 w-4" />
                                                 <span className="font-medium">
@@ -1061,8 +1069,8 @@ export default function OrdersPage() {
                                         })}
                                         
                                         {monthData.orders.length === 0 && (
-                                            <div className="text-center py-8 text-muted-foreground">
-                                                <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                            <div className="text-center py-8 text-gray-500">
+                                                <Package className="h-8 w-8 mx-auto mb-2" />
                                                 <p className="text-sm">Nenhum pedido</p>
                                             </div>
                                         )}
@@ -1085,7 +1093,7 @@ export default function OrdersPage() {
             <div className="bg-white rounded-lg border">
                 {/* Header do calendário */}
                 <div className="flex items-center justify-between p-4 border-b">
-                    <h2 className="text-lg font-semibold">
+                    <h2 className="text-lg font-semibold text-gray-800">
                         {calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
                     </h2>
                     <div className="flex items-center gap-2">
@@ -1124,7 +1132,7 @@ export default function OrdersPage() {
                 {/* Dias da semana */}
                 <div className="grid grid-cols-7 border-b">
                     {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
-                        <div key={day} className="p-2 text-center text-sm font-medium text-muted-foreground border-r last:border-r-0">
+                        <div key={day} className="p-2 text-center text-sm font-medium text-gray-700 border-r last:border-r-0">
                             {day}
                         </div>
                     ))}
@@ -1150,9 +1158,9 @@ export default function OrdersPage() {
                             >
                                 <div className={cn(
                                     "text-sm mb-1 p-1",
-                                    !isCurrentMonth && "text-muted-foreground",
-                                    isToday && "font-bold text-blue-600",
-                                    isPast && isCurrentMonth && "text-muted-foreground"
+                                    !isCurrentMonth && "text-gray-400",
+                                    isToday && "font-bold text-blue-700",
+                                    isPast && isCurrentMonth && "text-gray-600"
                                 )}>
                                     {day.getDate()}
                                 </div>
@@ -2408,8 +2416,8 @@ export default function OrdersPage() {
                 {viewMode === 'list' ? (
                     <Card>
                         <CardHeader>
-                            <CardTitle>Lista de Pedidos</CardTitle>
-                            <CardDescription>Acompanhe todos os pedidos de produção aprovados.</CardDescription>
+                            <CardTitle className="text-gray-800">Lista de Pedidos</CardTitle>
+                            <CardDescription className="text-gray-600">Acompanhe todos os pedidos de produção aprovados.</CardDescription>
                         </CardHeader>
                         <CardContent>
                             {isLoading ? (
@@ -2428,8 +2436,8 @@ export default function OrdersPage() {
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle>Kanban de Pedidos por Mês de Entrega</CardTitle>
-                                    <CardDescription>
+                                    <CardTitle className="text-gray-800">Kanban de Pedidos por Mês de Entrega</CardTitle>
+                                    <CardDescription className="text-gray-600">
                                         Visualize os pedidos organizados por mês de entrega com peso total por coluna.
                                         {filteredOrders.length > 0 && (
                                             <span className="ml-2">
@@ -2479,8 +2487,8 @@ export default function OrdersPage() {
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle>Calendário de Entregas</CardTitle>
-                                    <CardDescription>
+                                    <CardTitle className="text-gray-800">Calendário de Entregas</CardTitle>
+                                    <CardDescription className="text-gray-600">
                                         Visualize os pedidos organizados por data de entrega. 
                                         {filteredOrders.length > 0 && (
                                             <span className="ml-2">
@@ -2517,9 +2525,9 @@ export default function OrdersPage() {
                                 </div>
                             ) : filteredOrders.filter(o => o.deliveryDate).length === 0 ? (
                                 <div className="text-center py-12">
-                                    <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
-                                    <h3 className="text-lg font-medium mb-2">Nenhum pedido com data de entrega</h3>
-                                    <p className="text-muted-foreground">
+                                    <CalendarDays className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                                    <h3 className="text-lg font-medium mb-2 text-gray-700">Nenhum pedido com data de entrega</h3>
+                                    <p className="text-gray-600">
                                         Os pedidos aparecerão no calendário quando tiverem data de entrega definida.
                                     </p>
                                 </div>
