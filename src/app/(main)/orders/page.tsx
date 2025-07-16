@@ -484,7 +484,7 @@ export default function OrdersPage() {
     const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
     
     // View states
-    const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+    const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
     const [calendarDate, setCalendarDate] = useState(new Date());
 
     const form = useForm<z.infer<typeof orderSchema>>({
@@ -830,6 +830,38 @@ export default function OrdersPage() {
         return grouped;
     }, [filteredOrders]);
 
+    // Organiza os pedidos por mês para visualização Kanban
+    const ordersByMonth = useMemo(() => {
+        const grouped = new Map<string, { orders: Order[], totalWeight: number }>();
+        const completedOrders: Order[] = [];
+        let completedWeight = 0;
+        
+                                filteredOrders.forEach(order => {
+                            if (order.status === 'Concluído') {
+                                completedOrders.push(order);
+                                completedWeight += order.totalWeight || 0;
+                            } else if (order.deliveryDate) {
+                                const monthKey = format(order.deliveryDate, 'yyyy-MM');
+                                
+                                if (!grouped.has(monthKey)) {
+                                    grouped.set(monthKey, { orders: [], totalWeight: 0 });
+                                }
+                                
+                                const monthData = grouped.get(monthKey)!;
+                                monthData.orders.push(order);
+                                monthData.totalWeight += order.totalWeight || 0;
+                            }
+                        });
+
+        // Ordena as chaves por data (mês mais antigo primeiro)
+        const sortedEntries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+        
+        return {
+            monthColumns: sortedEntries,
+            completed: { orders: completedOrders, totalWeight: completedWeight }
+        };
+    }, [filteredOrders]);
+
     // Gera os dias do mês atual para o calendário
     const generateCalendarDays = (date: Date) => {
         const year = date.getFullYear();
@@ -853,6 +885,196 @@ export default function OrdersPage() {
     };
 
     const { days: calendarDays, firstDay, lastDay } = generateCalendarDays(calendarDate);
+
+    // Componente Kanban
+    const KanbanView = () => {
+        const allColumns = [
+            ...ordersByMonth.monthColumns,
+            ['completed', { orders: ordersByMonth.completed.orders, totalWeight: ordersByMonth.completed.totalWeight }]
+        ];
+
+        const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
+        
+        if (totalOrdersToShow === 0) {
+            return (
+                <div className="text-center py-12">
+                    <Package className="mx-auto h-12 w-12 text-muted-foreground/50 mb-4" />
+                    <h3 className="text-lg font-medium mb-2">Nenhum pedido para exibir no Kanban</h3>
+                    <p className="text-muted-foreground">
+                        Os pedidos aparecerão aqui quando tiverem data de entrega definida ou estiverem concluídos.
+                        {hasActiveFilters && (
+                            <span className="block mt-2 text-sm">
+                                Verifique se os filtros aplicados não estão ocultando os pedidos.
+                            </span>
+                        )}
+                    </p>
+                </div>
+            );
+        }
+
+        return (
+            <div className="w-full">
+                <div className="w-full overflow-x-auto">
+                    <div className="flex w-max space-x-4 p-4 min-w-full">
+                        {allColumns.map(([monthKey, monthData]) => {
+                            const isCompleted = monthKey === 'completed';
+                            const monthLabel = isCompleted 
+                                ? 'Concluídos' 
+                                : new Date(monthKey + '-01').toLocaleDateString('pt-BR', { 
+                                    month: 'short', 
+                                    year: 'numeric' 
+                                }).replace('.', '');
+                            
+                            return (
+                                <div key={monthKey} className="flex-shrink-0 w-72">
+                                    {/* Header da coluna */}
+                                    <div className={`rounded-lg border-2 p-4 mb-4 ${
+                                        isCompleted 
+                                            ? 'bg-green-50 border-green-200' 
+                                            : 'bg-blue-50 border-blue-200'
+                                    }`}>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="font-semibold text-lg flex items-center gap-2">
+                                                {isCompleted ? (
+                                                    <CheckCircle className="h-5 w-5 text-green-600" />
+                                                ) : (
+                                                    <CalendarDays className="h-5 w-5 text-blue-600" />
+                                                )}
+                                                {monthLabel}
+                                            </h3>
+                                            <Badge variant="secondary" className="font-medium">
+                                                {monthData.orders.length}
+                                            </Badge>
+                                        </div>
+                                        <div className="text-sm text-muted-foreground">
+                                            <div className="flex items-center gap-1">
+                                                <Weight className="h-4 w-4" />
+                                                <span className="font-medium">
+                                                    {monthData.totalWeight.toLocaleString('pt-BR', { 
+                                                        minimumFractionDigits: 2, 
+                                                        maximumFractionDigits: 2 
+                                                    })} kg
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Cards dos pedidos */}
+                                    <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
+                                        {monthData.orders.map(order => {
+                                            const statusProps = getStatusProps(order.status);
+                                            const orderProgress = calculateOrderProgress(order);
+                                            
+                                            return (
+                                                <Card 
+                                                    key={order.id} 
+                                                    className="p-4 cursor-pointer hover:shadow-md transition-shadow duration-200 border-l-4"
+                                                    style={{
+                                                        borderLeftColor: isCompleted 
+                                                            ? '#16a34a' 
+                                                            : statusProps.colorClass.includes('bg-green-600') ? '#16a34a'
+                                                            : statusProps.colorClass.includes('bg-blue-500') ? '#3b82f6'
+                                                            : statusProps.colorClass.includes('bg-orange-500') ? '#f97316'
+                                                            : statusProps.colorClass.includes('bg-red-') ? '#dc2626'
+                                                            : '#6b7280'
+                                                    }}
+                                                    onClick={() => handleViewOrder(order)}
+                                                >
+                                                    <div className="space-y-3">
+                                                        {/* Header do card */}
+                                                        <div className="flex items-start justify-between">
+                                                            <div className="flex-1 min-w-0">
+                                                                <h4 className="font-semibold text-sm truncate">
+                                                                    Pedido {order.quotationNumber}
+                                                                </h4>
+                                                                <p className="text-xs text-muted-foreground truncate">
+                                                                    {order.customer.name}
+                                                                </p>
+                                                            </div>
+                                                            <Badge variant={statusProps.variant} className={`text-xs ${statusProps.colorClass}`}>
+                                                                <statusProps.icon className="mr-1 h-3 w-3" />
+                                                                {statusProps.label}
+                                                            </Badge>
+                                                        </div>
+
+                                                        {/* Informações do projeto e OS */}
+                                                        {(order.projectName || order.internalOS) && (
+                                                            <div className="space-y-1">
+                                                                {order.projectName && (
+                                                                    <p className="text-xs text-muted-foreground truncate">
+                                                                        📋 {order.projectName}
+                                                                    </p>
+                                                                )}
+                                                                {order.internalOS && (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        🏷️ OS: {order.internalOS}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Dados importantes */}
+                                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                                            <div>
+                                                                <span className="text-muted-foreground">Peso:</span>
+                                                                <p className="font-medium">
+                                                                    {(order.totalWeight || 0).toLocaleString('pt-BR', { 
+                                                                        minimumFractionDigits: 1, 
+                                                                        maximumFractionDigits: 1 
+                                                                    })} kg
+                                                                </p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Itens:</span>
+                                                                <p className="font-medium">{order.items.length}</p>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Data de entrega */}
+                                                        {order.deliveryDate && (
+                                                            <div className="text-xs">
+                                                                <span className="text-muted-foreground">Entrega:</span>
+                                                                <p className="font-medium">
+                                                                    {format(order.deliveryDate, "dd/MM/yyyy")}
+                                                                </p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Progresso */}
+                                                        {!isCompleted && (
+                                                            <div>
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <span className="text-xs text-muted-foreground">Progresso:</span>
+                                                                    <span className="text-xs font-medium">{Math.round(orderProgress)}%</span>
+                                                                </div>
+                                                                <Progress value={orderProgress} className="h-1.5" />
+                                                            </div>
+                                                        )}
+
+                                                        {/* Status dos documentos */}
+                                                        <div className="flex items-center justify-center pt-2 border-t border-border/50">
+                                                            <DocumentStatusIcons documents={order.documents} />
+                                                        </div>
+                                                    </div>
+                                                </Card>
+                                            );
+                                        })}
+                                        
+                                        {monthData.orders.length === 0 && (
+                                            <div className="text-center py-8 text-muted-foreground">
+                                                <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                                <p className="text-sm">Nenhum pedido</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     // Componente de calendário
     const CalendarView = () => {
@@ -2063,6 +2285,15 @@ export default function OrdersPage() {
                                 Lista
                             </Button>
                             <Button
+                                variant={viewMode === 'kanban' ? 'default' : 'ghost'}
+                                size="sm"
+                                onClick={() => setViewMode('kanban')}
+                                className="h-8"
+                            >
+                                <GanttChart className="mr-2 h-4 w-4" />
+                                Kanban
+                            </Button>
+                            <Button
                                 variant={viewMode === 'calendar' ? 'default' : 'ghost'}
                                 size="sm"
                                 onClick={() => setViewMode('calendar')}
@@ -2189,6 +2420,57 @@ export default function OrdersPage() {
                                 </div>
                             ) : (
                                <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
+                            )}
+                        </CardContent>
+                    </Card>
+                ) : viewMode === 'kanban' ? (
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Kanban de Pedidos por Mês de Entrega</CardTitle>
+                                    <CardDescription>
+                                        Visualize os pedidos organizados por mês de entrega com peso total por coluna.
+                                        {filteredOrders.length > 0 && (
+                                            <span className="ml-2">
+                                                {filteredOrders.filter(o => o.deliveryDate || o.status === 'Concluído').length} de {filteredOrders.length} pedidos exibidos
+                                            </span>
+                                        )}
+                                    </CardDescription>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-green-600"></div>
+                                        <span>Concluído</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-blue-500"></div>
+                                        <span>Pronto</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-gray-600"></div>
+                                        <span>Em Produção</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-orange-500"></div>
+                                        <span>Atrasado</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {isLoading ? (
+                                <div className="flex space-x-4 p-4">
+                                    {Array.from({ length: 3 }).map((_, i) => (
+                                        <div key={i} className="flex-shrink-0 w-80 space-y-4">
+                                            <Skeleton className="h-24 w-full" />
+                                            <Skeleton className="h-32 w-full" />
+                                            <Skeleton className="h-32 w-full" />
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <KanbanView />
                             )}
                         </CardContent>
                     </Card>
