@@ -108,6 +108,7 @@ export default function FinancePage() {
   const [selectedOrderForRevenue, setSelectedOrderForRevenue] = useState<any>(null);
   const [manualGrossRevenue, setManualGrossRevenue] = useState('');
   const [manualTaxAmount, setManualTaxAmount] = useState('');
+  const [manualTaxRate, setManualTaxRate] = useState('');
   const [isSavingRevenue, setIsSavingRevenue] = useState(false);
   
   const { user, loading: authLoading } = useAuth();
@@ -120,7 +121,20 @@ export default function FinancePage() {
     return order;
   };
 
-  // Função para verificar senha
+  // Função para calcular impostos baseado no percentual
+  const calculateTaxFromRate = (grossValue: string, taxRate: string) => {
+    const gross = parseFloat(grossValue) || 0;
+    const rate = parseFloat(taxRate) || 0;
+    return (gross * (rate / 100)).toFixed(2);
+  };
+
+  // Função para calcular percentual baseado no valor
+  const calculateTaxRate = (grossValue: string, taxAmount: string) => {
+    const gross = parseFloat(grossValue) || 0;
+    const tax = parseFloat(taxAmount) || 0;
+    if (gross === 0) return '0';
+    return ((tax / gross) * 100).toFixed(2);
+  };
   const handleAuthentication = () => {
     if (password === 'OP4484210640') {
       setIsAuthenticated(true);
