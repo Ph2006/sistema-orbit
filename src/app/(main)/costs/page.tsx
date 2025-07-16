@@ -43,6 +43,8 @@ const itemUpdateSchema = z.object({
   storageLocation: z.string().optional(),
   deliveryReceiptDate: z.date().optional().nullable(),
   inspectionStatus: z.enum(inspectionStatuses).optional(),
+  weight: z.coerce.number().optional(),
+  weightUnit: z.string().optional(),
 });
 
 type ItemUpdateData = z.infer<typeof itemUpdateSchema>;
@@ -59,6 +61,8 @@ const requisitionItemSchema = z.object({
   storageLocation: z.string().optional(),
   deliveryReceiptDate: z.date().optional().nullable(),
   inspectionStatus: z.enum(inspectionStatuses).optional(),
+  weight: z.number().optional(),
+  weightUnit: z.string().optional(),
 });
 
 const segmentOptions = [
@@ -458,6 +462,8 @@ export default function CostsPage() {
     const [osSearchTerm, setOsSearchTerm] = useState("");
     const [selectedInsumo, setSelectedInsumo] = useState("");
     const [itemSpecification, setItemSpecification] = useState("");
+    const [activeTab, setActiveTab] = useState("receipts");
+    const [recentlyUpdatedItem, setRecentlyUpdatedItem] = useState<ItemForUpdate | null>(null);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -497,6 +503,8 @@ export default function CostsPage() {
                         storageLocation: item.storageLocation || "",
                         deliveryReceiptDate: item.deliveryReceiptDate?.toDate ? item.deliveryReceiptDate.toDate() : (item.deliveryReceiptDate ? new Date(item.deliveryReceiptDate) : null),
                         inspectionStatus: item.inspectionStatus || "Pendente",
+                        weight: item.weight || undefined,
+                        weightUnit: item.weightUnit || "kg",
                     })),
                 };
             });
@@ -582,6 +590,8 @@ export default function CostsPage() {
             storageLocation: item.storageLocation,
             deliveryReceiptDate: item.deliveryReceiptDate,
             inspectionStatus: item.inspectionStatus,
+            weight: item.weight,
+            weightUnit: item.weightUnit || "kg",
         });
         setIsFormOpen(true);
     };
@@ -623,9 +633,20 @@ export default function CostsPage() {
 
             await updateDoc(reqRef, { items: updatedItems });
 
-            toast({ title: "Item atualizado com sucesso!" });
+            // Preparar dados para auto-preenchimento no lançamento de custos
+            const itemForCost = { ...selectedItem, ...values };
+            setRecentlyUpdatedItem(itemForCost);
+
+            toast({ 
+                title: "Item atualizado com sucesso!", 
+                description: "Agora você pode lançar os custos na aba 'Lançamento de Custos'." 
+            });
             setIsFormOpen(false);
             await fetchRequisitions();
+            
+            // Redirecionar para a aba de lançamento de custos
+            setActiveTab("costEntry");
+            
         } catch (error: any) {
             console.error("Error updating item:", error);
             toast({ variant: "destructive", title: "Erro ao atualizar", description: error.message });
@@ -881,13 +902,52 @@ export default function CostsPage() {
         }
     };
 
+    // Função para usar dados do item recém-atualizado
+    const useRecentlyUpdatedItem = () => {
+        if (!recentlyUpdatedItem) return;
+        
+        // Encontrar a requisição e a OS correspondente
+        const requisition = requisitions.find(req => req.id === recentlyUpdatedItem.requisitionId);
+        const relatedOrder = requisition?.orderId ? orders.find(o => o.id === requisition.orderId) : null;
+        
+        if (relatedOrder) {
+            costEntryForm.setValue('orderId', relatedOrder.id);
+            setOsSearchTerm(`${relatedOrder.internalOS} - ${relatedOrder.customerName}`);
+        }
+        
+        costEntryForm.setValue('description', recentlyUpdatedItem.description);
+        costEntryForm.setValue('quantity', recentlyUpdatedItem.quantityRequested);
+        
+        // Calcular custo unitário baseado no peso e valor da nota fiscal
+        if (recentlyUpdatedItem.invoiceItemValue && recentlyUpdatedItem.weight && recentlyUpdatedItem.weight > 0) {
+            const unitCost = recentlyUpdatedItem.invoiceItemValue / recentlyUpdatedItem.weight;
+            costEntryForm.setValue('unitCost', parseFloat(unitCost.toFixed(4)));
+        } else if (recentlyUpdatedItem.invoiceItemValue) {
+            costEntryForm.setValue('unitCost', recentlyUpdatedItem.invoiceItemValue);
+        }
+        
+        setRecentlyUpdatedItem(null);
+        
+        toast({
+            title: "Dados preenchidos automaticamente!",
+            description: "Os dados do item recém-atualizado foram carregados. Confira e ajuste se necessário."
+        });
+    };
+
+    // Chamar auto-preenchimento quando mudar para aba de custos
+    useEffect(() => {
+        if (activeTab === "costEntry" && recentlyUpdatedItem) {
+            setTimeout(() => useRecentlyUpdatedItem(), 500);
+        }
+    }, [activeTab, recentlyUpdatedItem]);
+
     return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
           <h1 className="text-3xl font-bold tracking-tight font-headline">Centro de Custos</h1>
         </div>
-        <Tabs defaultValue="receipts" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
             <TabsList>
                 <TabsTrigger value="receipts">Recebimento de Materiais</TabsTrigger>
                 <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
@@ -953,6 +1013,7 @@ export default function CostsPage() {
                                                 <TableRow>
                                                     <TableHead>Item</TableHead>
                                                     <TableHead>Status</TableHead>
+                                                    <TableHead>Peso</TableHead>
                                                     <TableHead>Fornecedor</TableHead>
                                                     <TableHead>Nota Fiscal</TableHead>
                                                     <TableHead>Inspeção</TableHead>
@@ -964,6 +1025,9 @@ export default function CostsPage() {
                                                     <TableRow key={item.id}>
                                                         <TableCell className="font-medium">{item.description}</TableCell>
                                                         <TableCell><Badge variant={getStatusVariant(item.status)}>{item.status}</Badge></TableCell>
+                                                        <TableCell>
+                                                            {item.weight ? `${item.weight} ${item.weightUnit || 'kg'}` : '-'}
+                                                        </TableCell>
                                                         <TableCell>{item.supplierName || '-'}</TableCell>
                                                         <TableCell>{item.invoiceNumber || '-'}</TableCell>
                                                         <TableCell><Badge variant={getStatusVariant(item.inspectionStatus)}>{item.inspectionStatus}</Badge></TableCell>
@@ -1051,6 +1115,32 @@ export default function CostsPage() {
                 </Card>
             </TabsContent>
             <TabsContent value="costEntry" className="space-y-4">
+                {recentlyUpdatedItem && (
+                    <Card className="border-primary/50 bg-primary/5">
+                        <CardHeader>
+                            <CardTitle className="text-primary flex items-center gap-2">
+                                ✨ Item Recém-Atualizado Disponível
+                            </CardTitle>
+                            <CardDescription>
+                                O item "{recentlyUpdatedItem.description}" foi atualizado e está pronto para lançamento de custos.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center gap-4">
+                                <Button onClick={useRecentlyUpdatedItem} variant="default">
+                                    📋 Usar Dados do Item
+                                </Button>
+                                <Button 
+                                    onClick={() => setRecentlyUpdatedItem(null)} 
+                                    variant="outline"
+                                    size="sm"
+                                >
+                                    Dispensar
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
                 <Card>
                     <CardHeader>
                         <CardTitle>Lançamento de Custo na OS</CardTitle>
@@ -1310,6 +1400,27 @@ export default function CostsPage() {
                 <DialogDescription>
                     {selectedItem?.description}
                 </DialogDescription>
+                {selectedItem?.weight && (
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center gap-2 text-blue-800">
+                            <span className="font-semibold">⚖️ Peso do Material:</span>
+                            <span className="text-lg font-bold">
+                                {selectedItem.weight} {selectedItem.weightUnit || 'kg'}
+                            </span>
+                        </div>
+                        {selectedItem.invoiceItemValue && selectedItem.weight > 0 && (
+                            <div className="mt-2 text-sm text-blue-600">
+                                💰 Custo por {selectedItem.weightUnit || 'kg'}: {' '}
+                                <span className="font-semibold">
+                                    {(selectedItem.invoiceItemValue / selectedItem.weight).toLocaleString('pt-BR', { 
+                                        style: 'currency', 
+                                        currency: 'BRL' 
+                                    })}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                )}
             </DialogHeader>
             <Form {...itemForm}>
                 <form onSubmit={itemForm.handleSubmit(onItemSubmit)} className="space-y-6 pt-4">
@@ -1339,37 +1450,78 @@ export default function CostsPage() {
                             </FormItem>
                         )} />
                     </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <FormField control={itemForm.control} name="invoiceNumber" render={({ field }) => (
-                            <FormItem><FormLabel>Nota Fiscal</FormLabel><FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <FormField control={itemForm.control} name="weight" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Peso do Material</FormLabel>
+                                <FormControl>
+                                    <Input 
+                                        type="number" 
+                                        step="0.001" 
+                                        placeholder="0.000" 
+                                        {...field} 
+                                        value={field.value ?? ''} 
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}/>
+                        <FormField control={itemForm.control} name="weightUnit" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Unidade</FormLabel>
+                                <Select onValueChange={field.onChange} defaultValue={field.value || "kg"}>
+                                    <FormControl>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Unidade" />
+                                        </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                        <SelectItem value="kg">kg (quilograma)</SelectItem>
+                                        <SelectItem value="g">g (grama)</SelectItem>
+                                        <SelectItem value="t">t (tonelada)</SelectItem>
+                                        <SelectItem value="m">m (metro)</SelectItem>
+                                        <SelectItem value="m²">m² (metro quadrado)</SelectItem>
+                                        <SelectItem value="m³">m³ (metro cúbico)</SelectItem>
+                                        <SelectItem value="l">l (litro)</SelectItem>
+                                        <SelectItem value="un">un (unidade)</SelectItem>
+                                        <SelectItem value="pç">pç (peça)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <FormMessage />
+                            </FormItem>
                         )}/>
                         <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
                             <FormItem><FormLabel>Valor do Item (R$)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
                     </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <FormField control={itemForm.control} name="certificateNumber" render={({ field }) => (
+                        <FormField control={itemForm.control} name="invoiceNumber" render={({ field }) => (
+                            <FormItem><FormLabel>Nota Fiscal</FormLabel><FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                        )}/>
+                         <FormField control={itemForm.control} name="certificateNumber" render={({ field }) => (
                             <FormItem><FormLabel>Nº do Certificado</FormLabel><FormControl><Input placeholder="Certificado de qualidade/material" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                          <FormField control={itemForm.control} name="storageLocation" render={({ field }) => (
                             <FormItem><FormLabel>Local de Armazenamento</FormLabel><FormControl><Input placeholder="Ex: Prateleira A-10" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
+                        <FormField control={itemForm.control} name="inspectionStatus" render={({ field }) => (
+                            <FormItem><FormLabel>Status da Inspeção</FormLabel>
+                                <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                    <SelectTrigger><SelectValue placeholder="Selecione o status da inspeção" /></SelectTrigger>
+                                </FormControl><SelectContent>
+                                    {inspectionStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
+                                </SelectContent></Select><FormMessage />
+                            </FormItem>
+                        )}/>
                     </div>
-
-                    <FormField control={itemForm.control} name="inspectionStatus" render={({ field }) => (
-                        <FormItem><FormLabel>Status da Inspeção</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
-                                <SelectTrigger><SelectValue placeholder="Selecione o status da inspeção" /></SelectTrigger>
-                            </FormControl><SelectContent>
-                                {inspectionStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
-                            </SelectContent></Select><FormMessage />
-                        </FormItem>
-                    )}/>
                     
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
                         <Button type="submit" disabled={itemForm.formState.isSubmitting}>
-                            {itemForm.formState.isSubmitting ? "Salvando..." : "Salvar Atualizações"}
+                            {itemForm.formState.isSubmitting ? "Salvando..." : "Salvar e Ir para Custos"}
                         </Button>
                     </DialogFooter>
                 </form>
