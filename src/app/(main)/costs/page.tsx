@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -187,7 +188,7 @@ export default function CostsPage() {
     const [requisitions, setRequisitions] = useState<Requisition[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [orders, setOrders] = useState<OrderInfo[]>([]);
-    const [recentCostEntries, setRecentCostEntries] = useState<any[]>([]);
+
     const [isLoadingRequisitions, setIsLoadingRequisitions] = useState(true);
     const [isLoadingSuppliers, setIsLoadingSuppliers] = useState(true);
     const [isLoadingOrders, setIsLoadingOrders] = useState(true);
@@ -289,22 +290,15 @@ export default function CostsPage() {
                         id: doc.id,
                         internalOS: data.internalOS || 'N/A',
                         customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
-                        costEntries: data.costEntries || [],
+                        costEntries: (data.costEntries || []).map((entry: any) => ({
+                            ...entry,
+                            entryDate: entry.entryDate?.toDate ? entry.entryDate.toDate() : (entry.entryDate ? new Date(entry.entryDate) : undefined),
+                        })),
                     };
                 });
             setOrders(ordersList);
 
-            const allEntries = ordersList.flatMap(order => 
-                (order.costEntries || []).map((entry: any) => ({
-                    ...entry,
-                    orderId: order.id,
-                    internalOS: order.internalOS,
-                    customerName: order.customerName,
-                    entryDate: entry.entryDate?.toDate ? entry.entryDate.toDate() : (entry.entryDate ? new Date(entry.entryDate) : undefined),
-                }))
-            ).sort((a, b) => (b.entryDate?.getTime() || 0) - (a.entryDate?.getTime() || 0));
 
-            setRecentCostEntries(allEntries);
 
         } catch (error) {
             console.error("Error fetching orders:", error);
@@ -632,12 +626,44 @@ export default function CostsPage() {
                                 <AccordionItem value={req.id} key={req.id}>
                                     <AccordionTrigger className="hover:bg-muted/50 px-4">
                                         <div className="flex-1 text-left">
-                                            <span className="font-bold text-primary">Requisição Nº {req.requisitionNumber}</span>
-                                            <span className="text-muted-foreground text-sm ml-4">Data: {format(req.date, 'dd/MM/yyyy')}</span>
+                                            <div className="flex items-center gap-4">
+                                                <span className="font-bold text-primary">Requisição Nº {req.requisitionNumber}</span>
+                                                <span className="text-muted-foreground text-sm">Data: {format(req.date, 'dd/MM/yyyy')}</span>
+                                            </div>
+                                            <div className="text-sm text-muted-foreground mt-1">
+                                                {req.orderId ? 
+                                                    (() => {
+                                                        const order = orders.find(o => o.id === req.orderId);
+                                                        return order ? `OS: ${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
+                                                    })() : 'Sem OS vinculada'
+                                                } • {req.items.length} itens
+                                            </div>
                                         </div>
-                                        <Badge variant={getStatusVariant(req.status)}>{req.status}</Badge>
                                     </AccordionTrigger>
                                     <AccordionContent className="p-2">
+                                        <div className="mb-4 p-4 bg-muted/30 rounded-lg">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                                <div>
+                                                    <span className="font-semibold text-muted-foreground">OS Vinculada:</span>
+                                                    <p className="font-medium">
+                                                        {req.orderId ? 
+                                                            (() => {
+                                                                const order = orders.find(o => o.id === req.orderId);
+                                                                return order ? `${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
+                                                            })() : 'Nenhuma OS vinculada'
+                                                        }
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <span className="font-semibold text-muted-foreground">Total de Itens:</span>
+                                                    <p className="font-medium">{req.items.length}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="font-semibold text-muted-foreground">Status Geral:</span>
+                                                    <p><Badge variant={getStatusVariant(req.status)}>{req.status}</Badge></p>
+                                                </div>
+                                            </div>
+                                        </div>
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
@@ -800,47 +826,93 @@ export default function CostsPage() {
                 </Card>
                 <Card>
                     <CardHeader>
-                        <CardTitle>Custos Lançados Recentemente</CardTitle>
+                        <CardTitle>Custos Organizados por OS</CardTitle>
+                        <CardDescription>
+                            Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço.
+                        </CardDescription>
                     </CardHeader>
                     <CardContent>
                         {isLoadingOrders ? <Skeleton className="h-48 w-full" /> : 
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Data</TableHead>
-                                    <TableHead>OS</TableHead>
-                                    <TableHead>Descrição</TableHead>
-                                    <TableHead className="text-right">Custo Total</TableHead>
-                                    <TableHead>Lançado por</TableHead>
-                                    <TableHead className="text-right">Ações</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {recentCostEntries.length > 0 ? (
-                                    recentCostEntries.slice(0, 10).map(entry => (
-                                        <TableRow key={entry.id}>
-                                            <TableCell>{entry.entryDate ? format(entry.entryDate, 'dd/MM/yyyy HH:mm') : 'N/A'}</TableCell>
-                                            <TableCell>{entry.internalOS}</TableCell>
-                                            <TableCell>{entry.description}</TableCell>
-                                            <TableCell className="text-right font-medium">
-                                                {entry.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                            </TableCell>
-                                            <TableCell>{entry.enteredBy}</TableCell>
-                                            <TableCell className="text-right">
-                                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteCostEntryClick(entry)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))
-                                ) : (
-                                    <TableRow>
-                                        <TableCell colSpan={6} className="h-24 text-center">Nenhum custo lançado ainda.</TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
-                        }
+                        orders.filter(order => order.costEntries && order.costEntries.length > 0).length > 0 ? (
+                            <Accordion type="single" collapsible className="w-full">
+                                {orders
+                                    .filter(order => order.costEntries && order.costEntries.length > 0)
+                                    .map(order => {
+                                        const totalCost = order.costEntries?.reduce((sum, entry) => sum + (entry.totalCost || 0), 0) || 0;
+                                        const entriesCount = order.costEntries?.length || 0;
+                                        
+                                        return (
+                                            <AccordionItem value={order.id} key={order.id}>
+                                                <AccordionTrigger className="hover:bg-muted/50 px-4">
+                                                    <div className="flex-1 text-left">
+                                                        <div className="flex items-center gap-4">
+                                                            <span className="font-bold text-primary">OS: {order.internalOS}</span>
+                                                            <span className="text-muted-foreground">{order.customerName}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-6 mt-1 text-sm text-muted-foreground">
+                                                            <span>{entriesCount} lançamento{entriesCount !== 1 ? 's' : ''}</span>
+                                                            <span className="font-semibold text-green-600">
+                                                                Total: {totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </AccordionTrigger>
+                                                <AccordionContent className="p-2">
+                                                    <Table>
+                                                        <TableHeader>
+                                                            <TableRow>
+                                                                <TableHead>Data</TableHead>
+                                                                <TableHead>Descrição</TableHead>
+                                                                <TableHead className="text-right">Qtd</TableHead>
+                                                                <TableHead className="text-right">Valor Unit.</TableHead>
+                                                                <TableHead className="text-right">Total</TableHead>
+                                                                <TableHead>Lançado por</TableHead>
+                                                                <TableHead className="text-right">Ações</TableHead>
+                                                            </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                            {order.costEntries
+                                                                ?.sort((a, b) => (b.entryDate?.getTime() || 0) - (a.entryDate?.getTime() || 0))
+                                                                .map(entry => (
+                                                                <TableRow key={entry.id}>
+                                                                    <TableCell className="text-sm">
+                                                                        {entry.entryDate ? format(entry.entryDate, 'dd/MM/yyyy HH:mm') : 'N/A'}
+                                                                    </TableCell>
+                                                                    <TableCell className="font-medium">{entry.description}</TableCell>
+                                                                    <TableCell className="text-right">{entry.quantity}</TableCell>
+                                                                    <TableCell className="text-right">
+                                                                        {entry.unitCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                    </TableCell>
+                                                                    <TableCell className="text-right font-medium text-green-600">
+                                                                        {entry.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                    </TableCell>
+                                                                    <TableCell className="text-sm text-muted-foreground">{entry.enteredBy}</TableCell>
+                                                                    <TableCell className="text-right">
+                                                                        <Button 
+                                                                            variant="ghost" 
+                                                                            size="icon" 
+                                                                            className="text-destructive hover:text-destructive" 
+                                                                            onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
+                                                                        >
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </Button>
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            ))}
+                                                        </TableBody>
+                                                    </Table>
+                                                </AccordionContent>
+                                            </AccordionItem>
+                                        );
+                                    })}
+                            </Accordion>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-32 border-dashed border-2 rounded-lg">
+                                <PackageSearch className="h-8 w-8 mb-2" />
+                                <h3 className="font-semibold">Nenhum Custo Lançado</h3>
+                                <p className="text-sm">Quando custos forem lançados nas OS, eles aparecerão aqui organizados.</p>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             </TabsContent>
