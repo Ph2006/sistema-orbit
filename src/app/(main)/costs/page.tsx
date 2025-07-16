@@ -463,7 +463,6 @@ export default function CostsPage() {
     const [selectedInsumo, setSelectedInsumo] = useState("");
     const [itemSpecification, setItemSpecification] = useState("");
     const [activeTab, setActiveTab] = useState("receipts");
-    const [recentlyUpdatedItem, setRecentlyUpdatedItem] = useState<ItemForUpdate | null>(null);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -682,20 +681,29 @@ export default function CostsPage() {
                 await updateOrderCostFromRequisition(reqData.orderId, selectedItem.requisitionId, updatedItems);
             }
 
-            // Preparar dados para auto-preenchimento no lançamento de custos
-            const itemForCost = { ...selectedItem, ...values };
-            setRecentlyUpdatedItem(itemForCost);
-
-            toast({ 
-                title: "Item atualizado com sucesso!", 
-                description: "Os custos da OS foram atualizados automaticamente." 
-            });
+            // Toast mais informativo baseado nos valores
+            if (reqData.orderId) {
+                const hasValues = values.invoiceItemValue && values.invoiceItemValue > 0;
+                if (hasValues) {
+                    toast({ 
+                        title: "✅ Item precificado com sucesso!", 
+                        description: `Valor R$ ${values.invoiceItemValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi adicionado aos custos da OS.` 
+                    });
+                } else {
+                    toast({ 
+                        title: "📝 Item atualizado!", 
+                        description: "Dados salvos. Adicione o valor da nota fiscal para atualizar os custos da OS." 
+                    });
+                }
+            } else {
+                toast({ 
+                    title: "Item atualizado com sucesso!", 
+                    description: "Requisição não vinculada a uma OS." 
+                });
+            }
             setIsFormOpen(false);
             await fetchRequisitions();
             await fetchOrders();
-            
-            // Redirecionar para a aba de lançamento de custos
-            setActiveTab("costEntry");
             
         } catch (error: any) {
             console.error("Error updating item:", error);
@@ -727,31 +735,49 @@ export default function CostsPage() {
                 entry.requisitionId !== requisitionId
             );
             
-            // Calcular total da requisição
+            // Calcular total da requisição - o valor da nota fiscal já é o valor total do item
             const requisitionTotal = items.reduce((total, item) => {
                 const itemValue = item.invoiceItemValue || 0;
-                const quantity = item.quantityRequested || 1;
-                return total + (itemValue * quantity);
+                return total + itemValue;
             }, 0);
+            
+            // Contar quantos itens têm valores preenchidos
+            const itemsWithValues = items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
+            const totalItems = items.length;
+            
+            // Criar descrição dinâmica baseada no progresso
+            let description = `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'}`;
+            
+            if (itemsWithValues === 0) {
+                description += ` (Aguardando precificação)`;
+            } else if (itemsWithValues < totalItems) {
+                description += ` (${itemsWithValues}/${totalItems} itens precificados)`;
+            } else {
+                description += ` (Totalmente precificada)`;
+            }
             
             // Criar novo lançamento consolidado da requisição
             const requisitionCostEntry = {
                 id: `req-${requisitionId}-${Date.now()}`,
-                description: `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'}`,
-                quantity: 1,
-                unitCost: requisitionTotal,
+                description: description,
+                quantity: totalItems,
+                unitCost: requisitionTotal > 0 ? requisitionTotal / totalItems : 0,
                 totalCost: requisitionTotal,
                 entryDate: Timestamp.now(),
                 enteredBy: 'Sistema (Requisição)',
                 requisitionId: requisitionId,
                 isFromRequisition: true,
                 isPending: requisitionTotal === 0,
+                itemsWithValues: itemsWithValues,
+                totalItems: totalItems,
+                completionPercentage: totalItems > 0 ? Math.round((itemsWithValues / totalItems) * 100) : 0,
                 items: items.map(item => ({
                     description: item.description,
                     quantity: item.quantityRequested,
                     value: item.invoiceItemValue || 0,
                     weight: item.weight,
-                    weightUnit: item.weightUnit
+                    weightUnit: item.weightUnit,
+                    hasPricing: !!(item.invoiceItemValue && item.invoiceItemValue > 0)
                 }))
             };
             
@@ -760,6 +786,8 @@ export default function CostsPage() {
             await updateDoc(orderRef, {
                 costEntries: filteredCostEntries
             });
+            
+            console.log(`✅ Custo da OS atualizado: Requisição ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
             
         } catch (error) {
             console.error("Error updating order costs:", error);
@@ -1057,44 +1085,7 @@ export default function CostsPage() {
         }
     };
 
-    // Função para usar dados do item recém-atualizado
-    const useRecentlyUpdatedItem = () => {
-        if (!recentlyUpdatedItem) return;
-        
-        // Encontrar a requisição e a OS correspondente
-        const requisition = requisitions.find(req => req.id === recentlyUpdatedItem.requisitionId);
-        const relatedOrder = requisition?.orderId ? orders.find(o => o.id === requisition.orderId) : null;
-        
-        if (relatedOrder) {
-            costEntryForm.setValue('orderId', relatedOrder.id);
-            setOsSearchTerm(`${relatedOrder.internalOS} - ${relatedOrder.customerName}`);
-        }
-        
-        costEntryForm.setValue('description', recentlyUpdatedItem.description);
-        costEntryForm.setValue('quantity', recentlyUpdatedItem.quantityRequested);
-        
-        // Calcular custo unitário baseado no peso e valor da nota fiscal
-        if (recentlyUpdatedItem.invoiceItemValue && recentlyUpdatedItem.weight && recentlyUpdatedItem.weight > 0) {
-            const unitCost = recentlyUpdatedItem.invoiceItemValue / recentlyUpdatedItem.weight;
-            costEntryForm.setValue('unitCost', parseFloat(unitCost.toFixed(4)));
-        } else if (recentlyUpdatedItem.invoiceItemValue) {
-            costEntryForm.setValue('unitCost', recentlyUpdatedItem.invoiceItemValue);
-        }
-        
-        setRecentlyUpdatedItem(null);
-        
-        toast({
-            title: "Dados preenchidos automaticamente!",
-            description: "Os dados do item recém-atualizado foram carregados. Confira e ajuste se necessário."
-        });
-    };
 
-    // Chamar auto-preenchimento quando mudar para aba de custos
-    useEffect(() => {
-        if (activeTab === "costEntry" && recentlyUpdatedItem) {
-            setTimeout(() => useRecentlyUpdatedItem(), 500);
-        }
-    }, [activeTab, recentlyUpdatedItem]);
 
     return (
     <>
@@ -1200,25 +1191,10 @@ export default function CostsPage() {
                                                         <TableCell>{item.invoiceNumber || '-'}</TableCell>
                                                         <TableCell><Badge variant={getStatusVariant(item.inspectionStatus)}>{item.inspectionStatus}</Badge></TableCell>
                                                         <TableCell className="text-right">
-                                                            <div className="flex gap-2">
-                                                                <Button variant="outline" size="sm" onClick={() => handleOpenForm(item, req.id)}>
-                                                                    <FilePen className="mr-2 h-4 w-4" />
-                                                                    Atualizar
-                                                                </Button>
-                                                                <Button 
-                                                                    variant="ghost" 
-                                                                    size="sm" 
-                                                                    onClick={() => {
-                                                                        console.log('Item completo:', item);
-                                                                        console.log('Peso atual:', item.weight);
-                                                                        console.log('Unidade atual:', item.weightUnit);
-                                                                        alert(`DEBUG Item: ${item.description}\nPeso: ${item.weight || 'não definido'}\nUnidade: ${item.weightUnit || 'não definido'}\n\nVer console para dados completos`);
-                                                                    }}
-                                                                    className="text-xs"
-                                                                >
-                                                                    🐛 Debug
-                                                                </Button>
-                                                            </div>
+                                                            <Button variant="outline" size="sm" onClick={() => handleOpenForm(item, req.id)}>
+                                                                <FilePen className="mr-2 h-4 w-4" />
+                                                                Atualizar
+                                                            </Button>
                                                         </TableCell>
                                                     </TableRow>
                                                 ))}
@@ -1298,32 +1274,6 @@ export default function CostsPage() {
                 </Card>
             </TabsContent>
             <TabsContent value="costEntry" className="space-y-4">
-                {recentlyUpdatedItem && (
-                    <Card className="border-primary/50 bg-primary/5">
-                        <CardHeader>
-                            <CardTitle className="text-primary flex items-center gap-2">
-                                ✨ Item Recém-Atualizado Disponível
-                            </CardTitle>
-                            <CardDescription>
-                                O item "{recentlyUpdatedItem.description}" foi atualizado e está pronto para lançamento de custos.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="flex items-center gap-4">
-                                <Button onClick={useRecentlyUpdatedItem} variant="default">
-                                    📋 Usar Dados do Item
-                                </Button>
-                                <Button 
-                                    onClick={() => setRecentlyUpdatedItem(null)} 
-                                    variant="outline"
-                                    size="sm"
-                                >
-                                    Dispensar
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
                 <Card>
                     <CardHeader>
                         <CardTitle>Lançamento de Custo na OS</CardTitle>
@@ -1529,34 +1479,51 @@ export default function CostsPage() {
                                                                     <TableCell className="font-medium">
                                                                         <div>
                                                                             {entry.description}
-                                                                            {entry.isFromRequisition && (
-                                                                                <div className="flex items-center gap-1 mt-1">
-                                                                                    <Badge variant="secondary" className="text-xs">
-                                                                                        📋 Requisição
-                                                                                    </Badge>
-                                                                                    {entry.isPending && (
-                                                                                        <Badge variant="outline" className="text-xs text-orange-600">
-                                                                                            ⏳ Aguardando preços
-                                                                                        </Badge>
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
+                                                                                                                                                         {entry.isFromRequisition && (
+                                                                                 <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                                                                     <Badge variant="secondary" className="text-xs">
+                                                                                         📋 Requisição
+                                                                                     </Badge>
+                                                                                     {entry.isPending && (
+                                                                                         <Badge variant="outline" className="text-xs text-orange-600">
+                                                                                             ⏳ Aguardando preços
+                                                                                         </Badge>
+                                                                                     )}
+                                                                                     {!entry.isPending && entry.completionPercentage && entry.completionPercentage < 100 && (
+                                                                                         <Badge variant="outline" className="text-xs text-blue-600">
+                                                                                             🔄 {entry.completionPercentage}% precificado
+                                                                                         </Badge>
+                                                                                     )}
+                                                                                     {entry.completionPercentage === 100 && (
+                                                                                         <Badge variant="default" className="text-xs text-green-600">
+                                                                                             ✅ Completo
+                                                                                         </Badge>
+                                                                                     )}
+                                                                                 </div>
+                                                                             )}
                                                                             {entry.items && entry.items.length > 0 && (
                                                                                 <details className="mt-2">
                                                                                     <summary className="text-xs text-muted-foreground cursor-pointer hover:text-primary">
                                                                                         Ver {entry.items.length} item(ns) ↓
                                                                                     </summary>
                                                                                     <div className="mt-1 pl-2 border-l-2 border-muted">
-                                                                                        {entry.items.map((item: any, idx: number) => (
-                                                                                            <div key={idx} className="text-xs text-muted-foreground py-1">
-                                                                                                <span className="font-medium">{item.description}</span>
-                                                                                                <div className="text-xs">
-                                                                                                    Qtd: {item.quantity} • 
-                                                                                                    {item.weight ? ` Peso: ${item.weight}${item.weightUnit} • ` : ' '}
-                                                                                                    Valor: {item.value?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'R$ 0,00'}
-                                                                                                </div>
-                                                                                            </div>
-                                                                                        ))}
+                                                                                                                                                                                 {entry.items.map((item: any, idx: number) => (
+                                                                                             <div key={idx} className={`text-xs py-1 px-2 rounded border-l-2 ${item.hasPricing ? 'border-green-400 bg-green-50' : 'border-orange-400 bg-orange-50'}`}>
+                                                                                                 <div className="flex items-center gap-2">
+                                                                                                     <span className={`w-2 h-2 rounded-full ${item.hasPricing ? 'bg-green-500' : 'bg-orange-500'}`}></span>
+                                                                                                     <span className="font-medium text-gray-800">{item.description}</span>
+                                                                                                     {item.hasPricing && <span className="text-green-600 text-xs">✓</span>}
+                                                                                                 </div>
+                                                                                                 <div className="text-xs ml-4 mt-1">
+                                                                                                     <span className="text-gray-600">Qtd: {item.quantity}</span>
+                                                                                                     {item.weight && <span className="text-gray-600"> • Peso: {item.weight}{item.weightUnit}</span>}
+                                                                                                     <br />
+                                                                                                     <span className={`font-medium ${item.hasPricing ? 'text-green-700' : 'text-orange-600'}`}>
+                                                                                                         Valor: {item.value?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'Não informado'}
+                                                                                                     </span>
+                                                                                                 </div>
+                                                                                             </div>
+                                                                                         ))}
                                                                                     </div>
                                                                                 </details>
                                                                             )}
@@ -1778,7 +1745,7 @@ export default function CostsPage() {
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
                         <Button type="submit" disabled={itemForm.formState.isSubmitting}>
-                            {itemForm.formState.isSubmitting ? "Salvando..." : "Salvar e Ir para Custos"}
+                            {itemForm.formState.isSubmitting ? "Salvando..." : "Salvar Atualizações"}
                         </Button>
                     </DialogFooter>
                 </form>
