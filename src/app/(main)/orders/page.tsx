@@ -440,6 +440,34 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                                 <div className="flex items-center gap-2">
                                     <Progress value={orderProgress} className="h-2" />
                                     <span className="text-xs font-medium text-muted-foreground">{Math.round(orderProgress)}%</span>
+                                    {(() => {
+                                        // Verifica se há itens concluídos com atraso no embarque
+                                        const hasDelayedShipping = order.items.some(item => {
+                                            const itemProgress = calculateItemProgress(item);
+                                            return itemProgress === 100 && 
+                                                   item.shippingDate && 
+                                                   order.deliveryDate && 
+                                                   item.shippingDate > order.deliveryDate;
+                                        });
+                                        
+                                        if (hasDelayedShipping) {
+                                            return (
+                                                <TooltipProvider>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <div className="flex items-center">
+                                                                <AlertTriangle className="h-3 w-3 text-red-500" />
+                                                            </div>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>
+                                                            <p>Há itens com atraso no embarque</p>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </TooltipProvider>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
                                 </div>
                             </TableCell>
                             <TableCell>
@@ -2110,9 +2138,14 @@ export default function OrdersPage() {
 
             yPos = 45;
 
-            // Título
+            // Título - ajusta baseado no progresso do item
+            const itemProgress = calculateItemProgress(item);
             docPdf.setFontSize(18).setFont('helvetica', 'bold');
-            docPdf.text('FOLHA DE APONTAMENTO DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            if (itemProgress === 100) {
+                docPdf.text('CONTROLE DE EMBARQUE E ENTREGA', pageWidth / 2, yPos, { align: 'center' });
+            } else {
+                docPdf.text('FOLHA DE APONTAMENTO DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            }
             yPos += 15;
 
             // Informações do pedido
@@ -2137,11 +2170,44 @@ export default function OrdersPage() {
             yPos += 5;
             docPdf.text(`Quantidade: ${item.quantity}`, 15, yPos);
             docPdf.text(`Peso Unit.: ${(Number(item.unitWeight) || 0).toLocaleString('pt-BR')} kg`, pageWidth / 2, yPos);
-            yPos += 15;
+            yPos += 5;
+            
+            // Informações de embarque se o item estiver concluído
+            if (itemProgress === 100) {
+                yPos += 10;
+                docPdf.setFontSize(12).setFont('helvetica', 'bold');
+                docPdf.text('INFORMAÇÕES DE EMBARQUE:', 15, yPos);
+                yPos += 8;
+                
+                docPdf.setFontSize(10).setFont('helvetica', 'normal');
+                docPdf.text(`Lista de Embarque: ${item.shippingList || 'Pendente'}`, 15, yPos);
+                yPos += 5;
+                docPdf.text(`Nota Fiscal: ${item.invoiceNumber || 'Pendente'}`, 15, yPos);
+                yPos += 5;
+                docPdf.text(`Data de Embarque: ${item.shippingDate ? format(item.shippingDate, 'dd/MM/yyyy') : 'Pendente'}`, 15, yPos);
+                
+                // Status de entrega
+                if (item.shippingDate && selectedOrder.deliveryDate) {
+                    yPos += 5;
+                    const isOnTime = item.shippingDate <= selectedOrder.deliveryDate;
+                    docPdf.setFont('helvetica', 'bold');
+                    docPdf.text(`Status de Entrega: ${isOnTime ? 'NO PRAZO' : 'ATRASADO'}`, 15, yPos);
+                    
+                    if (!isOnTime) {
+                        const daysLate = Math.ceil((item.shippingDate.getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24));
+                        yPos += 5;
+                        docPdf.setFont('helvetica', 'normal');
+                        docPdf.text(`Atraso: ${daysLate} dia(s)`, 15, yPos);
+                    }
+                }
+                yPos += 10;
+            } else {
+                yPos += 10;
+            }
 
-            // QR Code MELHORADO com dados mais completos
+            // QR Code MELHORADO com dados mais completos incluindo informações de embarque
             const qrData = JSON.stringify({
-                type: 'apontamento_producao',
+                type: 'controle_embarque',
                 orderId: selectedOrder.id,
                 itemId: item.id,
                 orderNumber: selectedOrder.quotationNumber,
@@ -2150,9 +2216,15 @@ export default function OrdersPage() {
                 quantity: item.quantity,
                 customer: selectedOrder.customer.name,
                 internalOS: selectedOrder.internalOS || '',
+                deliveryDate: selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'yyyy-MM-dd') : null,
+                shippingDate: item.shippingDate ? format(item.shippingDate, 'yyyy-MM-dd') : null,
+                invoiceNumber: item.invoiceNumber || null,
+                shippingList: item.shippingList || null,
+                isOnTime: item.shippingDate && selectedOrder.deliveryDate ? 
+                    item.shippingDate <= selectedOrder.deliveryDate : null,
                 timestamp: new Date().toISOString(),
-                // URL para acesso direto (caso você tenha uma página de apontamento)
-                url: `${window.location.origin}/apontamento/${selectedOrder.id}/${item.id}`
+                // URL para acesso direto
+                url: `${window.location.origin}/embarque/${selectedOrder.id}/${item.id}`
             });
 
             try {
@@ -2255,11 +2327,13 @@ export default function OrdersPage() {
             }
 
             // Salvar o PDF
-            const filename = `Apontamento_${selectedOrder.quotationNumber}_${item.code || 'Item'}_${format(new Date(), 'yyyyMMdd')}.pdf`;
+            const filePrefix = itemProgress === 100 ? 'Controle_Embarque' : 'Apontamento';
+            const filename = `${filePrefix}_${selectedOrder.quotationNumber}_${item.code || 'Item'}_${format(new Date(), 'yyyyMMdd')}.pdf`;
             docPdf.save(filename);
 
+            const documentType = itemProgress === 100 ? 'Controle de Embarque' : 'Folha de Apontamento';
             toast({
-                title: "Folha gerada com sucesso!",
+                title: `${documentType} gerado com sucesso!`,
                 description: `Arquivo ${filename} foi baixado. QR Code incluído para rastreamento.`,
             });
 
@@ -2770,44 +2844,69 @@ export default function OrdersPage() {
                                 </div>
                                 {itemProgress === 100 && (
                                   <>
-                                    <Separator className="my-2" />
-                                    <h5 className="text-sm font-semibold">Informações de Envio (Item Concluído)</h5>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                      <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
-                                        <FormItem>
-                                          <FormLabel>Lista de Embarque (LE)</FormLabel>
-                                          <FormControl><Input placeholder="Nº da LE" {...field} value={field.value ?? ''} /></FormControl>
-                                          <FormMessage />
-                                        </FormItem>
-                                      )}/>
-                                      <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
-                                        <FormItem>
-                                          <FormLabel>Nota Fiscal (NF-e)</FormLabel>
-                                          <FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl>
-                                          <FormMessage />
-                                        </FormItem>
-                                      )}/>
-                                      <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
-                                        <FormItem>
-                                          <FormLabel>Data de Envio</FormLabel>
-                                          <FormControl>
-                                            <Input
-                                              type="date"
-                                              value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
-                                              onChange={(e) => {
-                                                console.log('🔥 DATA ENVIO ALTERADA:', e.target.value);
-                                                if (e.target.value) {
-                                                  field.onChange(new Date(e.target.value));
-                                                } else {
-                                                  field.onChange(null);
-                                                }
-                                              }}
-                                              className="w-full"
-                                            />
-                                          </FormControl>
-                                          <FormMessage />
-                                        </FormItem>
-                                      )}/>
+                                    <Separator className="my-3" />
+                                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                      <div className="flex items-center gap-2 mb-3">
+                                        <CheckCircle className="h-5 w-5 text-green-600" />
+                                        <h5 className="font-semibold text-green-800">Item Concluído - Preencha as Informações de Embarque</h5>
+                                      </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
+                                          <FormItem>
+                                            <FormLabel>Lista de Embarque (LE)</FormLabel>
+                                            <FormControl><Input placeholder="Nº da LE" {...field} value={field.value ?? ''} /></FormControl>
+                                            <FormMessage />
+                                          </FormItem>
+                                        )}/>
+                                        <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
+                                          <FormItem>
+                                            <FormLabel>Nota Fiscal (NF-e) *</FormLabel>
+                                            <FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl>
+                                            <FormMessage />
+                                          </FormItem>
+                                        )}/>
+                                        <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
+                                          <FormItem>
+                                            <FormLabel>Data de Embarque *</FormLabel>
+                                            <FormControl>
+                                              <Input
+                                                type="date"
+                                                value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                                onChange={(e) => {
+                                                  console.log('🔥 DATA EMBARQUE ALTERADA:', e.target.value);
+                                                  if (e.target.value) {
+                                                    field.onChange(new Date(e.target.value));
+                                                  } else {
+                                                    field.onChange(null);
+                                                  }
+                                                }}
+                                                className="w-full"
+                                              />
+                                            </FormControl>
+                                            <FormMessage />
+                                          </FormItem>
+                                        )}/>
+                                      </div>
+                                      {watchedItems[index]?.shippingDate && selectedOrder.deliveryDate && (
+                                        <div className="mt-3">
+                                          {new Date(watchedItems[index].shippingDate) <= selectedOrder.deliveryDate ? (
+                                            <div className="flex items-center gap-2 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
+                                              <CheckCircle className="h-4 w-4" />
+                                              <span className="font-medium">Item será entregue no prazo</span>
+                                            </div>
+                                          ) : (
+                                            <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
+                                              <AlertTriangle className="h-4 w-4" />
+                                              <span className="font-medium">
+                                                Item será entregue {Math.ceil((new Date(watchedItems[index].shippingDate).getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                      <p className="text-xs text-muted-foreground mt-2">
+                                        * Campos obrigatórios para finalização do embarque
+                                      </p>
                                     </div>
                                   </>
                                 )}
@@ -3005,6 +3104,20 @@ export default function OrdersPage() {
                                   <GanttChart className="mr-2 h-4 w-4" />
                                   Progresso
                                 </Button>
+                                {itemProgress === 100 && (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button variant="outline" size="sm" onClick={() => handleGenerateTimesheet(item)}>
+                                          <QrCode className="h-4 w-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Gerar Folha de Controle de Embarque com QR Code</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
                               </div>
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -3032,22 +3145,55 @@ export default function OrdersPage() {
                               </div>
                               <Progress value={itemProgress} className="h-2" />
                             </div>
-                            {itemProgress === 100 && (item.shippingList || item.invoiceNumber || item.shippingDate) && (
+                            {itemProgress === 100 && (
                               <>
                                 <Separator className="my-3" />
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                                  <div>
-                                    <span className="text-muted-foreground">Lista de Embarque:</span>
-                                    <p className="font-medium">{item.shippingList || 'N/A'}</p>
+                                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <CheckCircle className="h-5 w-5 text-green-600" />
+                                    <h5 className="font-semibold text-green-800">Item Concluído - Informações de Embarque</h5>
                                   </div>
-                                  <div>
-                                    <span className="text-muted-foreground">Nota Fiscal:</span>
-                                    <p className="font-medium">{item.invoiceNumber || 'N/A'}</p>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                    <div>
+                                      <span className="text-muted-foreground">Lista de Embarque:</span>
+                                      <p className="font-medium">{item.shippingList || 'Pendente'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Nota Fiscal:</span>
+                                      <p className="font-medium">{item.invoiceNumber || 'Pendente'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Data de Embarque:</span>
+                                      <div className="flex items-center gap-2">
+                                        <p className="font-medium">{item.shippingDate ? format(item.shippingDate, "dd/MM/yyyy") : 'Pendente'}</p>
+                                        {item.shippingDate && selectedOrder.deliveryDate && (
+                                          <>
+                                            {item.shippingDate <= selectedOrder.deliveryDate ? (
+                                              <Badge variant="default" className="bg-green-600 hover:bg-green-600/90 text-xs">
+                                                <CheckCircle className="mr-1 h-3 w-3" />
+                                                No Prazo
+                                              </Badge>
+                                            ) : (
+                                              <Badge variant="destructive" className="text-xs">
+                                                <AlertTriangle className="mr-1 h-3 w-3" />
+                                                Atrasado
+                                              </Badge>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <span className="text-muted-foreground">Data de Envio:</span>
-                                    <p className="font-medium">{item.shippingDate ? format(item.shippingDate, "dd/MM/yyyy") : 'N/A'}</p>
-                                  </div>
+                                  {item.shippingDate && selectedOrder.deliveryDate && item.shippingDate > selectedOrder.deliveryDate && (
+                                    <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                                      <div className="flex items-center gap-1">
+                                        <AlertTriangle className="h-3 w-3" />
+                                        <span className="font-medium">
+                                          Entregue {Math.ceil((item.shippingDate.getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
+                                        </span>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </>
                             )}
