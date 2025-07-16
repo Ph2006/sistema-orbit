@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2 } from "lucide-react";
+import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -548,6 +548,8 @@ export default function CostsPage() {
     const [itemSpecification, setItemSpecification] = useState("");
     const [activeTab, setActiveTab] = useState("receipts");
     const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+    const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+    const [selectedOrderForReport, setSelectedOrderForReport] = useState<OrderInfo | null>(null);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -1558,6 +1560,140 @@ export default function CostsPage() {
         setItemSpecification("");
     };
 
+    // Função para gerar relatório de recebimento de materiais por OS
+    const generateMaterialsReport = (order: OrderInfo) => {
+        try {
+            // Buscar todas as requisições vinculadas a esta OS
+            const orderRequisitions = requisitions.filter(req => req.orderId === order.id);
+            
+            // Agrupar gastos por fornecedor
+            const supplierCosts: { [key: string]: { 
+                supplierName: string; 
+                totalCost: number; 
+                items: Array<{
+                    description: string;
+                    quantity: number;
+                    unitValue: number;
+                    totalValue: number;
+                    invoiceNumber?: string;
+                    requisitionNumber: string;
+                    weight?: number;
+                    weightUnit?: string;
+                    deliveryDate?: Date | null;
+                    inspectionStatus?: string;
+                }>
+            }} = {};
+
+            // Resumo por requisição
+            const requisitionSummary = orderRequisitions.map(req => {
+                const materialsWithValue = req.items.filter(item => 
+                    item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
+                );
+                const totalReqCost = materialsWithValue.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
+                
+                return {
+                    requisitionNumber: req.requisitionNumber,
+                    date: req.date,
+                    totalItems: req.items.length,
+                    itemsWithValue: materialsWithValue.length,
+                    totalCost: totalReqCost,
+                    progress: req.items.length > 0 ? Math.round((materialsWithValue.length / req.items.length) * 100) : 0
+                };
+            });
+
+            let totalOrderCost = 0;
+            let totalItemsReceived = 0;
+            let totalWeight = 0;
+
+            orderRequisitions.forEach(req => {
+                req.items.forEach(item => {
+                    if (item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName) {
+                        const supplierKey = item.supplierName.toLowerCase();
+                        
+                        if (!supplierCosts[supplierKey]) {
+                            supplierCosts[supplierKey] = {
+                                supplierName: item.supplierName,
+                                totalCost: 0,
+                                items: []
+                            };
+                        }
+
+                        supplierCosts[supplierKey].totalCost += item.invoiceItemValue;
+                        supplierCosts[supplierKey].items.push({
+                            description: item.description,
+                            quantity: item.quantityRequested,
+                            unitValue: item.invoiceItemValue / item.quantityRequested,
+                            totalValue: item.invoiceItemValue,
+                            invoiceNumber: item.invoiceNumber,
+                            requisitionNumber: req.requisitionNumber,
+                            weight: item.weight,
+                            weightUnit: item.weightUnit,
+                            deliveryDate: item.deliveryReceiptDate,
+                            inspectionStatus: item.inspectionStatus
+                        });
+
+                        totalOrderCost += item.invoiceItemValue;
+                        totalItemsReceived += item.quantityRequested;
+                        
+                        // Somar peso total (convertendo para kg)
+                        if (item.weight) {
+                            let weightInKg = item.weight;
+                            if (item.weightUnit === 'g') weightInKg = item.weight / 1000;
+                            else if (item.weightUnit === 't') weightInKg = item.weight * 1000;
+                            totalWeight += weightInKg;
+                        }
+                    }
+                });
+            });
+
+            // Ordenar fornecedores por maior gasto
+            const sortedSuppliers = Object.values(supplierCosts).sort((a, b) => b.totalCost - a.totalCost);
+
+            return {
+                order,
+                suppliers: sortedSuppliers,
+                requisitionSummary,
+                totalOrderCost,
+                totalItemsReceived,
+                totalWeight,
+                totalSuppliers: sortedSuppliers.length,
+                requisitionsCount: orderRequisitions.length,
+                reportDate: new Date()
+            };
+        } catch (error) {
+            console.error("Erro ao gerar relatório:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar relatório",
+                description: "Não foi possível processar os dados para o relatório."
+            });
+            return null;
+        }
+    };
+
+    const handleGenerateReport = (order: OrderInfo) => {
+        const reportData = generateMaterialsReport(order);
+        if (reportData && reportData.suppliers.length > 0) {
+            setSelectedOrderForReport(order);
+            setIsReportModalOpen(true);
+        } else {
+            const orderReqs = requisitions.filter(req => req.orderId === order.id);
+            const totalReqItems = orderReqs.reduce((sum, req) => sum + req.items.length, 0);
+            
+            if (totalReqItems > 0) {
+                toast({
+                    title: "📦 Relatório não disponível",
+                    description: `Esta OS possui ${totalReqItems} itens em ${orderReqs.length} requisições, mas nenhum material foi recebido e precificado ainda.`
+                });
+            } else {
+                toast({
+                    title: "📋 Nenhuma requisição",
+                    description: "Esta OS não possui requisições de materiais vinculadas."
+                });
+            }
+        }
+    };
+
     const handleConfirmDeleteCostEntry = async () => {
         if (!costEntryToDelete) return;
         const orderRef = doc(db, "companies", "mecald", "orders", costEntryToDelete.orderId);
@@ -2269,12 +2405,64 @@ export default function CostsPage() {
                                                         <div className="flex items-center gap-4">
                                                             <span className="font-bold text-primary">OS: {order.internalOS}</span>
                                                             <span className="text-muted-foreground">{order.customerName}</span>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleGenerateReport(order);
+                                                                }}
+                                                                className="ml-auto text-xs h-7 px-2"
+                                                                title={(() => {
+                                                                    const orderReqs = requisitions.filter(req => req.orderId === order.id);
+                                                                    const hasValues = orderReqs.some(req => 
+                                                                        req.items.some(item => 
+                                                                            item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
+                                                                        )
+                                                                    );
+                                                                    const totalItems = orderReqs.reduce((sum, req) => sum + req.items.length, 0);
+                                                                    
+                                                                    if (!hasValues && totalItems > 0) {
+                                                                        return `Esta OS possui ${totalItems} itens em requisições, mas ainda não foram precificados`;
+                                                                    } else if (!hasValues) {
+                                                                        return "Esta OS não possui requisições de materiais";
+                                                                    }
+                                                                    return "Gerar relatório de recebimento de materiais por fornecedor";
+                                                                })()}
+                                                                disabled={(() => {
+                                                                    const orderReqs = requisitions.filter(req => req.orderId === order.id);
+                                                                    const hasValues = orderReqs.some(req => 
+                                                                        req.items.some(item => 
+                                                                            item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
+                                                                        )
+                                                                    );
+                                                                    return !hasValues;
+                                                                })()}
+                                                            >
+                                                                📊 Relatório
+                                                            </Button>
                                                         </div>
                                                         <div className="flex items-center gap-6 mt-1 text-sm text-muted-foreground">
                                                             <span>{entriesCount} lançamento{entriesCount !== 1 ? 's' : ''}</span>
                                                             <span className="font-semibold text-green-600">
                                                                 Total: {totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                             </span>
+                                                            {(() => {
+                                                                const orderReqs = requisitions.filter(req => req.orderId === order.id);
+                                                                const materialsCount = orderReqs.reduce((sum, req) => 
+                                                                    sum + req.items.filter(item => 
+                                                                        item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
+                                                                    ).length, 0
+                                                                );
+                                                                if (materialsCount > 0) {
+                                                                    return (
+                                                                        <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
+                                                                            📦 {materialsCount} materiais recebidos
+                                                                        </Badge>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
                                                         </div>
                                                     </div>
                                                 </AccordionTrigger>
@@ -2761,6 +2949,334 @@ export default function CostsPage() {
             </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Modal do Relatório de Recebimento de Materiais */}
+      <Dialog open={isReportModalOpen} onOpenChange={setIsReportModalOpen}>
+        <DialogContent className="max-w-6xl h-[90vh] flex flex-col">
+            <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                    📊 Relatório de Recebimento de Materiais
+                </DialogTitle>
+                <DialogDescription>
+                    {selectedOrderForReport && (
+                        <>OS: {selectedOrderForReport.internalOS} - {selectedOrderForReport.customerName}</>
+                    )}
+                </DialogDescription>
+            </DialogHeader>
+            
+            {selectedOrderForReport && (() => {
+                const reportData = generateMaterialsReport(selectedOrderForReport);
+                if (!reportData) return <div>Erro ao gerar dados do relatório</div>;
+                
+                return (
+                    <div className="flex-1 flex flex-col min-h-0">
+                        {/* Resumo Executivo */}
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 p-4 bg-muted/30 rounded-lg">
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-green-600">
+                                    {reportData.totalOrderCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </div>
+                                <div className="text-sm text-muted-foreground">Total Gasto</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-blue-600">{reportData.totalSuppliers}</div>
+                                <div className="text-sm text-muted-foreground">Fornecedores</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-purple-600">{reportData.totalItemsReceived}</div>
+                                <div className="text-sm text-muted-foreground">Itens Recebidos</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-orange-600">{reportData.requisitionsCount}</div>
+                                <div className="text-sm text-muted-foreground">Requisições</div>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-2xl font-bold text-teal-600">
+                                    {reportData.totalWeight > 0 ? `${reportData.totalWeight.toFixed(2)} kg` : '-'}
+                                </div>
+                                <div className="text-sm text-muted-foreground">Peso Total</div>
+                            </div>
+                        </div>
+
+                        {/* Resumo por Requisição */}
+                        {reportData.requisitionSummary.length > 1 && (
+                            <div className="mb-6">
+                                <h3 className="text-lg font-semibold mb-3">📋 Resumo por Requisição</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {reportData.requisitionSummary.map(req => (
+                                        <div key={req.requisitionNumber} className="p-3 border rounded-lg bg-white">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <span className="font-semibold text-primary">Req. {req.requisitionNumber}</span>
+                                                <Badge variant="outline" className="text-xs">
+                                                    {req.progress}%
+                                                </Badge>
+                                            </div>
+                                            <div className="text-sm space-y-1">
+                                                <div className="flex justify-between">
+                                                    <span>Itens:</span>
+                                                    <span>{req.itemsWithValue}/{req.totalItems}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span>Valor:</span>
+                                                    <span className="font-semibold text-green-600">
+                                                        {req.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">
+                                                    {safeFormatDate(req.date, 'dd/MM/yyyy')}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Lista de Fornecedores */}
+                        <ScrollArea className="flex-1">
+                            <div className="space-y-4">
+                                {reportData.suppliers.map((supplier, index) => {
+                                    const percentage = (supplier.totalCost / reportData.totalOrderCost) * 100;
+                                    
+                                    return (
+                                        <Card key={supplier.supplierName} className="overflow-hidden">
+                                            <CardHeader className="pb-2">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                                                            {index + 1}
+                                                        </div>
+                                                        <div>
+                                                            <CardTitle className="text-lg">{supplier.supplierName}</CardTitle>
+                                                            <div className="text-sm text-muted-foreground">
+                                                                {supplier.items.length} ite{supplier.items.length !== 1 ? 'ns' : 'm'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-xl font-bold text-green-600">
+                                                            {supplier.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                        </div>
+                                                        <div className="text-sm text-muted-foreground">
+                                                            {percentage.toFixed(1)}% do total
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Barra de Progresso */}
+                                                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                                                    <div 
+                                                        className="bg-gradient-to-r from-green-400 to-green-600 h-2 rounded-full transition-all" 
+                                                        style={{ width: `${percentage}%` }}
+                                                    ></div>
+                                                </div>
+                                            </CardHeader>
+                                            
+                                            <CardContent className="pt-0">
+                                                                                                 <Table>
+                                                     <TableHeader>
+                                                         <TableRow>
+                                                             <TableHead>Item</TableHead>
+                                                             <TableHead className="text-right">Qtd</TableHead>
+                                                             <TableHead className="text-right">Peso</TableHead>
+                                                             <TableHead className="text-right">Valor Unit.</TableHead>
+                                                             <TableHead className="text-right">Total</TableHead>
+                                                             <TableHead>NF</TableHead>
+                                                             <TableHead>Req.</TableHead>
+                                                             <TableHead>Status</TableHead>
+                                                         </TableRow>
+                                                     </TableHeader>
+                                                     <TableBody>
+                                                         {supplier.items.map((item, itemIndex) => (
+                                                             <TableRow key={itemIndex}>
+                                                                 <TableCell className="font-medium">{item.description}</TableCell>
+                                                                 <TableCell className="text-right">{item.quantity}</TableCell>
+                                                                 <TableCell className="text-right text-sm">
+                                                                     {item.weight ? `${item.weight} ${item.weightUnit || 'kg'}` : '-'}
+                                                                 </TableCell>
+                                                                 <TableCell className="text-right">
+                                                                     {item.unitValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                 </TableCell>
+                                                                 <TableCell className="text-right font-semibold text-green-600">
+                                                                     {item.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                 </TableCell>
+                                                                 <TableCell className="text-sm">{item.invoiceNumber || '-'}</TableCell>
+                                                                 <TableCell className="text-sm">{item.requisitionNumber}</TableCell>
+                                                                 <TableCell>
+                                                                     <div className="space-y-1">
+                                                                         {item.deliveryDate && (
+                                                                             <div className="text-xs text-green-600">
+                                                                                 📅 {safeFormatDate(item.deliveryDate, 'dd/MM/yy')}
+                                                                             </div>
+                                                                         )}
+                                                                         {item.inspectionStatus && (
+                                                                             <Badge variant={
+                                                                                 item.inspectionStatus.includes('Aprovado') ? 'default' :
+                                                                                 item.inspectionStatus.includes('Rejeitado') ? 'destructive' :
+                                                                                 'secondary'
+                                                                             } className="text-xs">
+                                                                                 {item.inspectionStatus}
+                                                                             </Badge>
+                                                                         )}
+                                                                     </div>
+                                                                 </TableCell>
+                                                             </TableRow>
+                                                         ))}
+                                                     </TableBody>
+                                                 </Table>
+                                            </CardContent>
+                                        </Card>
+                                    );
+                                })}
+                            </div>
+                        </ScrollArea>
+
+                        {/* Rodapé com ações */}
+                        <div className="flex items-center justify-between pt-4 border-t">
+                            <div className="text-xs text-muted-foreground">
+                                Relatório gerado em: {safeFormatDate(reportData.reportDate, 'dd/MM/yyyy HH:mm')}
+                            </div>
+                            <div className="flex gap-2">
+                                                                 <Button 
+                                     variant="outline" 
+                                     onClick={() => {
+                                         // Gerar CSV
+                                         const csvHeaders = ['Fornecedor', 'Item', 'Quantidade', 'Peso', 'Unidade Peso', 'Valor Unitário', 'Valor Total', 'Nota Fiscal', 'Requisição', 'Data Entrega', 'Status Inspeção', '% do Total'];
+                                         const csvData = reportData.suppliers.flatMap(supplier => 
+                                             supplier.items.map(item => {
+                                                 const percentage = (item.totalValue / reportData.totalOrderCost) * 100;
+                                                 return [
+                                                     supplier.supplierName,
+                                                     item.description,
+                                                     item.quantity.toString(),
+                                                     item.weight?.toString() || '',
+                                                     item.weightUnit || '',
+                                                     item.unitValue.toFixed(2).replace('.', ','),
+                                                     item.totalValue.toFixed(2).replace('.', ','),
+                                                     item.invoiceNumber || '',
+                                                     item.requisitionNumber,
+                                                     item.deliveryDate ? safeFormatDate(item.deliveryDate, 'dd/MM/yyyy') : '',
+                                                     item.inspectionStatus || '',
+                                                     percentage.toFixed(2).replace('.', ',') + '%'
+                                                 ];
+                                             })
+                                         );
+
+                                         const csvContent = [
+                                             csvHeaders.join(';'),
+                                             ...csvData.map(row => row.join(';'))
+                                         ].join('\n');
+
+                                         // Adicionar BOM para caracteres especiais
+                                         const BOM = '\uFEFF';
+                                         const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8' });
+                                         const url = window.URL.createObjectURL(blob);
+                                         const link = document.createElement('a');
+                                         link.href = url;
+                                         link.download = `relatorio_materiais_OS_${selectedOrderForReport.internalOS.replace('/', '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+                                         link.click();
+                                         window.URL.revokeObjectURL(url);
+                                     }}
+                                 >
+                                     📊 Exportar CSV
+                                 </Button>
+                                 <Button 
+                                     variant="outline" 
+                                     onClick={() => {
+                                         const printWindow = window.open('', '_blank');
+                                         if (printWindow) {
+                                             printWindow.document.write(`
+                                                 <html>
+                                                     <head>
+                                                         <title>Relatório - OS ${selectedOrderForReport.internalOS}</title>
+                                                         <style>
+                                                             body { font-family: Arial, sans-serif; margin: 20px; }
+                                                             .header { text-align: center; margin-bottom: 30px; }
+                                                             .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; text-align: center; }
+                                                             .summary-item { border: 1px solid #ccc; padding: 15px; border-radius: 5px; }
+                                                             .supplier { margin: 30px 0; border: 2px solid #ccc; padding: 15px; border-radius: 5px; }
+                                                             .supplier-header { background-color: #f5f5f5; padding: 10px; margin: -15px -15px 15px -15px; border-radius: 5px 5px 0 0; }
+                                                             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                                                             th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                                                             th { background-color: #f8f9fa; font-weight: bold; }
+                                                             .total { text-align: center; margin-top: 30px; font-size: 18px; font-weight: bold; }
+                                                         </style>
+                                                     </head>
+                                                     <body>
+                                                         <div class="header">
+                                                             <h1>Relatório de Recebimento de Materiais</h1>
+                                                             <h2>OS: ${selectedOrderForReport.internalOS} - ${selectedOrderForReport.customerName}</h2>
+                                                             <p>Gerado em: ${safeFormatDate(reportData.reportDate, 'dd/MM/yyyy HH:mm')}</p>
+                                                         </div>
+                                                         <div class="summary">
+                                                             <div class="summary-item">
+                                                                 <h3 style="color: #059669; margin: 0;">${reportData.totalOrderCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
+                                                                 <p style="margin: 5px 0 0 0;">Total Gasto</p>
+                                                             </div>
+                                                             <div class="summary-item">
+                                                                 <h3 style="color: #2563eb; margin: 0;">${reportData.totalSuppliers}</h3>
+                                                                 <p style="margin: 5px 0 0 0;">Fornecedores</p>
+                                                             </div>
+                                                             <div class="summary-item">
+                                                                 <h3 style="color: #7c3aed; margin: 0;">${reportData.totalItemsReceived}</h3>
+                                                                 <p style="margin: 5px 0 0 0;">Itens Recebidos</p>
+                                                             </div>
+                                                             <div class="summary-item">
+                                                                 <h3 style="color: #ea580c; margin: 0;">${reportData.requisitionsCount}</h3>
+                                                                 <p style="margin: 5px 0 0 0;">Requisições</p>
+                                                             </div>
+                                                         </div>
+                                                         ${reportData.suppliers.map((supplier, index) => {
+                                                             const percentage = (supplier.totalCost / reportData.totalOrderCost) * 100;
+                                                             return `
+                                                                 <div class="supplier">
+                                                                     <div class="supplier-header">
+                                                                         <h3 style="margin: 0; display: flex; justify-content: space-between;">
+                                                                             <span>${index + 1}. ${supplier.supplierName}</span>
+                                                                             <span style="color: #059669;">${supplier.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${percentage.toFixed(1)}%)</span>
+                                                                         </h3>
+                                                                     </div>
+                                                                     <table>
+                                                                         <tr><th>Item</th><th>Qtd</th><th>Peso</th><th>Valor Unit.</th><th>Valor Total</th><th>NF</th><th>Req.</th><th>Status</th></tr>
+                                                                         ${supplier.items.map(item => `
+                                                                             <tr>
+                                                                                 <td>${item.description}</td>
+                                                                                 <td style="text-align: center;">${item.quantity}</td>
+                                                                                 <td style="text-align: center;">${item.weight ? `${item.weight} ${item.weightUnit || 'kg'}` : '-'}</td>
+                                                                                 <td style="text-align: right;">${item.unitValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
+                                                                                 <td style="text-align: right; font-weight: bold;">${item.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
+                                                                                 <td style="text-align: center;">${item.invoiceNumber || '-'}</td>
+                                                                                 <td style="text-align: center;">${item.requisitionNumber}</td>
+                                                                                 <td style="text-align: center; font-size: 11px;">${item.inspectionStatus || '-'}</td>
+                                                                             </tr>
+                                                                         `).join('')}
+                                                                     </table>
+                                                                 </div>
+                                                             `;
+                                                         }).join('')}
+                                                         <div class="total">
+                                                             <p>TOTAL GERAL: ${reportData.totalOrderCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                                                         </div>
+                                                     </body>
+                                                 </html>
+                                             `);
+                                             printWindow.document.close();
+                                             printWindow.print();
+                                         }
+                                     }}
+                                 >
+                                     🖨️ Imprimir
+                                 </Button>
+                                <Button variant="outline" onClick={() => setIsReportModalOpen(false)}>
+                                    Fechar
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
+        </DialogContent>
+      </Dialog>
     </>
     );
     } catch (error) {
