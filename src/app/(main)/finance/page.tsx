@@ -113,6 +113,13 @@ export default function FinancePage() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
+  // Função auxiliar para encontrar ordem por ID
+  const findOrderById = (orderId: string) => {
+    const order = orders.find(o => o.id === orderId);
+    console.log('🔍 Buscando ordem por ID:', orderId, 'Encontrada:', !!order);
+    return order;
+  };
+
   // Função para verificar senha
   const handleAuthentication = () => {
     if (password === 'OP4484210640') {
@@ -695,30 +702,6 @@ export default function FinancePage() {
             <Lock className="w-4 h-4 mr-2" />
             Sair
           </Button>
-          {/* Botão de Debug/Teste */}
-          <Button
-            onClick={() => {
-              console.log('🔍 Estado atual dos dados:');
-              console.log('- Orders carregadas:', orders.length);
-              console.log('- Financial data:', financialData.length);
-              console.log('- Primeira OS:', orders[0]);
-              
-              if (orders.length > 0) {
-                console.log('🧪 Testando modal com primeira OS');
-                handleOpenRevenueModal(orders[0]);
-              } else {
-                toast({
-                  title: "Debug",
-                  description: "Nenhuma OS carregada ainda. Aguarde o carregamento dos dados.",
-                });
-              }
-            }}
-            variant="secondary"
-            className="flex items-center"
-          >
-            <Calculator className="w-4 h-4 mr-2" />
-            Teste Modal
-          </Button>
           <Button
             onClick={generateFinancialReport}
             disabled={!financialData.length}
@@ -945,12 +928,14 @@ export default function FinancePage() {
                             onClick={(e) => {
                               e.stopPropagation();
                               console.log('🔗 Botão clicado para OS:', data.internalOS, 'ID:', data.id);
-                              const order = findOrderById(data.id);
+                              console.log('📋 Orders disponíveis:', orders.length);
+                              const order = orders.find(o => o.id === data.id);
                               if (order) {
-                                console.log('✅ Ordem encontrada, abrindo modal:', order);
+                                console.log('✅ Ordem encontrada, abrindo modal:', order.internalOS);
                                 handleOpenRevenueModal(order);
                               } else {
                                 console.error('❌ Ordem não encontrada para ID:', data.id);
+                                console.log('📋 IDs disponíveis:', orders.map(o => o.id));
                                 toast({
                                   variant: "destructive",
                                   title: "Erro",
@@ -984,7 +969,7 @@ export default function FinancePage() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 console.log('🔗 Botão "Lançar Receita" clicado no resumo para OS:', data.internalOS);
-                                const order = findOrderById(data.id);
+                                const order = orders.find(o => o.id === data.id);
                                 if (order) {
                                   handleOpenRevenueModal(order);
                                 } else {
@@ -1009,7 +994,7 @@ export default function FinancePage() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 console.log('🔗 Botão "Editar" clicado no resumo para OS:', data.internalOS);
-                                const order = findOrderById(data.id);
+                                const order = orders.find(o => o.id === data.id);
                                 if (order) {
                                   handleOpenRevenueModal(order);
                                 } else {
