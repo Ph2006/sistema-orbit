@@ -618,6 +618,14 @@ export default function CostsPage() {
         syncRequisitionsWithOrders();
     }, [requisitions, orders]);
 
+    // Auto-atualizar dados quando mudar para aba de custos
+    useEffect(() => {
+        if (activeTab === "costEntry") {
+            console.log('🔄 Mudou para aba de custos, atualizando dados...');
+            fetchOrders();
+        }
+    }, [activeTab]);
+
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
         const selectedItemData = { ...item, requisitionId };
         setSelectedItem(selectedItemData);
@@ -675,10 +683,20 @@ export default function CostsPage() {
             updatedItems[itemIndex] = updatedItem;
 
             await updateDoc(reqRef, { items: updatedItems });
+            console.log('✅ Requisição atualizada no banco de dados');
 
             // Atualizar custos da OS automaticamente se a requisição estiver vinculada a uma OS
             if (reqData.orderId) {
-                await updateOrderCostFromRequisition(reqData.orderId, selectedItem.requisitionId, updatedItems);
+                console.log('🔗 Requisição vinculada à OS, atualizando custos...');
+                try {
+                    await updateOrderCostFromRequisition(reqData.orderId, selectedItem.requisitionId, updatedItems);
+                    console.log('✅ Custos da OS atualizados com sucesso');
+                } catch (costError) {
+                    console.error('❌ Erro ao atualizar custos da OS:', costError);
+                    // Mesmo se houver erro nos custos, mostra que a requisição foi salva
+                }
+            } else {
+                console.log('⚠️ Requisição não está vinculada a uma OS');
             }
 
             // Toast mais informativo baseado nos valores
@@ -687,7 +705,8 @@ export default function CostsPage() {
                 if (hasValues) {
                     toast({ 
                         title: "✅ Item precificado com sucesso!", 
-                        description: `Valor R$ ${values.invoiceItemValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi adicionado aos custos da OS.` 
+                        description: `Valor ${values.invoiceItemValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi adicionado aos custos da OS. Vá na aba 'Lançamento de Custos' para verificar.`,
+                        duration: 5000
                     });
                 } else {
                     toast({ 
@@ -702,8 +721,21 @@ export default function CostsPage() {
                 });
             }
             setIsFormOpen(false);
-            await fetchRequisitions();
-            await fetchOrders();
+            
+            // Forçar refresh de dados com feedback visual
+            console.log('🔄 Atualizando interface após edição...');
+            await Promise.all([
+                fetchRequisitions(),
+                fetchOrders()
+            ]);
+            
+            // Se estiver na aba de custos, forçar refresh adicional
+            if (activeTab === "costEntry") {
+                setTimeout(() => {
+                    console.log('🔄 Refresh adicional para aba de custos...');
+                    fetchOrders();
+                }, 1500);
+            }
             
         } catch (error: any) {
             console.error("Error updating item:", error);
@@ -713,37 +745,53 @@ export default function CostsPage() {
 
     // Função para atualizar custos da OS baseado na requisição
     const updateOrderCostFromRequisition = async (orderId: string, requisitionId: string, items: any[]) => {
+        console.log('🔄 Iniciando atualização de custos:', { orderId, requisitionId, items });
+        
         try {
             // Buscar dados da requisição
             const reqRef = doc(db, "companies", "mecald", "materialRequisitions", requisitionId);
             const reqSnap = await getDoc(reqRef);
             
-            if (!reqSnap.exists()) return;
+            if (!reqSnap.exists()) {
+                console.log('❌ Requisição não encontrada:', requisitionId);
+                return;
+            }
             
             const reqData = reqSnap.data();
+            console.log('📋 Dados da requisição:', reqData);
             
             const orderRef = doc(db, "companies", "mecald", "orders", orderId);
             const orderSnap = await getDoc(orderRef);
             
-            if (!orderSnap.exists()) return;
+            if (!orderSnap.exists()) {
+                console.log('❌ OS não encontrada:', orderId);
+                return;
+            }
             
             const orderData = orderSnap.data();
             const existingCostEntries = orderData.costEntries || [];
+            console.log('📊 Custos existentes na OS:', existingCostEntries.length);
             
             // Remover lançamentos antigos desta requisição
             const filteredCostEntries = existingCostEntries.filter((entry: any) => 
                 entry.requisitionId !== requisitionId
             );
+            console.log('🗑️ Removendo custos antigos da requisição, restaram:', filteredCostEntries.length);
             
             // Calcular total da requisição - o valor da nota fiscal já é o valor total do item
             const requisitionTotal = items.reduce((total, item) => {
                 const itemValue = item.invoiceItemValue || 0;
+                console.log(`💰 Item ${item.description}: R$ ${itemValue}`);
                 return total + itemValue;
             }, 0);
+            
+            console.log('💵 Total calculado da requisição:', requisitionTotal);
             
             // Contar quantos itens têm valores preenchidos
             const itemsWithValues = items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
             const totalItems = items.length;
+            
+            console.log(`📈 Progresso: ${itemsWithValues}/${totalItems} itens precificados`);
             
             // Criar descrição dinâmica baseada no progresso
             let description = `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'}`;
@@ -781,16 +829,31 @@ export default function CostsPage() {
                 }))
             };
             
+            console.log('💾 Novo lançamento de custo:', requisitionCostEntry);
+            
             filteredCostEntries.push(requisitionCostEntry);
             
+            console.log('📝 Salvando custos atualizados no banco...');
             await updateDoc(orderRef, {
                 costEntries: filteredCostEntries
             });
             
-            console.log(`✅ Custo da OS atualizado: Requisição ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            console.log(`✅ Custo da OS atualizado com sucesso: Requisição ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            
+            // Forçar múltiplas atualizações para garantir sincronização
+            setTimeout(() => {
+                console.log('🔄 Primeiro refresh dos dados...');
+                fetchOrders();
+            }, 500);
+            
+            setTimeout(() => {
+                console.log('🔄 Segundo refresh dos dados...');
+                fetchOrders();
+            }, 2000);
             
         } catch (error) {
-            console.error("Error updating order costs:", error);
+            console.error("❌ Error updating order costs:", error);
+            throw error; // Re-throw para que possa ser tratado no onItemSubmit
         }
     };
 
@@ -1407,11 +1470,21 @@ export default function CostsPage() {
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Custos Organizados por OS</CardTitle>
-                        <CardDescription>
-                            Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço.
-                        </CardDescription>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                        <div>
+                            <CardTitle>Custos Organizados por OS</CardTitle>
+                            <CardDescription>
+                                Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço.
+                            </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="text-xs text-muted-foreground">
+                                Última atualização: {new Date().toLocaleTimeString('pt-BR')}
+                            </div>
+                            <Button variant="outline" onClick={fetchOrders} disabled={isLoadingOrders}>
+                                {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar Custos'}
+                            </Button>
+                        </div>
                     </CardHeader>
                     <CardContent>
                         {isLoadingOrders ? <Skeleton className="h-48 w-full" /> : 
