@@ -152,6 +152,56 @@ type Requisition = {
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
 type OrderInfo = { id: string; internalOS: string; customerName: string; costEntries?: any[] };
 
+// Função utilitária para formatação segura de datas
+const safeFormatDate = (date: any, formatString: string, fallback: string = 'Data inválida'): string => {
+    try {
+        if (!date) return fallback;
+        
+        // Converter Firestore Timestamp para Date se necessário
+        let dateObj = date;
+        if (date?.toDate) {
+            dateObj = date.toDate();
+        } else if (typeof date === 'string' || typeof date === 'number') {
+            dateObj = new Date(date);
+        }
+        
+        // Verificar se a data é válida
+        if (!dateObj || !(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
+            console.warn('Data inválida detectada:', { 
+                originalDate: date, 
+                convertedDate: dateObj, 
+                formatString,
+                dateType: typeof date,
+                isDate: dateObj instanceof Date
+            });
+            return fallback;
+        }
+        
+        // Tentar formatar com proteção adicional
+        const result = format(dateObj, formatString);
+        return result;
+        
+    } catch (error: any) {
+        console.error('❌ Erro ao formatar data:', { 
+            date, 
+            formatString, 
+            error: error.message,
+            stack: error.stack 
+        });
+        
+        // Se for especificamente o erro RangeError: Invalid time value
+        if (error.message?.includes('Invalid time value')) {
+            console.error('🚨 ERRO ESPECÍFICO - Invalid time value:', {
+                originalDate: date,
+                dateType: typeof date,
+                formatString
+            });
+        }
+        
+        return fallback;
+    }
+};
+
 // Biblioteca global de insumos para caldeiraria e usinagem
 const insumosBiblioteca = {
     "MATERIAS_PRIMAS": [
@@ -446,6 +496,33 @@ const emptySupplierFormValues: z.infer<typeof supplierSchema> = {
 };
 
 export default function CostsPage() {
+    // Verificação inicial de problemas com datas
+    React.useEffect(() => {
+        try {
+            // Testar se a biblioteca de formatação de datas está funcionando
+            const testDate = new Date();
+            format(testDate, 'dd/MM/yyyy');
+            console.log("✅ Biblioteca de formatação de datas funcionando corretamente");
+        } catch (error) {
+            console.error("❌ Problema detectado com a biblioteca de formatação de datas:", error);
+        }
+
+        // Interceptar erros de RangeError relacionados a datas
+        const originalError = console.error;
+        console.error = (...args) => {
+            const message = args.join(' ');
+            if (message.includes('Invalid time value') || message.includes('RangeError')) {
+                console.warn("🚨 ERRO DE DATA DETECTADO:", ...args);
+                console.trace("Stack trace do erro de data:");
+            }
+            originalError.apply(console, args);
+        };
+
+        return () => {
+            console.error = originalError;
+        };
+    }, []);
+
     const [requisitions, setRequisitions] = useState<Requisition[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [orders, setOrders] = useState<OrderInfo[]>([]);
@@ -495,13 +572,36 @@ export default function CostsPage() {
                 const requisition = {
                     id: d.id,
                     requisitionNumber: data.requisitionNumber || 'N/A',
-                    date: data.date?.toDate ? data.date.toDate() : (data.date ? new Date(data.date) : new Date()),
+                    date: (() => {
+                        try {
+                            if (data.date?.toDate) return data.date.toDate();
+                            if (data.date) {
+                                const date = new Date(data.date);
+                                return !isNaN(date.getTime()) ? date : new Date();
+                            }
+                            return new Date();
+                        } catch {
+                            return new Date();
+                        }
+                    })(),
                     status: data.status,
                     orderId: data.orderId,
                     totalValue: data.totalValue || 0,
                     itemsWithPrice: data.itemsWithPrice || 0,
                     progress: data.progress || 0,
-                    lastPriceUpdate: data.lastPriceUpdate?.toDate ? data.lastPriceUpdate.toDate() : null,
+                    lastPriceUpdate: (() => {
+                        try {
+                            if (!data.lastPriceUpdate) return null;
+                            if (data.lastPriceUpdate?.toDate) return data.lastPriceUpdate.toDate();
+                            if (data.lastPriceUpdate) {
+                                const date = new Date(data.lastPriceUpdate);
+                                return !isNaN(date.getTime()) ? date : null;
+                            }
+                            return null;
+                        } catch {
+                            return null;
+                        }
+                    })(),
                     items: (data.items || []).map((item: any, index: number): RequisitionItem => {
                         // Tentar diferentes possíveis estruturas para o peso
                         const weight = item.weight || item.peso || item.materialWeight || item.itemWeight || undefined;
@@ -517,7 +617,19 @@ export default function CostsPage() {
                         invoiceItemValue: item.invoiceItemValue || undefined,
                         certificateNumber: item.certificateNumber || "",
                         storageLocation: item.storageLocation || "",
-                        deliveryReceiptDate: item.deliveryReceiptDate?.toDate ? item.deliveryReceiptDate.toDate() : (item.deliveryReceiptDate ? new Date(item.deliveryReceiptDate) : null),
+                        deliveryReceiptDate: (() => {
+                            try {
+                                if (!item.deliveryReceiptDate) return null;
+                                if (item.deliveryReceiptDate?.toDate) return item.deliveryReceiptDate.toDate();
+                                if (item.deliveryReceiptDate) {
+                                    const date = new Date(item.deliveryReceiptDate);
+                                    return !isNaN(date.getTime()) ? date : null;
+                                }
+                                return null;
+                            } catch {
+                                return null;
+                            }
+                        })(),
                         inspectionStatus: item.inspectionStatus || "Pendente",
                             weight: weight,
                             weightUnit: weightUnit,
@@ -563,8 +675,32 @@ export default function CostsPage() {
               return { 
                 id: d.id,
                 ...data,
-                firstRegistrationDate: data.firstRegistrationDate?.toDate ? data.firstRegistrationDate.toDate() : (data.firstRegistrationDate ? new Date(data.firstRegistrationDate) : undefined),
-                lastUpdate: data.lastUpdate?.toDate ? data.lastUpdate.toDate() : (data.lastUpdate ? new Date(data.lastUpdate) : undefined),
+                firstRegistrationDate: (() => {
+                  try {
+                    if (!data.firstRegistrationDate) return undefined;
+                    if (data.firstRegistrationDate?.toDate) return data.firstRegistrationDate.toDate();
+                    if (data.firstRegistrationDate) {
+                      const date = new Date(data.firstRegistrationDate);
+                      return !isNaN(date.getTime()) ? date : undefined;
+                    }
+                    return undefined;
+                  } catch {
+                    return undefined;
+                  }
+                })(),
+                lastUpdate: (() => {
+                  try {
+                    if (!data.lastUpdate) return undefined;
+                    if (data.lastUpdate?.toDate) return data.lastUpdate.toDate();
+                    if (data.lastUpdate) {
+                      const date = new Date(data.lastUpdate);
+                      return !isNaN(date.getTime()) ? date : undefined;
+                    }
+                    return undefined;
+                  } catch {
+                    return undefined;
+                  }
+                })(),
               } as Supplier
             });
             setSuppliers(suppliersList);
@@ -592,7 +728,45 @@ export default function CostsPage() {
                         customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
                         costEntries: (data.costEntries || []).map((entry: any) => ({
                             ...entry,
-                            entryDate: entry.entryDate?.toDate ? entry.entryDate.toDate() : (entry.entryDate ? new Date(entry.entryDate) : undefined),
+                            entryDate: (() => {
+                                try {
+                                    if (!entry.entryDate) return undefined;
+                                    if (entry.entryDate?.toDate) return entry.entryDate.toDate();
+                                    if (entry.entryDate) {
+                                        const date = new Date(entry.entryDate);
+                                        return !isNaN(date.getTime()) ? date : undefined;
+                                    }
+                                    return undefined;
+                                } catch {
+                                    return undefined;
+                                }
+                            })(),
+                            lastEditDate: (() => {
+                                try {
+                                    if (!entry.lastEditDate) return undefined;
+                                    if (entry.lastEditDate?.toDate) return entry.lastEditDate.toDate();
+                                    if (entry.lastEditDate) {
+                                        const date = new Date(entry.lastEditDate);
+                                        return !isNaN(date.getTime()) ? date : undefined;
+                                    }
+                                    return undefined;
+                                } catch {
+                                    return undefined;
+                                }
+                            })(),
+                            lastPriceUpdate: (() => {
+                                try {
+                                    if (!entry.lastPriceUpdate) return undefined;
+                                    if (entry.lastPriceUpdate?.toDate) return entry.lastPriceUpdate.toDate();
+                                    if (entry.lastPriceUpdate) {
+                                        const date = new Date(entry.lastPriceUpdate);
+                                        return !isNaN(date.getTime()) ? date : undefined;
+                                    }
+                                    return undefined;
+                                } catch {
+                                    return undefined;
+                                }
+                            })(),
                         })),
                     };
                 });
@@ -767,24 +941,42 @@ export default function CostsPage() {
 
 
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
-        const selectedItemData = { ...item, requisitionId };
-        setSelectedItem(selectedItemData);
-        
-        // Resetar formulário com dados existentes
-        const formData = {
-            supplierName: item.supplierName || "",
-            invoiceNumber: item.invoiceNumber || "",
-            invoiceItemValue: item.invoiceItemValue || undefined,
-            certificateNumber: item.certificateNumber || "",
-            storageLocation: item.storageLocation || "",
-            deliveryReceiptDate: item.deliveryReceiptDate || null,
-            inspectionStatus: item.inspectionStatus || "Pendente",
-            weight: item.weight || undefined,
-            weightUnit: item.weightUnit || "kg",
-        };
-        
-        itemForm.reset(formData);
-        setIsFormOpen(true);
+        try {
+            const selectedItemData = { ...item, requisitionId };
+            setSelectedItem(selectedItemData);
+            
+            // Resetar formulário com dados existentes - com proteção para datas
+            const formData = {
+                supplierName: item.supplierName || "",
+                invoiceNumber: item.invoiceNumber || "",
+                invoiceItemValue: item.invoiceItemValue || undefined,
+                certificateNumber: item.certificateNumber || "",
+                storageLocation: item.storageLocation || "",
+                deliveryReceiptDate: (() => {
+                    try {
+                        if (!item.deliveryReceiptDate) return null;
+                        const date = item.deliveryReceiptDate;
+                        return date && !isNaN(date.getTime()) ? date : null;
+                    } catch {
+                        console.warn("Data de entrega inválida no item:", item.deliveryReceiptDate);
+                        return null;
+                    }
+                })(),
+                inspectionStatus: item.inspectionStatus || "Pendente",
+                weight: item.weight || undefined,
+                weightUnit: item.weightUnit || "kg",
+            };
+            
+            itemForm.reset(formData);
+            setIsFormOpen(true);
+        } catch (error) {
+            console.error("Erro ao abrir formulário de item:", error);
+            toast({ 
+                variant: "destructive",
+                title: "Erro", 
+                description: "Não foi possível abrir o formulário. Tente novamente." 
+            });
+        }
     };
 
     const onItemSubmit = async (values: ItemUpdateData) => {
@@ -1327,25 +1519,34 @@ export default function CostsPage() {
     };
 
     const handleEditCostEntryClick = (entry: any) => {
-        setEditingCostEntry(entry);
-        setIsEditingCost(true);
-        
-        // Preencher o formulário com os dados do lançamento
-        costEntryForm.reset({
-            orderId: entry.orderId,
-            description: entry.description || "",
-            quantity: entry.quantity || 0,
-            unitCost: entry.unitCost || 0,
-            purchaseOrderNumber: entry.purchaseOrderNumber || "",
-        });
-        
-        // Ir para a aba de lançamento
-        setActiveTab("costEntry");
-        
-        toast({ 
-            title: "Modo de edição ativado", 
-            description: "Modifique os campos desejados e salve as alterações." 
-        });
+        try {
+            setEditingCostEntry(entry);
+            setIsEditingCost(true);
+            
+            // Preencher o formulário com os dados do lançamento
+            costEntryForm.reset({
+                orderId: entry.orderId || "",
+                description: entry.description || "",
+                quantity: entry.quantity || 0,
+                unitCost: entry.unitCost || 0,
+                purchaseOrderNumber: entry.purchaseOrderNumber || "",
+            });
+            
+            // Ir para a aba de lançamento
+            setActiveTab("costEntry");
+            
+            toast({ 
+                title: "Modo de edição ativado", 
+                description: "Modifique os campos desejados e salve as alterações." 
+            });
+        } catch (error) {
+            console.error("Erro ao ativar modo de edição:", error);
+            toast({ 
+                variant: "destructive",
+                title: "Erro", 
+                description: "Não foi possível ativar o modo de edição. Tente novamente." 
+            });
+        }
     };
 
     const handleCancelEdit = () => {
@@ -1430,9 +1631,11 @@ export default function CostsPage() {
 
 
 
-    return (
-    <>
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+    // Proteção contra erros de renderização
+    try {
+        return (
+        <>
+          <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
           <h1 className="text-3xl font-bold tracking-tight font-headline">Centro de Custos</h1>
         </div>
@@ -1473,7 +1676,7 @@ export default function CostsPage() {
                                                 <div className="flex-1 text-left">
                                                     <div className="flex items-center gap-4">
                                                         <span className="font-bold text-primary">Requisição Nº {req.requisitionNumber}</span>
-                                                        <span className="text-muted-foreground text-sm">Data: {format(req.date, 'dd/MM/yyyy')}</span>
+                                                        <span className="text-muted-foreground text-sm">Data: {safeFormatDate(req.date, 'dd/MM/yyyy')}</span>
                                                         {totalValue > 0 && (
                                                             <Badge variant="default" className="bg-green-600 text-white">
                                                                 💰 {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -2094,7 +2297,7 @@ export default function CostsPage() {
                                                                 .map(entry => (
                                                                 <TableRow key={entry.id}>
                                                                     <TableCell className="text-sm">
-                                                                        {entry.entryDate ? format(entry.entryDate, 'dd/MM/yyyy HH:mm') : 'N/A'}
+                                                                        {safeFormatDate(entry.entryDate, 'dd/MM/yyyy HH:mm', 'N/A')}
                                                                     </TableCell>
                                                                     <TableCell className="font-medium">
                                                                         <div>
@@ -2126,7 +2329,7 @@ export default function CostsPage() {
                                                                                  )}
                                                                                  {entry.lastPriceUpdate && (
                                                                                      <Badge variant="outline" className="text-xs text-gray-500">
-                                                                                         🕒 {format(entry.lastPriceUpdate, 'dd/MM HH:mm')}
+                                                                                         🕒 {safeFormatDate(entry.lastPriceUpdate, 'dd/MM HH:mm')}
                                                                                      </Badge>
                                                                                  )}
                                                                              </div>
@@ -2176,7 +2379,7 @@ export default function CostsPage() {
                                                                             )}
                                                                             {entry.lastEditDate && (
                                                                                 <div className="text-xs text-orange-600 mt-1">
-                                                                                    ✏️ Editado: {format(entry.lastEditDate, 'dd/MM/yy HH:mm')}
+                                                                                    ✏️ Editado: {safeFormatDate(entry.lastEditDate, 'dd/MM/yy HH:mm')}
                                                                                 </div>
                                                                             )}
                                                                         </div>
@@ -2457,7 +2660,7 @@ export default function CostsPage() {
                                 <FormMessage />
                             </FormItem>
                         )} />
-                         {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>Código: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {selectedSupplier.firstRegistrationDate ? format(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p><p>Última atualização: {selectedSupplier.lastUpdate ? format(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm') : 'N/A'}</p></div>)}
+                         {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>Código: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {safeFormatDate(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm', 'N/A')}</p><p>Última atualização: {safeFormatDate(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm', 'N/A')}</p></div>)}
                       </TabsContent>
                       <TabsContent value="contact" className="space-y-4">
                         <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do Responsável Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
@@ -2560,4 +2763,21 @@ export default function CostsPage() {
       </AlertDialog>
     </>
     );
+    } catch (error) {
+        console.error("Erro crítico na renderização da página:", error);
+        return (
+            <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+                <div className="flex items-center justify-between space-y-2">
+                    <h1 className="text-3xl font-bold tracking-tight font-headline">Centro de Custos</h1>
+                </div>
+                <div className="flex flex-col items-center justify-center text-center text-destructive h-64 border-dashed border-2 rounded-lg">
+                    <h3 className="text-lg font-semibold">Erro ao carregar a página</h3>
+                    <p className="text-sm">Ocorreu um erro inesperado. Recarregue a página para tentar novamente.</p>
+                    <Button variant="outline" onClick={() => window.location.reload()} className="mt-4">
+                        🔄 Recarregar Página
+                    </Button>
+                </div>
+            </div>
+        );
+    }
 }
