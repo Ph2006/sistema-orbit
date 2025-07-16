@@ -69,6 +69,15 @@ interface OrderFinancialData {
     totalWithTax: number;
     totalWithoutTax: number;
   }>;
+  
+  // Dados de receita manual
+  hasManualRevenue: boolean;
+  manualRevenueInfo?: {
+    grossRevenue: number;
+    taxAmount: number;
+    lastUpdate: Date;
+    updatedBy: string;
+  };
 }
 
 interface FinancialSummary {
@@ -109,17 +118,11 @@ export default function FinancePage() {
   const [manualGrossRevenue, setManualGrossRevenue] = useState('');
   const [manualTaxAmount, setManualTaxAmount] = useState('');
   const [manualTaxRate, setManualTaxRate] = useState('');
+  const [usePercentage, setUsePercentage] = useState(false);
   const [isSavingRevenue, setIsSavingRevenue] = useState(false);
   
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
-
-  // Função auxiliar para encontrar ordem por ID
-  const findOrderById = (orderId: string) => {
-    const order = orders.find(o => o.id === orderId);
-    console.log('🔍 Buscando ordem por ID:', orderId, 'Encontrada:', !!order);
-    return order;
-  };
 
   // Função para calcular impostos baseado no percentual
   const calculateTaxFromRate = (grossValue: string, taxRate: string) => {
@@ -135,6 +138,22 @@ export default function FinancePage() {
     if (gross === 0) return '0';
     return ((tax / gross) * 100).toFixed(2);
   };
+
+  // Atualizar campos automaticamente conforme o modo selecionado
+  useEffect(() => {
+    if (!manualGrossRevenue) return;
+    
+    if (usePercentage && manualTaxRate) {
+      // Calculando valor do imposto com base no percentual
+      const calculatedTax = calculateTaxFromRate(manualGrossRevenue, manualTaxRate);
+      setManualTaxAmount(calculatedTax);
+    } else if (!usePercentage && manualTaxAmount) {
+      // Calculando percentual com base no valor do imposto
+      const calculatedRate = calculateTaxRate(manualGrossRevenue, manualTaxAmount);
+      setManualTaxRate(calculatedRate);
+    }
+  }, [manualGrossRevenue, manualTaxRate, manualTaxAmount, usePercentage]);
+
   const handleAuthentication = () => {
     if (password === 'OP4484210640') {
       setIsAuthenticated(true);
@@ -233,12 +252,21 @@ export default function FinancePage() {
       let taxAmount = 0;
       let netRevenue = 0;
       let quotationItems: any[] = [];
+      let hasManualRevenue = false;
+      let manualRevenueInfo = undefined;
 
       // Primeiro, verificar se há receita manual salva na OS
       if (order.manualRevenue) {
+        hasManualRevenue = true;
         grossRevenue = Number(order.manualRevenue.grossRevenue) || 0;
         taxAmount = Number(order.manualRevenue.taxAmount) || 0;
         netRevenue = grossRevenue - taxAmount;
+        manualRevenueInfo = {
+          grossRevenue: grossRevenue,
+          taxAmount: taxAmount,
+          lastUpdate: order.manualRevenue.lastUpdate,
+          updatedBy: order.manualRevenue.updatedBy
+        };
       } else if (quotation && quotation.items) {
         // Se não há receita manual, usar dados do orçamento
         quotationItems = quotation.items;
@@ -313,6 +341,8 @@ export default function FinancePage() {
         taxRatio,
         costEntries,
         quotationItems,
+        hasManualRevenue,
+        manualRevenueInfo,
       };
     });
   };
@@ -373,22 +403,10 @@ export default function FinancePage() {
       });
       
       // Recarregar dados
-      const [ordersData, quotationsData] = await Promise.all([
-        fetchOrders(),
-        fetchQuotations()
-      ]);
-      
-      setOrders(ordersData);
-      setQuotations(quotationsData);
-      
-      const processedData = processFinancialData(ordersData, quotationsData);
-      setFinancialData(processedData);
+      await loadData();
       
       // Fechar modal e limpar estados
-      setIsRevenueModalOpen(false);
-      setSelectedOrderForRevenue(null);
-      setManualGrossRevenue('');
-      setManualTaxAmount('');
+      handleCloseRevenueModal();
       
     } catch (error) {
       console.error("Erro ao salvar receita manual:", error);
@@ -404,50 +422,68 @@ export default function FinancePage() {
 
   // Função para abrir modal de receita manual
   const handleOpenRevenueModal = (order: any) => {
+    console.log('🔄 Abrindo modal para OS:', order.internalOS, 'ID:', order.id);
     setSelectedOrderForRevenue(order);
     
     // Se já existem dados de receita manual, pré-preencher
     if (order.manualRevenue) {
-      setManualGrossRevenue(order.manualRevenue.grossRevenue.toString());
-      setManualTaxAmount(order.manualRevenue.taxAmount.toString());
+      const grossValue = order.manualRevenue.grossRevenue.toString();
+      const taxValue = order.manualRevenue.taxAmount.toString();
+      setManualGrossRevenue(grossValue);
+      setManualTaxAmount(taxValue);
+      setManualTaxRate(calculateTaxRate(grossValue, taxValue));
     } else {
       setManualGrossRevenue('');
       setManualTaxAmount('');
+      setManualTaxRate('');
     }
     
+    setUsePercentage(false);
     setIsRevenueModalOpen(true);
   };
-  useEffect(() => {
-    const loadData = async () => {
-      if (!user || !isAuthenticated) return;
-      
-      setIsLoading(true);
-      try {
-        const [ordersData, quotationsData] = await Promise.all([
-          fetchOrders(),
-          fetchQuotations()
-        ]);
-        
-        setOrders(ordersData);
-        setQuotations(quotationsData);
-        
-        const processedData = processFinancialData(ordersData, quotationsData);
-        setFinancialData(processedData);
-        
-        console.log(`📊 Dados financeiros processados: ${processedData.length} OS analisadas`);
-        
-      } catch (error) {
-        console.error("Erro ao carregar dados:", error);
-        toast({
-          variant: "destructive",
-          title: "Erro ao carregar dados",
-          description: "Não foi possível carregar os dados financeiros.",
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
 
+  // Função para fechar modal e limpar estados
+  const handleCloseRevenueModal = () => {
+    setIsRevenueModalOpen(false);
+    setSelectedOrderForRevenue(null);
+    setManualGrossRevenue('');
+    setManualTaxAmount('');
+    setManualTaxRate('');
+    setUsePercentage(false);
+  };
+
+  // Função para carregar dados
+  const loadData = async () => {
+    if (!user || !isAuthenticated) return;
+    
+    setIsLoading(true);
+    try {
+      const [ordersData, quotationsData] = await Promise.all([
+        fetchOrders(),
+        fetchQuotations()
+      ]);
+      
+      setOrders(ordersData);
+      setQuotations(quotationsData);
+      
+      const processedData = processFinancialData(ordersData, quotationsData);
+      setFinancialData(processedData);
+      
+      console.log(`📊 Dados financeiros processados: ${processedData.length} OS analisadas`);
+      
+    } catch (error) {
+      console.error("Erro ao carregar dados:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao carregar dados",
+        description: "Não foi possível carregar os dados financeiros.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     loadData();
   }, [user, isAuthenticated]);
 
@@ -888,6 +924,187 @@ export default function FinancePage() {
         </CardContent>
       </Card>
 
+      {/* Modal de Lançamento de Receita Manual */}
+      <Dialog open={isRevenueModalOpen} onOpenChange={setIsRevenueModalOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Lançamento Manual de Receita
+            </DialogTitle>
+            <DialogDescription>
+              {selectedOrderForRevenue ? (
+                <>
+                  Insira os dados de receita para a OS <strong>{selectedOrderForRevenue.internalOS}</strong>
+                  {selectedOrderForRevenue.manualRevenue && (
+                    <span className="block text-sm text-blue-600 mt-1">
+                      💡 Esta OS já possui receita manual cadastrada. Os valores serão atualizados.
+                    </span>
+                  )}
+                </>
+              ) : (
+                'Carregando dados da OS...'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Campo de Receita Bruta */}
+            <div className="space-y-2">
+              <Label htmlFor="grossRevenue">Receita Bruta Total</Label>
+              <Input
+                id="grossRevenue"
+                type="number"
+                step="0.01"
+                min="0"
+                value={manualGrossRevenue}
+                onChange={(e) => setManualGrossRevenue(e.target.value)}
+                placeholder="Ex: 15000.00"
+                className="text-lg font-medium"
+              />
+              <p className="text-xs text-muted-foreground">
+                Valor total da receita antes dos impostos
+              </p>
+            </div>
+
+            {/* Toggle para modo de entrada de impostos */}
+            <div className="space-y-3">
+              <Label>Forma de Cálculo dos Impostos</Label>
+              <div className="flex items-center space-x-4">
+                <Button
+                  type="button"
+                  variant={usePercentage ? "outline" : "default"}
+                  size="sm"
+                  onClick={() => setUsePercentage(false)}
+                  className="flex items-center gap-2"
+                >
+                  <DollarSign className="h-4 w-4" />
+                  Valor em Reais
+                </Button>
+                <Button
+                  type="button"
+                  variant={usePercentage ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setUsePercentage(true)}
+                  className="flex items-center gap-2"
+                >
+                  <Calculator className="h-4 w-4" />
+                  Percentual
+                </Button>
+              </div>
+            </div>
+
+            {/* Campos de impostos baseados no modo selecionado */}
+            <div className="grid grid-cols-2 gap-4">
+              {usePercentage ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="taxRate">Percentual de Impostos (%)</Label>
+                    <Input
+                      id="taxRate"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={manualTaxRate}
+                      onChange={(e) => setManualTaxRate(e.target.value)}
+                      placeholder="Ex: 18.50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="taxAmount">Valor dos Impostos (R$)</Label>
+                    <Input
+                      id="taxAmount"
+                      type="number"
+                      value={manualTaxAmount}
+                      readOnly
+                      className="bg-muted"
+                      placeholder="Calculado automaticamente"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="taxAmount">Valor dos Impostos (R$)</Label>
+                    <Input
+                      id="taxAmount"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={manualTaxAmount}
+                      onChange={(e) => setManualTaxAmount(e.target.value)}
+                      placeholder="Ex: 2775.00"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="taxRate">Percentual Equivalente (%)</Label>
+                    <Input
+                      id="taxRate"
+                      type="number"
+                      value={manualTaxRate}
+                      readOnly
+                      className="bg-muted"
+                      placeholder="Calculado automaticamente"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Resumo dos valores */}
+            {manualGrossRevenue && manualTaxAmount && (
+              <div className="border rounded-lg p-4 bg-muted/50">
+                <h4 className="font-medium mb-3">Resumo dos Valores</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Receita Bruta:</span>
+                    <p className="font-bold text-lg">
+                      {parseFloat(manualGrossRevenue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Impostos:</span>
+                    <p className="font-bold text-lg text-orange-600">
+                      -{parseFloat(manualTaxAmount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </p>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Receita Líquida:</span>
+                    <p className="font-bold text-xl text-green-600">
+                      {(parseFloat(manualGrossRevenue) - parseFloat(manualTaxAmount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseRevenueModal}>
+              <X className="w-4 h-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleSaveManualRevenue}
+              disabled={!manualGrossRevenue || !manualTaxAmount || isSavingRevenue}
+            >
+              {isSavingRevenue ? (
+                <>
+                  <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Salvando...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Salvar Receita
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Tabela Detalhada */}
       {isLoading ? (
         <Card>
@@ -922,6 +1139,11 @@ export default function FinancePage() {
                             💰 Sem Receita
                           </Badge>
                         )}
+                        {data.hasManualRevenue && (
+                          <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-300">
+                            📝 Manual
+                          </Badge>
+                        )}
                         <Badge 
                           variant={getMarginBadge(data.grossMargin).variant}
                           className={getMarginBadge(data.grossMargin).color}
@@ -935,34 +1157,36 @@ export default function FinancePage() {
                         <span className={`font-semibold ${data.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           Lucro: {data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </span>
-                        {data.grossRevenue === 0 && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              console.log('🔗 Botão clicado para OS:', data.internalOS, 'ID:', data.id);
-                              console.log('📋 Orders disponíveis:', orders.length);
-                              const order = orders.find(o => o.id === data.id);
-                              if (order) {
-                                console.log('✅ Ordem encontrada, abrindo modal:', order.internalOS);
-                                handleOpenRevenueModal(order);
-                              } else {
-                                console.error('❌ Ordem não encontrada para ID:', data.id);
-                                console.log('📋 IDs disponíveis:', orders.map(o => o.id));
-                                toast({
-                                  variant: "destructive",
-                                  title: "Erro",
-                                  description: "Não foi possível encontrar os dados da OS. Tente recarregar a página.",
-                                });
-                              }
-                            }}
-                            className="ml-2 h-6 px-2 text-xs"
-                          >
-                            <Plus className="h-3 w-3 mr-1" />
-                            Lançar Receita
-                          </Button>
-                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const order = orders.find(o => o.id === data.id);
+                            if (order) {
+                              handleOpenRevenueModal(order);
+                            } else {
+                              toast({
+                                variant: "destructive",
+                                title: "Erro",
+                                description: "Não foi possível encontrar os dados da OS. Tente recarregar a página.",
+                              });
+                            }
+                          }}
+                          className="ml-2 h-6 px-2 text-xs"
+                        >
+                          {data.grossRevenue === 0 ? (
+                            <>
+                              <Plus className="h-3 w-3 mr-1" />
+                              Lançar Receita
+                            </>
+                          ) : (
+                            <>
+                              <Edit className="h-3 w-3 mr-1" />
+                              Editar Receita
+                            </>
+                          )}
+                        </Button>
                       </div>
                     </div>
                   </AccordionTrigger>
@@ -973,58 +1197,15 @@ export default function FinancePage() {
                         <h4 className="font-semibold mb-4 flex items-center gap-2">
                           <DollarSign className="h-4 w-4" />
                           Resumo Financeiro
-                          {data.grossRevenue > 0 && orders.find(o => o.id === data.id)?.manualRevenue && (
-                            <Badge variant="secondary" className="text-xs ml-2">Manual</Badge>
+                          {data.hasManualRevenue && (
+                            <Badge variant="secondary" className="text-xs ml-2">
+                              📝 Receita Manual
+                            </Badge>
                           )}
-                          {data.grossRevenue === 0 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                console.log('🔗 Botão "Lançar Receita" clicado no resumo para OS:', data.internalOS);
-                                const order = orders.find(o => o.id === data.id);
-                                if (order) {
-                                  handleOpenRevenueModal(order);
-                                } else {
-                                  console.error('❌ Ordem não encontrada no resumo para ID:', data.id);
-                                  toast({
-                                    variant: "destructive",
-                                    title: "Erro",
-                                    description: "Não foi possível encontrar os dados da OS.",
-                                  });
-                                }
-                              }}
-                              className="ml-auto h-6 px-2 text-xs"
-                            >
-                              <Plus className="h-3 w-3 mr-1" />
-                              Lançar Receita
-                            </Button>
-                          )}
-                          {data.grossRevenue > 0 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                console.log('🔗 Botão "Editar" clicado no resumo para OS:', data.internalOS);
-                                const order = orders.find(o => o.id === data.id);
-                                if (order) {
-                                  handleOpenRevenueModal(order);
-                                } else {
-                                  console.error('❌ Ordem não encontrada para edição, ID:', data.id);
-                                  toast({
-                                    variant: "destructive",
-                                    title: "Erro",
-                                    description: "Não foi possível encontrar os dados da OS.",
-                                  });
-                                }
-                              }}
-                              className="ml-auto h-6 px-2 text-xs"
-                            >
-                              <Edit className="h-3 w-3 mr-1" />
-                              Editar
-                            </Button>
+                          {data.manualRevenueInfo && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              Atualizado: {format(data.manualRevenueInfo.lastUpdate, 'dd/MM/yyyy HH:mm')}
+                            </span>
                           )}
                         </h4>
                         <div className="space-y-3">
@@ -1135,136 +1316,4 @@ export default function FinancePage() {
                             </div>
                             <div>
                               <div className="flex justify-between text-xs mb-1">
-                                <span>Mão de Obra</span>
-                                <span>{data.totalCosts > 0 ? ((data.laborCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
-                              </div>
-                              <Progress 
-                                value={data.totalCosts > 0 ? (data.laborCosts / data.totalCosts) * 100 : 0} 
-                                className="h-1.5" 
-                              />
-                            </div>
-                            <div>
-                              <div className="flex justify-between text-xs mb-1">
-                                <span>Overhead</span>
-                                <span>{data.totalCosts > 0 ? ((data.overheadCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
-                              </div>
-                              <Progress 
-                                value={data.totalCosts > 0 ? (data.overheadCosts / data.totalCosts) * 100 : 0} 
-                                className="h-1.5" 
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </Card>
-
-                      {/* Detalhamento de Receitas */}
-                      {data.quotationItems.length > 0 && (
-                        <Card className="p-4">
-                          <h4 className="font-semibold mb-4 flex items-center gap-2">
-                            <FileText className="h-4 w-4" />
-                            Itens do Orçamento
-                          </h4>
-                          <div className="max-h-60 overflow-y-auto">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="text-xs">Item</TableHead>
-                                  <TableHead className="text-xs text-right">Qtd</TableHead>
-                                  <TableHead className="text-xs text-right">Valor Unit.</TableHead>
-                                  <TableHead className="text-xs text-right">Impostos</TableHead>
-                                  <TableHead className="text-xs text-right">Total</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {data.quotationItems.map((item, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell className="text-xs">{item.description}</TableCell>
-                                    <TableCell className="text-xs text-right">{item.quantity}</TableCell>
-                                    <TableCell className="text-xs text-right">
-                                      {item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                    <TableCell className="text-xs text-right">
-                                      {item.taxRate}%
-                                    </TableCell>
-                                    <TableCell className="text-xs text-right font-medium">
-                                      {item.totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </Card>
-                      )}
-
-                      {/* Detalhamento de Custos */}
-                      {data.costEntries.length > 0 && (
-                        <Card className="p-4">
-                          <h4 className="font-semibold mb-4 flex items-center gap-2">
-                            <TrendingDown className="h-4 w-4" />
-                            Lançamentos de Custos
-                          </h4>
-                          <div className="max-h-60 overflow-y-auto">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="text-xs">Descrição</TableHead>
-                                  <TableHead className="text-xs">Categoria</TableHead>
-                                  <TableHead className="text-xs text-right">Valor</TableHead>
-                                  <TableHead className="text-xs">Tipo</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {data.costEntries.map((entry, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell className="text-xs">{entry.description}</TableCell>
-                                    <TableCell className="text-xs">
-                                      <Badge variant="outline" className="text-xs">
-                                        {entry.category === 'material' && '📦 Material'}
-                                        {entry.category === 'labor' && '👷 M.O.'}
-                                        {entry.category === 'overhead' && '⚙️ Overhead'}
-                                      </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-xs text-right font-medium">
-                                      {entry.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                    <TableCell className="text-xs">
-                                      {entry.isFromRequisition ? (
-                                        <Badge variant="secondary" className="text-xs">Auto</Badge>
-                                      ) : (
-                                        <Badge variant="outline" className="text-xs">Manual</Badge>
-                                      )}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </Card>
-                      )}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-center text-muted-foreground">
-              <Package className="h-12 w-12 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Nenhum dado financeiro encontrado</h3>
-              <p className="text-sm">
-                {searchTerm || statusFilter !== 'all' 
-                  ? 'Tente ajustar os filtros para ver mais resultados.'
-                  : 'Não há OS ativas com dados financeiros disponíveis no momento.'
-                }
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
+                                <span>Mão de Obra
