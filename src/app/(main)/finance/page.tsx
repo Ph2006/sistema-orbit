@@ -695,6 +695,30 @@ export default function FinancePage() {
             <Lock className="w-4 h-4 mr-2" />
             Sair
           </Button>
+          {/* Botão de Debug/Teste */}
+          <Button
+            onClick={() => {
+              console.log('🔍 Estado atual dos dados:');
+              console.log('- Orders carregadas:', orders.length);
+              console.log('- Financial data:', financialData.length);
+              console.log('- Primeira OS:', orders[0]);
+              
+              if (orders.length > 0) {
+                console.log('🧪 Testando modal com primeira OS');
+                handleOpenRevenueModal(orders[0]);
+              } else {
+                toast({
+                  title: "Debug",
+                  description: "Nenhuma OS carregada ainda. Aguarde o carregamento dos dados.",
+                });
+              }
+            }}
+            variant="secondary"
+            className="flex items-center"
+          >
+            <Calculator className="w-4 h-4 mr-2" />
+            Teste Modal
+          </Button>
           <Button
             onClick={generateFinancialReport}
             disabled={!financialData.length}
@@ -920,8 +944,19 @@ export default function FinancePage() {
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation();
-                              const order = orders.find(o => o.id === data.id);
-                              if (order) handleOpenRevenueModal(order);
+                              console.log('🔗 Botão clicado para OS:', data.internalOS, 'ID:', data.id);
+                              const order = findOrderById(data.id);
+                              if (order) {
+                                console.log('✅ Ordem encontrada, abrindo modal:', order);
+                                handleOpenRevenueModal(order);
+                              } else {
+                                console.error('❌ Ordem não encontrada para ID:', data.id);
+                                toast({
+                                  variant: "destructive",
+                                  title: "Erro",
+                                  description: "Não foi possível encontrar os dados da OS. Tente recarregar a página.",
+                                });
+                              }
                             }}
                             className="ml-2 h-6 px-2 text-xs"
                           >
@@ -946,9 +981,20 @@ export default function FinancePage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                const order = orders.find(o => o.id === data.id);
-                                if (order) handleOpenRevenueModal(order);
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                console.log('🔗 Botão "Lançar Receita" clicado no resumo para OS:', data.internalOS);
+                                const order = findOrderById(data.id);
+                                if (order) {
+                                  handleOpenRevenueModal(order);
+                                } else {
+                                  console.error('❌ Ordem não encontrada no resumo para ID:', data.id);
+                                  toast({
+                                    variant: "destructive",
+                                    title: "Erro",
+                                    description: "Não foi possível encontrar os dados da OS.",
+                                  });
+                                }
                               }}
                               className="ml-auto h-6 px-2 text-xs"
                             >
@@ -960,9 +1006,20 @@ export default function FinancePage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => {
-                                const order = orders.find(o => o.id === data.id);
-                                if (order) handleOpenRevenueModal(order);
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                console.log('🔗 Botão "Editar" clicado no resumo para OS:', data.internalOS);
+                                const order = findOrderById(data.id);
+                                if (order) {
+                                  handleOpenRevenueModal(order);
+                                } else {
+                                  console.error('❌ Ordem não encontrada para edição, ID:', data.id);
+                                  toast({
+                                    variant: "destructive",
+                                    title: "Erro",
+                                    description: "Não foi possível encontrar os dados da OS.",
+                                  });
+                                }
                               }}
                               className="ml-auto h-6 px-2 text-xs"
                             >
