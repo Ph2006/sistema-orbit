@@ -491,21 +491,27 @@ export default function CostsPage() {
                     date: data.date?.toDate ? data.date.toDate() : (data.date ? new Date(data.date) : new Date()),
                     status: data.status,
                     orderId: data.orderId,
-                    items: (data.items || []).map((item: any, index: number): RequisitionItem => ({
-                        id: item.id || `${d.id}-${index}`,
-                        description: item.description,
-                        quantityRequested: item.quantityRequested,
-                        status: item.status || "Pendente",
-                        supplierName: item.supplierName || "",
-                        invoiceNumber: item.invoiceNumber || "",
-                        invoiceItemValue: item.invoiceItemValue || undefined,
-                        certificateNumber: item.certificateNumber || "",
-                        storageLocation: item.storageLocation || "",
-                        deliveryReceiptDate: item.deliveryReceiptDate?.toDate ? item.deliveryReceiptDate.toDate() : (item.deliveryReceiptDate ? new Date(item.deliveryReceiptDate) : null),
-                        inspectionStatus: item.inspectionStatus || "Pendente",
-                        weight: item.weight || undefined,
-                        weightUnit: item.weightUnit || "kg",
-                    })),
+                    items: (data.items || []).map((item: any, index: number): RequisitionItem => {
+                        // Tentar diferentes possíveis estruturas para o peso
+                        const weight = item.weight || item.peso || item.materialWeight || item.itemWeight || undefined;
+                        const weightUnit = item.weightUnit || item.pesoUnidade || item.unidadePeso || item.unit || "kg";
+                        
+                        return {
+                            id: item.id || `${d.id}-${index}`,
+                            description: item.description,
+                            quantityRequested: item.quantityRequested,
+                            status: item.status || "Pendente",
+                            supplierName: item.supplierName || "",
+                            invoiceNumber: item.invoiceNumber || "",
+                            invoiceItemValue: item.invoiceItemValue || undefined,
+                            certificateNumber: item.certificateNumber || "",
+                            storageLocation: item.storageLocation || "",
+                            deliveryReceiptDate: item.deliveryReceiptDate?.toDate ? item.deliveryReceiptDate.toDate() : (item.deliveryReceiptDate ? new Date(item.deliveryReceiptDate) : null),
+                            inspectionStatus: item.inspectionStatus || "Pendente",
+                            weight: weight,
+                            weightUnit: weightUnit,
+                        };
+                    }),
                 };
             });
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
@@ -614,18 +620,23 @@ export default function CostsPage() {
     }, [requisitions, orders]);
 
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
-        setSelectedItem({ ...item, requisitionId });
-        itemForm.reset({
-            supplierName: item.supplierName,
-            invoiceNumber: item.invoiceNumber,
-            invoiceItemValue: item.invoiceItemValue,
-            certificateNumber: item.certificateNumber,
-            storageLocation: item.storageLocation,
-            deliveryReceiptDate: item.deliveryReceiptDate,
-            inspectionStatus: item.inspectionStatus,
-            weight: item.weight,
+        const selectedItemData = { ...item, requisitionId };
+        setSelectedItem(selectedItemData);
+        
+        // Resetar formulário com dados existentes
+        const formData = {
+            supplierName: item.supplierName || "",
+            invoiceNumber: item.invoiceNumber || "",
+            invoiceItemValue: item.invoiceItemValue || undefined,
+            certificateNumber: item.certificateNumber || "",
+            storageLocation: item.storageLocation || "",
+            deliveryReceiptDate: item.deliveryReceiptDate || null,
+            inspectionStatus: item.inspectionStatus || "Pendente",
+            weight: item.weight || undefined,
             weightUnit: item.weightUnit || "kg",
-        });
+        };
+        
+        itemForm.reset(formData);
         setIsFormOpen(true);
     };
 
@@ -1099,11 +1110,16 @@ export default function CostsPage() {
             </TabsList>
             <TabsContent value="receipts">
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Recebimento de Materiais</CardTitle>
-                    <CardDescription>
-                      Gerencie o recebimento de materiais das requisições, atualize informações de nota fiscal e realize a inspeção de qualidade.
-                    </CardDescription>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle>Recebimento de Materiais</CardTitle>
+                      <CardDescription>
+                        Gerencie o recebimento de materiais das requisições, atualize informações de nota fiscal e realize a inspeção de qualidade.
+                      </CardDescription>
+                    </div>
+                    <Button variant="outline" onClick={fetchRequisitions} disabled={isLoadingRequisitions}>
+                      {isLoadingRequisitions ? 'Carregando...' : '🔄 Atualizar'}
+                    </Button>
                   </CardHeader>
                   <CardContent>
                     {isLoadingRequisitions ? (
@@ -1170,16 +1186,39 @@ export default function CostsPage() {
                                                         <TableCell className="font-medium">{item.description}</TableCell>
                                                         <TableCell><Badge variant={getStatusVariant(item.status)}>{item.status}</Badge></TableCell>
                                                         <TableCell>
-                                                            {item.weight ? `${item.weight} ${item.weightUnit || 'kg'}` : '-'}
+                                                            {item.weight ? (
+                                                                <span className="font-medium text-green-600">
+                                                                    {item.weight} {item.weightUnit || 'kg'}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-orange-500 text-sm">
+                                                                    ⚠️ Não informado
+                                                                </span>
+                                                            )}
                                                         </TableCell>
                                                         <TableCell>{item.supplierName || '-'}</TableCell>
                                                         <TableCell>{item.invoiceNumber || '-'}</TableCell>
                                                         <TableCell><Badge variant={getStatusVariant(item.inspectionStatus)}>{item.inspectionStatus}</Badge></TableCell>
                                                         <TableCell className="text-right">
-                                                            <Button variant="outline" size="sm" onClick={() => handleOpenForm(item, req.id)}>
-                                                                <FilePen className="mr-2 h-4 w-4" />
-                                                                Atualizar
-                                                            </Button>
+                                                            <div className="flex gap-2">
+                                                                <Button variant="outline" size="sm" onClick={() => handleOpenForm(item, req.id)}>
+                                                                    <FilePen className="mr-2 h-4 w-4" />
+                                                                    Atualizar
+                                                                </Button>
+                                                                <Button 
+                                                                    variant="ghost" 
+                                                                    size="sm" 
+                                                                    onClick={() => {
+                                                                        console.log('Item completo:', item);
+                                                                        console.log('Peso atual:', item.weight);
+                                                                        console.log('Unidade atual:', item.weightUnit);
+                                                                        alert(`DEBUG Item: ${item.description}\nPeso: ${item.weight || 'não definido'}\nUnidade: ${item.weightUnit || 'não definido'}\n\nVer console para dados completos`);
+                                                                    }}
+                                                                    className="text-xs"
+                                                                >
+                                                                    🐛 Debug
+                                                                </Button>
+                                                            </div>
                                                         </TableCell>
                                                     </TableRow>
                                                 ))}
@@ -1586,15 +1625,22 @@ export default function CostsPage() {
                 <DialogDescription>
                     {selectedItem?.description}
                 </DialogDescription>
-                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <div className="flex items-center gap-2 text-blue-800">
+                <div className={`mt-3 p-3 rounded-lg border ${selectedItem?.weight ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
+                    <div className="flex items-center gap-2">
                         <span className="font-semibold">⚖️ Peso do Material:</span>
                         <span className="text-lg font-bold">
-                            {selectedItem?.weight ? `${selectedItem.weight} ${selectedItem.weightUnit || 'kg'}` : 'Não informado'}
+                            {selectedItem?.weight ? (
+                                <span className="text-green-700">
+                                    {selectedItem.weight} {selectedItem.weightUnit || 'kg'}
+                                </span>
+                            ) : (
+                                <span className="text-orange-700">Não informado</span>
+                            )}
                         </span>
                     </div>
-                    {selectedItem?.invoiceItemValue && selectedItem?.weight && selectedItem.weight > 0 && (
-                        <div className="mt-2 text-sm text-blue-600">
+                    
+                    {selectedItem?.weight && selectedItem?.invoiceItemValue && selectedItem.weight > 0 && (
+                        <div className="mt-2 text-sm text-green-600">
                             💰 Custo por {selectedItem.weightUnit || 'kg'}: {' '}
                             <span className="font-semibold">
                                 {(selectedItem.invoiceItemValue / selectedItem.weight).toLocaleString('pt-BR', { 
@@ -1604,8 +1650,13 @@ export default function CostsPage() {
                             </span>
                         </div>
                     )}
-                    <div className="mt-2 text-xs text-blue-500">
-                        💡 Preencha o peso e valor para cálculo automático do custo
+                    
+                    <div className="mt-2 text-xs">
+                        {selectedItem?.weight ? (
+                            <span className="text-green-600">✅ Peso cadastrado - Os custos serão calculados automaticamente</span>
+                        ) : (
+                            <span className="text-orange-600">⚠️ Informe o peso abaixo para cálculo automático do custo por unidade</span>
+                        )}
                     </div>
                 </div>
             </DialogHeader>
@@ -1639,49 +1690,68 @@ export default function CostsPage() {
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <FormField control={itemForm.control} name="weight" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Peso do Material</FormLabel>
-                                <FormControl>
-                                    <Input 
-                                        type="number" 
-                                        step="0.001" 
-                                        placeholder="0.000" 
-                                        {...field} 
-                                        value={field.value ?? ''} 
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                        <FormField control={itemForm.control} name="weightUnit" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Unidade</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value || "kg"}>
-                                    <FormControl>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Unidade" />
-                                        </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                        <SelectItem value="kg">kg (quilograma)</SelectItem>
-                                        <SelectItem value="g">g (grama)</SelectItem>
-                                        <SelectItem value="t">t (tonelada)</SelectItem>
-                                        <SelectItem value="m">m (metro)</SelectItem>
-                                        <SelectItem value="m²">m² (metro quadrado)</SelectItem>
-                                        <SelectItem value="m³">m³ (metro cúbico)</SelectItem>
-                                        <SelectItem value="l">l (litro)</SelectItem>
-                                        <SelectItem value="un">un (unidade)</SelectItem>
-                                        <SelectItem value="pç">pç (peça)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                        <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
-                            <FormItem><FormLabel>Valor do Item (R$)</FormLabel><FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                        )}/>
-                    </div>
+                                                            <FormField control={itemForm.control} name="weight" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel className="flex items-center gap-2">
+                                                ⚖️ Peso do Material
+                                                {!selectedItem?.weight && <span className="text-orange-500 text-xs">(Obrigatório)</span>}
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input 
+                                                    type="number" 
+                                                    step="0.001" 
+                                                    placeholder={selectedItem?.weight ? selectedItem.weight.toString() : "Ex: 15.5"} 
+                                                    {...field} 
+                                                    value={field.value ?? ''} 
+                                                    className={!selectedItem?.weight && !field.value ? 'border-orange-300 focus:border-orange-500' : ''}
+                                                />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}/>
+                                    <FormField control={itemForm.control} name="weightUnit" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Unidade</FormLabel>
+                                            <Select onValueChange={field.onChange} value={field.value || "kg"}>
+                                                <FormControl>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Unidade" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="kg">kg (quilograma)</SelectItem>
+                                                    <SelectItem value="g">g (grama)</SelectItem>
+                                                    <SelectItem value="t">t (tonelada)</SelectItem>
+                                                    <SelectItem value="m">m (metro)</SelectItem>
+                                                    <SelectItem value="m²">m² (metro quadrado)</SelectItem>
+                                                    <SelectItem value="m³">m³ (metro cúbico)</SelectItem>
+                                                    <SelectItem value="l">l (litro)</SelectItem>
+                                                    <SelectItem value="un">un (unidade)</SelectItem>
+                                                    <SelectItem value="pç">pç (peça)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}/>
+                                    <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel className="flex items-center gap-2">
+                                                💰 Valor do Item (R$)
+                                                {!selectedItem?.invoiceItemValue && <span className="text-blue-500 text-xs">(Para cálculo de custo)</span>}
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input 
+                                                    type="number" 
+                                                    step="0.01" 
+                                                    placeholder="0.00" 
+                                                    {...field} 
+                                                    value={field.value ?? ''} 
+                                                />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}/>
+                                </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <FormField control={itemForm.control} name="invoiceNumber" render={({ field }) => (
                             <FormItem><FormLabel>Nota Fiscal</FormLabel><FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
