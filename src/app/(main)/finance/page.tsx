@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect } from 'react';
 import { Download, Lock, Eye, EyeOff, TrendingUp, TrendingDown, DollarSign } from "lucide-react";
 
