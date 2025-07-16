@@ -141,6 +141,10 @@ type Requisition = {
   date: Date;
   status: string;
   orderId?: string;
+  totalValue?: number;
+  itemsWithPrice?: number;
+  progress?: number;
+  lastPriceUpdate?: Date | null;
   items: RequisitionItem[];
 };
 
@@ -491,6 +495,10 @@ export default function CostsPage() {
                     date: data.date?.toDate ? data.date.toDate() : (data.date ? new Date(data.date) : new Date()),
                     status: data.status,
                     orderId: data.orderId,
+                    totalValue: data.totalValue || 0,
+                    itemsWithPrice: data.itemsWithPrice || 0,
+                    progress: data.progress || 0,
+                    lastPriceUpdate: data.lastPriceUpdate?.toDate ? data.lastPriceUpdate.toDate() : null,
                     items: (data.items || []).map((item: any, index: number): RequisitionItem => {
                         // Tentar diferentes possíveis estruturas para o peso
                         const weight = item.weight || item.peso || item.materialWeight || item.itemWeight || undefined;
@@ -744,8 +752,23 @@ export default function CostsPage() {
             const updatedItems = [...items];
             updatedItems[itemIndex] = updatedItem;
 
-            await updateDoc(reqRef, { items: updatedItems });
-            console.log('✅ Requisição atualizada no banco de dados');
+            // Calcular valor total da requisição
+            const totalValue = updatedItems.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
+            const itemsWithPrice = updatedItems.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
+            const progress = updatedItems.length > 0 ? Math.round((itemsWithPrice / updatedItems.length) * 100) : 0;
+
+            console.log(`💰 Valor total calculado da requisição: R$ ${totalValue}`);
+            console.log(`📊 Progresso de precificação: ${progress}% (${itemsWithPrice}/${updatedItems.length} itens)`);
+
+            // Atualizar requisição com os novos valores e totais
+            await updateDoc(reqRef, { 
+                items: updatedItems,
+                totalValue: totalValue,
+                itemsWithPrice: itemsWithPrice,
+                progress: progress,
+                lastPriceUpdate: Timestamp.now()
+            });
+            console.log('✅ Requisição atualizada no banco de dados com valores totais');
 
             // Atualizar custos da OS automaticamente se a requisição estiver vinculada a uma OS
             let costUpdateSuccess = false;
@@ -860,20 +883,14 @@ export default function CostsPage() {
             );
             console.log('🗑️ Removendo custos antigos da requisição, restaram:', filteredCostEntries.length);
             
-            // Calcular total da requisição - o valor da nota fiscal já é o valor total do item
-            const requisitionTotal = items.reduce((total, item) => {
-                const itemValue = item.invoiceItemValue || 0;
-                console.log(`💰 Item ${item.description}: R$ ${itemValue}`);
-                return total + itemValue;
-            }, 0);
-            
-            console.log('💵 Total calculado da requisição:', requisitionTotal);
-            
-            // Contar quantos itens têm valores preenchidos
-            const itemsWithValues = items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
+            // Usar valores já calculados e salvos na requisição
+            const requisitionTotal = reqData.totalValue || 0;
+            const itemsWithValues = reqData.itemsWithPrice || 0;
             const totalItems = items.length;
+            const progress = reqData.progress || 0;
             
-            console.log(`📈 Progresso: ${itemsWithValues}/${totalItems} itens precificados`);
+            console.log('💵 Valor total da requisição (salvo):', requisitionTotal);
+            console.log(`📈 Progresso salvo: ${progress}% (${itemsWithValues}/${totalItems} itens precificados)`);
             
             // Criar descrição dinâmica baseada no progresso
             let description = `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'}`;
@@ -894,13 +911,15 @@ export default function CostsPage() {
                 unitCost: requisitionTotal > 0 ? requisitionTotal / totalItems : 0,
                 totalCost: requisitionTotal,
                 entryDate: Timestamp.now(),
-                enteredBy: 'Sistema (Requisição)',
+                enteredBy: 'Sistema (Auto - Recebimento)',
                 requisitionId: requisitionId,
                 isFromRequisition: true,
                 isPending: requisitionTotal === 0,
                 itemsWithValues: itemsWithValues,
                 totalItems: totalItems,
-                completionPercentage: totalItems > 0 ? Math.round((itemsWithValues / totalItems) * 100) : 0,
+                completionPercentage: progress,
+                lastPriceUpdate: reqData.lastPriceUpdate,
+                sourceType: 'requisition_total',
                 items: items.map(item => ({
                     description: item.description,
                     quantity: item.quantityRequested,
@@ -1257,7 +1276,8 @@ export default function CostsPage() {
                     <div>
                     <CardTitle>Recebimento de Materiais</CardTitle>
                     <CardDescription>
-                      Gerencie o recebimento de materiais das requisições, atualize informações de nota fiscal e realize a inspeção de qualidade.
+                      Gerencie o recebimento de materiais das requisições, adicione valores das notas fiscais e realize a inspeção de qualidade. 
+                      <strong>Os valores totais de cada requisição serão automaticamente lançados como custos nas OS vinculadas.</strong>
                     </CardDescription>
                     </div>
                     <Button variant="outline" onClick={fetchRequisitions} disabled={isLoadingRequisitions}>
@@ -1272,62 +1292,168 @@ export default function CostsPage() {
                             {requisitions.map((req) => (
                                 <AccordionItem value={req.id} key={req.id}>
                                     <AccordionTrigger className="hover:bg-muted/50 px-4">
-                                        <div className="flex-1 text-left">
-                                            <div className="flex items-center gap-4">
-                                                <span className="font-bold text-primary">Requisição Nº {req.requisitionNumber}</span>
-                                                <span className="text-muted-foreground text-sm">Data: {format(req.date, 'dd/MM/yyyy')}</span>
-                                            </div>
-                                            <div className="text-sm text-muted-foreground mt-1">
-                                                {req.orderId ? 
-                                                    (() => {
-                                                        const order = orders.find(o => o.id === req.orderId);
-                                                        return order ? `OS: ${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
-                                                    })() : 'Sem OS vinculada'
-                                                } • {req.items.length} itens
-                                            </div>
-                                        </div>
+                                        {(() => {
+                                            const totalValue = req.items.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
+                                            const itemsWithPrice = req.items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
+                                            const progress = req.items.length > 0 ? Math.round((itemsWithPrice / req.items.length) * 100) : 0;
+                                            
+                                            return (
+                                                <div className="flex-1 text-left">
+                                                    <div className="flex items-center gap-4">
+                                                        <span className="font-bold text-primary">Requisição Nº {req.requisitionNumber}</span>
+                                                        <span className="text-muted-foreground text-sm">Data: {format(req.date, 'dd/MM/yyyy')}</span>
+                                                        {totalValue > 0 && (
+                                                            <Badge variant="default" className="bg-green-600 text-white">
+                                                                💰 {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
+                                                        <span>
+                                                            {req.orderId ? 
+                                                                (() => {
+                                                                    const order = orders.find(o => o.id === req.orderId);
+                                                                    return order ? `OS: ${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
+                                                                })() : 'Sem OS vinculada'
+                                                            }
+                                                        </span>
+                                                        <span>•</span>
+                                                        <span>{req.items.length} itens</span>
+                                                        <span>•</span>
+                                                        <span className={`font-medium ${progress === 100 ? 'text-green-600' : progress > 0 ? 'text-blue-600' : 'text-orange-600'}`}>
+                                                            {progress === 100 ? '✅ Completo' : progress > 0 ? `📊 ${progress}% precificado` : '⏳ Aguardando preços'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                     </AccordionTrigger>
                                     <AccordionContent className="p-2">
-                                        <div className="mb-4 p-4 bg-muted/30 rounded-lg">
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                                                <div>
-                                                    <span className="font-semibold text-muted-foreground">OS Vinculada:</span>
-                                                    <p className="font-medium">
-                                                        {req.orderId ? 
-                                                            (() => {
-                                                                const order = orders.find(o => o.id === req.orderId);
-                                                                return order ? `${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
-                                                            })() : 'Nenhuma OS vinculada'
-                                                        }
-                                                    </p>
+                                        {(() => {
+                                            // Calcular valores da requisição
+                                            const totalValue = req.items.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
+                                            const itemsWithPrice = req.items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
+                                            const totalItems = req.items.length;
+                                            const progress = totalItems > 0 ? Math.round((itemsWithPrice / totalItems) * 100) : 0;
+                                            
+                                            return (
+                                                <div className="mb-6">
+                                                    {/* Resumo da OS */}
+                                                    <div className="mb-4 p-4 bg-muted/30 rounded-lg">
+                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                                            <div>
+                                                                <span className="font-semibold text-muted-foreground">OS Vinculada:</span>
+                                                                <p className="font-medium">
+                                                                    {req.orderId ? 
+                                                                        (() => {
+                                                                            const order = orders.find(o => o.id === req.orderId);
+                                                                            return order ? `${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
+                                                                        })() : 'Nenhuma OS vinculada'
+                                                                    }
+                                                                </p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-semibold text-muted-foreground">Total de Itens:</span>
+                                                                <p className="font-medium">{req.items.length}</p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-semibold text-muted-foreground">Status Geral:</span>
+                                                                <p><Badge variant={getStatusVariant(req.status)}>{req.status}</Badge></p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {/* Resumo Financeiro da Requisição */}
+                                                    <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                                        <div className="flex items-center justify-between mb-3">
+                                                            <h4 className="font-semibold text-blue-900 flex items-center gap-2">
+                                                                💰 Resumo Financeiro da Requisição
+                                                            </h4>
+                                                            <Badge variant={progress === 100 ? "default" : progress > 0 ? "secondary" : "outline"} className="text-xs">
+                                                                {progress === 100 ? "✅ Completo" : progress > 0 ? `${progress}% Precificado` : "⏳ Aguardando"}
+                                                            </Badge>
+                                                        </div>
+                                                        
+                                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                                            <div className="bg-white p-3 rounded border">
+                                                                <span className="text-xs text-muted-foreground block">Valor Total</span>
+                                                                <span className={`text-lg font-bold ${totalValue > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                                                    {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                </span>
+                                                            </div>
+                                                            
+                                                            <div className="bg-white p-3 rounded border">
+                                                                <span className="text-xs text-muted-foreground block">Itens Precificados</span>
+                                                                <span className="text-lg font-bold text-blue-600">
+                                                                    {itemsWithPrice} / {totalItems}
+                                                                </span>
+                                                            </div>
+                                                            
+                                                            <div className="bg-white p-3 rounded border">
+                                                                <span className="text-xs text-muted-foreground block">Progresso</span>
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                                                        <div 
+                                                                            className={`h-2 rounded-full transition-all ${progress === 100 ? 'bg-green-500' : progress > 0 ? 'bg-blue-500' : 'bg-gray-300'}`}
+                                                                            style={{ width: `${progress}%` }}
+                                                                        ></div>
+                                                                    </div>
+                                                                    <span className="text-sm font-medium">{progress}%</span>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div className="bg-white p-3 rounded border">
+                                                                <span className="text-xs text-muted-foreground block">Valor Médio/Item</span>
+                                                                <span className="text-lg font-bold text-purple-600">
+                                                                    {itemsWithPrice > 0 ? (totalValue / itemsWithPrice).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00'}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        {req.orderId && totalValue > 0 && (
+                                                            <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
+                                                                ✅ <strong>Este valor será automaticamente lançado como custo na OS {req.orderId}</strong>
+                                                            </div>
+                                                        )}
+                                                        
+                                                        {req.orderId && totalValue === 0 && (
+                                                            <div className="mt-3 p-2 bg-orange-100 border border-orange-300 rounded text-sm text-orange-800">
+                                                                ⏳ Adicione os valores dos itens para que sejam lançados automaticamente na OS
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <span className="font-semibold text-muted-foreground">Total de Itens:</span>
-                                                    <p className="font-medium">{req.items.length}</p>
-                                                </div>
-                                                <div>
-                                                    <span className="font-semibold text-muted-foreground">Status Geral:</span>
-                                                    <p><Badge variant={getStatusVariant(req.status)}>{req.status}</Badge></p>
-                                                </div>
-                                            </div>
-                                        </div>
+                                            );
+                                        })()}
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
                                                     <TableHead>Item</TableHead>
-                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Qtd</TableHead>
                                                     <TableHead>Peso</TableHead>
+                                                    <TableHead>Valor (R$)</TableHead>
                                                     <TableHead>Fornecedor</TableHead>
-                                                    <TableHead>Nota Fiscal</TableHead>
-                                                    <TableHead>Inspeção</TableHead>
+                                                    <TableHead>NF</TableHead>
+                                                    <TableHead>Status</TableHead>
                                                     <TableHead className="text-right">Ações</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
                                                 {req.items.map(item => (
-                                                    <TableRow key={item.id}>
-                                                        <TableCell className="font-medium">{item.description}</TableCell>
-                                                        <TableCell><Badge variant={getStatusVariant(item.status)}>{item.status}</Badge></TableCell>
+                                                    <TableRow key={item.id} className={item.invoiceItemValue && item.invoiceItemValue > 0 ? 'bg-green-50 border-l-4 border-green-400' : ''}>
+                                                        <TableCell className="font-medium">
+                                                            <div>
+                                                                <span>{item.description}</span>
+                                                                {item.invoiceItemValue && item.invoiceItemValue > 0 && (
+                                                                    <div className="text-xs text-green-600 mt-1">✓ Precificado</div>
+                                                                )}
+                                                            </div>
+                                                        </TableCell>
+                                                        <TableCell className="text-center">
+                                                            <Badge variant="outline" className="text-xs">
+                                                                {item.quantityRequested}
+                                                            </Badge>
+                                                        </TableCell>
                                                         <TableCell>
                                                             {item.weight ? (
                                                                 <span className="font-medium text-green-600">
@@ -1339,13 +1465,38 @@ export default function CostsPage() {
                                                                 </span>
                                                             )}
                                                         </TableCell>
-                                                        <TableCell>{item.supplierName || '-'}</TableCell>
-                                                        <TableCell>{item.invoiceNumber || '-'}</TableCell>
-                                                        <TableCell><Badge variant={getStatusVariant(item.inspectionStatus)}>{item.inspectionStatus}</Badge></TableCell>
+                                                        <TableCell>
+                                                            {item.invoiceItemValue && item.invoiceItemValue > 0 ? (
+                                                                <div className="text-green-600 font-bold">
+                                                                    {item.invoiceItemValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                    {item.weight && (
+                                                                        <div className="text-xs text-gray-500 font-normal">
+                                                                            {(item.invoiceItemValue / item.weight).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}{'/' + (item.weightUnit || 'kg')}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-gray-400 text-sm">
+                                                                    Não informado
+                                                                </span>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell className="text-sm">{item.supplierName || '-'}</TableCell>
+                                                        <TableCell className="text-sm">{item.invoiceNumber || '-'}</TableCell>
+                                                        <TableCell>
+                                                            <div className="space-y-1">
+                                                                <Badge variant={getStatusVariant(item.status)} className="text-xs block text-center">
+                                                                    {item.status}
+                                                                </Badge>
+                                                                <Badge variant={getStatusVariant(item.inspectionStatus)} className="text-xs block text-center">
+                                                                    {item.inspectionStatus}
+                                                                </Badge>
+                                                            </div>
+                                                        </TableCell>
                                                         <TableCell className="text-right">
                                                             <Button variant="outline" size="sm" onClick={() => handleOpenForm(item, req.id)}>
                                                                 <FilePen className="mr-2 h-4 w-4" />
-                                                                Atualizar
+                                                                {item.invoiceItemValue && item.invoiceItemValue > 0 ? 'Editar' : 'Precificar'}
                                                             </Button>
                                                         </TableCell>
                                                     </TableRow>
@@ -1563,7 +1714,8 @@ export default function CostsPage() {
                         <div>
                         <CardTitle>Custos Organizados por OS</CardTitle>
                         <CardDescription>
-                            Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço.
+                            Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço. 
+                            <strong>Os custos de materiais são automaticamente calculados a partir dos valores das requisições no painel de recebimento.</strong>
                             {(() => {
                                 // Verificar se há requisições que precisam ser sincronizadas
                                 const pendingReqs = orders.flatMap(order => 
@@ -1576,9 +1728,9 @@ export default function CostsPage() {
                                 
                                 if (pendingReqs.length > 0) {
                                     return (
-                                        <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-sm">
-                                            ⚠️ <span className="font-medium">{pendingReqs.length} requisições</span> estão aguardando sincronização. 
-                                            <span className="text-orange-700"> Use "Re-sincronizar Requisições" se você já adicionou valores no recebimento de materiais.</span>
+                                        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+                                            💡 <span className="font-medium">{pendingReqs.length} requisições</span> estão aguardando valores. 
+                                            <span className="text-blue-700"> Vá para "Recebimento de Materiais" para adicionar os preços das notas fiscais.</span>
                                         </div>
                                     );
                                 }
@@ -1669,28 +1821,38 @@ export default function CostsPage() {
                                                                     <TableCell className="font-medium">
                                                                         <div>
                                                                             {entry.description}
-                                                                                                                                                         {entry.isFromRequisition && (
-                                                                                 <div className="flex items-center gap-1 mt-1 flex-wrap">
-                                                                                     <Badge variant="secondary" className="text-xs">
-                                                                                         📋 Requisição
+                                                                                                                                                                                                                                 {entry.isFromRequisition && (
+                                                                             <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                                                                 <Badge variant="secondary" className="text-xs">
+                                                                                     📋 Materiais (Auto)
+                                                                                 </Badge>
+                                                                                 {entry.sourceType === 'requisition_total' && (
+                                                                                     <Badge variant="outline" className="text-xs text-blue-600">
+                                                                                         💰 Valor do Recebimento
                                                                                      </Badge>
-                                                                                     {entry.isPending && (
-                                                                                         <Badge variant="outline" className="text-xs text-orange-600">
-                                                                                             ⏳ Aguardando preços
-                                                                                         </Badge>
-                                                                                     )}
-                                                                                     {!entry.isPending && entry.completionPercentage && entry.completionPercentage < 100 && (
-                                                                                         <Badge variant="outline" className="text-xs text-blue-600">
-                                                                                             🔄 {entry.completionPercentage}% precificado
-                                                                                         </Badge>
-                                                                                     )}
-                                                                                     {entry.completionPercentage === 100 && (
-                                                                                         <Badge variant="default" className="text-xs text-green-600">
-                                                                                             ✅ Completo
-                                                                                         </Badge>
-                                                                                     )}
-                                                                                 </div>
-                                                                             )}
+                                                                                 )}
+                                                                                 {entry.isPending && (
+                                                                                     <Badge variant="outline" className="text-xs text-orange-600">
+                                                                                         ⏳ Aguardando preços
+                                                                                     </Badge>
+                                                                                 )}
+                                                                                 {!entry.isPending && entry.completionPercentage && entry.completionPercentage < 100 && (
+                                                                                     <Badge variant="outline" className="text-xs text-blue-600">
+                                                                                         🔄 {entry.completionPercentage}% precificado
+                                                                                     </Badge>
+                                                                                 )}
+                                                                                 {entry.completionPercentage === 100 && (
+                                                                                     <Badge variant="default" className="text-xs text-green-600">
+                                                                                         ✅ Completo
+                                                                                     </Badge>
+                                                                                 )}
+                                                                                 {entry.lastPriceUpdate && (
+                                                                                     <Badge variant="outline" className="text-xs text-gray-500">
+                                                                                         🕒 {format(entry.lastPriceUpdate, 'dd/MM HH:mm')}
+                                                                                     </Badge>
+                                                                                 )}
+                                                                             </div>
+                                                                         )}
                                                                             {entry.items && entry.items.length > 0 && (
                                                                                 <details className="mt-2">
                                                                                     <summary className="text-xs text-muted-foreground cursor-pointer hover:text-primary">
