@@ -642,6 +642,51 @@ export default function CostsPage() {
         await fetchOrders();
         console.log('✅ Refresh dos custos concluído');
     }, [fetchOrders]);
+    
+    // Função para re-sincronizar todas as requisições com suas OS
+    const forceSyncAllRequisitions = useCallback(async () => {
+        console.log('🔄 Forçando re-sincronização de todas as requisições...');
+        setIsLoadingOrders(true);
+        
+        try {
+            let syncCount = 0;
+            
+            for (const req of requisitions) {
+                if (req.orderId) {
+                    console.log(`🔗 Re-sincronizando requisição ${req.requisitionNumber} com OS ${req.orderId}`);
+                    
+                    // Buscar itens atualizados da requisição
+                    const reqRef = doc(db, "companies", "mecald", "materialRequisitions", req.id);
+                    const reqSnap = await getDoc(reqRef);
+                    
+                    if (reqSnap.exists()) {
+                        const reqData = reqSnap.data();
+                        const items = reqData.items || [];
+                        
+                        // Atualizar custos da OS
+                        await updateOrderCostFromRequisition(req.orderId, req.id, items);
+                        syncCount++;
+                    }
+                }
+            }
+            
+            await fetchOrders();
+            toast({ 
+                title: "✅ Re-sincronização completa!", 
+                description: `${syncCount} requisições foram re-sincronizadas com suas OS.` 
+            });
+            
+        } catch (error) {
+            console.error('❌ Erro na re-sincronização:', error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro na re-sincronização", 
+                description: "Houve um problema. Verifique o console para detalhes." 
+            });
+        } finally {
+            setIsLoadingOrders(false);
+        }
+    }, [requisitions, fetchOrders, toast]);
 
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
         const selectedItemData = { ...item, requisitionId };
@@ -766,7 +811,8 @@ export default function CostsPage() {
 
     // Função para atualizar custos da OS baseado na requisição
     const updateOrderCostFromRequisition = async (orderId: string, requisitionId: string, items: any[]) => {
-        console.log('🔄 Iniciando atualização de custos:', { orderId, requisitionId, items });
+        console.log('🔄 ===== INICIANDO ATUALIZAÇÃO DE CUSTOS =====');
+        console.log('🔄 Dados de entrada:', { orderId, requisitionId, itemsCount: items.length });
         
         try {
             // Buscar dados da requisição
@@ -779,7 +825,12 @@ export default function CostsPage() {
             }
             
             const reqData = reqSnap.data();
-            console.log('📋 Dados da requisição:', reqData);
+            console.log('📋 Requisição encontrada:', {
+                id: requisitionId,
+                number: reqData.requisitionNumber,
+                status: reqData.status,
+                itemsCount: (reqData.items || []).length
+            });
             
             const orderRef = doc(db, "companies", "mecald", "orders", orderId);
             const orderSnap = await getDoc(orderRef);
@@ -793,7 +844,17 @@ export default function CostsPage() {
             const existingCostEntries = orderData.costEntries || [];
             console.log('📊 Custos existentes na OS:', existingCostEntries.length);
             
+            // Log detalhado dos lançamentos existentes
+            existingCostEntries.forEach((entry: any, index: number) => {
+                console.log(`📝 Lançamento ${index}: ID=${entry.id}, ReqID=${entry.requisitionId}, Descrição="${entry.description}"`);
+            });
+            
             // Remover lançamentos antigos desta requisição
+            const oldEntriesForThisReq = existingCostEntries.filter((entry: any) => 
+                entry.requisitionId === requisitionId
+            );
+            console.log(`🔍 Encontrados ${oldEntriesForThisReq.length} lançamentos antigos da requisição ${requisitionId}:`, oldEntriesForThisReq.map(e => e.id));
+            
             const filteredCostEntries = existingCostEntries.filter((entry: any) => 
                 entry.requisitionId !== requisitionId
             );
@@ -852,17 +913,35 @@ export default function CostsPage() {
             
             console.log('💾 Novo lançamento de custo:', requisitionCostEntry);
             
-            filteredCostEntries.push(requisitionCostEntry);
+            // Primeiro, vamos tentar remover os lançamentos antigos usando arrayRemove
+            if (oldEntriesForThisReq.length > 0) {
+                console.log('🗑️ Removendo lançamentos antigos usando arrayRemove...');
+                
+                // Remover lançamentos antigos um por um
+                for (const oldEntry of oldEntriesForThisReq) {
+                    console.log(`🗑️ Removendo lançamento: ${oldEntry.id}`);
+                    await updateDoc(orderRef, {
+                        costEntries: arrayRemove(oldEntry)
+                    });
+                }
+                
+                console.log('✅ Lançamentos antigos removidos');
+            }
             
-            console.log('📝 Salvando custos atualizados no banco...');
+            // Adicionar o novo lançamento
+            console.log('📝 Adicionando novo lançamento...');
             await updateDoc(orderRef, {
-                costEntries: filteredCostEntries
+                costEntries: arrayUnion(requisitionCostEntry)
             });
+            console.log('✅ Novo lançamento adicionado');
             
             console.log(`✅ Custo da OS atualizado com sucesso: Requisição ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            console.log('🔄 ===== ATUALIZAÇÃO DE CUSTOS CONCLUÍDA =====');
             
         } catch (error) {
+            console.error("❌ ===== ERRO NA ATUALIZAÇÃO DE CUSTOS =====");
             console.error("❌ Error updating order costs:", error);
+            console.error("❌ Detalhes:", { orderId, requisitionId, itemsCount: items.length });
             throw error; // Re-throw para que possa ser tratado no onItemSubmit
         }
     };
@@ -1485,18 +1564,43 @@ export default function CostsPage() {
                         <CardTitle>Custos Organizados por OS</CardTitle>
                         <CardDescription>
                             Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço.
+                            {(() => {
+                                // Verificar se há requisições que precisam ser sincronizadas
+                                const pendingReqs = orders.flatMap(order => 
+                                    (order.costEntries || []).filter((entry: any) => 
+                                        entry.isFromRequisition && 
+                                        entry.isPending && 
+                                        entry.description?.includes('Aguardando precificação')
+                                    )
+                                );
+                                
+                                if (pendingReqs.length > 0) {
+                                    return (
+                                        <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-sm">
+                                            ⚠️ <span className="font-medium">{pendingReqs.length} requisições</span> estão aguardando sincronização. 
+                                            <span className="text-orange-700"> Use "Re-sincronizar Requisições" se você já adicionou valores no recebimento de materiais.</span>
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
                         </CardDescription>
                         </div>
-                        <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-3">
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
                                 <div className={`w-2 h-2 rounded-full ${isLoadingOrders ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
-                                                                 <span>
+                                <span>
                                      {isLoadingOrders ? 'Carregando dados...' : (lastUpdateTime ? `Atualizado às ${lastUpdateTime.toLocaleTimeString('pt-BR')}` : 'Sem dados')}
                                  </span>
                             </div>
-                            <Button variant="outline" onClick={forceRefreshCosts} disabled={isLoadingOrders}>
-                                {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar Custos'}
-                            </Button>
+                            <div className="flex gap-2">
+                                <Button variant="outline" onClick={forceSyncAllRequisitions} disabled={isLoadingOrders} className="text-xs">
+                                    {isLoadingOrders ? 'Sincronizando...' : '🔄 Re-sincronizar Requisições'}
+                                </Button>
+                                <Button variant="outline" onClick={forceRefreshCosts} disabled={isLoadingOrders}>
+                                    {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar Custos'}
+                                </Button>
+                            </div>
                         </div>
                     </CardHeader>
                     <CardContent>
