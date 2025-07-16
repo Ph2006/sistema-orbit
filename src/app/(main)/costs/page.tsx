@@ -143,6 +143,258 @@ type Requisition = {
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
 type OrderInfo = { id: string; internalOS: string; customerName: string; costEntries?: any[] };
 
+// Biblioteca global de insumos para caldeiraria e usinagem
+const insumosBiblioteca = {
+    "MATERIAS_PRIMAS": [
+        // Aços Carbono
+        "Aço carbono ASTM A36",
+        "Aço SAE 1020",
+        "Aço SAE 1045",
+        "Aço SAE 8620",
+        "Aço SAE 4140",
+        "Aço SAE 4340",
+        "Aço 52100",
+        
+        // Aços Ferramenta
+        "Aço ferramenta D2",
+        "Aço ferramenta D6",
+        "Aço ferramenta VC131",
+        "Aço ferramenta H13",
+        
+        // Aços Inoxidáveis
+        "Aço inox AISI 304",
+        "Aço inox AISI 316",
+        "Aço inox AISI 310",
+        "Aço inox AISI 410",
+        "Aço inox AISI 420",
+        
+        // Aços Especiais
+        "HARDOX 400",
+        "HARDOX 450",
+        "HARDOX 500",
+        "Dillidur 400",
+        "Dillidur 500",
+        "USI AR 400",
+        "USI AR 500",
+        
+        // Metais Não Ferrosos
+        "Alumínio 6061",
+        "Alumínio 7075",
+        "Alumínio 5083",
+        "Latão",
+        "Bronze SAE 660",
+        "Titânio Ti-6Al-4V",
+        "Cobre eletrolítico",
+        "Zinco fundido",
+        "Magnésio fundido",
+        "Níquel puro ou ligado",
+        
+        // Plásticos Técnicos
+        "Plástico Nylon (PA6)",
+        "Plástico UHMW",
+        "Plástico POM (Delrin)",
+        "Plástico PTFE (Teflon)",
+        "Plástico PVC industrial",
+        "Poliuretano sólido",
+        "Poliuretano expandido",
+        "Grafite para eletroerosão"
+    ],
+    
+    "FERRAMENTAS_CORTE": [
+        // Pastilhas
+        "Pastilha de corte de metal duro (carbeto de tungstênio)",
+        "Pastilha de corte cerâmica",
+        "Pastilha de corte CBN (nitreto cúbico de boro)",
+        "Pastilha de corte PCD (diamante policristalino)",
+        
+        // Brocas
+        "Brocas HSS",
+        "Brocas de metal duro",
+        
+        // Fresas
+        "Fresas topo reto",
+        "Fresas topo esférico",
+        "Fresas de canal",
+        
+        // Ferramentas Especiais
+        "Alargadores manuais",
+        "Alargadores de máquina",
+        "Machos de rosca M, G, NPT",
+        
+        // Abrasivos
+        "Discos de desbaste",
+        "Discos flap",
+        "Discos de corte",
+        "Rebolos"
+    ],
+    
+    "CONSUMIVEIS_USINAGEM": [
+        // Fluidos
+        "Fluidos de corte solúveis",
+        "Fluidos de corte semissintéticos",
+        "Fluidos de corte sintéticos",
+        "Óleos integrais para usinagem pesada",
+        "Óleos de base vegetal para usinagem ecológica",
+        
+        // Porta-ferramentas
+        "Porta-pastilhas ISO",
+        "Porta-fresas tipo Weldon",
+        "Porta-ferramentas ER",
+        "Porta-ferramentas BT",
+        "Porta-ferramentas SK",
+        "Porta-ferramentas HSK",
+        "Mandris para usinagem"
+    ],
+    
+    "FIXACAO": [
+        // Parafusos
+        "Parafusos cabeça sextavada",
+        "Parafusos Allen",
+        "Parafusos de pressão",
+        "Parafusos cabeça chata",
+        
+        // Porcas e Arruelas
+        "Porcas sextavadas",
+        "Porcas travantes (nylon ou metal)",
+        "Arruelas lisas",
+        "Arruelas de pressão",
+        "Arruelas dentadas",
+        
+        // Elementos de Fixação
+        "Pinos de posicionamento cilíndricos",
+        "Pinos cônicos",
+        "Chavetas retas DIN 6885",
+        "Chavetas paralelas DIN 6886",
+        "Prisioneiros roscados",
+        "Anéis de retenção Seeger",
+        "Buchas de guia",
+        "Buchas de redução"
+    ],
+    
+    "SOLDAGEM": [
+        // Arames
+        "Arame MIG ER70S-6",
+        "Arame MIG inox ER308L",
+        "Arame MIG inox ER309",
+        "Arame MIG inox ER316",
+        "Arame tubular E71T-1",
+        "Arame tubular E71T-GS",
+        
+        // Eletrodos
+        "Eletrodo revestido E6013",
+        "Eletrodo revestido E7018",
+        "Eletrodo inoxidável 308L",
+        "Eletrodo de níquel Ni99",
+        
+        // Varetas TIG
+        "Vareta TIG ER308L",
+        "Vareta TIG ER4045",
+        "Vareta TIG ER5356",
+        
+        // Gases
+        "Argônio puro",
+        "CO₂ industrial",
+        "Mistura Ar + CO₂ (92/8 ou 80/20)",
+        "Oxigênio industrial",
+        "Acetileno Puro",
+        "Nitrogênio gasoso",
+        "Gás hélio (uso especial)",
+        
+        // Fundentes
+        "Fundente para soldagem TIG",
+        "Fluxo para brasagem"
+    ],
+    
+    "ACABAMENTO_PINTURA": [
+        // Abrasivos
+        "Lixas ferro grão 36, 60, 80",
+        "Lixas flap zirconada",
+        "Escovas de aço rotativas",
+        
+        // Ensaios
+        "Líquido penetrante (ensaio LP)",
+        "Tinta de contraste para LP",
+        "Revelador em spray",
+        
+        // Limpeza
+        "Trapos industriais",
+        "Panos não tecidos",
+        "Solvente desengraxante",
+        "Desengraxante biodegradável",
+        
+        // Tintas e Primers
+        "Tinta epóxi bicomponente",
+        "Tinta poliuretano (PU)",
+        "Tinta esmalte sintético industrial",
+        "Primer zarcão industrial",
+        "Diluente industrial",
+        "Catalisador PU",
+        "Fita crepe de alta temperatura",
+        "Pistola de pintura convencional",
+        "Pistola de pintura HVLP"
+    ],
+    
+    "LUBRIFICACAO": [
+        "Óleo hidráulico ISO VG 32",
+        "Óleo hidráulico ISO VG 68",
+        "Graxa industrial EP2",
+        "Graxa branca atóxica",
+        "Graxa com bisulfeto de molibdênio"
+    ],
+    
+    "DISPOSITIVOS_FIXACAO": [
+        "Mandíbulas de torno",
+        "Garras de torno automático",
+        "Calços metálicos",
+        "Calços plásticos",
+        "Calas de nivelamento",
+        "Morsas fixas e giratórias",
+        "Suportes magnéticos",
+        "Dispositivos de fixação rápida"
+    ],
+    
+    "ELEMENTOS_MAQUINAS": [
+        // Mancais e Rolamentos
+        "Mancais tipo pedestal",
+        "Mancais tipo flange",
+        "Rolamentos rígidos de esferas",
+        "Rolamentos de rolos cilíndricos",
+        "Rolamentos de agulhas",
+        "Rolamentos axiais",
+        
+        // Transmissão
+        "Engrenagens retas",
+        "Engrenagens helicoidais",
+        "Polias de alumínio",
+        "Polias de ferro fundido",
+        "Correias em V A/B/C",
+        "Correias sincronizadoras HTD",
+        "Acoplamento elástico tipo H",
+        "Acoplamento dentado tipo KTR",
+        "Acoplamento cardan",
+        
+        // Molas
+        "Molas helicoidais",
+        "Molas prato",
+        "Molas de compressão e tração"
+    ],
+    
+    "INSTRUMENTOS_MEDICAO": [
+        // Instrumentos Dimensionais
+        "Paquímetros digitais e analógicos",
+        "Micrômetros externos",
+        "Micrômetros internos",
+        "Relógios comparadores",
+        "Relógios apalpadores",
+        "Blocos padrão",
+        "Calibradores de raio",
+        "Calibradores de rosca (M, G, UN, NPT)",
+        "Calibradores de folga",
+        "Trenas industriais",
+        "Esquadros de precisão"
+    ]
+};
+
 const emptySupplierFormValues: z.infer<typeof supplierSchema> = {
     status: 'ativo',
     razaoSocial: '',
@@ -203,6 +455,9 @@ export default function CostsPage() {
     
     const [isDeleteCostAlertOpen, setIsDeleteCostAlertOpen] = useState(false);
     const [costEntryToDelete, setCostEntryToDelete] = useState<any | null>(null);
+    const [osSearchTerm, setOsSearchTerm] = useState("");
+    const [selectedInsumo, setSelectedInsumo] = useState("");
+    const [itemSpecification, setItemSpecification] = useState("");
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -501,6 +756,9 @@ export default function CostsPage() {
             });
             toast({ title: "Custo lançado!", description: `O custo foi adicionado à OS selecionada.` });
             costEntryForm.reset();
+            setOsSearchTerm("");
+            setSelectedInsumo("");
+            setItemSpecification("");
             await fetchOrders();
         } catch (error) {
             console.error("Error adding cost entry:", error);
@@ -595,6 +853,32 @@ export default function CostsPage() {
         if (lowerStatus.includes("ativo")) return "default";
         if (lowerStatus.includes("inativo")) return "destructive";
         return "outline";
+    };
+
+    // Filtrar ordens baseado no termo de busca
+    const filteredOrders = orders.filter(order => 
+        order.internalOS.toLowerCase().includes(osSearchTerm.toLowerCase()) ||
+        order.customerName.toLowerCase().includes(osSearchTerm.toLowerCase())
+    );
+
+    // Função para selecionar insumo da biblioteca
+    const handleInsumoSelect = (insumo: string) => {
+        setSelectedInsumo(insumo);
+        updateItemDescription(insumo, itemSpecification);
+    };
+
+    // Função para atualizar descrição completa do item
+    const updateItemDescription = (baseItem: string, specification: string) => {
+        const fullDescription = specification ? `${baseItem} - ${specification}` : baseItem;
+        costEntryForm.setValue('description', fullDescription);
+    };
+
+    // Função para atualizar especificação
+    const handleSpecificationChange = (specification: string) => {
+        setItemSpecification(specification);
+        if (selectedInsumo) {
+            updateItemDescription(selectedInsumo, specification);
+        }
     };
 
     return (
@@ -781,20 +1065,95 @@ export default function CostsPage() {
                                     <FormField control={costEntryForm.control} name="orderId" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Ordem de Serviço (OS)</FormLabel>
-                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS" /></SelectTrigger></FormControl>
-                                                <SelectContent>
-                                                    {isLoadingOrders ? <SelectItem value="loading" disabled>Carregando...</SelectItem> : 
-                                                    orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS} - {o.customerName}</SelectItem>)}
-                                                </SelectContent>
-                                            </Select>
+                                            <div className="space-y-2">
+                                                <Input
+                                                    placeholder="🔍 Buscar OS por número ou cliente..."
+                                                    value={osSearchTerm}
+                                                    onChange={(e) => setOsSearchTerm(e.target.value)}
+                                                    className="mb-2"
+                                                />
+                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS" /></SelectTrigger></FormControl>
+                                                    <SelectContent>
+                                                        {isLoadingOrders ? <SelectItem value="loading" disabled>Carregando...</SelectItem> : 
+                                                        filteredOrders.length > 0 ? (
+                                                            filteredOrders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS} - {o.customerName}</SelectItem>)
+                                                        ) : (
+                                                            <SelectItem value="no-results" disabled>Nenhuma OS encontrada</SelectItem>
+                                                        )}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
                                             <FormMessage />
                                         </FormItem>
                                     )} />
                                     <FormField control={costEntryForm.control} name="description" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Descrição do Item/Serviço</FormLabel>
-                                            <FormControl><Input placeholder="Ex: Eletrodo 7018, Disco de corte" {...field} value={field.value ?? ''} /></FormControl>
+                                            <div className="space-y-3">
+                                                <FormControl><Input placeholder="Digite livremente ou selecione da biblioteca abaixo" {...field} value={field.value ?? ''} /></FormControl>
+                                                
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="text-sm font-medium">📚 Biblioteca de Insumos</label>
+                                                        <Select onValueChange={handleInsumoSelect}>
+                                                            <SelectTrigger className="mt-1">
+                                                                <SelectValue placeholder="Selecione da biblioteca" />
+                                                            </SelectTrigger>
+                                                            <SelectContent className="max-h-60">
+                                                                {Object.entries(insumosBiblioteca).map(([categoria, itens]) => (
+                                                                    <div key={categoria}>
+                                                                        <div className="sticky top-0 bg-background p-2 border-b">
+                                                                            <div className="text-xs font-medium text-muted-foreground">
+                                                                                {categoria === 'MATERIAS_PRIMAS' && '🧱 MATÉRIAS PRIMAS'}
+                                                                                {categoria === 'FERRAMENTAS_CORTE' && '⚙️ FERRAMENTAS DE CORTE'}
+                                                                                {categoria === 'CONSUMIVEIS_USINAGEM' && '🔧 CONSUMÍVEIS USINAGEM'}
+                                                                                {categoria === 'FIXACAO' && '🔩 FIXAÇÃO'}
+                                                                                {categoria === 'SOLDAGEM' && '🔥 SOLDAGEM'}
+                                                                                {categoria === 'ACABAMENTO_PINTURA' && '🎨 ACABAMENTO E PINTURA'}
+                                                                                {categoria === 'LUBRIFICACAO' && '🛢️ LUBRIFICAÇÃO'}
+                                                                                {categoria === 'DISPOSITIVOS_FIXACAO' && '🗜️ DISPOSITIVOS DE FIXAÇÃO'}
+                                                                                {categoria === 'ELEMENTOS_MAQUINAS' && '⚙️ ELEMENTOS DE MÁQUINAS'}
+                                                                                {categoria === 'INSTRUMENTOS_MEDICAO' && '📏 INSTRUMENTOS DE MEDIÇÃO'}
+                                                                            </div>
+                                                                        </div>
+                                                                        {itens.map((insumo: string) => (
+                                                                            <SelectItem key={insumo} value={insumo}>{insumo}</SelectItem>
+                                                                        ))}
+                                                                    </div>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    
+                                                    <div>
+                                                        <label className="text-sm font-medium">🔧 Especificação</label>
+                                                        <Input
+                                                            placeholder="Ex: diâmetro 20mm, espessura 3mm"
+                                                            value={itemSpecification}
+                                                            onChange={(e) => handleSpecificationChange(e.target.value)}
+                                                            className="mt-1"
+                                                        />
+                                                        <div className="text-xs text-muted-foreground mt-1">
+                                                            Adicione detalhes técnicos do item
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {selectedInsumo && (
+                                                    <div className="p-3 bg-muted/30 rounded-lg border-l-4 border-primary">
+                                                        <div className="text-sm">
+                                                            <span className="font-medium text-muted-foreground">Item selecionado:</span>
+                                                            <p className="font-medium mt-1">{selectedInsumo}</p>
+                                                            {itemSpecification && (
+                                                                <p className="text-muted-foreground text-xs mt-1">
+                                                                    Especificação: {itemSpecification}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
                                             <FormMessage />
                                         </FormItem>
                                     )} />
@@ -833,10 +1192,26 @@ export default function CostsPage() {
                     </CardHeader>
                     <CardContent>
                         {isLoadingOrders ? <Skeleton className="h-48 w-full" /> : 
-                        orders.filter(order => order.costEntries && order.costEntries.length > 0).length > 0 ? (
-                            <Accordion type="single" collapsible className="w-full">
-                                {orders
-                                    .filter(order => order.costEntries && order.costEntries.length > 0)
+                        (() => {
+                            const ordersWithCosts = (osSearchTerm ? filteredOrders : orders)
+                                .filter(order => order.costEntries && order.costEntries.length > 0);
+                            return ordersWithCosts.length > 0 ? (
+                                <div className="space-y-4">
+                                    {osSearchTerm && (
+                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                            <span>🔍 Buscando por: "{osSearchTerm}"</span>
+                                            <Button 
+                                                variant="ghost" 
+                                                size="sm" 
+                                                onClick={() => setOsSearchTerm("")}
+                                                className="h-auto p-1 text-xs"
+                                            >
+                                                Limpar busca
+                                            </Button>
+                                        </div>
+                                    )}
+                                    <Accordion type="single" collapsible className="w-full">
+                                        {ordersWithCosts
                                     .map(order => {
                                         const totalCost = order.costEntries?.reduce((sum, entry) => sum + (entry.totalCost || 0), 0) || 0;
                                         const entriesCount = order.costEntries?.length || 0;
@@ -905,14 +1280,23 @@ export default function CostsPage() {
                                             </AccordionItem>
                                         );
                                     })}
-                            </Accordion>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-32 border-dashed border-2 rounded-lg">
-                                <PackageSearch className="h-8 w-8 mb-2" />
-                                <h3 className="font-semibold">Nenhum Custo Lançado</h3>
-                                <p className="text-sm">Quando custos forem lançados nas OS, eles aparecerão aqui organizados.</p>
-                            </div>
-                        )}
+                                    </Accordion>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-32 border-dashed border-2 rounded-lg">
+                                    <PackageSearch className="h-8 w-8 mb-2" />
+                                    <h3 className="font-semibold">
+                                        {osSearchTerm ? `Nenhuma OS encontrada para "${osSearchTerm}"` : "Nenhum Custo Lançado"}
+                                    </h3>
+                                    <p className="text-sm">
+                                        {osSearchTerm 
+                                            ? "Tente buscar por outro termo ou limpe a busca para ver todas as OS."
+                                            : "Quando custos forem lançados nas OS, eles aparecerão aqui organizados."
+                                        }
+                                    </p>
+                                </div>
+                            );
+                        })()}
                     </CardContent>
                 </Card>
             </TabsContent>
