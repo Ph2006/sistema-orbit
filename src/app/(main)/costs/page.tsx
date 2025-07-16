@@ -489,7 +489,7 @@ export default function CostsPage() {
             const reqsSnapshot = await getDocs(collection(db, "companies", "mecald", "materialRequisitions"));
             const reqsList: Requisition[] = reqsSnapshot.docs.map(d => {
                 const data = d.data();
-                return {
+                const requisition = {
                     id: d.id,
                     requisitionNumber: data.requisitionNumber || 'N/A',
                     date: data.date?.toDate ? data.date.toDate() : (data.date ? new Date(data.date) : new Date()),
@@ -521,6 +521,25 @@ export default function CostsPage() {
                         };
                     }),
                 };
+                
+                // Log para debug requisições com valores
+                if (requisition.totalValue && requisition.totalValue > 0) {
+                    console.log(`💰 Requisição ${requisition.requisitionNumber} carregada com valor R$ ${requisition.totalValue} (${requisition.progress}% completa) - OS ID: ${requisition.orderId || 'NÃO VINCULADA'}`);
+                    
+                    // Log especial para a requisição 00008
+                    if (requisition.requisitionNumber === '00008') {
+                        console.log(`🔍 ===== REQUISIÇÃO 00008 DETECTADA =====`);
+                        console.log(`💰 Valor: R$ ${requisition.totalValue}`);
+                        console.log(`📊 Progresso: ${requisition.progress}%`);
+                        console.log(`🔗 OS ID: ${requisition.orderId}`);
+                        console.log(`📅 Última atualização: ${requisition.lastPriceUpdate}`);
+                        console.log(`🔍 ===== FIM DEBUG 00008 =====`);
+                    }
+                } else if (requisition.orderId) {
+                    console.log(`📋 Requisição ${requisition.requisitionNumber} sem valores ainda - OS ID: ${requisition.orderId}`);
+                }
+                
+                return requisition;
             });
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
         } catch (error) {
@@ -578,6 +597,29 @@ export default function CostsPage() {
             const totalCostEntries = ordersList.reduce((sum, order) => sum + (order.costEntries?.length || 0), 0);
             console.log(`📊 ${ordersList.length} ordens carregadas com ${totalCostEntries} lançamentos de custo`);
             
+            // Log especial para debug da OS 724/25
+            const order724 = ordersList.find(order => order.internalOS === '724/25');
+            if (order724) {
+                console.log(`🔍 ===== OS 724/25 DETECTADA =====`);
+                console.log(`🆔 ID: ${order724.id}`);
+                console.log(`📋 Número: ${order724.internalOS}`);
+                console.log(`👤 Cliente: ${order724.customerName}`);
+                console.log(`💼 Lançamentos: ${(order724.costEntries || []).length}`);
+                if (order724.costEntries && order724.costEntries.length > 0) {
+                    order724.costEntries.forEach((entry: any, index: number) => {
+                        console.log(`  📝 Lançamento ${index + 1}: ${entry.description} - R$ ${entry.totalCost} (Req ID: ${entry.requisitionId || 'N/A'})`);
+                    });
+                }
+                console.log(`🔍 ===== FIM DEBUG OS 724/25 =====`);
+            } else {
+                console.log(`⚠️ OS 724/25 NÃO ENCONTRADA nas ${ordersList.length} ordens carregadas`);
+                // Listar todas as OS para debug
+                console.log('📋 Ordens carregadas:');
+                ordersList.forEach(order => {
+                    console.log(`  - ${order.internalOS} (ID: ${order.id}) - ${order.customerName}`);
+                });
+            }
+            
             setOrders(ordersList);
             setLastUpdateTime(new Date());
 
@@ -598,24 +640,80 @@ export default function CostsPage() {
         }
     }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
 
-    // Sincronizar requisições com OS automaticamente (apenas uma vez quando os dados são carregados)
+    // Sincronizar requisições com OS automaticamente
     useEffect(() => {
         const syncRequisitionsWithOrders = async () => {
             if (!requisitions.length || !orders.length || isLoadingRequisitions || isLoadingOrders) return;
             
+            console.log('🔄 ===== INICIANDO VERIFICAÇÃO DE SINCRONIZAÇÃO =====');
+            console.log(`📊 Total de requisições: ${requisitions.length}`);
+            console.log(`📊 Total de ordens: ${orders.length}`);
+            
             let hasChanges = false;
             
             for (const req of requisitions) {
-                if (req.orderId) {
+                if (req.orderId && req.totalValue && req.totalValue > 0) {
+                    console.log(`🔍 ===== VERIFICANDO REQUISIÇÃO ${req.requisitionNumber} =====`);
+                    console.log(`💰 Valor: R$ ${req.totalValue} | Progresso: ${req.progress}% | OS ID: ${req.orderId}`);
+                    
+                    const order = orders.find(o => o.id === req.orderId);
+                    if (order) {
+                        console.log(`📋 OS encontrada: ${order.internalOS} - ${order.customerName}`);
+                        console.log(`💼 Lançamentos existentes na OS: ${(order.costEntries || []).length}`);
+                        
+                        // Debug especial para requisição 00008
+                        if (req.requisitionNumber === '00008') {
+                            console.log(`🔍 ===== MAPEAMENTO REQUISIÇÃO 00008 =====`);
+                            console.log(`🔗 Requisição 00008 está vinculada ao ID: ${req.orderId}`);
+                            console.log(`📋 Este ID corresponde à OS: ${order.internalOS}`);
+                            console.log(`🎯 Esperado: OS 724/25`);
+                            console.log(`✅ Match: ${order.internalOS === '724/25' ? 'SIM' : 'NÃO - PROBLEMA!'}`);
+                            if (order.internalOS !== '724/25') {
+                                console.error(`❌ ERRO: Requisição 00008 deveria estar vinculada à OS 724/25, mas está vinculada à OS ${order.internalOS}`);
+                            }
+                            console.log(`🔍 ===== FIM MAPEAMENTO 00008 =====`);
+                        }
+                        
+                        const existingReqCost = order.costEntries?.find((entry: any) => 
+                            entry.requisitionId === req.id
+                        );
+                        
+                        if (existingReqCost) {
+                            console.log(`🔍 Lançamento existente encontrado: R$ ${existingReqCost.totalCost} | Pendente: ${existingReqCost.isPending}`);
+                        } else {
+                            console.log(`⚠️ NENHUM lançamento encontrado para esta requisição!`);
+                        }
+                        
+                        // Se não existe lançamento OU o lançamento existente tem valor diferente
+                        const needsUpdate = !existingReqCost || 
+                                          (existingReqCost.totalCost !== req.totalValue) ||
+                                          existingReqCost.isPending;
+                        
+                        if (needsUpdate) {
+                            console.log(`🚀 EXECUTANDO SINCRONIZAÇÃO: Requisição ${req.requisitionNumber} -> OS ${req.orderId}`);
+                            try {
+                                await updateOrderCostFromRequisition(req.orderId, req.id, req.items);
+                                hasChanges = true;
+                                console.log(`✅ Sincronização da requisição ${req.requisitionNumber} CONCLUÍDA`);
+                            } catch (error) {
+                                console.error(`❌ ERRO na sincronização da requisição ${req.requisitionNumber}:`, error);
+                            }
+                        } else {
+                            console.log(`✅ Requisição ${req.requisitionNumber} já está sincronizada corretamente`);
+                        }
+                    } else {
+                        console.error(`❌ OS ${req.orderId} NÃO ENCONTRADA para requisição ${req.requisitionNumber}!`);
+                    }
+                } else if (req.orderId && (!req.totalValue || req.totalValue === 0)) {
+                    // Requisição sem valores ainda - criar lançamento pendente
                     const order = orders.find(o => o.id === req.orderId);
                     if (order) {
                         const existingReqCost = order.costEntries?.find((entry: any) => 
                             entry.requisitionId === req.id
                         );
                         
-                        // Se não existe lançamento para esta requisição, criar um
                         if (!existingReqCost) {
-                            console.log(`🔗 Criando lançamento inicial para requisição ${req.id} na OS ${req.orderId}`);
+                            console.log(`📝 Criando lançamento pendente para requisição ${req.requisitionNumber} na OS ${req.orderId}`);
                             await createInitialOrderCostFromRequisition(req.orderId, req.id);
                             hasChanges = true;
                         }
@@ -624,77 +722,46 @@ export default function CostsPage() {
             }
             
             // Re-fetch orders se houve mudanças
+            console.log('🔄 ===== FINALIZANDO VERIFICAÇÃO DE SINCRONIZAÇÃO =====');
             if (hasChanges) {
-                console.log('📊 Sincronização detectou mudanças, atualizando ordens...');
+                console.log('📊 ✅ MUDANÇAS DETECTADAS - Atualizando interface...');
                 await fetchOrders();
+                console.log('🔄 Interface atualizada após sincronização');
+            } else {
+                console.log('✅ Nenhuma sincronização necessária - todos os dados estão atualizados');
             }
+            console.log('🔄 ===== VERIFICAÇÃO DE SINCRONIZAÇÃO CONCLUÍDA =====');
         };
         
-        // Aguardar um pouco antes de sincronizar para evitar múltiplas execuções
-        const timeoutId = setTimeout(syncRequisitionsWithOrders, 2000);
+        // Sincronizar quando dados mudam - aguardar um pouco para garantir que tudo foi carregado
+        const timeoutId = setTimeout(syncRequisitionsWithOrders, 1000);
         return () => clearTimeout(timeoutId);
-    }, [requisitions.length, orders.length, isLoadingRequisitions, isLoadingOrders]);
+    }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders]);
+
+    // Função para forçar refresh dos dados de custos
+    const forceRefreshCosts = useCallback(async () => {
+        console.log('🔄 Refresh forçado dos dados...');
+        setIsLoadingOrders(true);
+        setIsLoadingRequisitions(true);
+        
+        // Recarregar tanto requisições quanto ordens
+        await Promise.all([
+            fetchRequisitions(),
+            fetchOrders()
+        ]);
+        
+        console.log('✅ Refresh completo - dados serão sincronizados automaticamente');
+    }, [fetchOrders, fetchRequisitions]);
 
     // Auto-atualizar dados quando mudar para aba de custos
     useEffect(() => {
         if (activeTab === "costEntry") {
             console.log('🔄 Mudou para aba de custos, atualizando dados...');
-            fetchOrders();
+            forceRefreshCosts();
         }
-    }, [activeTab]);
+    }, [activeTab, forceRefreshCosts]);
     
-    // Função para forçar refresh dos dados de custos
-    const forceRefreshCosts = useCallback(async () => {
-        console.log('🔄 Refresh forçado dos custos...');
-        setIsLoadingOrders(true);
-        await fetchOrders();
-        console.log('✅ Refresh dos custos concluído');
-    }, [fetchOrders]);
-    
-    // Função para re-sincronizar todas as requisições com suas OS
-    const forceSyncAllRequisitions = useCallback(async () => {
-        console.log('🔄 Forçando re-sincronização de todas as requisições...');
-        setIsLoadingOrders(true);
-        
-        try {
-            let syncCount = 0;
-            
-            for (const req of requisitions) {
-                if (req.orderId) {
-                    console.log(`🔗 Re-sincronizando requisição ${req.requisitionNumber} com OS ${req.orderId}`);
-                    
-                    // Buscar itens atualizados da requisição
-                    const reqRef = doc(db, "companies", "mecald", "materialRequisitions", req.id);
-                    const reqSnap = await getDoc(reqRef);
-                    
-                    if (reqSnap.exists()) {
-                        const reqData = reqSnap.data();
-                        const items = reqData.items || [];
-                        
-                        // Atualizar custos da OS
-                        await updateOrderCostFromRequisition(req.orderId, req.id, items);
-                        syncCount++;
-                    }
-                }
-            }
-            
-            await fetchOrders();
-            toast({ 
-                title: "✅ Re-sincronização completa!", 
-                description: `${syncCount} requisições foram re-sincronizadas com suas OS.` 
-            });
-            
-        } catch (error) {
-            console.error('❌ Erro na re-sincronização:', error);
-            toast({ 
-                variant: "destructive", 
-                title: "Erro na re-sincronização", 
-                description: "Houve um problema. Verifique o console para detalhes." 
-            });
-        } finally {
-            setIsLoadingOrders(false);
-        }
-    }, [requisitions, fetchOrders, toast]);
+
 
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
         const selectedItemData = { ...item, requisitionId };
@@ -852,7 +919,10 @@ export default function CostsPage() {
                 id: requisitionId,
                 number: reqData.requisitionNumber,
                 status: reqData.status,
-                itemsCount: (reqData.items || []).length
+                itemsCount: (reqData.items || []).length,
+                totalValue: reqData.totalValue,
+                progress: reqData.progress,
+                lastUpdate: reqData.lastPriceUpdate?.toDate ? reqData.lastPriceUpdate.toDate() : null
             });
             
             const orderRef = doc(db, "companies", "mecald", "orders", orderId);
@@ -1412,13 +1482,30 @@ export default function CostsPage() {
                                                         
                                                         {req.orderId && totalValue > 0 && (
                                                             <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
-                                                                ✅ <strong>Este valor será automaticamente lançado como custo na OS {req.orderId}</strong>
+                                                                ✅ <strong>Este valor será automaticamente lançado como custo na OS {
+                                                                    (() => {
+                                                                        const order = orders.find(o => o.id === req.orderId);
+                                                                        return order ? order.internalOS : req.orderId;
+                                                                    })()
+                                                                }</strong>
                                                             </div>
                                                         )}
                                                         
                                                         {req.orderId && totalValue === 0 && (
                                                             <div className="mt-3 p-2 bg-orange-100 border border-orange-300 rounded text-sm text-orange-800">
-                                                                ⏳ Adicione os valores dos itens para que sejam lançados automaticamente na OS
+                                                                ⏳ Adicione os valores dos itens para que sejam lançados automaticamente na OS {
+                                                                    (() => {
+                                                                        const order = orders.find(o => o.id === req.orderId);
+                                                                        return order ? order.internalOS : req.orderId;
+                                                                    })()
+                                                                }
+                                                            </div>
+                                                        )}
+                                                        
+                                                        {req.orderId && !orders.find(o => o.id === req.orderId) && (
+                                                            <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
+                                                                ⚠️ <strong>Problema de vinculação:</strong> A OS vinculada (ID: {req.orderId}) não foi encontrada. 
+                                                                Verifique se a OS ainda existe ou se houve erro na vinculação.
                                                             </div>
                                                         )}
                                                     </div>
@@ -1716,26 +1803,6 @@ export default function CostsPage() {
                         <CardDescription>
                             Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço. 
                             <strong>Os custos de materiais são automaticamente calculados a partir dos valores das requisições no painel de recebimento.</strong>
-                            {(() => {
-                                // Verificar se há requisições que precisam ser sincronizadas
-                                const pendingReqs = orders.flatMap(order => 
-                                    (order.costEntries || []).filter((entry: any) => 
-                                        entry.isFromRequisition && 
-                                        entry.isPending && 
-                                        entry.description?.includes('Aguardando precificação')
-                                    )
-                                );
-                                
-                                if (pendingReqs.length > 0) {
-                                    return (
-                                        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-                                            💡 <span className="font-medium">{pendingReqs.length} requisições</span> estão aguardando valores. 
-                                            <span className="text-blue-700"> Vá para "Recebimento de Materiais" para adicionar os preços das notas fiscais.</span>
-                                        </div>
-                                    );
-                                }
-                                return null;
-                            })()}
                         </CardDescription>
                         </div>
                                                 <div className="flex items-center gap-3">
@@ -1745,14 +1812,9 @@ export default function CostsPage() {
                                      {isLoadingOrders ? 'Carregando dados...' : (lastUpdateTime ? `Atualizado às ${lastUpdateTime.toLocaleTimeString('pt-BR')}` : 'Sem dados')}
                                  </span>
                             </div>
-                            <div className="flex gap-2">
-                                <Button variant="outline" onClick={forceSyncAllRequisitions} disabled={isLoadingOrders} className="text-xs">
-                                    {isLoadingOrders ? 'Sincronizando...' : '🔄 Re-sincronizar Requisições'}
-                                </Button>
-                                <Button variant="outline" onClick={forceRefreshCosts} disabled={isLoadingOrders}>
-                                    {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar Custos'}
-                                </Button>
-                            </div>
+                            <Button variant="outline" onClick={forceRefreshCosts} disabled={isLoadingOrders}>
+                                {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar'}
+                            </Button>
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -1775,6 +1837,28 @@ export default function CostsPage() {
                                             </Button>
                                         </div>
                                     )}
+                                    
+                                    {/* Aviso se há requisições com valores que ainda não apareceram nos custos */}
+                                    {(() => {
+                                        const reqsWithValues = requisitions.filter(req => req.orderId && req.totalValue && req.totalValue > 0);
+                                        const osWithoutCosts = reqsWithValues.filter(req => {
+                                            const order = orders.find(o => o.id === req.orderId);
+                                            const hasReqCost = order?.costEntries?.find((entry: any) => 
+                                                entry.requisitionId === req.id && entry.totalCost > 0
+                                            );
+                                            return !hasReqCost;
+                                        });
+                                        
+                                        if (osWithoutCosts.length > 0) {
+                                            return (
+                                                <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm">
+                                                    ⚠️ <span className="font-medium">{osWithoutCosts.length} requisições</span> com valores não apareceram nos custos. 
+                                                    <span className="text-orange-700"> A sincronização será automática em alguns instantes.</span>
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
                                     <Accordion type="single" collapsible className="w-full">
                                         {ordersWithCosts
                                     .map(order => {
