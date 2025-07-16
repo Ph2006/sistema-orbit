@@ -580,6 +580,39 @@ export default function CostsPage() {
         }
     }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
 
+    // Sincronizar requisições com OS automaticamente
+    useEffect(() => {
+        const syncRequisitionsWithOrders = async () => {
+            if (!requisitions.length || !orders.length) return;
+            
+            let hasChanges = false;
+            
+            for (const req of requisitions) {
+                if (req.orderId) {
+                    const order = orders.find(o => o.id === req.orderId);
+                    if (order) {
+                        const existingReqCost = order.costEntries?.find((entry: any) => 
+                            entry.requisitionId === req.id
+                        );
+                        
+                        // Se não existe lançamento para esta requisição, criar um
+                        if (!existingReqCost) {
+                            await createInitialOrderCostFromRequisition(req.orderId, req.id);
+                            hasChanges = true;
+                        }
+                    }
+                }
+            }
+            
+            // Re-fetch orders se houve mudanças
+            if (hasChanges) {
+                await fetchOrders();
+            }
+        };
+        
+        syncRequisitionsWithOrders();
+    }, [requisitions, orders]);
+
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
         setSelectedItem({ ...item, requisitionId });
         itemForm.reset({
@@ -633,16 +666,22 @@ export default function CostsPage() {
 
             await updateDoc(reqRef, { items: updatedItems });
 
+            // Atualizar custos da OS automaticamente se a requisição estiver vinculada a uma OS
+            if (reqData.orderId) {
+                await updateOrderCostFromRequisition(reqData.orderId, selectedItem.requisitionId, updatedItems);
+            }
+
             // Preparar dados para auto-preenchimento no lançamento de custos
             const itemForCost = { ...selectedItem, ...values };
             setRecentlyUpdatedItem(itemForCost);
 
             toast({ 
                 title: "Item atualizado com sucesso!", 
-                description: "Agora você pode lançar os custos na aba 'Lançamento de Custos'." 
+                description: "Os custos da OS foram atualizados automaticamente." 
             });
             setIsFormOpen(false);
             await fetchRequisitions();
+            await fetchOrders();
             
             // Redirecionar para a aba de lançamento de custos
             setActiveTab("costEntry");
@@ -650,6 +689,111 @@ export default function CostsPage() {
         } catch (error: any) {
             console.error("Error updating item:", error);
             toast({ variant: "destructive", title: "Erro ao atualizar", description: error.message });
+        }
+    };
+
+    // Função para atualizar custos da OS baseado na requisição
+    const updateOrderCostFromRequisition = async (orderId: string, requisitionId: string, items: any[]) => {
+        try {
+            // Buscar dados da requisição
+            const reqRef = doc(db, "companies", "mecald", "materialRequisitions", requisitionId);
+            const reqSnap = await getDoc(reqRef);
+            
+            if (!reqSnap.exists()) return;
+            
+            const reqData = reqSnap.data();
+            
+            const orderRef = doc(db, "companies", "mecald", "orders", orderId);
+            const orderSnap = await getDoc(orderRef);
+            
+            if (!orderSnap.exists()) return;
+            
+            const orderData = orderSnap.data();
+            const existingCostEntries = orderData.costEntries || [];
+            
+            // Remover lançamentos antigos desta requisição
+            const filteredCostEntries = existingCostEntries.filter((entry: any) => 
+                entry.requisitionId !== requisitionId
+            );
+            
+            // Calcular total da requisição
+            const requisitionTotal = items.reduce((total, item) => {
+                const itemValue = item.invoiceItemValue || 0;
+                const quantity = item.quantityRequested || 1;
+                return total + (itemValue * quantity);
+            }, 0);
+            
+            // Criar novo lançamento consolidado da requisição
+            const requisitionCostEntry = {
+                id: `req-${requisitionId}-${Date.now()}`,
+                description: `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'}`,
+                quantity: 1,
+                unitCost: requisitionTotal,
+                totalCost: requisitionTotal,
+                entryDate: Timestamp.now(),
+                enteredBy: 'Sistema (Requisição)',
+                requisitionId: requisitionId,
+                isFromRequisition: true,
+                isPending: requisitionTotal === 0,
+                items: items.map(item => ({
+                    description: item.description,
+                    quantity: item.quantityRequested,
+                    value: item.invoiceItemValue || 0,
+                    weight: item.weight,
+                    weightUnit: item.weightUnit
+                }))
+            };
+            
+            filteredCostEntries.push(requisitionCostEntry);
+            
+            await updateDoc(orderRef, {
+                costEntries: filteredCostEntries
+            });
+            
+        } catch (error) {
+            console.error("Error updating order costs:", error);
+        }
+    };
+
+    // Função para criar lançamento inicial quando uma requisição é vinculada a uma OS
+    const createInitialOrderCostFromRequisition = async (orderId: string, requisitionId: string) => {
+        try {
+            const reqRef = doc(db, "companies", "mecald", "materialRequisitions", requisitionId);
+            const reqSnap = await getDoc(reqRef);
+            
+            if (!reqSnap.exists()) return;
+            
+            const reqData = reqSnap.data();
+            const items = reqData.items || [];
+            
+            // Criar lançamento inicial (mesmo sem valores)
+            const orderRef = doc(db, "companies", "mecald", "orders", orderId);
+            const initialCostEntry = {
+                id: `req-${requisitionId}-initial`,
+                description: `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'} (Aguardando precificação)`,
+                quantity: items.length,
+                unitCost: 0,
+                totalCost: 0,
+                entryDate: Timestamp.now(),
+                enteredBy: 'Sistema (Requisição)',
+                requisitionId: requisitionId,
+                isFromRequisition: true,
+                isPending: true,
+                items: items.map((item: any) => ({
+                    description: item.description,
+                    quantity: item.quantityRequested,
+                    value: 0,
+                    weight: item.weight || null,
+                    weightUnit: item.weightUnit || 'kg'
+                }))
+            };
+            
+            await updateDoc(orderRef, {
+                costEntries: arrayUnion(initialCostEntry)
+            });
+            
+        } catch (error) {
+            console.error("Error creating initial order cost:", error);
         }
     };
     
@@ -1343,7 +1487,42 @@ export default function CostsPage() {
                                                                     <TableCell className="text-sm">
                                                                         {entry.entryDate ? format(entry.entryDate, 'dd/MM/yyyy HH:mm') : 'N/A'}
                                                                     </TableCell>
-                                                                    <TableCell className="font-medium">{entry.description}</TableCell>
+                                                                    <TableCell className="font-medium">
+                                                                        <div>
+                                                                            {entry.description}
+                                                                            {entry.isFromRequisition && (
+                                                                                <div className="flex items-center gap-1 mt-1">
+                                                                                    <Badge variant="secondary" className="text-xs">
+                                                                                        📋 Requisição
+                                                                                    </Badge>
+                                                                                    {entry.isPending && (
+                                                                                        <Badge variant="outline" className="text-xs text-orange-600">
+                                                                                            ⏳ Aguardando preços
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                            {entry.items && entry.items.length > 0 && (
+                                                                                <details className="mt-2">
+                                                                                    <summary className="text-xs text-muted-foreground cursor-pointer hover:text-primary">
+                                                                                        Ver {entry.items.length} item(ns) ↓
+                                                                                    </summary>
+                                                                                    <div className="mt-1 pl-2 border-l-2 border-muted">
+                                                                                        {entry.items.map((item: any, idx: number) => (
+                                                                                            <div key={idx} className="text-xs text-muted-foreground py-1">
+                                                                                                <span className="font-medium">{item.description}</span>
+                                                                                                <div className="text-xs">
+                                                                                                    Qtd: {item.quantity} • 
+                                                                                                    {item.weight ? ` Peso: ${item.weight}${item.weightUnit} • ` : ' '}
+                                                                                                    Valor: {item.value?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'R$ 0,00'}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                </details>
+                                                                            )}
+                                                                        </div>
+                                                                    </TableCell>
                                                                     <TableCell className="text-right">{entry.quantity}</TableCell>
                                                                     <TableCell className="text-right">
                                                                         {entry.unitCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -1353,14 +1532,21 @@ export default function CostsPage() {
                                                                     </TableCell>
                                                                     <TableCell className="text-sm text-muted-foreground">{entry.enteredBy}</TableCell>
                                                                     <TableCell className="text-right">
-                                                                        <Button 
-                                                                            variant="ghost" 
-                                                                            size="icon" 
-                                                                            className="text-destructive hover:text-destructive" 
-                                                                            onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
-                                                                        >
-                                                                            <Trash2 className="h-4 w-4" />
-                                                                        </Button>
+                                                                        {!entry.isFromRequisition && (
+                                                                            <Button 
+                                                                                variant="ghost" 
+                                                                                size="icon" 
+                                                                                className="text-destructive hover:text-destructive" 
+                                                                                onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
+                                                                            >
+                                                                                <Trash2 className="h-4 w-4" />
+                                                                            </Button>
+                                                                        )}
+                                                                        {entry.isFromRequisition && (
+                                                                            <Badge variant="outline" className="text-xs">
+                                                                                Auto
+                                                                            </Badge>
+                                                                        )}
                                                                     </TableCell>
                                                                 </TableRow>
                                                             ))}
@@ -1400,27 +1586,28 @@ export default function CostsPage() {
                 <DialogDescription>
                     {selectedItem?.description}
                 </DialogDescription>
-                {selectedItem?.weight && (
-                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <div className="flex items-center gap-2 text-blue-800">
-                            <span className="font-semibold">⚖️ Peso do Material:</span>
-                            <span className="text-lg font-bold">
-                                {selectedItem.weight} {selectedItem.weightUnit || 'kg'}
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-800">
+                        <span className="font-semibold">⚖️ Peso do Material:</span>
+                        <span className="text-lg font-bold">
+                            {selectedItem?.weight ? `${selectedItem.weight} ${selectedItem.weightUnit || 'kg'}` : 'Não informado'}
+                        </span>
+                    </div>
+                    {selectedItem?.invoiceItemValue && selectedItem?.weight && selectedItem.weight > 0 && (
+                        <div className="mt-2 text-sm text-blue-600">
+                            💰 Custo por {selectedItem.weightUnit || 'kg'}: {' '}
+                            <span className="font-semibold">
+                                {(selectedItem.invoiceItemValue / selectedItem.weight).toLocaleString('pt-BR', { 
+                                    style: 'currency', 
+                                    currency: 'BRL' 
+                                })}
                             </span>
                         </div>
-                        {selectedItem.invoiceItemValue && selectedItem.weight > 0 && (
-                            <div className="mt-2 text-sm text-blue-600">
-                                💰 Custo por {selectedItem.weightUnit || 'kg'}: {' '}
-                                <span className="font-semibold">
-                                    {(selectedItem.invoiceItemValue / selectedItem.weight).toLocaleString('pt-BR', { 
-                                        style: 'currency', 
-                                        currency: 'BRL' 
-                                    })}
-                                </span>
-                            </div>
-                        )}
+                    )}
+                    <div className="mt-2 text-xs text-blue-500">
+                        💡 Preencha o peso e valor para cálculo automático do custo
                     </div>
-                )}
+                </div>
             </DialogHeader>
             <Form {...itemForm}>
                 <form onSubmit={itemForm.handleSubmit(onItemSubmit)} className="space-y-6 pt-4">
