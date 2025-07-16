@@ -128,6 +128,7 @@ const costEntrySchema = z.object({
   description: z.string().optional(),
   quantity: z.coerce.number().optional(),
   unitCost: z.coerce.number().optional(),
+  purchaseOrderNumber: z.string().optional(),
 });
 
 type CostEntryData = z.infer<typeof costEntrySchema>;
@@ -463,6 +464,8 @@ export default function CostsPage() {
     
     const [isDeleteCostAlertOpen, setIsDeleteCostAlertOpen] = useState(false);
     const [costEntryToDelete, setCostEntryToDelete] = useState<any | null>(null);
+    const [editingCostEntry, setEditingCostEntry] = useState<any | null>(null);
+    const [isEditingCost, setIsEditingCost] = useState(false);
     const [osSearchTerm, setOsSearchTerm] = useState("");
     const [selectedInsumo, setSelectedInsumo] = useState("");
     const [itemSpecification, setItemSpecification] = useState("");
@@ -1185,29 +1188,97 @@ export default function CostsPage() {
     };
 
     const onCostEntrySubmit = async (values: CostEntryData) => {
+        if (!values.orderId) {
+            toast({ variant: "destructive", title: "Erro", description: "Selecione uma OS." });
+            return;
+        }
+
         const orderRef = doc(db, "companies", "mecald", "orders", values.orderId);
-        const costEntry = {
-            id: Date.now().toString(),
-            description: values.description,
-            quantity: values.quantity,
-            unitCost: values.unitCost,
-            totalCost: values.quantity * values.unitCost,
-            entryDate: Timestamp.now(),
-            enteredBy: user?.email || 'Sistema',
-        };
+        
         try {
-            await updateDoc(orderRef, {
-                costEntries: arrayUnion(costEntry)
-            });
-            toast({ title: "Custo lançado!", description: `O custo foi adicionado à OS selecionada.` });
+            if (isEditingCost && editingCostEntry) {
+                // EDITANDO LANÇAMENTO EXISTENTE
+                const orderSnap = await getDoc(orderRef);
+                if (!orderSnap.exists()) {
+                    throw new Error("Ordem de serviço não encontrada.");
+                }
+                
+                const orderData = orderSnap.data();
+                const costEntries = orderData.costEntries || [];
+                
+                // Encontrar o lançamento antigo
+                const oldEntryIndex = costEntries.findIndex((e: any) => e.id === editingCostEntry.id);
+                if (oldEntryIndex === -1) {
+                    throw new Error("Lançamento não encontrado.");
+                }
+                
+                const oldEntry = costEntries[oldEntryIndex];
+                
+                // Criar o lançamento atualizado, preservando campos importantes
+                const updatedEntry = {
+                    ...oldEntry,
+                    // Para lançamentos automáticos, preservar descrição, quantidade e custo originais
+                    description: oldEntry.isFromRequisition ? oldEntry.description : values.description,
+                    quantity: oldEntry.isFromRequisition ? oldEntry.quantity : values.quantity,
+                    unitCost: oldEntry.isFromRequisition ? oldEntry.unitCost : values.unitCost,
+                    totalCost: oldEntry.isFromRequisition ? oldEntry.totalCost : (values.quantity * values.unitCost),
+                    purchaseOrderNumber: values.purchaseOrderNumber || oldEntry.purchaseOrderNumber,
+                    lastEditDate: Timestamp.now(),
+                    lastEditedBy: user?.email || 'Sistema',
+                };
+                
+                // Remover o antigo e adicionar o novo
+                await updateDoc(orderRef, {
+                    costEntries: arrayRemove(oldEntry)
+                });
+                
+                await updateDoc(orderRef, {
+                    costEntries: arrayUnion(updatedEntry)
+                });
+                
+                toast({ 
+                    title: "Lançamento atualizado!", 
+                    description: `As alterações foram salvas com sucesso.` 
+                });
+            } else {
+                // CRIANDO NOVO LANÇAMENTO
+                const costEntry = {
+                    id: Date.now().toString(),
+                    description: values.description,
+                    quantity: values.quantity,
+                    unitCost: values.unitCost,
+                    totalCost: values.quantity * values.unitCost,
+                    entryDate: Timestamp.now(),
+                    enteredBy: user?.email || 'Sistema',
+                    purchaseOrderNumber: values.purchaseOrderNumber,
+                };
+                
+                await updateDoc(orderRef, {
+                    costEntries: arrayUnion(costEntry)
+                });
+                
+                toast({ 
+                    title: "Custo lançado!", 
+                    description: `O custo foi adicionado à OS selecionada.` 
+                });
+            }
+            
+            // Reset form and states
             costEntryForm.reset();
             setOsSearchTerm("");
             setSelectedInsumo("");
             setItemSpecification("");
+            setIsEditingCost(false);
+            setEditingCostEntry(null);
             await fetchOrders();
-        } catch (error) {
-            console.error("Error adding cost entry:", error);
-            toast({ variant: "destructive", title: "Erro ao lançar custo." });
+            
+        } catch (error: any) {
+            console.error("Error saving cost entry:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao salvar", 
+                description: error.message 
+            });
         }
     };
 
@@ -1253,6 +1324,37 @@ export default function CostsPage() {
     const handleDeleteCostEntryClick = (entry: any) => {
         setCostEntryToDelete(entry);
         setIsDeleteCostAlertOpen(true);
+    };
+
+    const handleEditCostEntryClick = (entry: any) => {
+        setEditingCostEntry(entry);
+        setIsEditingCost(true);
+        
+        // Preencher o formulário com os dados do lançamento
+        costEntryForm.reset({
+            orderId: entry.orderId,
+            description: entry.description || "",
+            quantity: entry.quantity || 0,
+            unitCost: entry.unitCost || 0,
+            purchaseOrderNumber: entry.purchaseOrderNumber || "",
+        });
+        
+        // Ir para a aba de lançamento
+        setActiveTab("costEntry");
+        
+        toast({ 
+            title: "Modo de edição ativado", 
+            description: "Modifique os campos desejados e salve as alterações." 
+        });
+    };
+
+    const handleCancelEdit = () => {
+        setIsEditingCost(false);
+        setEditingCostEntry(null);
+        costEntryForm.reset();
+        setOsSearchTerm("");
+        setSelectedInsumo("");
+        setItemSpecification("");
     };
 
     const handleConfirmDeleteCostEntry = async () => {
@@ -1666,12 +1768,40 @@ export default function CostsPage() {
             <TabsContent value="costEntry" className="space-y-4">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Lançamento de Custo na OS</CardTitle>
-                        <CardDescription>
-                            Registre custos de itens de almoxarifado, consumíveis ou outros serviços diretamente em uma Ordem de Serviço.
-                        </CardDescription>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle>
+                                    {isEditingCost ? "Editar Lançamento de Custo" : "Lançamento de Custo na OS"}
+                                </CardTitle>
+                                <CardDescription>
+                                    {isEditingCost 
+                                        ? `Editando: ${editingCostEntry?.description || 'Lançamento selecionado'}`
+                                        : "Registre custos de itens de almoxarifado, consumíveis ou outros serviços diretamente em uma Ordem de Serviço."
+                                    }
+                                </CardDescription>
+                            </div>
+                            {isEditingCost && (
+                                <Button variant="outline" onClick={handleCancelEdit}>
+                                    Cancelar Edição
+                                </Button>
+                            )}
+                        </div>
                     </CardHeader>
                     <CardContent>
+                        {isEditingCost && (
+                            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center gap-2 text-blue-800">
+                                    <Pencil className="h-4 w-4" />
+                                    <span className="font-semibold">Modo de Edição Ativo</span>
+                                </div>
+                                <p className="text-sm text-blue-600 mt-1">
+                                    Você está editando o lançamento: <strong>{editingCostEntry?.description}</strong>
+                                </p>
+                                <p className="text-xs text-blue-500 mt-2">
+                                    💡 Dica: Para lançamentos automáticos de materiais, você pode editar campos como o número do pedido de compra, mas valores serão recalculados automaticamente com base no recebimento.
+                                </p>
+                            </div>
+                        )}
                         <Form {...costEntryForm}>
                             <form onSubmit={costEntryForm.handleSubmit(onCostEntrySubmit)} className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1684,8 +1814,9 @@ export default function CostsPage() {
                                                     value={osSearchTerm}
                                                     onChange={(e) => setOsSearchTerm(e.target.value)}
                                                     className="mb-2"
+                                                    disabled={isEditingCost}
                                                 />
-                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEditingCost}>
                                                     <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS" /></SelectTrigger></FormControl>
                                                     <SelectContent>
                                                         {isLoadingOrders ? <SelectItem value="loading" disabled>Carregando...</SelectItem> : 
@@ -1696,6 +1827,11 @@ export default function CostsPage() {
                                                         )}
                                                     </SelectContent>
                                                 </Select>
+                                                {isEditingCost && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        A OS não pode ser alterada durante a edição
+                                                    </p>
+                                                )}
                                             </div>
                                             <FormMessage />
                                         </FormItem>
@@ -1704,54 +1840,68 @@ export default function CostsPage() {
                                         <FormItem>
                                             <FormLabel>Descrição do Item/Serviço</FormLabel>
                                             <div className="space-y-3">
-                                                <FormControl><Input placeholder="Digite livremente ou selecione da biblioteca abaixo" {...field} value={field.value ?? ''} /></FormControl>
+                                                <FormControl>
+                                                    <Input 
+                                                        placeholder="Digite livremente ou selecione da biblioteca abaixo" 
+                                                        {...field} 
+                                                        value={field.value ?? ''} 
+                                                        disabled={isEditingCost && editingCostEntry?.isFromRequisition}
+                                                    />
+                                                </FormControl>
+                                                {isEditingCost && editingCostEntry?.isFromRequisition && (
+                                                    <p className="text-xs text-orange-600">
+                                                        ⚠️ Descrição baseada na requisição (não editável)
+                                                    </p>
+                                                )}
                                                 
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                    <div>
-                                                        <label className="text-sm font-medium">📚 Biblioteca de Insumos</label>
-                                                        <Select onValueChange={handleInsumoSelect}>
-                                                            <SelectTrigger className="mt-1">
-                                                                <SelectValue placeholder="Selecione da biblioteca" />
-                                                            </SelectTrigger>
-                                                            <SelectContent className="max-h-60">
-                                                                {Object.entries(insumosBiblioteca).map(([categoria, itens]) => (
-                                                                    <div key={categoria}>
-                                                                        <div className="sticky top-0 bg-background p-2 border-b">
-                                                                            <div className="text-xs font-medium text-muted-foreground">
-                                                                                {categoria === 'MATERIAS_PRIMAS' && '🧱 MATÉRIAS PRIMAS'}
-                                                                                {categoria === 'FERRAMENTAS_CORTE' && '⚙️ FERRAMENTAS DE CORTE'}
-                                                                                {categoria === 'CONSUMIVEIS_USINAGEM' && '🔧 CONSUMÍVEIS USINAGEM'}
-                                                                                {categoria === 'FIXACAO' && '🔩 FIXAÇÃO'}
-                                                                                {categoria === 'SOLDAGEM' && '🔥 SOLDAGEM'}
-                                                                                {categoria === 'ACABAMENTO_PINTURA' && '🎨 ACABAMENTO E PINTURA'}
-                                                                                {categoria === 'LUBRIFICACAO' && '🛢️ LUBRIFICAÇÃO'}
-                                                                                {categoria === 'DISPOSITIVOS_FIXACAO' && '🗜️ DISPOSITIVOS DE FIXAÇÃO'}
-                                                                                {categoria === 'ELEMENTOS_MAQUINAS' && '⚙️ ELEMENTOS DE MÁQUINAS'}
-                                                                                {categoria === 'INSTRUMENTOS_MEDICAO' && '📏 INSTRUMENTOS DE MEDIÇÃO'}
+                                                {!(isEditingCost && editingCostEntry?.isFromRequisition) && (
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="text-sm font-medium">📚 Biblioteca de Insumos</label>
+                                                            <Select onValueChange={handleInsumoSelect}>
+                                                                <SelectTrigger className="mt-1">
+                                                                    <SelectValue placeholder="Selecione da biblioteca" />
+                                                                </SelectTrigger>
+                                                                <SelectContent className="max-h-60">
+                                                                    {Object.entries(insumosBiblioteca).map(([categoria, itens]) => (
+                                                                        <div key={categoria}>
+                                                                            <div className="sticky top-0 bg-background p-2 border-b">
+                                                                                <div className="text-xs font-medium text-muted-foreground">
+                                                                                    {categoria === 'MATERIAS_PRIMAS' && '🧱 MATÉRIAS PRIMAS'}
+                                                                                    {categoria === 'FERRAMENTAS_CORTE' && '⚙️ FERRAMENTAS DE CORTE'}
+                                                                                    {categoria === 'CONSUMIVEIS_USINAGEM' && '🔧 CONSUMÍVEIS USINAGEM'}
+                                                                                    {categoria === 'FIXACAO' && '🔩 FIXAÇÃO'}
+                                                                                    {categoria === 'SOLDAGEM' && '🔥 SOLDAGEM'}
+                                                                                    {categoria === 'ACABAMENTO_PINTURA' && '🎨 ACABAMENTO E PINTURA'}
+                                                                                    {categoria === 'LUBRIFICACAO' && '🛢️ LUBRIFICAÇÃO'}
+                                                                                    {categoria === 'DISPOSITIVOS_FIXACAO' && '🗜️ DISPOSITIVOS DE FIXAÇÃO'}
+                                                                                    {categoria === 'ELEMENTOS_MAQUINAS' && '⚙️ ELEMENTOS DE MÁQUINAS'}
+                                                                                    {categoria === 'INSTRUMENTOS_MEDICAO' && '📏 INSTRUMENTOS DE MEDIÇÃO'}
+                                                                                </div>
                                                                             </div>
+                                                                            {itens.map((insumo: string) => (
+                                                                                <SelectItem key={insumo} value={insumo}>{insumo}</SelectItem>
+                                                                            ))}
                                                                         </div>
-                                                                        {itens.map((insumo: string) => (
-                                                                            <SelectItem key={insumo} value={insumo}>{insumo}</SelectItem>
-                                                                        ))}
-                                                                    </div>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                    
-                                                    <div>
-                                                        <label className="text-sm font-medium">🔧 Especificação</label>
-                                                        <Input
-                                                            placeholder="Ex: diâmetro 20mm, espessura 3mm"
-                                                            value={itemSpecification}
-                                                            onChange={(e) => handleSpecificationChange(e.target.value)}
-                                                            className="mt-1"
-                                                        />
-                                                        <div className="text-xs text-muted-foreground mt-1">
-                                                            Adicione detalhes técnicos do item
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        
+                                                        <div>
+                                                            <label className="text-sm font-medium">🔧 Especificação</label>
+                                                            <Input
+                                                                placeholder="Ex: diâmetro 20mm, espessura 3mm"
+                                                                value={itemSpecification}
+                                                                onChange={(e) => handleSpecificationChange(e.target.value)}
+                                                                className="mt-1"
+                                                            />
+                                                            <div className="text-xs text-muted-foreground mt-1">
+                                                                Adicione detalhes técnicos do item
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
+                                                )}
                                                 
                                                 {selectedInsumo && (
                                                     <div className="p-3 bg-muted/30 rounded-lg border-l-4 border-primary">
@@ -1771,25 +1921,69 @@ export default function CostsPage() {
                                         </FormItem>
                                     )} />
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <FormField control={costEntryForm.control} name="quantity" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Quantidade</FormLabel>
-                                            <FormControl><Input type="number" step="0.01" placeholder="1" {...field} value={field.value ?? ''} /></FormControl>
+                                            <FormControl>
+                                                <Input 
+                                                    type="number" 
+                                                    step="0.01" 
+                                                    placeholder="1" 
+                                                    {...field} 
+                                                    value={field.value ?? ''} 
+                                                    disabled={isEditingCost && editingCostEntry?.isFromRequisition}
+                                                />
+                                            </FormControl>
+                                            {isEditingCost && editingCostEntry?.isFromRequisition && (
+                                                <p className="text-xs text-orange-600">
+                                                    ⚠️ Quantidade baseada na requisição (não editável)
+                                                </p>
+                                            )}
                                             <FormMessage />
                                         </FormItem>
                                     )} />
                                     <FormField control={costEntryForm.control} name="unitCost" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Custo Unitário (R$)</FormLabel>
-                                            <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
+                                            <FormControl>
+                                                <Input 
+                                                    type="number" 
+                                                    step="0.01" 
+                                                    placeholder="0.00" 
+                                                    {...field} 
+                                                    value={field.value ?? ''} 
+                                                    disabled={isEditingCost && editingCostEntry?.isFromRequisition}
+                                                />
+                                            </FormControl>
+                                            {isEditingCost && editingCostEntry?.isFromRequisition && (
+                                                <p className="text-xs text-orange-600">
+                                                    ⚠️ Custo calculado automaticamente (não editável)
+                                                </p>
+                                            )}
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                    <FormField control={costEntryForm.control} name="purchaseOrderNumber" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Nº Pedido de Compra MECALD</FormLabel>
+                                            <FormControl><Input placeholder="Ex: PC-2024-001" {...field} value={field.value ?? ''} /></FormControl>
+                                            <FormDescription>Número do pedido interno da MECALD (opcional)</FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     )} />
                                 </div>
-                                <div className="flex justify-end">
+                                <div className="flex justify-end gap-3">
+                                    {isEditingCost && (
+                                        <Button type="button" variant="outline" onClick={handleCancelEdit}>
+                                            Cancelar
+                                        </Button>
+                                    )}
                                     <Button type="submit" disabled={costEntryForm.formState.isSubmitting}>
-                                        {costEntryForm.formState.isSubmitting ? 'Lançando...' : 'Lançar Custo'}
+                                        {costEntryForm.formState.isSubmitting 
+                                            ? (isEditingCost ? 'Salvando...' : 'Lançando...') 
+                                            : (isEditingCost ? 'Salvar Alterações' : 'Lançar Custo')
+                                        }
                                     </Button>
                                 </div>
                             </form>
@@ -1890,7 +2084,7 @@ export default function CostsPage() {
                                                                 <TableHead className="text-right">Qtd</TableHead>
                                                                 <TableHead className="text-right">Valor Unit.</TableHead>
                                                                 <TableHead className="text-right">Total</TableHead>
-                                                                <TableHead>Lançado por</TableHead>
+                                                                <TableHead>Lançado por / PC</TableHead>
                                                                 <TableHead className="text-right">Ações</TableHead>
                                                             </TableRow>
                                                         </TableHeader>
@@ -1972,23 +2166,54 @@ export default function CostsPage() {
                                                                     <TableCell className="text-right font-medium text-green-600">
                                                                         {entry.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                                     </TableCell>
-                                                                    <TableCell className="text-sm text-muted-foreground">{entry.enteredBy}</TableCell>
+                                                                    <TableCell className="text-sm text-muted-foreground">
+                                                                        <div>
+                                                                            <div>{entry.enteredBy}</div>
+                                                                            {entry.purchaseOrderNumber && (
+                                                                                <div className="text-xs text-blue-600 font-medium mt-1">
+                                                                                    📋 PC: {entry.purchaseOrderNumber}
+                                                                                </div>
+                                                                            )}
+                                                                            {entry.lastEditDate && (
+                                                                                <div className="text-xs text-orange-600 mt-1">
+                                                                                    ✏️ Editado: {format(entry.lastEditDate, 'dd/MM/yy HH:mm')}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </TableCell>
                                                                     <TableCell className="text-right">
-                                                                        {!entry.isFromRequisition && (
-                                                                        <Button 
-                                                                            variant="ghost" 
-                                                                            size="icon" 
-                                                                            className="text-destructive hover:text-destructive" 
-                                                                            onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
-                                                                        >
-                                                                            <Trash2 className="h-4 w-4" />
-                                                                        </Button>
-                                                                        )}
-                                                                        {entry.isFromRequisition && (
-                                                                            <Badge variant="outline" className="text-xs">
-                                                                                Auto
-                                                                            </Badge>
-                                                                        )}
+                                                                        <div className="flex items-center justify-end gap-2">
+                                                                            {/* Botão de Editar - disponível para todos os lançamentos */}
+                                                                            <Button 
+                                                                                variant="ghost" 
+                                                                                size="icon" 
+                                                                                className="text-blue-600 hover:text-blue-800" 
+                                                                                onClick={() => handleEditCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
+                                                                                title={entry.isFromRequisition ? "Editar dados do lançamento (ex: nº pedido)" : "Editar lançamento"}
+                                                                            >
+                                                                                <Pencil className="h-4 w-4" />
+                                                                            </Button>
+                                                                            
+                                                                            {/* Botão de Deletar - apenas para lançamentos manuais */}
+                                                                            {!entry.isFromRequisition && (
+                                                                                <Button 
+                                                                                    variant="ghost" 
+                                                                                    size="icon" 
+                                                                                    className="text-destructive hover:text-destructive" 
+                                                                                    onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
+                                                                                    title="Excluir lançamento"
+                                                                                >
+                                                                                    <Trash2 className="h-4 w-4" />
+                                                                                </Button>
+                                                                            )}
+                                                                            
+                                                                            {/* Badge para lançamentos automáticos */}
+                                                                            {entry.isFromRequisition && (
+                                                                                <Badge variant="outline" className="text-xs">
+                                                                                    Auto
+                                                                                </Badge>
+                                                                            )}
+                                                                        </div>
                                                                     </TableCell>
                                                                 </TableRow>
                                                             ))}
