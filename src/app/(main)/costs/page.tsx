@@ -463,6 +463,7 @@ export default function CostsPage() {
     const [selectedInsumo, setSelectedInsumo] = useState("");
     const [itemSpecification, setItemSpecification] = useState("");
     const [activeTab, setActiveTab] = useState("receipts");
+    const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -496,17 +497,17 @@ export default function CostsPage() {
                         const weightUnit = item.weightUnit || item.pesoUnidade || item.unidadePeso || item.unit || "kg";
                         
                         return {
-                            id: item.id || `${d.id}-${index}`,
-                            description: item.description,
-                            quantityRequested: item.quantityRequested,
-                            status: item.status || "Pendente",
-                            supplierName: item.supplierName || "",
-                            invoiceNumber: item.invoiceNumber || "",
-                            invoiceItemValue: item.invoiceItemValue || undefined,
-                            certificateNumber: item.certificateNumber || "",
-                            storageLocation: item.storageLocation || "",
-                            deliveryReceiptDate: item.deliveryReceiptDate?.toDate ? item.deliveryReceiptDate.toDate() : (item.deliveryReceiptDate ? new Date(item.deliveryReceiptDate) : null),
-                            inspectionStatus: item.inspectionStatus || "Pendente",
+                        id: item.id || `${d.id}-${index}`,
+                        description: item.description,
+                        quantityRequested: item.quantityRequested,
+                        status: item.status || "Pendente",
+                        supplierName: item.supplierName || "",
+                        invoiceNumber: item.invoiceNumber || "",
+                        invoiceItemValue: item.invoiceItemValue || undefined,
+                        certificateNumber: item.certificateNumber || "",
+                        storageLocation: item.storageLocation || "",
+                        deliveryReceiptDate: item.deliveryReceiptDate?.toDate ? item.deliveryReceiptDate.toDate() : (item.deliveryReceiptDate ? new Date(item.deliveryReceiptDate) : null),
+                        inspectionStatus: item.inspectionStatus || "Pendente",
                             weight: weight,
                             weightUnit: weightUnit,
                         };
@@ -547,6 +548,7 @@ export default function CostsPage() {
     
     const fetchOrders = useCallback(async () => {
         if (!user) return;
+        console.log('📊 Iniciando busca de ordens de serviço...');
         setIsLoadingOrders(true);
         try {
             const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
@@ -564,9 +566,12 @@ export default function CostsPage() {
                         })),
                     };
                 });
+            
+            const totalCostEntries = ordersList.reduce((sum, order) => sum + (order.costEntries?.length || 0), 0);
+            console.log(`📊 ${ordersList.length} ordens carregadas com ${totalCostEntries} lançamentos de custo`);
+            
             setOrders(ordersList);
-
-
+            setLastUpdateTime(new Date());
 
         } catch (error) {
             console.error("Error fetching orders:", error);
@@ -585,10 +590,10 @@ export default function CostsPage() {
         }
     }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
 
-    // Sincronizar requisições com OS automaticamente
+    // Sincronizar requisições com OS automaticamente (apenas uma vez quando os dados são carregados)
     useEffect(() => {
         const syncRequisitionsWithOrders = async () => {
-            if (!requisitions.length || !orders.length) return;
+            if (!requisitions.length || !orders.length || isLoadingRequisitions || isLoadingOrders) return;
             
             let hasChanges = false;
             
@@ -602,6 +607,7 @@ export default function CostsPage() {
                         
                         // Se não existe lançamento para esta requisição, criar um
                         if (!existingReqCost) {
+                            console.log(`🔗 Criando lançamento inicial para requisição ${req.id} na OS ${req.orderId}`);
                             await createInitialOrderCostFromRequisition(req.orderId, req.id);
                             hasChanges = true;
                         }
@@ -611,12 +617,15 @@ export default function CostsPage() {
             
             // Re-fetch orders se houve mudanças
             if (hasChanges) {
+                console.log('📊 Sincronização detectou mudanças, atualizando ordens...');
                 await fetchOrders();
             }
         };
         
-        syncRequisitionsWithOrders();
-    }, [requisitions, orders]);
+        // Aguardar um pouco antes de sincronizar para evitar múltiplas execuções
+        const timeoutId = setTimeout(syncRequisitionsWithOrders, 2000);
+        return () => clearTimeout(timeoutId);
+    }, [requisitions.length, orders.length, isLoadingRequisitions, isLoadingOrders]);
 
     // Auto-atualizar dados quando mudar para aba de custos
     useEffect(() => {
@@ -625,6 +634,14 @@ export default function CostsPage() {
             fetchOrders();
         }
     }, [activeTab]);
+    
+    // Função para forçar refresh dos dados de custos
+    const forceRefreshCosts = useCallback(async () => {
+        console.log('🔄 Refresh forçado dos custos...');
+        setIsLoadingOrders(true);
+        await fetchOrders();
+        console.log('✅ Refresh dos custos concluído');
+    }, [fetchOrders]);
 
     const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
         const selectedItemData = { ...item, requisitionId };
@@ -686,11 +703,13 @@ export default function CostsPage() {
             console.log('✅ Requisição atualizada no banco de dados');
 
             // Atualizar custos da OS automaticamente se a requisição estiver vinculada a uma OS
+            let costUpdateSuccess = false;
             if (reqData.orderId) {
                 console.log('🔗 Requisição vinculada à OS, atualizando custos...');
                 try {
                     await updateOrderCostFromRequisition(reqData.orderId, selectedItem.requisitionId, updatedItems);
                     console.log('✅ Custos da OS atualizados com sucesso');
+                    costUpdateSuccess = true;
                 } catch (costError) {
                     console.error('❌ Erro ao atualizar custos da OS:', costError);
                     // Mesmo se houver erro nos custos, mostra que a requisição foi salva
@@ -702,11 +721,16 @@ export default function CostsPage() {
             // Toast mais informativo baseado nos valores
             if (reqData.orderId) {
                 const hasValues = values.invoiceItemValue && values.invoiceItemValue > 0;
-                if (hasValues) {
+                if (hasValues && costUpdateSuccess) {
                     toast({ 
                         title: "✅ Item precificado com sucesso!", 
-                        description: `Valor ${values.invoiceItemValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi adicionado aos custos da OS. Vá na aba 'Lançamento de Custos' para verificar.`,
+                        description: `Valor ${values.invoiceItemValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi adicionado aos custos da OS.`,
                         duration: 5000
+                    });
+                } else if (hasValues && !costUpdateSuccess) {
+                    toast({ 
+                        title: "⚠️ Item atualizado com aviso!", 
+                        description: "Dados salvos, mas houve problema ao atualizar custos da OS. Tente recarregar a página." 
                     });
                 } else {
                     toast({ 
@@ -722,20 +746,17 @@ export default function CostsPage() {
             }
             setIsFormOpen(false);
             
-            // Forçar refresh de dados com feedback visual
+            // Forçar refresh de dados de forma mais robusta
             console.log('🔄 Atualizando interface após edição...');
-            await Promise.all([
-                fetchRequisitions(),
-                fetchOrders()
-            ]);
             
-            // Se estiver na aba de custos, forçar refresh adicional
-            if (activeTab === "costEntry") {
-                setTimeout(() => {
-                    console.log('🔄 Refresh adicional para aba de custos...');
-                    fetchOrders();
-                }, 1500);
-            }
+            // Aguardar um pouco para o Firestore processar as mudanças
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Atualizar dados sequencialmente para evitar conflitos
+            await fetchRequisitions();
+            await fetchOrders();
+            
+            console.log('✅ Interface atualizada');
             
         } catch (error: any) {
             console.error("Error updating item:", error);
@@ -839,17 +860,6 @@ export default function CostsPage() {
             });
             
             console.log(`✅ Custo da OS atualizado com sucesso: Requisição ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
-            
-            // Forçar múltiplas atualizações para garantir sincronização
-            setTimeout(() => {
-                console.log('🔄 Primeiro refresh dos dados...');
-                fetchOrders();
-            }, 500);
-            
-            setTimeout(() => {
-                console.log('🔄 Segundo refresh dos dados...');
-                fetchOrders();
-            }, 2000);
             
         } catch (error) {
             console.error("❌ Error updating order costs:", error);
@@ -1166,10 +1176,10 @@ export default function CostsPage() {
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between">
                     <div>
-                      <CardTitle>Recebimento de Materiais</CardTitle>
-                      <CardDescription>
-                        Gerencie o recebimento de materiais das requisições, atualize informações de nota fiscal e realize a inspeção de qualidade.
-                      </CardDescription>
+                    <CardTitle>Recebimento de Materiais</CardTitle>
+                    <CardDescription>
+                      Gerencie o recebimento de materiais das requisições, atualize informações de nota fiscal e realize a inspeção de qualidade.
+                    </CardDescription>
                     </div>
                     <Button variant="outline" onClick={fetchRequisitions} disabled={isLoadingRequisitions}>
                       {isLoadingRequisitions ? 'Carregando...' : '🔄 Atualizar'}
@@ -1472,16 +1482,19 @@ export default function CostsPage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
-                            <CardTitle>Custos Organizados por OS</CardTitle>
-                            <CardDescription>
-                                Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço.
-                            </CardDescription>
+                        <CardTitle>Custos Organizados por OS</CardTitle>
+                        <CardDescription>
+                            Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço.
+                        </CardDescription>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <div className="text-xs text-muted-foreground">
-                                Última atualização: {new Date().toLocaleTimeString('pt-BR')}
+                        <div className="flex items-center gap-3">
+                            <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${isLoadingOrders ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
+                                                                 <span>
+                                     {isLoadingOrders ? 'Carregando dados...' : (lastUpdateTime ? `Atualizado às ${lastUpdateTime.toLocaleTimeString('pt-BR')}` : 'Sem dados')}
+                                 </span>
                             </div>
-                            <Button variant="outline" onClick={fetchOrders} disabled={isLoadingOrders}>
+                            <Button variant="outline" onClick={forceRefreshCosts} disabled={isLoadingOrders}>
                                 {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar Custos'}
                             </Button>
                         </div>
@@ -1612,14 +1625,14 @@ export default function CostsPage() {
                                                                     <TableCell className="text-sm text-muted-foreground">{entry.enteredBy}</TableCell>
                                                                     <TableCell className="text-right">
                                                                         {!entry.isFromRequisition && (
-                                                                            <Button 
-                                                                                variant="ghost" 
-                                                                                size="icon" 
-                                                                                className="text-destructive hover:text-destructive" 
-                                                                                onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
-                                                                            >
-                                                                                <Trash2 className="h-4 w-4" />
-                                                                            </Button>
+                                                                        <Button 
+                                                                            variant="ghost" 
+                                                                            size="icon" 
+                                                                            className="text-destructive hover:text-destructive" 
+                                                                            onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
+                                                                        >
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </Button>
                                                                         )}
                                                                         {entry.isFromRequisition && (
                                                                             <Badge variant="outline" className="text-xs">
@@ -1772,8 +1785,8 @@ export default function CostsPage() {
                                             </Select>
                                             <FormMessage />
                                         </FormItem>
-                                    )}/>
-                                    <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
+                        )}/>
+                        <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
                                         <FormItem>
                                             <FormLabel className="flex items-center gap-2">
                                                 💰 Valor do Item (R$)
@@ -1790,13 +1803,13 @@ export default function CostsPage() {
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>
-                                    )}/>
-                                </div>
+                        )}/>
+                    </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <FormField control={itemForm.control} name="invoiceNumber" render={({ field }) => (
                             <FormItem><FormLabel>Nota Fiscal</FormLabel><FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
-                         <FormField control={itemForm.control} name="certificateNumber" render={({ field }) => (
+                        <FormField control={itemForm.control} name="certificateNumber" render={({ field }) => (
                             <FormItem><FormLabel>Nº do Certificado</FormLabel><FormControl><Input placeholder="Certificado de qualidade/material" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
                     </div>
@@ -1804,15 +1817,15 @@ export default function CostsPage() {
                          <FormField control={itemForm.control} name="storageLocation" render={({ field }) => (
                             <FormItem><FormLabel>Local de Armazenamento</FormLabel><FormControl><Input placeholder="Ex: Prateleira A-10" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
-                        <FormField control={itemForm.control} name="inspectionStatus" render={({ field }) => (
-                            <FormItem><FormLabel>Status da Inspeção</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
-                                    <SelectTrigger><SelectValue placeholder="Selecione o status da inspeção" /></SelectTrigger>
-                                </FormControl><SelectContent>
-                                    {inspectionStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
-                                </SelectContent></Select><FormMessage />
-                            </FormItem>
-                        )}/>
+                    <FormField control={itemForm.control} name="inspectionStatus" render={({ field }) => (
+                        <FormItem><FormLabel>Status da Inspeção</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione o status da inspeção" /></SelectTrigger>
+                            </FormControl><SelectContent>
+                                {inspectionStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
+                            </SelectContent></Select><FormMessage />
+                        </FormItem>
+                    )}/>
                     </div>
                     
                     <DialogFooter>
