@@ -212,6 +212,7 @@ const actionPlanItemSchema = z.object({
 // --- SCHEMAS ---
 const nonConformanceSchema = z.object({
   id: z.string().optional(),
+  number: z.string().optional(), // ✅ NOVO CAMPO PARA NUMERAÇÃO
   date: z.date({ required_error: "A data é obrigatória." }),
   orderId: z.string({ required_error: "Selecione um pedido." }),
   item: z.object({
@@ -560,7 +561,7 @@ const lessonsLearnedSchema = z.object({
 
 
 // --- TYPES ---
-type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, orderNumber: string, customerName: string, photos?: string[], responsibleNc?: string };
+type NonConformance = z.infer<typeof nonConformanceSchema> & { id: string, number: string, orderNumber: string, customerName: string, photos?: string[], responsibleNc?: string };
 
 type Occurrence = z.infer<typeof occurrenceSchema> & { 
   id: string, 
@@ -912,6 +913,7 @@ export default function QualityPage() {
           item: { id: data.itemId, description: data.itemDescription }, customerName: order?.customerName || 'N/A',
           description: data.description, type: data.type, status: data.status, photos: data.photos || [],
           responsibleNc: data.responsibleNc || 'N/A', // ✅ ADICIONAR ESTA LINHA
+          number: data.number || '', // ✅ NOVO CAMPO PARA NUMERAÇÃO
         } as NonConformance;
       });
       setReports(reportsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
@@ -1096,6 +1098,75 @@ export default function QualityPage() {
     }, [selectedOrderForInspections, materialInspections, dimensionalReports, weldingInspections, paintingReports, liquidPenetrantReports, ultrasoundReports, lessonsLearnedReports]);
 
 
+  // --- FUNÇÃO AUXILIAR PARA GERAR NUMERAÇÃO ---
+  const generateRncNumber = async (): Promise<string> => {
+    try {
+      const snapshot = await getDocs(collection(db, "companies", "mecald", "qualityReports"));
+      const existingNumbers = snapshot.docs
+        .map(doc => doc.data().number)
+        .filter(num => num && typeof num === 'string' && num.startsWith('RNC-'))
+        .map(num => parseInt(num.replace('RNC-', '')))
+        .filter(num => !isNaN(num));
+      
+      const lastNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0;
+      const newNumber = lastNumber + 1;
+      return `RNC-${newNumber.toString().padStart(4, '0')}`;
+    } catch (error) {
+      console.error("Erro ao gerar numeração:", error);
+      return `RNC-${Date.now().toString().slice(-4)}`; // Fallback
+    }
+  };
+
+  // --- FUNÇÃO PARA ENUMERAR RNCs EXISTENTES ---
+  const enumerateExistingRncs = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "companies", "mecald", "qualityReports"));
+      const unNumberedReports = snapshot.docs.filter(doc => !doc.data().number);
+      
+      if (unNumberedReports.length === 0) {
+        toast({ title: "Todos os RNCs já estão enumerados!" });
+        return;
+      }
+
+      // Ordenar por data para manter a sequência cronológica
+      const sortedReports = unNumberedReports.sort((a, b) => {
+        const dateA = a.data().date.toDate();
+        const dateB = b.data().date.toDate();
+        return dateA.getTime() - dateB.getTime();
+      });
+
+      // Obter próximo número disponível
+      const existingNumbers = snapshot.docs
+        .map(doc => doc.data().number)
+        .filter(num => num && typeof num === 'string' && num.startsWith('RNC-'))
+        .map(num => parseInt(num.replace('RNC-', '')))
+        .filter(num => !isNaN(num));
+      
+      let nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
+
+      // Atualizar cada RNC sem numeração
+      for (const doc of sortedReports) {
+        const rncNumber = `RNC-${nextNumber.toString().padStart(4, '0')}`;
+        await updateDoc(doc.ref, { number: rncNumber });
+        nextNumber++;
+      }
+
+      toast({ 
+        title: "Enumeração concluída!", 
+        description: `${unNumberedReports.length} RNC(s) foram enumerados.` 
+      });
+      
+      await fetchAllData(); // Recarregar dados
+    } catch (error) {
+      console.error("Erro ao enumerar RNCs:", error);
+      toast({ 
+        variant: "destructive", 
+        title: "Erro ao enumerar RNCs", 
+        description: "Não foi possível enumerar os RNCs existentes." 
+      });
+    }
+  };
+
   // --- RNC HANDLERS ---
   const onRncSubmit = async (values: z.infer<typeof nonConformanceSchema>) => {
     try {
@@ -1129,6 +1200,8 @@ export default function QualityPage() {
         await updateDoc(doc(db, "companies", "mecald", "qualityReports", selectedReport.id), dataToSave);
         toast({ title: "Relatório atualizado com sucesso!" });
       } else {
+        // ✅ GERAR NÚMERO AUTOMÁTICO
+        dataToSave.number = await generateRncNumber();
         await addDoc(collection(db, "companies", "mecald", "qualityReports"), dataToSave);
         toast({ title: "Relatório de não conformidade criado!" });
       }
@@ -1275,7 +1348,9 @@ export default function QualityPage() {
         }
         docPdf.setFontSize(16).setFont(undefined, 'bold');
         docPdf.text(`Relatório de Não Conformidade`, pageWidth / 2, y + 8, { align: 'center' });
-        y += 25;
+        docPdf.setFontSize(12).setFont(undefined, 'normal');
+        docPdf.text(`Número: ${report.number || 'N/A'}`, pageWidth / 2, y + 16, { align: 'center' });
+        y += 30;
 
         // Informações principais
         autoTable(docPdf, {
@@ -3035,14 +3110,18 @@ export default function QualityPage() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <div><CardTitle>Histórico de RNCs</CardTitle><CardDescription>Gerencie todas as não conformidades internas e reclamações de clientes.</CardDescription></div>
-                    <Button onClick={handleAddRncClick}><PlusCircle className="mr-2 h-4 w-4" />Registrar Não Conformidade</Button>
+                    <div className="flex gap-2">
+                        <Button variant="outline" onClick={enumerateExistingRncs}><TicketCheck className="mr-2 h-4 w-4" />Enumerar RNCs</Button>
+                        <Button onClick={handleAddRncClick}><PlusCircle className="mr-2 h-4 w-4" />Registrar Não Conformidade</Button>
+                    </div>
                 </CardHeader>
                 <CardContent>
                   {isLoading ? <Skeleton className="h-64 w-full" /> :
-                  <Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Cliente</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                  <Table><TableHeader><TableRow><TableHead>Número</TableHead><TableHead>Data</TableHead><TableHead>Pedido</TableHead><TableHead>Cliente</TableHead><TableHead>Item</TableHead><TableHead>Tipo</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
                     <TableBody>
                       {reports.length > 0 ? (
                         reports.map((report) => (<TableRow key={report.id}>
+                            <TableCell className="font-mono text-sm">{report.number || 'N/A'}</TableCell>
                             <TableCell>{format(report.date, 'dd/MM/yyyy')}</TableCell><TableCell>{report.orderNumber}</TableCell><TableCell>{report.customerName}</TableCell>
                             <TableCell>{report.item.description}</TableCell><TableCell>{report.type}</TableCell>
                             <TableCell><Badge variant={getStatusVariant(report.status)}>{report.status}</Badge></TableCell>
@@ -3053,7 +3132,7 @@ export default function QualityPage() {
                               <Button variant="ghost" size="icon" onClick={() => handleEditRncClick(report)}><Pencil className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteRncClick(report)}><Trash2 className="h-4 w-4" /></Button>
                             </TableCell></TableRow>))
-                      ) : ( <TableRow><TableCell colSpan={7} className="h-24 text-center">Nenhum relatório de não conformidade encontrado.</TableCell></TableRow> )}
+                      ) : ( <TableRow><TableCell colSpan={8} className="h-24 text-center">Nenhum relatório de não conformidade encontrado.</TableCell></TableRow> )}
                     </TableBody></Table> }
                 </CardContent></Card>
             </TabsContent>
@@ -3932,7 +4011,7 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             });
         }
     }, [calibrations]);
-    // ...existing code...
+    // ...rest of the code...
     const watchedOrderId = form.watch("orderId");
     const watchedItemId = form.watch("itemId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
