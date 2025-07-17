@@ -108,7 +108,6 @@ export default function FinancePage() {
   const [isLoading, setIsLoading] = useState(false);
   
   // Estados de filtros
-  const [selectedOS, setSelectedOS] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -1316,4 +1315,145 @@ export default function FinancePage() {
                             </div>
                             <div>
                               <div className="flex justify-between text-xs mb-1">
-                                <span>Mão de Obra
+                                <span>Mão de Obra</span>
+                                <span>{data.totalCosts > 0 ? ((data.laborCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
+                              </div>
+                              <Progress 
+                                value={data.totalCosts > 0 ? (data.laborCosts / data.totalCosts) * 100 : 0} 
+                                className="h-1.5" 
+                              />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span>Overhead</span>
+                                <span>{data.totalCosts > 0 ? ((data.overheadCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
+                              </div>
+                              <Progress 
+                                value={data.totalCosts > 0 ? (data.overheadCosts / data.totalCosts) * 100 : 0} 
+                                className="h-1.5" 
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+
+                      {/* Detalhamento de Receitas */}
+                      {data.quotationItems.length > 0 && (
+                        <Card className="p-4">
+                          <h4 className="font-semibold mb-4 flex items-center gap-2">
+                            <FileText className="h-4 w-4" />
+                            Itens do Orçamento
+                          </h4>
+                          <div className="max-h-60 overflow-y-auto">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="text-xs">Item</TableHead>
+                                  <TableHead className="text-xs text-right">Qtd</TableHead>
+                                  <TableHead className="text-xs text-right">Valor Unit.</TableHead>
+                                  <TableHead className="text-xs text-right">Impostos</TableHead>
+                                  <TableHead className="text-xs text-right">Total</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {data.quotationItems.map((item, index) => (
+                                  <TableRow key={index}>
+                                    <TableCell className="text-xs">{item.description}</TableCell>
+                                    <TableCell className="text-xs text-right">{item.quantity}</TableCell>
+                                    <TableCell className="text-xs text-right">
+                                      {item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </TableCell>
+                                    <TableCell className="text-xs text-right">
+                                      {item.taxRate}%
+                                    </TableCell>
+                                    <TableCell className="text-xs text-right font-medium">
+                                      {item.totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </Card>
+                      )}
+
+                      {/* Detalhamento de Custos */}
+                      {data.costEntries.length > 0 && (
+                        <Card className="p-4">
+                          <h4 className="font-semibold mb-4 flex items-center gap-2">
+                            <TrendingDown className="h-4 w-4" />
+                            Lançamentos de Custos
+                          </h4>
+                          <div className="max-h-60 overflow-y-auto">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="text-xs">Descrição</TableHead>
+                                  <TableHead className="text-xs">Categoria</TableHead>
+                                  <TableHead className="text-xs text-right">Valor</TableHead>
+                                  <TableHead className="text-xs">Tipo</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {data.costEntries.map((entry, index) => (
+                                  <TableRow key={index}>
+                                    <TableCell className="text-xs">{entry.description}</TableCell>
+                                    <TableCell className="text-xs">
+                                      <Badge variant="outline" className="text-xs">
+                                        {entry.category === 'material' && '📦 Material'}
+                                        {entry.category === 'labor' && '👷 M.O.'}
+                                        {entry.category === 'overhead' && '⚙️ Overhead'}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-xs text-right font-medium">
+                                      {entry.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    </TableCell>
+                                    <TableCell className="text-xs">
+                                      {entry.isFromRequisition ? (
+                                        <Badge variant="secondary" className="text-xs">Auto</Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="text-xs">Manual</Badge>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </Card>
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-6">
+            <div className="text-center text-muted-foreground">
+              <Package className="h-12 w-12 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Nenhum dado financeiro encontrado</h3>
+              <p className="text-sm">
+                {searchTerm || statusFilter !== 'all' 
+                  ? 'Tente ajustar os filtros para ver mais resultados.'
+                  : 'Não há OS ativas com dados financeiros disponíveis no momento.'
+                }
+              </p>
+              {!searchTerm && statusFilter === 'all' && (
+                <Button
+                  variant="outline"
+                  onClick={loadData}
+                  className="mt-4"
+                >
+                  🔄 Recarregar Dados
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
