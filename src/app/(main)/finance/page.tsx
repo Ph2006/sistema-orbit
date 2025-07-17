@@ -553,8 +553,360 @@ export default function FinancePage() {
     });
   }, [financialData, searchTerm, statusFilter]);
 
-  // Função para gerar relatório em PDF
-  const generateFinancialReport = async () => {
+  // Função para gerar relatório individual em PDF
+  const generateIndividualReport = async (data: OrderFinancialData) => {
+    toast({ title: "Gerando relatório individual...", description: "Por favor, aguarde." });
+
+    try {
+      const docPdf = new jsPDF({ orientation: "portrait" });
+      const pageWidth = docPdf.internal.pageSize.width;
+      const pageHeight = docPdf.internal.pageSize.height;
+      let yPos = 20;
+
+      // Função auxiliar para verificar quebra de página
+      const checkPageBreak = (requiredSpace: number) => {
+        if (yPos + requiredSpace > pageHeight - 20) {
+          docPdf.addPage();
+          yPos = 20;
+        }
+      };
+
+      // Cabeçalho do relatório
+      docPdf.setFontSize(20).setFont('helvetica', 'bold');
+      docPdf.text('RELATÓRIO FINANCEIRO DETALHADO', pageWidth / 2, yPos, { align: 'center' });
+      yPos += 10;
+      
+      docPdf.setFontSize(16).setFont('helvetica', 'normal');
+      docPdf.text(`ORDEM DE SERVIÇO: ${data.internalOS}`, pageWidth / 2, yPos, { align: 'center' });
+      yPos += 15;
+
+      // Informações básicas
+      docPdf.setFontSize(12).setFont('helvetica', 'bold');
+      docPdf.text('INFORMAÇÕES GERAIS', 15, yPos);
+      yPos += 8;
+
+      const basicInfo = [
+        ['OS:', data.internalOS],
+        ['Cliente:', data.customerName],
+        ['Status:', data.status],
+        ['Orçamento:', data.quotationNumber || 'N/A'],
+        ['Data de Entrega:', data.deliveryDate ? format(data.deliveryDate, 'dd/MM/yyyy') : 'Não definida'],
+        ['Gerado em:', format(new Date(), 'dd/MM/yyyy HH:mm')],
+      ];
+
+      autoTable(docPdf, {
+        startY: yPos,
+        head: [],
+        body: basicInfo,
+        columnStyles: {
+          0: { cellWidth: 50, fontStyle: 'bold' },
+          1: { cellWidth: 130 },
+        },
+        styles: { fontSize: 10 },
+        theme: 'grid',
+      });
+
+      yPos = (docPdf as any).lastAutoTable.finalY + 15;
+      checkPageBreak(50);
+
+      // RESUMO FINANCEIRO
+      docPdf.setFontSize(14).setFont('helvetica', 'bold');
+      docPdf.text('RESUMO FINANCEIRO', 15, yPos);
+      yPos += 10;
+
+      const financialSummary = [
+        ['RECEITAS', ''],
+        ['Receita Bruta Total', data.grossRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['(-) Impostos e Taxas', `-${data.taxAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${data.taxRatio.toFixed(1)}%)`],
+        ['(=) Receita Líquida', data.netRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['', ''],
+        ['CUSTOS', ''],
+        ['Materiais', `-${data.materialCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`],
+        ['Mão de Obra', `-${data.laborCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`],
+        ['Custos Gerais/Overhead', `-${data.overheadCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`],
+        ['(=) Total de Custos', `-${data.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`],
+        ['', ''],
+        ['RESULTADOS', ''],
+        ['Lucro Bruto (Receita Líq. - Custos)', `${data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`],
+        ['Margem Bruta', `${data.grossMargin.toFixed(2)}%`],
+        ['Lucro Líquido (após impostos)', `${data.netProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`],
+        ['Margem Líquida', `${data.netMargin.toFixed(2)}%`],
+        ['Relação Custos/Receita', `${data.costRatio.toFixed(1)}%`],
+      ];
+
+      autoTable(docPdf, {
+        startY: yPos,
+        head: [],
+        body: financialSummary,
+        columnStyles: {
+          0: { cellWidth: 120, fontStyle: 'bold' },
+          1: { cellWidth: 60, halign: 'right' },
+        },
+        styles: { fontSize: 10 },
+        theme: 'striped',
+        didParseCell: function(data) {
+          // Destacar seções principais
+          if (data.cell.text[0] === 'RECEITAS' || data.cell.text[0] === 'CUSTOS' || data.cell.text[0] === 'RESULTADOS') {
+            data.cell.styles.fillColor = [37, 99, 235];
+            data.cell.styles.textColor = [255, 255, 255];
+            data.cell.styles.fontStyle = 'bold';
+          }
+          // Destacar totais
+          if (data.cell.text[0].includes('(=)')) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [243, 244, 246];
+          }
+        },
+      });
+
+      yPos = (docPdf as any).lastAutoTable.finalY + 15;
+      checkPageBreak(50);
+
+      // FONTE DA RECEITA
+      docPdf.setFontSize(14).setFont('helvetica', 'bold');
+      docPdf.text('ORIGEM DA RECEITA', 15, yPos);
+      yPos += 10;
+
+      if (data.hasManualRevenue) {
+        docPdf.setFontSize(10).setFont('helvetica', 'normal');
+        docPdf.text('✓ Receita lançada manualmente no sistema', 15, yPos);
+        yPos += 5;
+        if (data.manualRevenueInfo) {
+          docPdf.text(`Última atualização: ${format(data.manualRevenueInfo.lastUpdate, 'dd/MM/yyyy HH:mm')}`, 15, yPos);
+          yPos += 5;
+          docPdf.text(`Atualizado por: ${data.manualRevenueInfo.updatedBy}`, 15, yPos);
+          yPos += 10;
+        }
+      } else if (data.quotationItems.length > 0) {
+        docPdf.setFontSize(10).setFont('helvetica', 'normal');
+        docPdf.text('✓ Receita calculada automaticamente com base no orçamento', 15, yPos);
+        yPos += 15;
+
+        // Detalhamento dos itens do orçamento
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('ITENS DO ORÇAMENTO', 15, yPos);
+        yPos += 8;
+
+        const quotationData = data.quotationItems.map(item => [
+          item.description,
+          item.quantity.toString(),
+          item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+          `${item.taxRate}%`,
+          item.totalWithoutTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+          item.totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        ]);
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [['Descrição', 'Qtd', 'Vlr Unit.', 'Imposto', 'Subtotal', 'Total c/ Imp.']],
+          body: quotationData,
+          columnStyles: {
+            0: { cellWidth: 60 },
+            1: { cellWidth: 20, halign: 'center' },
+            2: { cellWidth: 25, halign: 'right' },
+            3: { cellWidth: 20, halign: 'center' },
+            4: { cellWidth: 25, halign: 'right' },
+            5: { cellWidth: 30, halign: 'right' },
+          },
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [37, 99, 235] },
+        });
+
+        yPos = (docPdf as any).lastAutoTable.finalY + 15;
+      } else {
+        docPdf.setFontSize(10).setFont('helvetica', 'normal');
+        docPdf.text('⚠️ Nenhuma receita encontrada para esta OS', 15, yPos);
+        yPos += 15;
+      }
+
+      checkPageBreak(50);
+
+      // DETALHAMENTO DOS CUSTOS
+      if (data.costEntries.length > 0) {
+        docPdf.setFontSize(14).setFont('helvetica', 'bold');
+        docPdf.text('DETALHAMENTO DOS CUSTOS', 15, yPos);
+        yPos += 10;
+
+        // Análise por categoria
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('DISTRIBUIÇÃO POR CATEGORIA', 15, yPos);
+        yPos += 8;
+
+        const categoryAnalysis = [
+          ['Materiais', data.materialCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 
+           `${data.totalCosts > 0 ? ((data.materialCosts / data.totalCosts) * 100).toFixed(1) : 0}%`],
+          ['Mão de Obra', data.laborCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 
+           `${data.totalCosts > 0 ? ((data.laborCosts / data.totalCosts) * 100).toFixed(1) : 0}%`],
+          ['Custos Gerais/Overhead', data.overheadCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 
+           `${data.totalCosts > 0 ? ((data.overheadCosts / data.totalCosts) * 100).toFixed(1) : 0}%`],
+          ['TOTAL', data.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), '100%'],
+        ];
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [['Categoria', 'Valor', '% do Total']],
+          body: categoryAnalysis,
+          columnStyles: {
+            0: { cellWidth: 80 },
+            1: { cellWidth: 50, halign: 'right' },
+            2: { cellWidth: 30, halign: 'center' },
+          },
+          styles: { fontSize: 10 },
+          headStyles: { fillColor: [37, 99, 235] },
+          didParseCell: function(data) {
+            if (data.cell.text[0] === 'TOTAL') {
+              data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.fillColor = [243, 244, 246];
+            }
+          },
+        });
+
+        yPos = (docPdf as any).lastAutoTable.finalY + 15;
+        checkPageBreak(50);
+
+        // Lançamentos detalhados
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('LANÇAMENTOS DETALHADOS', 15, yPos);
+        yPos += 8;
+
+        const costDetails = data.costEntries.map(entry => [
+          entry.description,
+          entry.category === 'material' ? '📦 Material' : 
+          entry.category === 'labor' ? '👷 Mão de Obra' : '⚙️ Overhead',
+          entry.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+          entry.isFromRequisition ? 'Automático' : 'Manual'
+        ]);
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [['Descrição', 'Categoria', 'Valor', 'Origem']],
+          body: costDetails,
+          columnStyles: {
+            0: { cellWidth: 80 },
+            1: { cellWidth: 35 },
+            2: { cellWidth: 35, halign: 'right' },
+            3: { cellWidth: 30, halign: 'center' },
+          },
+          styles: { fontSize: 9 },
+          headStyles: { fillColor: [37, 99, 235] },
+        });
+
+        yPos = (docPdf as any).lastAutoTable.finalY + 15;
+      } else {
+        docPdf.setFontSize(14).setFont('helvetica', 'bold');
+        docPdf.text('DETALHAMENTO DOS CUSTOS', 15, yPos);
+        yPos += 10;
+        
+        docPdf.setFontSize(10).setFont('helvetica', 'normal');
+        docPdf.text('⚠️ Nenhum custo lançado para esta OS', 15, yPos);
+        yPos += 15;
+      }
+
+      checkPageBreak(80);
+
+      // ANÁLISE DE RENTABILIDADE
+      docPdf.setFontSize(14).setFont('helvetica', 'bold');
+      docPdf.text('ANÁLISE DE RENTABILIDADE', 15, yPos);
+      yPos += 10;
+
+      // Classificação da margem
+      let marginClassification = '';
+      let marginColor = '';
+      if (data.grossMargin >= 20) {
+        marginClassification = 'EXCELENTE';
+        marginColor = 'Verde';
+      } else if (data.grossMargin >= 10) {
+        marginClassification = 'BOA';
+        marginColor = 'Amarelo';
+      } else if (data.grossMargin >= 0) {
+        marginClassification = 'REGULAR';
+        marginColor = 'Laranja';
+      } else {
+        marginClassification = 'CRÍTICA';
+        marginColor = 'Vermelho';
+      }
+
+      const profitabilityAnalysis = [
+        ['Status da Margem:', `${marginClassification} (${marginColor})`],
+        ['Margem Bruta:', `${data.grossMargin.toFixed(2)}%`],
+        ['Margem Líquida:', `${data.netMargin.toFixed(2)}%`],
+        ['Eficiência de Custos:', `${(100 - data.costRatio).toFixed(1)}%`],
+        ['Carga Tributária:', `${data.taxRatio.toFixed(1)}% da receita bruta`],
+        ['Ponto de Equilíbrio:', data.netRevenue > 0 ? 
+          `${((data.totalCosts / data.netRevenue) * 100).toFixed(1)}% da receita líquida` : 'N/A'],
+      ];
+
+      autoTable(docPdf, {
+        startY: yPos,
+        head: [],
+        body: profitabilityAnalysis,
+        columnStyles: {
+          0: { cellWidth: 80, fontStyle: 'bold' },
+          1: { cellWidth: 100 },
+        },
+        styles: { fontSize: 10 },
+        theme: 'grid',
+      });
+
+      yPos = (docPdf as any).lastAutoTable.finalY + 15;
+      checkPageBreak(60);
+
+      // RECOMENDAÇÕES
+      docPdf.setFontSize(14).setFont('helvetica', 'bold');
+      docPdf.text('RECOMENDAÇÕES TÉCNICAS', 15, yPos);
+      yPos += 10;
+
+      docPdf.setFontSize(10).setFont('helvetica', 'normal');
+      
+      if (data.grossMargin < 0) {
+        docPdf.text('• AÇÃO URGENTE: Esta OS está gerando prejuízo. Revisar custos imediatamente.', 15, yPos);
+        yPos += 6;
+      } else if (data.grossMargin < 10) {
+        docPdf.text('• ATENÇÃO: Margem baixa. Analisar possibilidades de redução de custos.', 15, yPos);
+        yPos += 6;
+      } else {
+        docPdf.text('• Status financeiro dentro dos parâmetros aceitáveis.', 15, yPos);
+        yPos += 6;
+      }
+
+      if (data.materialCosts > data.laborCosts && data.materialCosts > data.overheadCosts) {
+        docPdf.text('• Materiais representam o maior custo. Revisar fornecedores e negociações.', 15, yPos);
+        yPos += 6;
+      }
+
+      if (data.taxRatio > 20) {
+        docPdf.text('• Carga tributária elevada. Avaliar regime tributário e planejamento fiscal.', 15, yPos);
+        yPos += 6;
+      }
+
+      docPdf.text('• Acompanhar evolução dos custos durante execução da OS.', 15, yPos);
+      yPos += 6;
+      docPdf.text('• Comparar com histórico de OS similares para benchmarking.', 15, yPos);
+
+      // Footer
+      yPos = pageHeight - 30;
+      docPdf.setFontSize(8).setFont('helvetica', 'italic');
+      docPdf.text('Relatório gerado automaticamente pelo Sistema de Gestão Financeira', pageWidth / 2, yPos, { align: 'center' });
+      docPdf.text(`${format(new Date(), 'dd/MM/yyyy HH:mm')} - Página ${docPdf.getNumberOfPages()}`, pageWidth / 2, yPos + 5, { align: 'center' });
+
+      // Salvar o arquivo
+      const fileName = `Relatorio_OS_${data.internalOS.replace(/[^\w\s]/gi, '')}_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
+      docPdf.save(fileName);
+      
+      toast({ 
+        title: "Relatório individual gerado!", 
+        description: `Relatório da OS ${data.internalOS} baixado com sucesso.` 
+      });
+      
+    } catch (error) {
+      console.error("Erro ao gerar relatório individual:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar relatório",
+        description: "Não foi possível gerar o relatório individual. Tente novamente.",
+      });
+    }
+  };
     if (!financialData.length) {
       toast({
         variant: "destructive",
@@ -1156,36 +1508,50 @@ export default function FinancePage() {
                         <span className={`font-semibold ${data.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           Lucro: {data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const order = orders.find(o => o.id === data.id);
-                            if (order) {
-                              handleOpenRevenueModal(order);
-                            } else {
-                              toast({
-                                variant: "destructive",
-                                title: "Erro",
-                                description: "Não foi possível encontrar os dados da OS. Tente recarregar a página.",
-                              });
-                            }
-                          }}
-                          className="ml-2 h-6 px-2 text-xs"
-                        >
-                          {data.grossRevenue === 0 ? (
-                            <>
-                              <Plus className="h-3 w-3 mr-1" />
-                              Lançar Receita
-                            </>
-                          ) : (
-                            <>
-                              <Edit className="h-3 w-3 mr-1" />
-                              Editar Receita
-                            </>
-                          )}
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const order = orders.find(o => o.id === data.id);
+                              if (order) {
+                                handleOpenRevenueModal(order);
+                              } else {
+                                toast({
+                                  variant: "destructive",
+                                  title: "Erro",
+                                  description: "Não foi possível encontrar os dados da OS. Tente recarregar a página.",
+                                });
+                              }
+                            }}
+                            className="h-6 px-2 text-xs"
+                          >
+                            {data.grossRevenue === 0 ? (
+                              <>
+                                <Plus className="h-3 w-3 mr-1" />
+                                Lançar Receita
+                              </>
+                            ) : (
+                              <>
+                                <Edit className="h-3 w-3 mr-1" />
+                                Editar Receita
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              generateIndividualReport(data);
+                            }}
+                            className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          >
+                            <Download className="h-3 w-3 mr-1" />
+                            PDF
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </AccordionTrigger>
