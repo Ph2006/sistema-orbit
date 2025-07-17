@@ -865,7 +865,111 @@ export default function FinancePage() {
   };
 
   // Função para gerar relatório em PDF
-  const generateFinancialReport = async () => { yPos,
+  const generateFinancialReport = async () => {
+    if (!financialData.length) {
+      toast({
+        variant: "destructive",
+        title: "Sem dados",
+        description: "Não há dados financeiros para gerar o relatório.",
+      });
+      return;
+    }
+
+    toast({ title: "Gerando relatório...", description: "Por favor, aguarde." });
+
+    try {
+      const docPdf = new jsPDF({ orientation: "landscape" });
+      const pageWidth = docPdf.internal.pageSize.width;
+      let yPos = 15;
+
+      // Título
+      docPdf.setFontSize(18).setFont('helvetica', 'bold');
+      docPdf.text('RELATÓRIO FINANCEIRO DETALHADO', pageWidth / 2, yPos, { align: 'center' });
+      yPos += 10;
+      
+      docPdf.setFontSize(12).setFont('helvetica', 'normal');
+      docPdf.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, pageWidth / 2, yPos, { align: 'center' });
+      yPos += 15;
+
+      // Resumo executivo
+      docPdf.setFontSize(14).setFont('helvetica', 'bold');
+      docPdf.text('RESUMO EXECUTIVO', 15, yPos);
+      yPos += 10;
+
+      const summaryData = [
+        ['Total de OS Analisadas', financialSummary.totalOrders.toString()],
+        ['Receita Bruta Total', financialSummary.totalGrossRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['Receita Líquida Total', financialSummary.totalNetRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['Total de Impostos', financialSummary.totalTaxes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['Total de Custos', financialSummary.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['Lucro Bruto Total', financialSummary.totalGrossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['Lucro Líquido Total', financialSummary.totalNetProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })],
+        ['Margem Bruta Média', `${financialSummary.averageGrossMargin.toFixed(2)}%`],
+        ['Margem Líquida Média', `${financialSummary.averageNetMargin.toFixed(2)}%`],
+        ['OS Lucrativas', financialSummary.profitableOrders.toString()],
+        ['OS Não Lucrativas', financialSummary.unprofitableOrders.toString()],
+      ];
+
+      autoTable(docPdf, {
+        startY: yPos,
+        head: [['Indicador', 'Valor']],
+        body: summaryData,
+        columnStyles: {
+          0: { cellWidth: 80 },
+          1: { cellWidth: 50, halign: 'right' },
+        },
+        styles: { fontSize: 10 },
+        headStyles: { fillColor: [37, 99, 235] },
+      });
+
+      yPos = (docPdf as any).lastAutoTable.finalY + 20;
+
+      // Detalhamento por OS
+      docPdf.setFontSize(14).setFont('helvetica', 'bold');
+      docPdf.text('DETALHAMENTO POR ORDEM DE SERVIÇO', 15, yPos);
+      yPos += 10;
+
+      const detailData = filteredData.map(data => [
+        data.internalOS,
+        data.customerName,
+        data.grossRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        data.netRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        data.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        `${data.grossMargin.toFixed(1)}%`,
+        data.status,
+      ]);
+
+      autoTable(docPdf, {
+        startY: yPos,
+        head: [['OS', 'Cliente', 'Receita Bruta', 'Receita Líquida', 'Custos', 'Lucro Bruto', 'Margem', 'Status']],
+        body: detailData,
+        columnStyles: {
+          0: { cellWidth: 25 },
+          1: { cellWidth: 45 },
+          2: { cellWidth: 30, halign: 'right' },
+          3: { cellWidth: 30, halign: 'right' },
+          4: { cellWidth: 30, halign: 'right' },
+          5: { cellWidth: 30, halign: 'right' },
+          6: { cellWidth: 20, halign: 'center' },
+          7: { cellWidth: 25, halign: 'center' },
+        },
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [37, 99, 235] },
+      });
+
+      docPdf.save(`Relatorio_Financeiro_${format(new Date(), 'yyyyMMdd')}.pdf`);
+      
+      toast({ title: "Relatório gerado!", description: "O relatório foi baixado com sucesso." });
+      
+    } catch (error) {
+      console.error("Erro ao gerar relatório:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar relatório",
+        description: "Não foi possível gerar o arquivo PDF.",
+      });
+    } yPos,
           head: [['Descrição', 'Qtd', 'Vlr Unit.', 'Imposto', 'Subtotal', 'Total c/ Imp.']],
           body: quotationData,
           columnStyles: {
