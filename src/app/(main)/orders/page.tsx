@@ -63,6 +63,7 @@ const orderItemSchema = z.object({
     description: z.string().min(1, "A descrição é obrigatória."),
     quantity: z.coerce.number().min(0, "A quantidade não pode ser negativa."),
     unitWeight: z.coerce.number().min(0, "O peso não pode ser negativo.").optional(),
+    itemNumber: z.string().optional(), // Número do item no pedido de compra
     productionPlan: z.array(productionStageSchema).optional(),
     itemDeliveryDate: z.date().nullable().optional(),
     shippingList: z.string().optional(),
@@ -568,6 +569,7 @@ export default function OrdersPage() {
                         ...item, 
                         id: item.id || `${doc.id}-${index}`,
                         code: itemCode,
+                        itemNumber: item.itemNumber || '', // Preserva o número do item no pedido de compra
                     };
                     delete enrichedItem.product_code;
 
@@ -705,6 +707,7 @@ export default function OrdersPage() {
 
                 return {
                     ...formItem,
+                    itemNumber: formItem.itemNumber || '',
                     itemDeliveryDate: formItem.itemDeliveryDate ? Timestamp.fromDate(new Date(formItem.itemDeliveryDate)) : null,
                     shippingDate: formItem.shippingDate ? Timestamp.fromDate(new Date(formItem.shippingDate)) : null,
                     productionPlan: planToSave,
@@ -1581,6 +1584,7 @@ export default function OrdersPage() {
             const tableBody = itemsToInclude.map(item => {
                 const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
                 return [
+                    item.itemNumber || '-',
                     item.code || '-',
                     item.description,
                     item.quantity.toString(),
@@ -1591,16 +1595,17 @@ export default function OrdersPage() {
             
             autoTable(docPdf, {
                 startY: yPos,
-                head: [['Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
+                head: [['Nº Item', 'Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
                 body: tableBody,
                 styles: { fontSize: 8 },
                 headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255, halign: 'center' },
                 columnStyles: {
-                    0: { cellWidth: 20 },
-                    1: { cellWidth: 'auto' },
-                    2: { cellWidth: 20, halign: 'center' },
-                    3: { cellWidth: 30, halign: 'center' },
-                    4: { cellWidth: 30, halign: 'center' },
+                    0: { cellWidth: 18, halign: 'center' },
+                    1: { cellWidth: 18 },
+                    2: { cellWidth: 'auto' },
+                    3: { cellWidth: 18, halign: 'center' },
+                    4: { cellWidth: 28, halign: 'center' },
+                    5: { cellWidth: 28, halign: 'center' },
                 }
             });
     
@@ -1891,7 +1896,7 @@ export default function OrdersPage() {
                     }));
                 }
                 const { id, product_code, ...restOfItem } = item as any;
-                return {...restOfItem, id: item.id, productionPlan: planForFirestore };
+                return {...restOfItem, id: item.id, itemNumber: item.itemNumber || '', productionPlan: planForFirestore };
             });
     
             await updateDoc(orderRef, { items: itemsForFirestore });
@@ -2211,6 +2216,7 @@ export default function OrdersPage() {
                 orderId: selectedOrder.id,
                 itemId: item.id,
                 orderNumber: selectedOrder.quotationNumber,
+                itemNumber: item.itemNumber || null, // Número do item no pedido de compra
                 itemCode: item.code || 'SEM_CODIGO',
                 itemDescription: item.description,
                 quantity: item.quantity,
@@ -2798,7 +2804,15 @@ export default function OrdersPage() {
                                     <FormMessage />
                                   </FormItem>
                                 )}/>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                  <FormField control={form.control} name={`items.${index}.itemNumber`} render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Nº Item PC</FormLabel>
+                                      <FormControl><Input placeholder="Ex: 001" {...field} value={field.value || ''} /></FormControl>
+                                      <FormMessage />
+                                      <FormDescription className="text-xs">Nº do item conforme Pedido de Compra do cliente</FormDescription>
+                                    </FormItem>
+                                  )}/>
                                   <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
                                     <FormItem>
                                       <FormLabel>Código</FormLabel>
@@ -2820,27 +2834,27 @@ export default function OrdersPage() {
                                       <FormMessage />
                                     </FormItem>
                                   )}/>
-                                                                        <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
-                                        <FormItem>
-                                          <FormLabel>Entrega do Item</FormLabel>
-                                          <FormControl>
-                                            <Input
-                                              type="date"
-                                              value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
-                                              onChange={(e) => {
-                                                console.log('🔥 DATA ENTREGA ITEM ALTERADA:', e.target.value);
-                                                if (e.target.value) {
-                                                  field.onChange(new Date(e.target.value));
-                                                } else {
-                                                  field.onChange(null);
-                                                }
-                                              }}
-                                              className="w-full"
-                                            />
-                                          </FormControl>
-                                          <FormMessage />
-                                        </FormItem>
-                                      )}/>
+                                  <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Entrega do Item</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type="date"
+                                          value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                          onChange={(e) => {
+                                            console.log('🔥 DATA ENTREGA ITEM ALTERADA:', e.target.value);
+                                            if (e.target.value) {
+                                              field.onChange(new Date(e.target.value));
+                                            } else {
+                                              field.onChange(null);
+                                            }
+                                          }}
+                                          className="w-full"
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}/>
                                 </div>
                                 {itemProgress === 100 && (
                                   <>
@@ -3120,7 +3134,11 @@ export default function OrdersPage() {
                                 )}
                               </div>
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Nº Item PC:</span>
+                                <p className="font-medium">{item.itemNumber || 'N/A'}</p>
+                              </div>
                               <div>
                                 <span className="text-muted-foreground">Quantidade:</span>
                                 <p className="font-medium">{item.quantity}</p>
