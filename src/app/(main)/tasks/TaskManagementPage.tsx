@@ -398,7 +398,8 @@ const TaskManagementPage = () => {
   // =============================================================================
 
   const filteredTasks = useMemo(() => {
-    let filtered = tasks;
+    const safeTasks = tasks || [];
+    let filtered = safeTasks;
 
     if (statusFilter !== "all") {
       filtered = filtered.filter(task => task.status === statusFilter);
@@ -420,23 +421,24 @@ const TaskManagementPage = () => {
   }, [tasks, statusFilter, resourceFilter, responsibleFilter, orderFilter]);
 
   const tasksByPeriod = useMemo(() => {
+    const safeFilteredTasks = filteredTasks || [];
     const today = new Date();
     const weekStart = startOfWeek(today, { weekStartsOn: 1 });
     const weekEnd = endOfWeek(today, { weekStartsOn: 1 });
 
     return {
-      today: filteredTasks.filter(task => 
+      today: safeFilteredTasks.filter(task => 
         task.startDate && isToday(task.startDate) || 
         task.status === 'Em Andamento'
       ),
-      thisWeek: filteredTasks.filter(task => 
+      thisWeek: safeFilteredTasks.filter(task => 
         task.startDate && isThisWeek(task.startDate, { weekStartsOn: 1 }) ||
         (task.status === 'Em Andamento' && task.startDate && task.startDate <= weekEnd)
       ),
-      pending: filteredTasks.filter(task => task.status === 'Pendente'),
-      inProgress: filteredTasks.filter(task => task.status === 'Em Andamento'),
-      completed: filteredTasks.filter(task => task.status === 'Concluído'),
-      overdue: filteredTasks.filter(task => 
+      pending: safeFilteredTasks.filter(task => task.status === 'Pendente'),
+      inProgress: safeFilteredTasks.filter(task => task.status === 'Em Andamento'),
+      completed: safeFilteredTasks.filter(task => task.status === 'Concluído'),
+      overdue: safeFilteredTasks.filter(task => 
         task.startDate && 
         task.startDate < today && 
         task.status !== 'Concluído'
@@ -445,11 +447,12 @@ const TaskManagementPage = () => {
   }, [filteredTasks]);
 
   const stats = useMemo(() => {
-    const total = tasks.length;
-    const completed = tasks.filter(t => t.status === 'Concluído').length;
-    const inProgress = tasks.filter(t => t.status === 'Em Andamento').length;
-    const pending = tasks.filter(t => t.status === 'Pendente').length;
-    const overdue = tasks.filter(t => 
+    const safeTasks = tasks || [];
+    const total = safeTasks.length;
+    const completed = safeTasks.filter(t => t.status === 'Concluído').length;
+    const inProgress = safeTasks.filter(t => t.status === 'Em Andamento').length;
+    const pending = safeTasks.filter(t => t.status === 'Pendente').length;
+    const overdue = safeTasks.filter(t => 
       t.startDate && 
       t.startDate < new Date() && 
       t.status !== 'Concluído'
@@ -460,15 +463,17 @@ const TaskManagementPage = () => {
 
   // Dados para programação
   const schedulingData = useMemo(() => {
-    const pendingTasks = tasks.filter(task => task.status === 'Pendente');
-    const scheduledTasks = tasks.filter(task => 
+    const safeTasks = tasks || [];
+    const pendingTasks = safeTasks.filter(task => task.status === 'Pendente');
+    const scheduledTasks = safeTasks.filter(task => 
       task.scheduledStartDate && task.assignedResourceId
     ) as ScheduledTask[];
     
     const conflicts = detectResourceConflicts(scheduledTasks);
     
     // Recursos disponíveis vs ocupados
-    const resourceUtilization = resources.map(resource => {
+    const safeResources = resources || [];
+    const resourceUtilization = safeResources.map(resource => {
       const tasksForResource = scheduledTasks.filter(task => 
         task.assignedResourceId === resource.id &&
         task.scheduledStartDate &&
@@ -497,7 +502,8 @@ const TaskManagementPage = () => {
 
   // Lista de ordens únicas
   const uniqueOrders = useMemo(() => {
-    const orders = tasks.reduce((acc, task) => {
+    const safeTasks = tasks || [];
+    const orders = safeTasks.reduce((acc, task) => {
       if (!acc.find(o => o.id === task.orderId)) {
         acc.push({
           id: task.orderId,
