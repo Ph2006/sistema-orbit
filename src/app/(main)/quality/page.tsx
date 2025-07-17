@@ -27,7 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, TicketCheck, Plus, Link } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, CalendarIcon, CheckCircle, AlertTriangle, XCircle, FileText, Beaker, ShieldCheck, Wrench, Microscope, BookOpen, BrainCircuit, Phone, SlidersHorizontal, PackageSearch, FileDown, Search, FilePen, AlertCircle, Clock, Play, MoreVertical, Plus, Link } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -1117,55 +1117,7 @@ export default function QualityPage() {
     }
   };
 
-  // --- FUNÇÃO PARA ENUMERAR RNCs EXISTENTES ---
-  const enumerateExistingRncs = async () => {
-    try {
-      const snapshot = await getDocs(collection(db, "companies", "mecald", "qualityReports"));
-      const unNumberedReports = snapshot.docs.filter(doc => !doc.data().number);
-      
-      if (unNumberedReports.length === 0) {
-        toast({ title: "Todos os RNCs já estão enumerados!" });
-        return;
-      }
 
-      // Ordenar por data para manter a sequência cronológica
-      const sortedReports = unNumberedReports.sort((a, b) => {
-        const dateA = a.data().date.toDate();
-        const dateB = b.data().date.toDate();
-        return dateA.getTime() - dateB.getTime();
-      });
-
-      // Obter próximo número disponível
-      const existingNumbers = snapshot.docs
-        .map(doc => doc.data().number)
-        .filter(num => num && typeof num === 'string' && num.startsWith('RNC-'))
-        .map(num => parseInt(num.replace('RNC-', '')))
-        .filter(num => !isNaN(num));
-      
-      let nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
-
-      // Atualizar cada RNC sem numeração
-      for (const doc of sortedReports) {
-        const rncNumber = `RNC-${nextNumber.toString().padStart(4, '0')}`;
-        await updateDoc(doc.ref, { number: rncNumber });
-        nextNumber++;
-      }
-
-      toast({ 
-        title: "Enumeração concluída!", 
-        description: `${unNumberedReports.length} RNC(s) foram enumerados.` 
-      });
-      
-      await fetchAllData(); // Recarregar dados
-    } catch (error) {
-      console.error("Erro ao enumerar RNCs:", error);
-      toast({ 
-        variant: "destructive", 
-        title: "Erro ao enumerar RNCs", 
-        description: "Não foi possível enumerar os RNCs existentes." 
-      });
-    }
-  };
 
   // --- RNC HANDLERS ---
   const onRncSubmit = async (values: z.infer<typeof nonConformanceSchema>) => {
@@ -3110,10 +3062,7 @@ export default function QualityPage() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <div><CardTitle>Histórico de RNCs</CardTitle><CardDescription>Gerencie todas as não conformidades internas e reclamações de clientes.</CardDescription></div>
-                    <div className="flex gap-2">
-                        <Button variant="outline" onClick={enumerateExistingRncs}><TicketCheck className="mr-2 h-4 w-4" />Enumerar RNCs</Button>
-                        <Button onClick={handleAddRncClick}><PlusCircle className="mr-2 h-4 w-4" />Registrar Não Conformidade</Button>
-                    </div>
+                    <Button onClick={handleAddRncClick}><PlusCircle className="mr-2 h-4 w-4" />Registrar Não Conformidade</Button>
                 </CardHeader>
                 <CardContent>
                   {isLoading ? <Skeleton className="h-64 w-full" /> :
