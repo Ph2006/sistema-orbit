@@ -7,7 +7,7 @@ import * as z from "zod";
 import { collection, getDocs, doc, getDoc, updateDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, isToday, isThisWeek, startOfWeek, endOfWeek, addDays, isSameDay } from "date-fns";
+import { format, isToday, isThisWeek, startOfWeek, endOfWeek, addDays, isSameDay, parseISO, startOfDay, endOfDay, differenceInHours, addHours, isWithinInterval } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 // Icons
 import { 
@@ -46,7 +48,12 @@ import {
   TrendingUp,
   Activity,
   CalendarDays,
-  Download
+  Download,
+  Schedule,
+  AlertCircle,
+  Edit,
+  RotateCcw,
+  CheckSquare
 } from "lucide-react";
 
 // =============================================================================
@@ -61,7 +68,28 @@ const taskAssignmentSchema = z.object({
   notes: z.string().optional(),
 });
 
+const taskSchedulingSchema = z.object({
+  taskId: z.string(),
+  resourceId: z.string().optional(),
+  responsibleId: z.string().optional(),
+  estimatedHours: z.number().min(0.1),
+  startDate: z.string(),
+  startTime: z.string(),
+  notes: z.string().optional(),
+});
+
+const taskUpdateSchema = z.object({
+  taskId: z.string(),
+  status: z.enum(['Concluído', 'Reprogramado']),
+  completedDate: z.string().optional(),
+  newStartDate: z.string().optional(),
+  newStartTime: z.string().optional(),
+  notes: z.string().optional(),
+});
+
 type TaskAssignmentFormData = z.infer<typeof taskAssignmentSchema>;
+type TaskSchedulingFormData = z.infer<typeof taskSchedulingSchema>;
+type TaskUpdateFormData = z.infer<typeof taskUpdateSchema>;
 
 interface Task {
   id: string;
@@ -86,6 +114,8 @@ interface Task {
   notes?: string;
   deliveryDate?: Date;
   priority: 'baixa' | 'media' | 'alta' | 'urgente';
+  scheduledStartDate?: Date;
+  scheduledStartTime?: string;
 }
 
 interface Resource {
@@ -110,6 +140,21 @@ interface CompanyData {
   cnpj?: string;
 }
 
+interface ResourceConflict {
+  resourceId: string;
+  resourceName: string;
+  date: string;
+  conflictingTasks: Task[];
+  totalHours: number;
+  capacity: number;
+}
+
+interface ScheduledTask extends Task {
+  scheduledStartDate: Date;
+  scheduledStartTime: string;
+  scheduledEndDate: Date;
+}
+
 // =============================================================================
 // COMPONENTE PRINCIPAL
 // =============================================================================
@@ -122,15 +167,19 @@ const TaskManagementPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isAssignmentDialogOpen, setIsAssignmentDialogOpen] = useState(false);
+  const [isSchedulingDialogOpen, setIsSchedulingDialogOpen] = useState(false);
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("today");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [resourceFilter, setResourceFilter] = useState<string>("all");
   const [responsibleFilter, setResponsibleFilter] = useState<string>("all");
+  const [orderFilter, setOrderFilter] = useState<string>("all");
+  const [selectedViewDate, setSelectedViewDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  // Form para atribuição de tarefas
+  // Forms
   const assignmentForm = useForm<TaskAssignmentFormData>({
     resolver: zodResolver(taskAssignmentSchema),
     defaultValues: {
@@ -141,11 +190,31 @@ const TaskManagementPage = () => {
     },
   });
 
+  const schedulingForm = useForm<TaskSchedulingFormData>({
+    resolver: zodResolver(taskSchedulingSchema),
+    defaultValues: {
+      resourceId: "",
+      responsibleId: "",
+      estimatedHours: 8,
+      startDate: format(new Date(), 'yyyy-MM-dd'),
+      startTime: "08:00",
+      notes: "",
+    },
+  });
+
+  const updateForm = useForm<TaskUpdateFormData>({
+    resolver: zodResolver(taskUpdateSchema),
+    defaultValues: {
+      status: 'Concluído',
+      completedDate: format(new Date(), 'yyyy-MM-dd'),
+      notes: "",
+    },
+  });
+
   // =============================================================================
   // FUNÇÕES UTILITÁRIAS
   // =============================================================================
 
-  // Função para calcular prioridade baseada na data de entrega
   const calculatePriority = (deliveryDate?: Date): 'baixa' | 'media' | 'alta' | 'urgente' => {
     if (!deliveryDate) return 'media';
     
@@ -153,30 +222,98 @@ const TaskManagementPage = () => {
     const diffTime = deliveryDate.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
-    if (diffDays < 0) return 'urgente'; // Atrasado
+    if (diffDays < 0) return 'urgente';
     if (diffDays <= 3) return 'alta';
     if (diffDays <= 7) return 'media';
     return 'baixa';
+  };
+
+  // Função para detectar conflitos de recursos
+  const detectResourceConflicts = (scheduledTasks: ScheduledTask[]): ResourceConflict[] => {
+    const conflicts: ResourceConflict[] = [];
+    const resourceTasksByDate: { [key: string]: { [resourceId: string]: ScheduledTask[] } } = {};
+
+    // Agrupar tarefas por data e recurso
+    scheduledTasks.forEach(task => {
+      if (!task.assignedResourceId || !task.scheduledStartDate) return;
+      
+      const dateKey = format(task.scheduledStartDate, 'yyyy-MM-dd');
+      if (!resourceTasksByDate[dateKey]) {
+        resourceTasksByDate[dateKey] = {};
+      }
+      if (!resourceTasksByDate[dateKey][task.assignedResourceId]) {
+        resourceTasksByDate[dateKey][task.assignedResourceId] = [];
+      }
+      
+      resourceTasksByDate[dateKey][task.assignedResourceId].push(task);
+    });
+
+    // Verificar conflitos
+    Object.entries(resourceTasksByDate).forEach(([date, resourceTasks]) => {
+      Object.entries(resourceTasks).forEach(([resourceId, tasks]) => {
+        if (tasks.length <= 1) return;
+
+        const resource = resources.find(r => r.id === resourceId);
+        if (!resource) return;
+
+        // Verificar sobreposição de horários
+        const sortedTasks = tasks.sort((a, b) => 
+          new Date(`${date} ${a.scheduledStartTime}`).getTime() - 
+          new Date(`${date} ${b.scheduledStartTime}`).getTime()
+        );
+
+        let totalHours = 0;
+        let hasTimeConflict = false;
+
+        for (let i = 0; i < sortedTasks.length; i++) {
+          const currentTask = sortedTasks[i];
+          totalHours += currentTask.estimatedHours || 0;
+
+          if (i < sortedTasks.length - 1) {
+            const nextTask = sortedTasks[i + 1];
+            const currentEnd = addHours(
+              new Date(`${date} ${currentTask.scheduledStartTime}`),
+              currentTask.estimatedHours || 0
+            );
+            const nextStart = new Date(`${date} ${nextTask.scheduledStartTime}`);
+
+            if (currentEnd > nextStart) {
+              hasTimeConflict = true;
+            }
+          }
+        }
+
+        if (hasTimeConflict || totalHours > (resource.capacity || 8)) {
+          conflicts.push({
+            resourceId,
+            resourceName: resource.name,
+            date,
+            conflictingTasks: tasks,
+            totalHours,
+            capacity: resource.capacity || 8,
+          });
+        }
+      });
+    });
+
+    return conflicts;
   };
 
   // =============================================================================
   // BUSCA DE DADOS
   // =============================================================================
 
-  // Função para buscar dados
   const fetchData = async () => {
     if (!user) return;
     setIsLoading(true);
     
     try {
-      // Buscar pedidos
       const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
       const allTasks: Task[] = [];
 
       ordersSnapshot.docs.forEach(orderDoc => {
         const orderData = orderDoc.data();
         
-        // Filtrar apenas pedidos não concluídos
         if (orderData.status === 'Concluído' || orderData.status === 'Cancelado') {
           return;
         }
@@ -207,6 +344,8 @@ const TaskManagementPage = () => {
                 notes: stage.notes,
                 deliveryDate,
                 priority: calculatePriority(deliveryDate),
+                scheduledStartDate: stage.scheduledStartDate?.toDate(),
+                scheduledStartTime: stage.scheduledStartTime,
               };
               allTasks.push(task);
             });
@@ -214,17 +353,14 @@ const TaskManagementPage = () => {
         });
       });
 
-      // Buscar recursos
       const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
       const resourcesSnap = await getDoc(resourcesRef);
       const resourcesData = resourcesSnap.exists() ? resourcesSnap.data().resources || [] : [];
       
-      // Buscar membros da equipe
       const teamRef = doc(db, "companies", "mecald", "settings", "team");
       const teamSnap = await getDoc(teamRef);
       const teamData = teamSnap.exists() ? teamSnap.data().members || [] : [];
 
-      // Enriquecer tarefas com nomes dos recursos e responsáveis
       const enrichedTasks = allTasks.map(task => ({
         ...task,
         assignedResourceName: task.assignedResourceId 
@@ -261,29 +397,28 @@ const TaskManagementPage = () => {
   // DADOS COMPUTADOS
   // =============================================================================
 
-  // Filtrar tarefas
   const filteredTasks = useMemo(() => {
     let filtered = tasks;
 
-    // Filtro por status
     if (statusFilter !== "all") {
       filtered = filtered.filter(task => task.status === statusFilter);
     }
 
-    // Filtro por recurso
     if (resourceFilter !== "all") {
       filtered = filtered.filter(task => task.assignedResourceId === resourceFilter);
     }
 
-    // Filtro por responsável
     if (responsibleFilter !== "all") {
       filtered = filtered.filter(task => task.responsibleId === responsibleFilter);
     }
 
-    return filtered;
-  }, [tasks, statusFilter, resourceFilter, responsibleFilter]);
+    if (orderFilter !== "all") {
+      filtered = filtered.filter(task => task.orderId === orderFilter);
+    }
 
-  // Tarefas por período
+    return filtered;
+  }, [tasks, statusFilter, resourceFilter, responsibleFilter, orderFilter]);
+
   const tasksByPeriod = useMemo(() => {
     const today = new Date();
     const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -309,7 +444,6 @@ const TaskManagementPage = () => {
     };
   }, [filteredTasks]);
 
-  // Estatísticas
   const stats = useMemo(() => {
     const total = tasks.length;
     const completed = tasks.filter(t => t.status === 'Concluído').length;
@@ -324,11 +458,63 @@ const TaskManagementPage = () => {
     return { total, completed, inProgress, pending, overdue };
   }, [tasks]);
 
+  // Dados para programação
+  const schedulingData = useMemo(() => {
+    const pendingTasks = tasks.filter(task => task.status === 'Pendente');
+    const scheduledTasks = tasks.filter(task => 
+      task.scheduledStartDate && task.assignedResourceId
+    ) as ScheduledTask[];
+    
+    const conflicts = detectResourceConflicts(scheduledTasks);
+    
+    // Recursos disponíveis vs ocupados
+    const resourceUtilization = resources.map(resource => {
+      const tasksForResource = scheduledTasks.filter(task => 
+        task.assignedResourceId === resource.id &&
+        task.scheduledStartDate &&
+        isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+      );
+      
+      const totalHours = tasksForResource.reduce((sum, task) => sum + (task.estimatedHours || 0), 0);
+      const utilization = (totalHours / (resource.capacity || 8)) * 100;
+      
+      return {
+        resource,
+        tasks: tasksForResource,
+        totalHours,
+        utilization: Math.min(utilization, 100),
+        isOverutilized: totalHours > (resource.capacity || 8),
+      };
+    });
+
+    return {
+      pendingTasks,
+      scheduledTasks,
+      conflicts,
+      resourceUtilization,
+    };
+  }, [tasks, resources, selectedViewDate]);
+
+  // Lista de ordens únicas
+  const uniqueOrders = useMemo(() => {
+    const orders = tasks.reduce((acc, task) => {
+      if (!acc.find(o => o.id === task.orderId)) {
+        acc.push({
+          id: task.orderId,
+          number: task.orderNumber,
+          customer: task.customer,
+        });
+      }
+      return acc;
+    }, [] as Array<{ id: string; number: string; customer: string }>);
+    
+    return orders.sort((a, b) => a.number.localeCompare(b.number));
+  }, [tasks]);
+
   // =============================================================================
   // HANDLERS
   // =============================================================================
 
-  // Handlers
   const handleAssignTask = (task: Task) => {
     setSelectedTask(task);
     assignmentForm.reset({
@@ -341,11 +527,35 @@ const TaskManagementPage = () => {
     setIsAssignmentDialogOpen(true);
   };
 
+  const handleScheduleTask = (task: Task) => {
+    setSelectedTask(task);
+    schedulingForm.reset({
+      taskId: task.id,
+      resourceId: task.assignedResourceId || "",
+      responsibleId: task.responsibleId || "",
+      estimatedHours: task.estimatedHours || 8,
+      startDate: task.scheduledStartDate ? format(task.scheduledStartDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
+      startTime: task.scheduledStartTime || "08:00",
+      notes: task.notes || "",
+    });
+    setIsSchedulingDialogOpen(true);
+  };
+
+  const handleUpdateTask = (task: Task) => {
+    setSelectedTask(task);
+    updateForm.reset({
+      taskId: task.id,
+      status: 'Concluído',
+      completedDate: format(new Date(), 'yyyy-MM-dd'),
+      notes: "",
+    });
+    setIsUpdateDialogOpen(true);
+  };
+
   const onAssignmentSubmit = async (values: TaskAssignmentFormData) => {
     if (!selectedTask) return;
 
     try {
-      // Atualizar a tarefa no Firestore
       const orderRef = doc(db, "companies", "mecald", "orders", selectedTask.orderId);
       const orderSnap = await getDoc(orderRef);
       
@@ -387,7 +597,7 @@ const TaskManagementPage = () => {
 
       setIsAssignmentDialogOpen(false);
       setSelectedTask(null);
-      await fetchData(); // Recarregar dados
+      await fetchData();
 
     } catch (error) {
       console.error("Error assigning task:", error);
@@ -399,11 +609,138 @@ const TaskManagementPage = () => {
     }
   };
 
+  const onSchedulingSubmit = async (values: TaskSchedulingFormData) => {
+    if (!selectedTask) return;
+
+    try {
+      const orderRef = doc(db, "companies", "mecald", "orders", selectedTask.orderId);
+      const orderSnap = await getDoc(orderRef);
+      
+      if (!orderSnap.exists()) {
+        throw new Error("Pedido não encontrado");
+      }
+
+      const orderData = orderSnap.data();
+      const updatedItems = orderData.items.map((item: any, itemIndex: number) => {
+        if (item.id === selectedTask.itemId || itemIndex.toString() === selectedTask.itemId.split('-').pop()) {
+          const updatedProductionPlan = item.productionPlan?.map((stage: any, stageIndex: number) => {
+            const taskId = `${selectedTask.orderId}-${itemIndex}-${stageIndex}`;
+            if (taskId === selectedTask.id) {
+              return {
+                ...stage,
+                assignedResourceId: values.resourceId || null,
+                responsibleId: values.responsibleId || null,
+                estimatedHours: values.estimatedHours,
+                scheduledStartDate: Timestamp.fromDate(parseISO(values.startDate)),
+                scheduledStartTime: values.startTime,
+                notes: values.notes || null,
+                status: 'Programado',
+              };
+            }
+            return stage;
+          });
+          
+          return {
+            ...item,
+            productionPlan: updatedProductionPlan,
+          };
+        }
+        return item;
+      });
+
+      await updateDoc(orderRef, { items: updatedItems });
+
+      toast({
+        title: "Tarefa programada!",
+        description: "A tarefa foi programada com sucesso.",
+      });
+
+      setIsSchedulingDialogOpen(false);
+      setSelectedTask(null);
+      await fetchData();
+
+    } catch (error) {
+      console.error("Error scheduling task:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao programar tarefa",
+        description: "Não foi possível programar a tarefa.",
+      });
+    }
+  };
+
+  const onUpdateSubmit = async (values: TaskUpdateFormData) => {
+    if (!selectedTask) return;
+
+    try {
+      const orderRef = doc(db, "companies", "mecald", "orders", selectedTask.orderId);
+      const orderSnap = await getDoc(orderRef);
+      
+      if (!orderSnap.exists()) {
+        throw new Error("Pedido não encontrado");
+      }
+
+      const orderData = orderSnap.data();
+      const updatedItems = orderData.items.map((item: any, itemIndex: number) => {
+        if (item.id === selectedTask.itemId || itemIndex.toString() === selectedTask.itemId.split('-').pop()) {
+          const updatedProductionPlan = item.productionPlan?.map((stage: any, stageIndex: number) => {
+            const taskId = `${selectedTask.orderId}-${itemIndex}-${stageIndex}`;
+            if (taskId === selectedTask.id) {
+              const updateData: any = {
+                ...stage,
+                status: values.status,
+                notes: values.notes || stage.notes,
+              };
+
+              if (values.status === 'Concluído' && values.completedDate) {
+                updateData.completedDate = Timestamp.fromDate(parseISO(values.completedDate));
+                updateData.actualCompletionDate = Timestamp.fromDate(new Date());
+              }
+
+              if (values.status === 'Reprogramado' && values.newStartDate) {
+                updateData.scheduledStartDate = Timestamp.fromDate(parseISO(values.newStartDate));
+                updateData.scheduledStartTime = values.newStartTime || stage.scheduledStartTime;
+                updateData.status = 'Programado';
+              }
+
+              return updateData;
+            }
+            return stage;
+          });
+          
+          return {
+            ...item,
+            productionPlan: updatedProductionPlan,
+          };
+        }
+        return item;
+      });
+
+      await updateDoc(orderRef, { items: updatedItems });
+
+      toast({
+        title: "Tarefa atualizada!",
+        description: `A tarefa foi ${values.status === 'Concluído' ? 'concluída' : 'reprogramada'} com sucesso.`,
+      });
+
+      setIsUpdateDialogOpen(false);
+      setSelectedTask(null);
+      await fetchData();
+
+    } catch (error) {
+      console.error("Error updating task:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao atualizar tarefa",
+        description: "Não foi possível atualizar a tarefa.",
+      });
+    }
+  };
+
   // =============================================================================
   // GERAÇÃO DE RELATÓRIOS
   // =============================================================================
 
-  // Função para gerar relatório PDF
   const generateTaskReport = async (period: 'daily' | 'weekly') => {
     try {
       const companyRef = doc(db, "companies", "mecald", "settings", "company");
@@ -414,7 +751,6 @@ const TaskManagementPage = () => {
       const pageWidth = pdfDoc.internal.pageSize.width;
       let yPos = 15;
 
-      // Header com logo e informações da empresa
       if (companyData.logo?.preview) {
         try {
           pdfDoc.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
@@ -423,7 +759,6 @@ const TaskManagementPage = () => {
         }
       }
 
-      // Informações da empresa
       let companyInfoX = 65;
       let companyInfoY = yPos + 5;
       pdfDoc.setFontSize(16).setFont('helvetica', 'bold');
@@ -439,60 +774,72 @@ const TaskManagementPage = () => {
 
       yPos = 45;
 
-      // Título do relatório
       pdfDoc.setFontSize(18).setFont('helvetica', 'bold');
-      const title = period === 'daily' ? 'TAREFAS DIÁRIAS' : 'TAREFAS SEMANAIS';
+      const title = period === 'daily' ? 'PROGRAMAÇÃO DIÁRIA' : 'PROGRAMAÇÃO SEMANAL';
       pdfDoc.text(title, pageWidth / 2, yPos, { align: 'center' });
       yPos += 10;
 
-      // Data do relatório
       pdfDoc.setFontSize(10).setFont('helvetica', 'normal');
       const dateStr = period === 'daily' 
-        ? `Data: ${format(new Date(), 'dd/MM/yyyy')}`
-        : `Semana de ${format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'dd/MM')} a ${format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'dd/MM/yyyy')}`;
+        ? `Data: ${format(parseISO(selectedViewDate), 'dd/MM/yyyy')}`
+        : `Semana de ${format(startOfWeek(parseISO(selectedViewDate), { weekStartsOn: 1 }), 'dd/MM')} a ${format(endOfWeek(parseISO(selectedViewDate), { weekStartsOn: 1 }), 'dd/MM/yyyy')}`;
       pdfDoc.text(dateStr, pageWidth / 2, yPos, { align: 'center' });
       yPos += 15;
 
-      // Dados para o relatório
-      const tasksToShow = period === 'daily' ? tasksByPeriod.today : tasksByPeriod.thisWeek;
+      const tasksToShow = period === 'daily' 
+        ? schedulingData.scheduledTasks.filter(task => 
+            task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+          )
+        : schedulingData.scheduledTasks.filter(task => 
+            task.scheduledStartDate && isThisWeek(task.scheduledStartDate, { weekStartsOn: 1 })
+          );
 
       if (tasksToShow.length === 0) {
-        pdfDoc.text('Nenhuma tarefa encontrada para este período.', pageWidth / 2, yPos, { align: 'center' });
+        pdfDoc.text('Nenhuma tarefa programada para este período.', pageWidth / 2, yPos, { align: 'center' });
       } else {
-        // Estatísticas rápidas
-        const periodStats = {
+        // Estatísticas da programação
+        const scheduleStats = {
           total: tasksToShow.length,
-          pending: tasksToShow.filter(t => t.status === 'Pendente').length,
-          inProgress: tasksToShow.filter(t => t.status === 'Em Andamento').length,
-          completed: tasksToShow.filter(t => t.status === 'Concluído').length,
+          resources: [...new Set(tasksToShow.map(t => t.assignedResourceId))].length,
+          totalHours: tasksToShow.reduce((sum, t) => sum + (t.estimatedHours || 0), 0),
         };
 
         pdfDoc.setFontSize(12).setFont('helvetica', 'bold');
-        pdfDoc.text('RESUMO:', 15, yPos);
+        pdfDoc.text('RESUMO DA PROGRAMAÇÃO:', 15, yPos);
         yPos += 8;
 
         pdfDoc.setFontSize(10).setFont('helvetica', 'normal');
-        pdfDoc.text(`Total de tarefas: ${periodStats.total}`, 15, yPos);
-        pdfDoc.text(`Pendentes: ${periodStats.pending}`, 70, yPos);
-        pdfDoc.text(`Em andamento: ${periodStats.inProgress}`, 120, yPos);
-        pdfDoc.text(`Concluídas: ${periodStats.completed}`, 170, yPos);
+        pdfDoc.text(`Total de tarefas: ${scheduleStats.total}`, 15, yPos);
+        pdfDoc.text(`Recursos utilizados: ${scheduleStats.resources}`, 80, yPos);
+        pdfDoc.text(`Horas programadas: ${scheduleStats.totalHours}h`, 150, yPos);
         yPos += 15;
 
-        // Tabela de tarefas
-        const tableBody = tasksToShow.map(task => [
-          task.orderNumber,
-          task.customer,
-          task.itemDescription.substring(0, 30) + (task.itemDescription.length > 30 ? '...' : ''),
-          task.stageName,
-          task.status,
-          task.assignedResourceName || 'Não atribuído',
-          task.responsibleName || 'Não atribuído',
-          task.deliveryDate ? format(task.deliveryDate, 'dd/MM/yy') : 'N/A',
-        ]);
+        // Tabela de programação
+        const tableBody = tasksToShow
+          .sort((a, b) => {
+            if (a.scheduledStartDate && b.scheduledStartDate) {
+              const dateCompare = a.scheduledStartDate.getTime() - b.scheduledStartDate.getTime();
+              if (dateCompare === 0) {
+                return (a.scheduledStartTime || '').localeCompare(b.scheduledStartTime || '');
+              }
+              return dateCompare;
+            }
+            return 0;
+          })
+          .map(task => [
+            task.scheduledStartDate ? format(task.scheduledStartDate, 'dd/MM') : 'N/A',
+            task.scheduledStartTime || 'N/A',
+            task.orderNumber,
+            task.customer.substring(0, 20) + (task.customer.length > 20 ? '...' : ''),
+            task.stageName.substring(0, 25) + (task.stageName.length > 25 ? '...' : ''),
+            task.assignedResourceName || 'N/A',
+            task.responsibleName || 'N/A',
+            `${task.estimatedHours || 0}h`,
+          ]);
 
         autoTable(pdfDoc, {
           startY: yPos,
-          head: [['Pedido', 'Cliente', 'Item', 'Etapa', 'Status', 'Recurso', 'Responsável', 'Entrega']],
+          head: [['Data', 'Hora', 'OS', 'Cliente', 'Etapa', 'Recurso', 'Responsável', 'Horas']],
           body: tableBody,
           styles: { 
             fontSize: 8,
@@ -505,22 +852,45 @@ const TaskManagementPage = () => {
             fontStyle: 'bold'
           },
           columnStyles: {
-            0: { cellWidth: 20 }, // Pedido
-            1: { cellWidth: 35 }, // Cliente
-            2: { cellWidth: 40 }, // Item
-            3: { cellWidth: 30 }, // Etapa
-            4: { cellWidth: 25 }, // Status
+            0: { cellWidth: 20 }, // Data
+            1: { cellWidth: 20 }, // Hora
+            2: { cellWidth: 25 }, // OS
+            3: { cellWidth: 35 }, // Cliente
+            4: { cellWidth: 40 }, // Etapa
             5: { cellWidth: 30 }, // Recurso
             6: { cellWidth: 30 }, // Responsável
-            7: { cellWidth: 20 }, // Entrega
+            7: { cellWidth: 20 }, // Horas
           }
         });
 
+        // Conflitos (se houver)
+        if (schedulingData.conflicts.length > 0) {
+          const finalY = (pdfDoc as any).lastAutoTable.finalY;
+          yPos = finalY + 15;
+          
+          pdfDoc.setFontSize(12).setFont('helvetica', 'bold');
+          pdfDoc.setTextColor(220, 38, 38); // Vermelho
+          pdfDoc.text('⚠️ CONFLITOS DETECTADOS:', 15, yPos);
+          yPos += 8;
+          
+          pdfDoc.setFontSize(10).setFont('helvetica', 'normal');
+          pdfDoc.setTextColor(0, 0, 0); // Preto
+          
+          schedulingData.conflicts.forEach((conflict, index) => {
+            pdfDoc.text(
+              `${index + 1}. ${conflict.resourceName} em ${format(parseISO(conflict.date), 'dd/MM/yyyy')}: ${conflict.totalHours}h programadas (capacidade: ${conflict.capacity}h)`,
+              15, yPos
+            );
+            yPos += 5;
+          });
+        }
+
         // Rodapé
-        const finalY = (pdfDoc as any).lastAutoTable.finalY;
+        const finalY = (pdfDoc as any).lastAutoTable?.finalY || yPos;
         if (finalY + 20 < pdfDoc.internal.pageSize.height - 20) {
           yPos = finalY + 15;
           pdfDoc.setFontSize(8).setFont('helvetica', 'italic');
+          pdfDoc.setTextColor(100, 100, 100);
           pdfDoc.text(
             `Relatório gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
             pageWidth / 2,
@@ -530,21 +900,20 @@ const TaskManagementPage = () => {
         }
       }
 
-      // Salvar PDF
-      const filename = `Tarefas_${period === 'daily' ? 'Diarias' : 'Semanais'}_${format(new Date(), 'yyyyMMdd')}.pdf`;
+      const filename = `Programacao_${period === 'daily' ? 'Diaria' : 'Semanal'}_${format(parseISO(selectedViewDate), 'yyyyMMdd')}.pdf`;
       pdfDoc.save(filename);
 
       toast({
         title: "Relatório gerado!",
-        description: `O relatório ${period === 'daily' ? 'diário' : 'semanal'} foi baixado com sucesso.`,
+        description: `O relatório de programação ${period === 'daily' ? 'diária' : 'semanal'} foi baixado com sucesso.`,
       });
 
     } catch (error) {
-      console.error("Error generating report:", error);
+      console.error("Error generating scheduling report:", error);
       toast({
         variant: "destructive",
         title: "Erro ao gerar relatório",
-        description: "Não foi possível gerar o relatório PDF.",
+        description: "Não foi possível gerar o relatório de programação.",
       });
     }
   };
@@ -553,7 +922,6 @@ const TaskManagementPage = () => {
   // COMPONENTES AUXILIARES
   // =============================================================================
 
-  // Componentes auxiliares
   const TaskTable = ({ tasks, title }: { tasks: Task[]; title: string }) => {
     const getPriorityBadge = (priority: Task['priority']) => {
       const variants = {
@@ -574,6 +942,7 @@ const TaskManagementPage = () => {
       const variants = {
         'Pendente': "bg-gray-100 text-gray-800",
         'Em Andamento': "bg-blue-100 text-blue-800",
+        'Programado': "bg-purple-100 text-purple-800",
         'Concluído': "bg-green-100 text-green-800"
       };
       
@@ -668,6 +1037,375 @@ const TaskManagementPage = () => {
           </Table>
         </CardContent>
       </Card>
+    );
+  };
+
+  // Componente para a aba de programação
+  const SchedulingTab = () => {
+    return (
+      <div className="space-y-6">
+        {/* Filtros para programação */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Schedule className="h-5 w-5" />
+              Programação de Tarefas
+            </CardTitle>
+            <CardDescription>
+              Programe tarefas pendentes e gerencie conflitos de recursos
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium">Data de Visualização:</label>
+                <Input
+                  type="date"
+                  value={selectedViewDate}
+                  onChange={(e) => setSelectedViewDate(e.target.value)}
+                  className="w-[160px]"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium">Filtrar por OS:</label>
+                <Select value={orderFilter} onValueChange={setOrderFilter}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Todas as OS" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as OS</SelectItem>
+                    {uniqueOrders.map(order => (
+                      <SelectItem key={order.id} value={order.id}>
+                        {order.number} - {order.customer.substring(0, 30)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => generateTaskReport('daily')}>
+                  <Printer className="mr-2 h-4 w-4" />
+                  Exportar Diário
+                </Button>
+                <Button variant="outline" onClick={() => generateTaskReport('weekly')}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar Semanal
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Alertas de conflitos */}
+        {schedulingData.conflicts.length > 0 && (
+          <Alert className="border-red-200 bg-red-50">
+            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <AlertDescription>
+              <div className="space-y-2">
+                <p className="font-medium text-red-800">
+                  {schedulingData.conflicts.length} conflito(s) de recursos detectado(s):
+                </p>
+                {schedulingData.conflicts.map((conflict, index) => (
+                  <div key={index} className="text-sm text-red-700">
+                    • <strong>{conflict.resourceName}</strong> em {format(parseISO(conflict.date), 'dd/MM/yyyy')}: 
+                    {conflict.totalHours}h programadas (capacidade: {conflict.capacity}h)
+                  </div>
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Dashboard de recursos */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Utilização de Recursos - {format(parseISO(selectedViewDate), 'dd/MM/yyyy')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {schedulingData.resourceUtilization.map((item) => (
+                <Card key={item.resource.id} className={item.isOverutilized ? "border-red-200" : ""}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      {item.resource.name}
+                      {item.isOverutilized && (
+                        <AlertCircle className="h-4 w-4 text-red-500" />
+                      )}
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      {item.resource.type} • Capacidade: {item.resource.capacity || 8}h
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>Utilização:</span>
+                        <span className={item.isOverutilized ? "text-red-600 font-medium" : ""}>
+                          {item.totalHours}h ({item.utilization.toFixed(0)}%)
+                        </span>
+                      </div>
+                      <Progress 
+                        value={item.utilization} 
+                        className={`h-2 ${item.isOverutilized ? '[&>div]:bg-red-500' : ''}`}
+                      />
+                      <div className="text-xs text-muted-foreground">
+                        {item.tasks.length} tarefa(s) programada(s)
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Tarefas pendentes para programação */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5" />
+                Tarefas Pendentes para Programação
+              </span>
+              <Badge variant="outline">{schedulingData.pendingTasks.length} tarefas</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {schedulingData.pendingTasks.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">
+                Todas as tarefas foram programadas!
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>OS</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Item</TableHead>
+                    <TableHead>Etapa</TableHead>
+                    <TableHead>Prioridade</TableHead>
+                    <TableHead>Entrega</TableHead>
+                    <TableHead>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {schedulingData.pendingTasks
+                    .filter(task => orderFilter === "all" || task.orderId === orderFilter)
+                    .map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell className="font-medium">{task.orderNumber}</TableCell>
+                      <TableCell>{task.customer}</TableCell>
+                      <TableCell>
+                        <div>
+                          {task.itemCode && <div className="text-xs text-muted-foreground">[{task.itemCode}]</div>}
+                          <div className="truncate max-w-[150px]" title={task.itemDescription}>
+                            {task.itemDescription}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>{task.stageName}</TableCell>
+                      <TableCell>
+                        <Badge className={
+                          task.priority === 'urgente' ? "bg-red-100 text-red-800" :
+                          task.priority === 'alta' ? "bg-orange-100 text-orange-800" :
+                          task.priority === 'media' ? "bg-yellow-100 text-yellow-800" :
+                          "bg-blue-100 text-blue-800"
+                        }>
+                          {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {task.deliveryDate ? format(task.deliveryDate, 'dd/MM/yyyy') : 'N/A'}
+                      </TableCell>
+                      <TableCell>
+                        <Button 
+                          size="sm"
+                          onClick={() => handleScheduleTask(task)}
+                        >
+                          <Schedule className="h-4 w-4 mr-1" />
+                          Programar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Tarefas programadas */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                Tarefas Programadas - {format(parseISO(selectedViewDate), 'dd/MM/yyyy')}
+              </span>
+              <Badge variant="outline">
+                {schedulingData.scheduledTasks.filter(task => 
+                  task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+                ).length} tarefas
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {schedulingData.scheduledTasks.filter(task => 
+              task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+            ).length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">
+                Nenhuma tarefa programada para esta data.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Hora</TableHead>
+                    <TableHead>OS</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Etapa</TableHead>
+                    <TableHead>Recurso</TableHead>
+                    <TableHead>Responsável</TableHead>
+                    <TableHead>Duração</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {schedulingData.scheduledTasks
+                    .filter(task => 
+                      task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
+                      (orderFilter === "all" || task.orderId === orderFilter)
+                    )
+                    .sort((a, b) => (a.scheduledStartTime || '').localeCompare(b.scheduledStartTime || ''))
+                    .map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell className="font-medium">{task.scheduledStartTime}</TableCell>
+                      <TableCell>{task.orderNumber}</TableCell>
+                      <TableCell>{task.customer}</TableCell>
+                      <TableCell>{task.stageName}</TableCell>
+                      <TableCell>
+                        {task.assignedResourceName ? (
+                          <Badge variant="outline">{task.assignedResourceName}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">N/A</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {task.responsibleName ? (
+                          <Badge variant="outline">{task.responsibleName}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">N/A</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{task.estimatedHours || 0}h</TableCell>
+                      <TableCell>
+                        <Badge className={
+                          task.status === 'Concluído' ? "bg-green-100 text-green-800" :
+                          task.status === 'Em Andamento' ? "bg-blue-100 text-blue-800" :
+                          "bg-purple-100 text-purple-800"
+                        }>
+                          {task.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button 
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleScheduleTask(task)}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          {(task.status === 'Programado' || task.status === 'Em Andamento') && (
+                            <Button 
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleUpdateTask(task)}
+                            >
+                              <CheckSquare className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Dashboard Realizado x Programado */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Realizado x Programado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Tarefas Programadas</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {schedulingData.scheduledTasks.filter(task => 
+                      task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+                    ).length}
+                  </div>
+                  <p className="text-xs text-muted-foreground">para hoje</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Tarefas Concluídas</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">
+                    {schedulingData.scheduledTasks.filter(task => 
+                      task.scheduledStartDate && 
+                      isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
+                      task.status === 'Concluído'
+                    ).length}
+                  </div>
+                  <p className="text-xs text-muted-foreground">hoje</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Taxa de Conclusão</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {(() => {
+                      const scheduled = schedulingData.scheduledTasks.filter(task => 
+                        task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+                      ).length;
+                      const completed = schedulingData.scheduledTasks.filter(task => 
+                        task.scheduledStartDate && 
+                        isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
+                        task.status === 'Concluído'
+                      ).length;
+                      return scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0;
+                    })()}%
+                  </div>
+                  <p className="text-xs text-muted-foreground">de eficiência</p>
+                </CardContent>
+              </Card>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     );
   };
 
@@ -788,6 +1526,7 @@ const TaskManagementPage = () => {
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="Pendente">Pendente</SelectItem>
                   <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                  <SelectItem value="Programado">Programado</SelectItem>
                   <SelectItem value="Concluído">Concluído</SelectItem>
                 </SelectContent>
               </Select>
@@ -890,7 +1629,7 @@ const TaskManagementPage = () => {
 
       {/* Abas de Tarefas */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="today" className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             Hoje ({tasksByPeriod.today.length})
@@ -914,6 +1653,10 @@ const TaskManagementPage = () => {
           <TabsTrigger value="overdue" className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" />
             Atrasadas ({tasksByPeriod.overdue.length})
+          </TabsTrigger>
+          <TabsTrigger value="scheduling" className="flex items-center gap-2">
+            <Schedule className="h-4 w-4" />
+            Programar ({schedulingData.pendingTasks.length})
           </TabsTrigger>
         </TabsList>
 
@@ -940,6 +1683,10 @@ const TaskManagementPage = () => {
         <TabsContent value="overdue">
           <TaskTable tasks={tasksByPeriod.overdue} title="Tarefas em Atraso" />
         </TabsContent>
+
+        <TabsContent value="scheduling">
+          <SchedulingTab />
+        </TabsContent>
       </Tabs>
 
       {/* Dialog de Atribuição de Tarefas */}
@@ -954,7 +1701,6 @@ const TaskManagementPage = () => {
           
           {selectedTask && (
             <div className="space-y-4">
-              {/* Informações da Tarefa */}
               <Card className="p-4 bg-muted/50">
                 <div className="space-y-2">
                   <div className="flex justify-between">
@@ -988,7 +1734,6 @@ const TaskManagementPage = () => {
                 </div>
               </Card>
 
-              {/* Formulário de Atribuição */}
               <Form {...assignmentForm}>
                 <form onSubmit={assignmentForm.handleSubmit(onAssignmentSubmit)} className="space-y-4">
                   <FormField
@@ -1110,6 +1855,362 @@ const TaskManagementPage = () => {
                     </Button>
                     <Button type="submit" disabled={assignmentForm.formState.isSubmitting}>
                       {assignmentForm.formState.isSubmitting ? "Salvando..." : "Atribuir Tarefa"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Programação de Tarefas */}
+      <Dialog open={isSchedulingDialogOpen} onOpenChange={setIsSchedulingDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Programar Tarefa</DialogTitle>
+            <DialogDescription>
+              Defina data, horário e recursos para esta tarefa.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedTask && (
+            <div className="space-y-4">
+              <Card className="p-4 bg-muted/50">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="font-medium">Pedido:</span>
+                    <span>{selectedTask.orderNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Cliente:</span>
+                    <span>{selectedTask.customer}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Etapa:</span>
+                    <span>{selectedTask.stageName}</span>
+                  </div>
+                  {selectedTask.deliveryDate && (
+                    <div className="flex justify-between">
+                      <span className="font-medium">Entrega:</span>
+                      <span className={
+                        selectedTask.priority === 'urgente' ? "text-red-600 font-medium" :
+                        selectedTask.priority === 'alta' ? "text-orange-600 font-medium" :
+                        ""
+                      }>
+                        {format(selectedTask.deliveryDate, 'dd/MM/yyyy')}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Form {...schedulingForm}>
+                <form onSubmit={schedulingForm.handleSubmit(onSchedulingSubmit)} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={schedulingForm.control}
+                      name="startDate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Data de Início</FormLabel>
+                          <FormControl>
+                            <Input type="date" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={schedulingForm.control}
+                      name="startTime"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Horário de Início</FormLabel>
+                          <FormControl>
+                            <Input type="time" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <FormField
+                    control={schedulingForm.control}
+                    name="resourceId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Recurso Produtivo</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione um recurso" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="">Nenhum recurso</SelectItem>
+                            {resources
+                              .filter(r => r.status === 'disponivel')
+                              .map(resource => (
+                                <SelectItem key={resource.id} value={resource.id}>
+                                  <div className="flex items-center gap-2">
+                                    <Settings className="h-4 w-4" />
+                                    {resource.name} ({resource.type}) - Cap: {resource.capacity || 8}h
+                                  </div>
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={schedulingForm.control}
+                    name="responsibleId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Responsável</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione um responsável" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="">Nenhum responsável</SelectItem>
+                            {teamMembers.map(member => (
+                              <SelectItem key={member.id} value={member.id}>
+                                <div className="flex items-center gap-2">
+                                  <User className="h-4 w-4" />
+                                  {member.name} - {member.position}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={schedulingForm.control}
+                    name="estimatedHours"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Duração (horas)</FormLabel>
+                        <FormControl>
+                          <Select 
+                            onValueChange={(value) => field.onChange(parseFloat(value))} 
+                            value={field.value?.toString() || ""}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione a duração" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="0.5">0,5 horas</SelectItem>
+                              <SelectItem value="1">1 hora</SelectItem>
+                              <SelectItem value="2">2 horas</SelectItem>
+                              <SelectItem value="4">4 horas</SelectItem>
+                              <SelectItem value="8">8 horas</SelectItem>
+                              <SelectItem value="12">12 horas</SelectItem>
+                              <SelectItem value="16">16 horas</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={schedulingForm.control}
+                    name="notes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Observações</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Instruções especiais, materiais necessários, etc."
+                            className="resize-none"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <DialogFooter>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => setIsSchedulingDialogOpen(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={schedulingForm.formState.isSubmitting}>
+                      {schedulingForm.formState.isSubmitting ? "Programando..." : "Programar Tarefa"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Atualização de Tarefas */}
+      <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Atualizar Status da Tarefa</DialogTitle>
+            <DialogDescription>
+              Marque a tarefa como concluída ou reprograme para outra data.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedTask && (
+            <div className="space-y-4">
+              <Card className="p-4 bg-muted/50">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="font-medium">Pedido:</span>
+                    <span>{selectedTask.orderNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Etapa:</span>
+                    <span>{selectedTask.stageName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Status Atual:</span>
+                    <Badge>{selectedTask.status}</Badge>
+                  </div>
+                  {selectedTask.scheduledStartDate && (
+                    <div className="flex justify-between">
+                      <span className="font-medium">Programado para:</span>
+                      <span>
+                        {format(selectedTask.scheduledStartDate, 'dd/MM/yyyy')} às {selectedTask.scheduledStartTime}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Form {...updateForm}>
+                <form onSubmit={updateForm.handleSubmit(onUpdateSubmit)} className="space-y-4">
+                  <FormField
+                    control={updateForm.control}
+                    name="status"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nova Situação</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione o status" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="Concluído">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-green-600" />
+                                Marcar como Concluída
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="Reprogramado">
+                              <div className="flex items-center gap-2">
+                                <RotateCcw className="h-4 w-4 text-blue-600" />
+                                Reprogramar Tarefa
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {updateForm.watch('status') === 'Concluído' && (
+                    <FormField
+                      control={updateForm.control}
+                      name="completedDate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Data de Conclusão</FormLabel>
+                          <FormControl>
+                            <Input type="date" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  {updateForm.watch('status') === 'Reprogramado' && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={updateForm.control}
+                        name="newStartDate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Nova Data</FormLabel>
+                            <FormControl>
+                              <Input type="date" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={updateForm.control}
+                        name="newStartTime"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Novo Horário</FormLabel>
+                            <FormControl>
+                              <Input type="time" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+
+                  <FormField
+                    control={updateForm.control}
+                    name="notes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Observações</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Comentários sobre a conclusão ou motivo da reprogramação..."
+                            className="resize-none"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <DialogFooter>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => setIsUpdateDialogOpen(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={updateForm.formState.isSubmitting}>
+                      {updateForm.formState.isSubmitting ? "Salvando..." : "Atualizar Tarefa"}
                     </Button>
                   </DialogFooter>
                 </form>
