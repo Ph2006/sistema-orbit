@@ -539,6 +539,52 @@ export default function OrdersPage() {
         }
     };
     
+    // Função helper para converter timestamps do Firestore de forma segura
+    const safeToDate = (timestamp: any): Date | null => {
+        if (!timestamp) return null;
+        
+        // Se já é uma data JavaScript válida
+        if (timestamp instanceof Date) {
+            return isNaN(timestamp.getTime()) ? null : timestamp;
+        }
+        
+        // Se é um timestamp do Firestore com método toDate
+        if (timestamp && typeof timestamp.toDate === 'function') {
+            try {
+                const date = timestamp.toDate();
+                return (date instanceof Date && !isNaN(date.getTime())) ? date : null;
+            } catch (error) {
+                console.warn("Erro ao converter timestamp do Firestore:", error);
+                return null;
+            }
+        }
+        
+        // Se é um objeto com propriedades seconds e nanoseconds (formato Firestore)
+        if (timestamp && typeof timestamp === 'object' && 'seconds' in timestamp) {
+            try {
+                const date = new Date(timestamp.seconds * 1000);
+                return isNaN(date.getTime()) ? null : date;
+            } catch (error) {
+                console.warn("Erro ao converter objeto timestamp:", error);
+                return null;
+            }
+        }
+        
+        // Tenta converter string ou number para data
+        if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+            try {
+                const date = new Date(timestamp);
+                return isNaN(date.getTime()) ? null : date;
+            } catch (error) {
+                console.warn("Erro ao converter string/number para data:", error);
+                return null;
+            }
+        }
+        
+        console.warn("Tipo de timestamp não reconhecido:", typeof timestamp, timestamp);
+        return null;
+    };
+
     const fetchOrders = async (): Promise<Order[]> => {
         if (!user) return [];
         setIsLoading(true);
@@ -559,9 +605,10 @@ export default function OrdersPage() {
 
             const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             ordersList = querySnapshot.docs.map(doc => {
-                const data = doc.data();
-                const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date());
-                const deliveryDate = data.deliveryDate?.toDate ? data.deliveryDate.toDate() : undefined;
+                try {
+                    const data = doc.data();
+                    const createdAtDate = safeToDate(data.createdAt) || new Date();
+                    const deliveryDate = safeToDate(data.deliveryDate);
                 
                 const enrichedItems = (data.items || []).map((item: any, index: number) => {
                     const itemCode = item.code || item.product_code || '';
@@ -586,8 +633,8 @@ export default function OrdersPage() {
 
                     let finalProductionPlan = (item.productionPlan || []).map((p: any) => ({
                         ...p,
-                        startDate: p.startDate?.toDate ? p.startDate.toDate() : null,
-                        completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : null,
+                        startDate: safeToDate(p.startDate),
+                        completedDate: safeToDate(p.completedDate),
                     }));
 
                     if (finalProductionPlan.length === 0) {
@@ -604,10 +651,10 @@ export default function OrdersPage() {
 
                     return {
                         ...enrichedItem,
-                        itemDeliveryDate: item.itemDeliveryDate?.toDate() || deliveryDate,
+                        itemDeliveryDate: safeToDate(item.itemDeliveryDate) || deliveryDate,
                         shippingList: item.shippingList || '',
                         invoiceNumber: item.invoiceNumber || '',
-                        shippingDate: item.shippingDate?.toDate() || null,
+                        shippingDate: safeToDate(item.shippingDate),
                     };
                 });
 
@@ -646,6 +693,26 @@ export default function OrdersPage() {
                     driveLink: data.driveLink || '',
                     documents: data.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
                 } as Order;
+                } catch (error) {
+                    console.error("Erro ao processar pedido:", doc.id, error);
+                    // Retorna um pedido com dados mínimos em caso de erro
+                    return {
+                        id: doc.id,
+                        quotationId: '',
+                        quotationNumber: 'Erro ao carregar',
+                        internalOS: '',
+                        projectName: '',
+                        customer: { id: '', name: 'Erro ao carregar' },
+                        items: [],
+                        totalValue: 0,
+                        status: 'Erro',
+                        createdAt: new Date(),
+                        deliveryDate: undefined,
+                        totalWeight: 0,
+                        driveLink: '',
+                        documents: { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                    } as Order;
+                }
             });
             
             setOrders(ordersList);
@@ -2040,8 +2107,8 @@ export default function OrdersPage() {
                 ...item,
                 productionPlan: (item.productionPlan || []).map((p: any) => ({
                     ...p,
-                    startDate: p.startDate?.toDate ? p.startDate.toDate() : p.startDate,
-                    completedDate: p.completedDate?.toDate ? p.completedDate.toDate() : p.completedDate,
+                    startDate: safeToDate(p.startDate),
+                    completedDate: safeToDate(p.completedDate),
                 }))
             }));
             
