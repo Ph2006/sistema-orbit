@@ -1849,30 +1849,32 @@ export default function OrdersPage() {
                         if (progressMatch) {
                             const progress = parseFloat(progressMatch[1]);
                             
-                            // Posição e dimensões da barra
-                            const barX = data.cell.x + 70; // Posição após o texto "Progresso: XX%"
-                            const barY = data.cell.y + 2;
-                            const barWidth = 80;
-                            const barHeight = 4;
+                            // Posição e dimensões da barra (ajustada para melhor posicionamento)
+                            const barX = data.cell.x + 80; // Posição após o texto "Progresso: XX.X%"
+                            const barY = data.cell.y + 3;
+                            const barWidth = 70;
+                            const barHeight = 5;
                             
                             // Fundo da barra (cinza claro)
                             docPdf.setFillColor(230, 230, 230);
                             docPdf.rect(barX, barY, barWidth, barHeight, 'F');
                             
-                            // Barra de progresso colorida
+                            // Barra de progresso colorida baseada na porcentagem
                             const fillWidth = (progress / 100) * barWidth;
-                            if (progress < 30) {
-                                docPdf.setFillColor(239, 68, 68); // Vermelho
-                            } else if (progress < 70) {
-                                docPdf.setFillColor(245, 158, 11); // Amarelo
-                            } else {
-                                docPdf.setFillColor(34, 197, 94); // Verde
+                            if (fillWidth > 0) { // Só desenha se houver progresso
+                                if (progress < 30) {
+                                    docPdf.setFillColor(239, 68, 68); // Vermelho para progresso baixo
+                                } else if (progress < 70) {
+                                    docPdf.setFillColor(245, 158, 11); // Amarelo para progresso médio
+                                } else {
+                                    docPdf.setFillColor(34, 197, 94); // Verde para progresso alto
+                                }
+                                docPdf.rect(barX, barY, fillWidth, barHeight, 'F');
                             }
-                            docPdf.rect(barX, barY, fillWidth, barHeight, 'F');
                             
-                            // Borda da barra
-                            docPdf.setDrawColor(150, 150, 150);
-                            docPdf.setLineWidth(0.1);
+                            // Borda da barra para definir melhor o contorno
+                            docPdf.setDrawColor(0, 0, 0);
+                            docPdf.setLineWidth(0.2);
                             docPdf.rect(barX, barY, barWidth, barHeight, 'S');
                         }
                     }
