@@ -691,9 +691,33 @@ export default function OrdersPage() {
         setIsSheetOpen(true);
     };
 
+        // Função helper para remover campos undefined (Firestore não aceita undefined)
+    const removeUndefinedFields = (obj: any): any => {
+        if (obj === null || obj === undefined) {
+            return null;
+        }
+        
+        if (Array.isArray(obj)) {
+            return obj.map(removeUndefinedFields);
+        }
+        
+        if (typeof obj === 'object') {
+            const cleaned: any = {};
+            Object.keys(obj).forEach(key => {
+                const value = obj[key];
+                if (value !== undefined) {
+                    cleaned[key] = removeUndefinedFields(value);
+                }
+            });
+            return cleaned;
+        }
+        
+        return obj;
+    };
+
     const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
         if (!selectedOrder) return;
-    
+
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
             
@@ -701,37 +725,49 @@ export default function OrdersPage() {
                 const originalItem = selectedOrder.items.find(i => i.id === formItem.id);
                 const planToSave = originalItem?.productionPlan?.map(p => ({
                     ...p,
-                    startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
-                    completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                    startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : (p.startDate || null),
+                    completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : (p.completedDate || null),
+                    status: p.status || 'Pendente',
+                    stageName: p.stageName || '',
+                    durationDays: p.durationDays || 0,
                 })) || [];
 
                 return {
                     ...formItem,
+                    id: formItem.id || '',
                     itemNumber: formItem.itemNumber || '',
+                    description: formItem.description || '',
+                    quantity: formItem.quantity || 0,
+                    unitWeight: formItem.unitWeight || 0,
+                    unitPrice: formItem.unitPrice || 0,
+                    code: formItem.code || '',
                     itemDeliveryDate: formItem.itemDeliveryDate ? Timestamp.fromDate(new Date(formItem.itemDeliveryDate)) : null,
                     shippingDate: formItem.shippingDate ? Timestamp.fromDate(new Date(formItem.shippingDate)) : null,
                     productionPlan: planToSave,
                 };
             });
-    
+
             const totalWeight = calculateTotalWeight(itemsToSave);
             
             const dataToSave = {
-                customer: values.customer,
-                customerId: values.customer.id,
-                customerName: values.customer.name,
-                internalOS: values.internalOS,
-                projectName: values.projectName,
-                quotationNumber: values.quotationNumber,
+                customer: values.customer || null,
+                customerId: values.customer?.id || null,
+                customerName: values.customer?.name || null,
+                internalOS: values.internalOS || null,
+                projectName: values.projectName || null,
+                quotationNumber: values.quotationNumber || null,
                 deliveryDate: values.deliveryDate ? Timestamp.fromDate(new Date(values.deliveryDate)) : null,
-                status: values.status,
-                driveLink: values.driveLink,
-                documents: values.documents,
-                items: itemsToSave,
-                totalWeight: totalWeight,
+                status: values.status || null,
+                driveLink: values.driveLink || null,
+                documents: values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                items: itemsToSave || [],
+                totalWeight: totalWeight || 0,
             };
-    
-            await updateDoc(orderRef, dataToSave);
+
+            // Remove campos undefined antes de enviar para o Firestore
+            const cleanedData = removeUndefinedFields(dataToSave);
+
+            await updateDoc(orderRef, cleanedData);
     
             toast({
                 title: "Pedido atualizado!",
@@ -1978,19 +2014,27 @@ export default function OrdersPage() {
                         ...p,
                         startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
                         completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
+                        status: p.status || 'Pendente',
+                        stageName: p.stageName || '',
+                        durationDays: p.durationDays || 0,
                     }));
                 } else {
                     planForFirestore = (item.productionPlan || []).map((p: any) => ({
                         ...p,
-                        startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : p.startDate,
-                        completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : p.completedDate,
+                        startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : (p.startDate || null),
+                        completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : (p.completedDate || null),
+                        status: p.status || 'Pendente',
+                        stageName: p.stageName || '',
+                        durationDays: p.durationDays || 0,
                     }));
                 }
                 const { id, product_code, ...restOfItem } = item as any;
                 return {...restOfItem, id: item.id, itemNumber: item.itemNumber || '', productionPlan: planForFirestore };
             });
     
-            await updateDoc(orderRef, { items: itemsForFirestore });
+            // Remove campos undefined antes de enviar para o Firestore
+            const cleanedItems = removeUndefinedFields(itemsForFirestore);
+            await updateDoc(orderRef, { items: cleanedItems });
 
             const updatedItemsForCheck = itemsForFirestore.map((item: any) => ({
                 ...item,
@@ -2011,7 +2055,9 @@ export default function OrdersPage() {
             );
 
             if (allItemsCompleted && selectedOrder.status !== 'Concluído') {
-                await updateDoc(orderRef, { status: "Concluído" });
+                // Remove campos undefined antes de enviar para o Firestore
+                const statusUpdate = removeUndefinedFields({ status: "Concluído" });
+                await updateDoc(orderRef, statusUpdate);
                 toast({ 
                     title: "Pedido Concluído!", 
                     description: "Todos os itens foram finalizados e o status do pedido foi atualizado automaticamente." 
@@ -2073,6 +2119,9 @@ export default function OrdersPage() {
                     ...p,
                     startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
                     completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
+                    status: p.status || 'Pendente',
+                    stageName: p.stageName || '',
+                    durationDays: p.durationDays || 0,
                 }));
                 
                 return {
@@ -2084,7 +2133,9 @@ export default function OrdersPage() {
             });
 
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
-            await updateDoc(orderRef, { items: itemsForFirestore });
+            // Remove campos undefined antes de enviar para o Firestore
+            const cleanedItems = removeUndefinedFields(itemsForFirestore);
+            await updateDoc(orderRef, { items: cleanedItems });
 
             toast({ title: "Progresso colado!", description: `Etapas aplicadas ao item "${targetItem.description}".` });
             
