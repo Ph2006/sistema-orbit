@@ -57,6 +57,48 @@ import {
 } from "lucide-react";
 
 // =============================================================================
+// UTILITY FUNCTIONS FOR DATE HANDLING
+// =============================================================================
+
+// Função para converter diferentes formatos de data para Date de forma segura
+const safeToDate = (dateValue) => {
+  if (!dateValue) return null;
+  
+  try {
+    // Se é um Timestamp do Firestore
+    if (dateValue && typeof dateValue.toDate === 'function') {
+      return dateValue.toDate();
+    }
+    
+    // Se é um objeto com propriedades seconds/nanoseconds (Firestore Timestamp serializado)
+    if (dateValue && typeof dateValue === 'object' && 'seconds' in dateValue) {
+      return new Date(dateValue.seconds * 1000);
+    }
+    
+    // Se é uma string
+    if (typeof dateValue === 'string') {
+      const date = new Date(dateValue);
+      return isNaN(date.getTime()) ? null : date;
+    }
+    
+    // Se já é uma Date
+    if (dateValue instanceof Date) {
+      return isNaN(dateValue.getTime()) ? null : dateValue;
+    }
+    
+    // Se é um número (timestamp)
+    if (typeof dateValue === 'number') {
+      return new Date(dateValue);
+    }
+    
+    return null;
+  } catch (error) {
+    console.warn('Error converting date:', error, dateValue);
+    return null;
+  }
+};
+
+// =============================================================================
 // SCHEMAS E TYPES
 // =============================================================================
 
@@ -318,7 +360,8 @@ const TaskManagementPage = () => {
           return;
         }
 
-        const deliveryDate = orderData.deliveryDate?.toDate();
+        // Usar safeToDate para converter a data de entrega
+        const deliveryDate = safeToDate(orderData.deliveryDate);
         
         orderData.items?.forEach((item: any, itemIndex: number) => {
           if (item.productionPlan && Array.isArray(item.productionPlan)) {
@@ -334,8 +377,8 @@ const TaskManagementPage = () => {
                 itemCode: item.code,
                 stageName: stage.stageName || 'Etapa sem nome',
                 status: stage.status || 'Pendente',
-                startDate: stage.startDate?.toDate(),
-                completedDate: stage.completedDate?.toDate(),
+                startDate: safeToDate(stage.startDate),
+                completedDate: safeToDate(stage.completedDate),
                 durationDays: stage.durationDays,
                 useBusinessDays: stage.useBusinessDays !== false,
                 assignedResourceId: stage.assignedResourceId,
@@ -344,7 +387,7 @@ const TaskManagementPage = () => {
                 notes: stage.notes,
                 deliveryDate,
                 priority: calculatePriority(deliveryDate),
-                scheduledStartDate: stage.scheduledStartDate?.toDate(),
+                scheduledStartDate: safeToDate(stage.scheduledStartDate),
                 scheduledStartTime: stage.scheduledStartTime,
               };
               allTasks.push(task);
@@ -428,11 +471,11 @@ const TaskManagementPage = () => {
 
     return {
       today: safeFilteredTasks.filter(task => 
-        task.startDate && isToday(task.startDate) || 
+        (task.startDate && isToday(task.startDate)) || 
         task.status === 'Em Andamento'
       ),
       thisWeek: safeFilteredTasks.filter(task => 
-        task.startDate && isThisWeek(task.startDate, { weekStartsOn: 1 }) ||
+        (task.startDate && isThisWeek(task.startDate, { weekStartsOn: 1 })) ||
         (task.status === 'Em Andamento' && task.startDate && task.startDate <= weekEnd)
       ),
       pending: safeFilteredTasks.filter(task => task.status === 'Pendente'),
@@ -826,641 +869,7 @@ const TaskManagementPage = () => {
             if (a.scheduledStartDate && b.scheduledStartDate) {
               const dateCompare = a.scheduledStartDate.getTime() - b.scheduledStartDate.getTime();
               if (dateCompare === 0) {
-                return (a.scheduledStartTime || '').localeCompare(b.scheduledStartTime || '');
-              }
-              return dateCompare;
-            }
-            return 0;
-          })
-          .map(task => [
-            task.scheduledStartDate ? format(task.scheduledStartDate, 'dd/MM') : 'N/A',
-            task.scheduledStartTime || 'N/A',
-            task.orderNumber,
-            task.customer.substring(0, 20) + (task.customer.length > 20 ? '...' : ''),
-            task.stageName.substring(0, 25) + (task.stageName.length > 25 ? '...' : ''),
-            task.assignedResourceName || 'N/A',
-            task.responsibleName || 'N/A',
-            `${task.estimatedHours || 0}h`,
-          ]);
-
-        autoTable(pdfDoc, {
-          startY: yPos,
-          head: [['Data', 'Hora', 'OS', 'Cliente', 'Etapa', 'Recurso', 'Responsável', 'Horas']],
-          body: tableBody,
-          styles: { 
-            fontSize: 8,
-            cellPadding: 2
-          },
-          headStyles: { 
-            fillColor: [37, 99, 235], 
-            fontSize: 9, 
-            textColor: 255,
-            fontStyle: 'bold'
-          },
-          columnStyles: {
-            0: { cellWidth: 20 }, // Data
-            1: { cellWidth: 20 }, // Hora
-            2: { cellWidth: 25 }, // OS
-            3: { cellWidth: 35 }, // Cliente
-            4: { cellWidth: 40 }, // Etapa
-            5: { cellWidth: 30 }, // Recurso
-            6: { cellWidth: 30 }, // Responsável
-            7: { cellWidth: 20 }, // Horas
-          }
-        });
-
-        // Conflitos (se houver)
-        if (schedulingData.conflicts.length > 0) {
-          const finalY = (pdfDoc as any).lastAutoTable.finalY;
-          yPos = finalY + 15;
-          
-          pdfDoc.setFontSize(12).setFont('helvetica', 'bold');
-          pdfDoc.setTextColor(220, 38, 38); // Vermelho
-          pdfDoc.text('⚠️ CONFLITOS DETECTADOS:', 15, yPos);
-          yPos += 8;
-          
-          pdfDoc.setFontSize(10).setFont('helvetica', 'normal');
-          pdfDoc.setTextColor(0, 0, 0); // Preto
-          
-          schedulingData.conflicts.forEach((conflict, index) => {
-            pdfDoc.text(
-              `${index + 1}. ${conflict.resourceName} em ${format(parseISO(conflict.date), 'dd/MM/yyyy')}: ${conflict.totalHours}h programadas (capacidade: ${conflict.capacity}h)`,
-              15, yPos
-            );
-            yPos += 5;
-          });
-        }
-
-        // Rodapé
-        const finalY = (pdfDoc as any).lastAutoTable?.finalY || yPos;
-        if (finalY + 20 < pdfDoc.internal.pageSize.height - 20) {
-          yPos = finalY + 15;
-          pdfDoc.setFontSize(8).setFont('helvetica', 'italic');
-          pdfDoc.setTextColor(100, 100, 100);
-          pdfDoc.text(
-            `Relatório gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
-            pageWidth / 2,
-            yPos,
-            { align: 'center' }
-          );
-        }
-      }
-
-      const filename = `Programacao_${period === 'daily' ? 'Diaria' : 'Semanal'}_${format(parseISO(selectedViewDate), 'yyyyMMdd')}.pdf`;
-      pdfDoc.save(filename);
-
-      toast({
-        title: "Relatório gerado!",
-        description: `O relatório de programação ${period === 'daily' ? 'diária' : 'semanal'} foi baixado com sucesso.`,
-      });
-
-    } catch (error) {
-      console.error("Error generating scheduling report:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar relatório",
-        description: "Não foi possível gerar o relatório de programação.",
-      });
-    }
-  };
-
-  // =============================================================================
-  // COMPONENTES AUXILIARES
-  // =============================================================================
-
-  const TaskTable = ({ tasks, title }: { tasks: Task[]; title: string }) => {
-    // Garantir que tasks seja sempre um array válido
-    const safeTasks = tasks || [];
-    
-    const getPriorityBadge = (priority: Task['priority']) => {
-      const variants = {
-        baixa: "bg-blue-100 text-blue-800",
-        media: "bg-yellow-100 text-yellow-800", 
-        alta: "bg-orange-100 text-orange-800",
-        urgente: "bg-red-100 text-red-800"
-      };
-      
-      return (
-        <Badge className={variants[priority]}>
-          {priority.charAt(0).toUpperCase() + priority.slice(1)}
-        </Badge>
-      );
-    };
-
-    const getStatusBadge = (status: string) => {
-      const variants = {
-        'Pendente': "bg-gray-100 text-gray-800",
-        'Em Andamento': "bg-blue-100 text-blue-800",
-        'Programado': "bg-purple-100 text-purple-800",
-        'Concluído': "bg-green-100 text-green-800"
-      };
-      
-      return (
-        <Badge className={variants[status as keyof typeof variants] || "bg-gray-100 text-gray-800"}>
-          {status}
-        </Badge>
-      );
-    };
-
-    if (safeTasks.length === 0) {
-      return (
-        <Card>
-          <CardHeader>
-            <CardTitle>{title}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-center text-muted-foreground py-8">
-              Nenhuma tarefa encontrada para este período.
-            </p>
-          </CardContent>
-        </Card>
-      );
-    }
-
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            {title}
-            <Badge variant="outline">{safeTasks.length} tarefas</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Pedido</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Item</TableHead>
-                <TableHead>Etapa</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Prioridade</TableHead>
-                <TableHead>Recurso</TableHead>
-                <TableHead>Responsável</TableHead>
-                <TableHead>Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {safeTasks.map((task) => (
-                <TableRow key={task.id}>
-                  <TableCell className="font-medium">{task.orderNumber}</TableCell>
-                  <TableCell>{task.customer}</TableCell>
-                  <TableCell>
-                    <div>
-                      {task.itemCode ? <div className="text-xs text-muted-foreground">[{task.itemCode}]</div> : null}
-                      <div className="truncate max-w-[150px]" title={task.itemDescription}>
-                        {task.itemDescription}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>{task.stageName}</TableCell>
-                  <TableCell>{getStatusBadge(task.status)}</TableCell>
-                  <TableCell>{getPriorityBadge(task.priority)}</TableCell>
-                  <TableCell>
-                    {task.assignedResourceName ? (
-                      <Badge variant="outline">{task.assignedResourceName}</Badge>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">Não atribuído</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {task.responsibleName ? (
-                      <Badge variant="outline">{task.responsibleName}</Badge>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">Não atribuído</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleAssignTask(task)}
-                    >
-                      <Settings className="h-4 w-4 mr-1" />
-                      {task.assignedResourceId || task.responsibleId ? 'Editar' : 'Atribuir'}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  // Componente para a aba de programação
-  const SchedulingTab = () => {
-    return (
-      <div className="space-y-6">
-        {/* Filtros para programação */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Schedule className="h-5 w-5" />
-              Programação de Tarefas
-            </CardTitle>
-            <CardDescription>
-              Programe tarefas pendentes e gerencie conflitos de recursos
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium">Data de Visualização:</label>
-                <Input
-                  type="date"
-                  value={selectedViewDate}
-                  onChange={(e) => setSelectedViewDate(e.target.value)}
-                  className="w-[160px]"
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium">Filtrar por OS:</label>
-                <Select value={orderFilter} onValueChange={setOrderFilter}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Todas as OS" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as OS</SelectItem>
-                    {uniqueOrders.map(order => (
-                      <SelectItem key={order.id} value={order.id}>
-                        {order.number} - {order.customer.substring(0, 30)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => generateTaskReport('daily')}>
-                  <Printer className="mr-2 h-4 w-4" />
-                  Exportar Diário
-                </Button>
-                <Button variant="outline" onClick={() => generateTaskReport('weekly')}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Exportar Semanal
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Alertas de conflitos */}
-        {schedulingData.conflicts && schedulingData.conflicts.length > 0 && (
-          <Alert className="border-red-200 bg-red-50">
-            <AlertTriangle className="h-4 w-4 text-red-600" />
-            <AlertDescription>
-              <div className="space-y-2">
-                <p className="font-medium text-red-800">
-                  {schedulingData.conflicts.length} conflito(s) de recursos detectado(s):
-                </p>
-                {(schedulingData.conflicts || []).map((conflict, index) => (
-                  <div key={index} className="text-sm text-red-700">
-                    • <strong>{conflict.resourceName}</strong> em {format(parseISO(conflict.date), 'dd/MM/yyyy')}: 
-                    {conflict.totalHours}h programadas (capacidade: {conflict.capacity}h)
-                  </div>
-                ))}
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Dashboard de recursos */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Utilização de Recursos - {format(parseISO(selectedViewDate), 'dd/MM/yyyy')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {(schedulingData.resourceUtilization || []).map((item) => (
-                <Card key={item.resource.id} className={item.isOverutilized ? "border-red-200" : ""}>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm flex items-center justify-between">
-                      {item.resource.name}
-                      {item.isOverutilized && (
-                        <AlertCircle className="h-4 w-4 text-red-500" />
-                      )}
-                    </CardTitle>
-                    <CardDescription className="text-xs">
-                      {item.resource.type} • Capacidade: {item.resource.capacity || 8}h
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Utilização:</span>
-                        <span className={item.isOverutilized ? "text-red-600 font-medium" : ""}>
-                          {item.totalHours}h ({item.utilization.toFixed(0)}%)
-                        </span>
-                      </div>
-                      <Progress 
-                        value={item.utilization} 
-                        className={`h-2 ${item.isOverutilized ? '[&>div]:bg-red-500' : ''}`}
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        {item.tasks.length} tarefa(s) programada(s)
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Tarefas pendentes para programação */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <ClipboardList className="h-5 w-5" />
-                Tarefas Pendentes para Programação
-              </span>
-              <Badge variant="outline">{schedulingData.pendingTasks.length} tarefas</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {schedulingData.pendingTasks.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
-                Todas as tarefas foram programadas!
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>OS</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Item</TableHead>
-                    <TableHead>Etapa</TableHead>
-                    <TableHead>Prioridade</TableHead>
-                    <TableHead>Entrega</TableHead>
-                    <TableHead>Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(schedulingData.pendingTasks || [])
-                    .filter(task => orderFilter === "all" || task.orderId === orderFilter)
-                    .map((task) => (
-                    <TableRow key={task.id}>
-                      <TableCell className="font-medium">{task.orderNumber}</TableCell>
-                      <TableCell>{task.customer}</TableCell>
-                      <TableCell>
-                        <div>
-                          {task.itemCode ? <div className="text-xs text-muted-foreground">[{task.itemCode}]</div> : null}
-                          <div className="truncate max-w-[150px]" title={task.itemDescription}>
-                            {task.itemDescription}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>{task.stageName}</TableCell>
-                      <TableCell>
-                        <Badge className={
-                          task.priority === 'urgente' ? "bg-red-100 text-red-800" :
-                          task.priority === 'alta' ? "bg-orange-100 text-orange-800" :
-                          task.priority === 'media' ? "bg-yellow-100 text-yellow-800" :
-                          "bg-blue-100 text-blue-800"
-                        }>
-                          {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {task.deliveryDate ? format(task.deliveryDate, 'dd/MM/yyyy') : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <Button 
-                          size="sm"
-                          onClick={() => handleScheduleTask(task)}
-                        >
-                          <Schedule className="h-4 w-4 mr-1" />
-                          Programar
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Tarefas programadas */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Calendar className="h-5 w-5" />
-                Tarefas Programadas - {format(parseISO(selectedViewDate), 'dd/MM/yyyy')}
-              </span>
-              <Badge variant="outline">
-                {schedulingData.scheduledTasks.filter(task => 
-                  task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
-                ).length} tarefas
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {schedulingData.scheduledTasks.filter(task => 
-              task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
-            ).length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
-                Nenhuma tarefa programada para esta data.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Hora</TableHead>
-                    <TableHead>OS</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Etapa</TableHead>
-                    <TableHead>Recurso</TableHead>
-                    <TableHead>Responsável</TableHead>
-                    <TableHead>Duração</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Ações</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(schedulingData.scheduledTasks || [])
-                    .filter(task => 
-                      task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
-                      (orderFilter === "all" || task.orderId === orderFilter)
-                    )
-                    .sort((a, b) => (a.scheduledStartTime || '').localeCompare(b.scheduledStartTime || ''))
-                    .map((task) => (
-                    <TableRow key={task.id}>
-                      <TableCell className="font-medium">{task.scheduledStartTime}</TableCell>
-                      <TableCell>{task.orderNumber}</TableCell>
-                      <TableCell>{task.customer}</TableCell>
-                      <TableCell>{task.stageName}</TableCell>
-                      <TableCell>
-                        {task.assignedResourceName ? (
-                          <Badge variant="outline">{task.assignedResourceName}</Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">N/A</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {task.responsibleName ? (
-                          <Badge variant="outline">{task.responsibleName}</Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">N/A</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{task.estimatedHours || 0}h</TableCell>
-                      <TableCell>
-                        <Badge className={
-                          task.status === 'Concluído' ? "bg-green-100 text-green-800" :
-                          task.status === 'Em Andamento' ? "bg-blue-100 text-blue-800" :
-                          "bg-purple-100 text-purple-800"
-                        }>
-                          {task.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button 
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleScheduleTask(task)}
-                          >
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                          {(task.status === 'Programado' || task.status === 'Em Andamento') && (
-                            <Button 
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleUpdateTask(task)}
-                            >
-                              <CheckSquare className="h-3 w-3" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Dashboard Realizado x Programado */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              Realizado x Programado
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Tarefas Programadas</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">
-                    {schedulingData.scheduledTasks.filter(task => 
-                      task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
-                    ).length}
-                  </div>
-                  <p className="text-xs text-muted-foreground">para hoje</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Tarefas Concluídas</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">
-                    {schedulingData.scheduledTasks.filter(task => 
-                      task.scheduledStartDate && 
-                      isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
-                      task.status === 'Concluído'
-                    ).length}
-                  </div>
-                  <p className="text-xs text-muted-foreground">hoje</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Taxa de Conclusão</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-purple-600">
-                    {(() => {
-                      const scheduled = schedulingData.scheduledTasks.filter(task => 
-                        task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
-                      ).length;
-                      const completed = schedulingData.scheduledTasks.filter(task => 
-                        task.scheduledStartDate && 
-                        isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
-                        task.status === 'Concluído'
-                      ).length;
-                      return scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0;
-                    })()}%
-                  </div>
-                  <p className="text-xs text-muted-foreground">de eficiência</p>
-                </CardContent>
-              </Card>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  };
-
-  // =============================================================================
-  // LOADING STATE
-  // =============================================================================
-
-  // Verificar autenticação primeiro
-  if (authLoading) {
-    return (
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  // Se não há usuário autenticado, não renderizar
-  if (!user) {
-    return null;
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  // =============================================================================
-  // RENDER PRINCIPAL
-  // =============================================================================
-
-  return (
+                return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
       {/* Header */}
       <div className="flex items-center justify-between space-y-2">
@@ -1549,7 +958,47 @@ const TaskManagementPage = () => {
               <label className="text-sm font-medium">Status:</label>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Status" />
+                  <FormField
+                    control={updateForm.control}
+                    name="notes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Observações</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Comentários sobre a conclusão ou motivo da reprogramação..."
+                            className="resize-none"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <DialogFooter>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => setIsUpdateDialogOpen(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={updateForm.formState.isSubmitting}>
+                      {updateForm.formState.isSubmitting ? "Salvando..." : "Atualizar Tarefa"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default TaskManagementPage;<SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
@@ -2212,44 +1661,632 @@ const TaskManagementPage = () => {
                     </div>
                   ) : null}
 
-                  <FormField
-                    control={updateForm.control}
-                    name="notes"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Observações</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Comentários sobre a conclusão ou motivo da reprogramação..."
-                            className="resize-none"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
+                  a.scheduledStartTime || '').localeCompare(b.scheduledStartTime || '');
+              }
+              return dateCompare;
+            }
+            return 0;
+          })
+          .map(task => [
+            task.scheduledStartDate ? format(task.scheduledStartDate, 'dd/MM') : 'N/A',
+            task.scheduledStartTime || 'N/A',
+            task.orderNumber,
+            task.customer.substring(0, 20) + (task.customer.length > 20 ? '...' : ''),
+            task.stageName.substring(0, 25) + (task.stageName.length > 25 ? '...' : ''),
+            task.assignedResourceName || 'N/A',
+            task.responsibleName || 'N/A',
+            `${task.estimatedHours || 0}h`,
+          ]);
+
+        autoTable(pdfDoc, {
+          startY: yPos,
+          head: [['Data', 'Hora', 'OS', 'Cliente', 'Etapa', 'Recurso', 'Responsável', 'Horas']],
+          body: tableBody,
+          styles: { 
+            fontSize: 8,
+            cellPadding: 2
+          },
+          headStyles: { 
+            fillColor: [37, 99, 235], 
+            fontSize: 9, 
+            textColor: 255,
+            fontStyle: 'bold'
+          },
+          columnStyles: {
+            0: { cellWidth: 20 }, // Data
+            1: { cellWidth: 20 }, // Hora
+            2: { cellWidth: 25 }, // OS
+            3: { cellWidth: 35 }, // Cliente
+            4: { cellWidth: 40 }, // Etapa
+            5: { cellWidth: 30 }, // Recurso
+            6: { cellWidth: 30 }, // Responsável
+            7: { cellWidth: 20 }, // Horas
+          }
+        });
+
+        // Conflitos (se houver)
+        if (schedulingData.conflicts.length > 0) {
+          const finalY = (pdfDoc as any).lastAutoTable.finalY;
+          yPos = finalY + 15;
+          
+          pdfDoc.setFontSize(12).setFont('helvetica', 'bold');
+          pdfDoc.setTextColor(220, 38, 38); // Vermelho
+          pdfDoc.text('⚠️ CONFLITOS DETECTADOS:', 15, yPos);
+          yPos += 8;
+          
+          pdfDoc.setFontSize(10).setFont('helvetica', 'normal');
+          pdfDoc.setTextColor(0, 0, 0); // Preto
+          
+          schedulingData.conflicts.forEach((conflict, index) => {
+            pdfDoc.text(
+              `${index + 1}. ${conflict.resourceName} em ${format(parseISO(conflict.date), 'dd/MM/yyyy')}: ${conflict.totalHours}h programadas (capacidade: ${conflict.capacity}h)`,
+              15, yPos
+            );
+            yPos += 5;
+          });
+        }
+
+        // Rodapé
+        const finalY = (pdfDoc as any).lastAutoTable?.finalY || yPos;
+        if (finalY + 20 < pdfDoc.internal.pageSize.height - 20) {
+          yPos = finalY + 15;
+          pdfDoc.setFontSize(8).setFont('helvetica', 'italic');
+          pdfDoc.setTextColor(100, 100, 100);
+          pdfDoc.text(
+            `Relatório gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+            pageWidth / 2,
+            yPos,
+            { align: 'center' }
+          );
+        }
+      }
+
+      const filename = `Programacao_${period === 'daily' ? 'Diaria' : 'Semanal'}_${format(parseISO(selectedViewDate), 'yyyyMMdd')}.pdf`;
+      pdfDoc.save(filename);
+
+      toast({
+        title: "Relatório gerado!",
+        description: `O relatório de programação ${period === 'daily' ? 'diária' : 'semanal'} foi baixado com sucesso.`,
+      });
+
+    } catch (error) {
+      console.error("Error generating scheduling report:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar relatório",
+        description: "Não foi possível gerar o relatório de programação.",
+      });
+    }
+  };
+
+  // =============================================================================
+  // COMPONENTES AUXILIARES
+  // =============================================================================
+
+  const TaskTable = ({ tasks, title }: { tasks: Task[]; title: string }) => {
+    // Garantir que tasks seja sempre um array válido
+    const safeTasks = tasks || [];
+    
+    const getPriorityBadge = (priority: Task['priority']) => {
+      const variants = {
+        baixa: "bg-blue-100 text-blue-800",
+        media: "bg-yellow-100 text-yellow-800", 
+        alta: "bg-orange-100 text-orange-800",
+        urgente: "bg-red-100 text-red-800"
+      };
+      
+      return (
+        <Badge className={variants[priority]}>
+          {priority.charAt(0).toUpperCase() + priority.slice(1)}
+        </Badge>
+      );
+    };
+
+    const getStatusBadge = (status: string) => {
+      const variants = {
+        'Pendente': "bg-gray-100 text-gray-800",
+        'Em Andamento': "bg-blue-100 text-blue-800",
+        'Programado': "bg-purple-100 text-purple-800",
+        'Concluído': "bg-green-100 text-green-800"
+      };
+      
+      return (
+        <Badge className={variants[status as keyof typeof variants] || "bg-gray-100 text-gray-800"}>
+          {status}
+        </Badge>
+      );
+    };
+
+    if (safeTasks.length === 0) {
+      return (
+        <Card>
+          <CardHeader>
+            <CardTitle>{title}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-center text-muted-foreground py-8">
+              Nenhuma tarefa encontrada para este período.
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            {title}
+            <Badge variant="outline">{safeTasks.length} tarefas</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pedido</TableHead>
+                <TableHead>Cliente</TableHead>
+                <TableHead>Item</TableHead>
+                <TableHead>Etapa</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Prioridade</TableHead>
+                <TableHead>Recurso</TableHead>
+                <TableHead>Responsável</TableHead>
+                <TableHead>Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {safeTasks.map((task) => (
+                <TableRow key={task.id}>
+                  <TableCell className="font-medium">{task.orderNumber}</TableCell>
+                  <TableCell>{task.customer}</TableCell>
+                  <TableCell>
+                    <div>
+                      {task.itemCode ? <div className="text-xs text-muted-foreground">[{task.itemCode}]</div> : null}
+                      <div className="truncate max-w-[150px]" title={task.itemDescription}>
+                        {task.itemDescription}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>{task.stageName}</TableCell>
+                  <TableCell>{getStatusBadge(task.status)}</TableCell>
+                  <TableCell>{getPriorityBadge(task.priority)}</TableCell>
+                  <TableCell>
+                    {task.assignedResourceName ? (
+                      <Badge variant="outline">{task.assignedResourceName}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">Não atribuído</span>
                     )}
-                  />
-
-                  <DialogFooter>
+                  </TableCell>
+                  <TableCell>
+                    {task.responsibleName ? (
+                      <Badge variant="outline">{task.responsibleName}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">Não atribuído</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Button 
-                      type="button" 
                       variant="outline" 
-                      onClick={() => setIsUpdateDialogOpen(false)}
+                      size="sm"
+                      onClick={() => handleAssignTask(task)}
                     >
-                      Cancelar
+                      <Settings className="h-4 w-4 mr-1" />
+                      {task.assignedResourceId || task.responsibleId ? 'Editar' : 'Atribuir'}
                     </Button>
-                    <Button type="submit" disabled={updateForm.formState.isSubmitting}>
-                      {updateForm.formState.isSubmitting ? "Salvando..." : "Atualizar Tarefa"}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </Form>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-};
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    );
+  };
 
-export default TaskManagementPage;
+  // Componente para a aba de programação
+  const SchedulingTab = () => {
+    return (
+      <div className="space-y-6">
+        {/* Filtros para programação */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Schedule className="h-5 w-5" />
+              Programação de Tarefas
+            </CardTitle>
+            <CardDescription>
+              Programe tarefas pendentes e gerencie conflitos de recursos
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium">Data de Visualização:</label>
+                <Input
+                  type="date"
+                  value={selectedViewDate}
+                  onChange={(e) => setSelectedViewDate(e.target.value)}
+                  className="w-[160px]"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium">Filtrar por OS:</label>
+                <Select value={orderFilter} onValueChange={setOrderFilter}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Todas as OS" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as OS</SelectItem>
+                    {uniqueOrders.map(order => (
+                      <SelectItem key={order.id} value={order.id}>
+                        {order.number} - {order.customer.substring(0, 30)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => generateTaskReport('daily')}>
+                  <Printer className="mr-2 h-4 w-4" />
+                  Exportar Diário
+                </Button>
+                <Button variant="outline" onClick={() => generateTaskReport('weekly')}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar Semanal
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Alertas de conflitos */}
+        {schedulingData.conflicts && schedulingData.conflicts.length > 0 && (
+          <Alert className="border-red-200 bg-red-50">
+            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <AlertDescription>
+              <div className="space-y-2">
+                <p className="font-medium text-red-800">
+                  {schedulingData.conflicts.length} conflito(s) de recursos detectado(s):
+                </p>
+                {(schedulingData.conflicts || []).map((conflict, index) => (
+                  <div key={index} className="text-sm text-red-700">
+                    • <strong>{conflict.resourceName}</strong> em {format(parseISO(conflict.date), 'dd/MM/yyyy')}: 
+                    {conflict.totalHours}h programadas (capacidade: {conflict.capacity}h)
+                  </div>
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Dashboard de recursos */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Utilização de Recursos - {format(parseISO(selectedViewDate), 'dd/MM/yyyy')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {(schedulingData.resourceUtilization || []).map((item) => (
+                <Card key={item.resource.id} className={item.isOverutilized ? "border-red-200" : ""}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      {item.resource.name}
+                      {item.isOverutilized && (
+                        <AlertCircle className="h-4 w-4 text-red-500" />
+                      )}
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      {item.resource.type} • Capacidade: {item.resource.capacity || 8}h
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span>Utilização:</span>
+                        <span className={item.isOverutilized ? "text-red-600 font-medium" : ""}>
+                          {item.totalHours}h ({item.utilization.toFixed(0)}%)
+                        </span>
+                      </div>
+                      <Progress 
+                        value={item.utilization} 
+                        className={`h-2 ${item.isOverutilized ? '[&>div]:bg-red-500' : ''}`}
+                      />
+                      <div className="text-xs text-muted-foreground">
+                        {item.tasks.length} tarefa(s) programada(s)
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Tarefas pendentes para programação */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <ClipboardList className="h-5 w-5" />
+                Tarefas Pendentes para Programação
+              </span>
+              <Badge variant="outline">{schedulingData.pendingTasks.length} tarefas</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {schedulingData.pendingTasks.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">
+                Todas as tarefas foram programadas!
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>OS</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Item</TableHead>
+                    <TableHead>Etapa</TableHead>
+                    <TableHead>Prioridade</TableHead>
+                    <TableHead>Entrega</TableHead>
+                    <TableHead>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(schedulingData.pendingTasks || [])
+                    .filter(task => orderFilter === "all" || task.orderId === orderFilter)
+                    .map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell className="font-medium">{task.orderNumber}</TableCell>
+                      <TableCell>{task.customer}</TableCell>
+                      <TableCell>
+                        <div>
+                          {task.itemCode ? <div className="text-xs text-muted-foreground">[{task.itemCode}]</div> : null}
+                          <div className="truncate max-w-[150px]" title={task.itemDescription}>
+                            {task.itemDescription}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>{task.stageName}</TableCell>
+                      <TableCell>
+                        <Badge className={
+                          task.priority === 'urgente' ? "bg-red-100 text-red-800" :
+                          task.priority === 'alta' ? "bg-orange-100 text-orange-800" :
+                          task.priority === 'media' ? "bg-yellow-100 text-yellow-800" :
+                          "bg-blue-100 text-blue-800"
+                        }>
+                          {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {task.deliveryDate ? format(task.deliveryDate, 'dd/MM/yyyy') : 'N/A'}
+                      </TableCell>
+                      <TableCell>
+                        <Button 
+                          size="sm"
+                          onClick={() => handleScheduleTask(task)}
+                        >
+                          <Schedule className="h-4 w-4 mr-1" />
+                          Programar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Tarefas programadas */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                Tarefas Programadas - {format(parseISO(selectedViewDate), 'dd/MM/yyyy')}
+              </span>
+              <Badge variant="outline">
+                {schedulingData.scheduledTasks.filter(task => 
+                  task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+                ).length} tarefas
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {schedulingData.scheduledTasks.filter(task => 
+              task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+            ).length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">
+                Nenhuma tarefa programada para esta data.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Hora</TableHead>
+                    <TableHead>OS</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Etapa</TableHead>
+                    <TableHead>Recurso</TableHead>
+                    <TableHead>Responsável</TableHead>
+                    <TableHead>Duração</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(schedulingData.scheduledTasks || [])
+                    .filter(task => 
+                      task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
+                      (orderFilter === "all" || task.orderId === orderFilter)
+                    )
+                    .sort((a, b) => (a.scheduledStartTime || '').localeCompare(b.scheduledStartTime || ''))
+                    .map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell className="font-medium">{task.scheduledStartTime}</TableCell>
+                      <TableCell>{task.orderNumber}</TableCell>
+                      <TableCell>{task.customer}</TableCell>
+                      <TableCell>{task.stageName}</TableCell>
+                      <TableCell>
+                        {task.assignedResourceName ? (
+                          <Badge variant="outline">{task.assignedResourceName}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">N/A</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {task.responsibleName ? (
+                          <Badge variant="outline">{task.responsibleName}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">N/A</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{task.estimatedHours || 0}h</TableCell>
+                      <TableCell>
+                        <Badge className={
+                          task.status === 'Concluído' ? "bg-green-100 text-green-800" :
+                          task.status === 'Em Andamento' ? "bg-blue-100 text-blue-800" :
+                          "bg-purple-100 text-purple-800"
+                        }>
+                          {task.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button 
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleScheduleTask(task)}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          {(task.status === 'Programado' || task.status === 'Em Andamento') && (
+                            <Button 
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleUpdateTask(task)}
+                            >
+                              <CheckSquare className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Dashboard Realizado x Programado */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Realizado x Programado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Tarefas Programadas</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-600">
+                    {schedulingData.scheduledTasks.filter(task => 
+                      task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+                    ).length}
+                  </div>
+                  <p className="text-xs text-muted-foreground">para hoje</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Tarefas Concluídas</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">
+                    {schedulingData.scheduledTasks.filter(task => 
+                      task.scheduledStartDate && 
+                      isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
+                      task.status === 'Concluído'
+                    ).length}
+                  </div>
+                  <p className="text-xs text-muted-foreground">hoje</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Taxa de Conclusão</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-purple-600">
+                    {(() => {
+                      const scheduled = schedulingData.scheduledTasks.filter(task => 
+                        task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate))
+                      ).length;
+                      const completed = schedulingData.scheduledTasks.filter(task => 
+                        task.scheduledStartDate && 
+                        isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
+                        task.status === 'Concluído'
+                      ).length;
+                      return scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0;
+                    })()}%
+                  </div>
+                  <p className="text-xs text-muted-foreground">de eficiência</p>
+                </CardContent>
+              </Card>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // =============================================================================
+  // LOADING STATE
+  // =============================================================================
+
+  // Verificar autenticação primeiro
+  if (authLoading) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  // Se não há usuário autenticado, não renderizar
+  if (!user) {
+    return null;
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
+    );
+  }
