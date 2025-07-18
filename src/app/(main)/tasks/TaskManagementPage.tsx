@@ -1007,7 +1007,7 @@ const TaskManagementPage = () => {
                   <TableCell>{task.customer}</TableCell>
                   <TableCell>
                     <div>
-                      {task.itemCode && <div className="text-xs text-muted-foreground">[{task.itemCode}]</div>}
+                      {task.itemCode ? <div className="text-xs text-muted-foreground">[{task.itemCode}]</div> : null}
                       <div className="truncate max-w-[150px]" title={task.itemDescription}>
                         {task.itemDescription}
                       </div>
@@ -1108,7 +1108,7 @@ const TaskManagementPage = () => {
         </Card>
 
         {/* Alertas de conflitos */}
-        {schedulingData.conflicts.length > 0 && (
+        {schedulingData.conflicts && schedulingData.conflicts.length > 0 && (
           <Alert className="border-red-200 bg-red-50">
             <AlertTriangle className="h-4 w-4 text-red-600" />
             <AlertDescription>
@@ -1211,7 +1211,7 @@ const TaskManagementPage = () => {
                       <TableCell>{task.customer}</TableCell>
                       <TableCell>
                         <div>
-                          {task.itemCode && <div className="text-xs text-muted-foreground">[{task.itemCode}]</div>}
+                          {task.itemCode ? <div className="text-xs text-muted-foreground">[{task.itemCode}]</div> : null}
                           <div className="truncate max-w-[150px]" title={task.itemDescription}>
                             {task.itemDescription}
                           </div>
@@ -2164,7 +2164,7 @@ const TaskManagementPage = () => {
                     )}
                   />
 
-                  {updateForm.watch('status') === 'Concluído' && (
+                  {updateForm.watch('status') === 'Concluído' ? (
                     <FormField
                       control={updateForm.control}
                       name="completedDate"
@@ -2178,9 +2178,9 @@ const TaskManagementPage = () => {
                         </FormItem>
                       )}
                     />
-                  )}
+                  ) : null}
 
-                  {updateForm.watch('status') === 'Reprogramado' && (
+                  {updateForm.watch('status') === 'Reprogramado' ? (
                     <div className="grid grid-cols-2 gap-4">
                       <FormField
                         control={updateForm.control}
@@ -2210,7 +2210,7 @@ const TaskManagementPage = () => {
                         )}
                       />
                     </div>
-                  )}
+                  ) : null}
 
                   <FormField
                     control={updateForm.control}
