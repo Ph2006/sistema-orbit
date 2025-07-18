@@ -929,6 +929,9 @@ const TaskManagementPage = () => {
   // =============================================================================
 
   const TaskTable = ({ tasks, title }: { tasks: Task[]; title: string }) => {
+    // Garantir que tasks seja sempre um array válido
+    const safeTasks = tasks || [];
+    
     const getPriorityBadge = (priority: Task['priority']) => {
       const variants = {
         baixa: "bg-blue-100 text-blue-800",
@@ -959,7 +962,7 @@ const TaskManagementPage = () => {
       );
     };
 
-    if (tasks.length === 0) {
+    if (safeTasks.length === 0) {
       return (
         <Card>
           <CardHeader>
@@ -979,7 +982,7 @@ const TaskManagementPage = () => {
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             {title}
-            <Badge variant="outline">{tasks.length} tarefas</Badge>
+            <Badge variant="outline">{safeTasks.length} tarefas</Badge>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -998,7 +1001,7 @@ const TaskManagementPage = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {tasks.map((task) => (
+              {safeTasks.map((task) => (
                 <TableRow key={task.id}>
                   <TableCell className="font-medium">{task.orderNumber}</TableCell>
                   <TableCell>{task.customer}</TableCell>
@@ -1113,7 +1116,7 @@ const TaskManagementPage = () => {
                 <p className="font-medium text-red-800">
                   {schedulingData.conflicts.length} conflito(s) de recursos detectado(s):
                 </p>
-                {schedulingData.conflicts.map((conflict, index) => (
+                {(schedulingData.conflicts || []).map((conflict, index) => (
                   <div key={index} className="text-sm text-red-700">
                     • <strong>{conflict.resourceName}</strong> em {format(parseISO(conflict.date), 'dd/MM/yyyy')}: 
                     {conflict.totalHours}h programadas (capacidade: {conflict.capacity}h)
@@ -1134,7 +1137,7 @@ const TaskManagementPage = () => {
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {schedulingData.resourceUtilization.map((item) => (
+              {(schedulingData.resourceUtilization || []).map((item) => (
                 <Card key={item.resource.id} className={item.isOverutilized ? "border-red-200" : ""}>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm flex items-center justify-between">
@@ -1200,7 +1203,7 @@ const TaskManagementPage = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {schedulingData.pendingTasks
+                  {(schedulingData.pendingTasks || [])
                     .filter(task => orderFilter === "all" || task.orderId === orderFilter)
                     .map((task) => (
                     <TableRow key={task.id}>
@@ -1283,7 +1286,7 @@ const TaskManagementPage = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {schedulingData.scheduledTasks
+                  {(schedulingData.scheduledTasks || [])
                     .filter(task => 
                       task.scheduledStartDate && isSameDay(task.scheduledStartDate, parseISO(selectedViewDate)) &&
                       (orderFilter === "all" || task.orderId === orderFilter)
@@ -1776,7 +1779,7 @@ const TaskManagementPage = () => {
                           </FormControl>
                           <SelectContent>
                             <SelectItem value="">Nenhum recurso</SelectItem>
-                            {resources
+                            {(resources || [])
                               .filter(r => r.status === 'disponivel')
                               .map(resource => (
                                 <SelectItem key={resource.id} value={resource.id}>
@@ -1807,7 +1810,7 @@ const TaskManagementPage = () => {
                           </FormControl>
                           <SelectContent>
                             <SelectItem value="">Nenhum responsável</SelectItem>
-                            {teamMembers.map(member => (
+                            {(teamMembers || []).map(member => (
                               <SelectItem key={member.id} value={member.id}>
                                 <div className="flex items-center gap-2">
                                   <User className="h-4 w-4" />
