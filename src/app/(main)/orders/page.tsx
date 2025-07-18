@@ -1730,6 +1730,46 @@ export default function OrdersPage() {
             
             yPos = Math.max(leftColumnY, rightColumnY) + 10;
 
+            // Progresso geral do pedido
+            const orderProgress = calculateOrderProgress(selectedOrder);
+            
+            // Título do progresso geral
+            docPdf.setFontSize(10).setFont('helvetica', 'bold');
+            docPdf.text('PROGRESSO GERAL DO PEDIDO:', 15, yPos);
+            yPos += 8;
+            
+            // Barra de progresso geral
+            const progressBarWidth = 120;
+            const progressBarHeight = 8;
+            const progressBarX = 15;
+            
+            // Fundo da barra (cinza claro)
+            docPdf.setFillColor(230, 230, 230);
+            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'F');
+            
+            // Barra de progresso colorida
+            const progressWidth = (orderProgress / 100) * progressBarWidth;
+            if (orderProgress < 30) {
+                docPdf.setFillColor(239, 68, 68); // Vermelho
+            } else if (orderProgress < 70) {
+                docPdf.setFillColor(245, 158, 11); // Amarelo
+            } else {
+                docPdf.setFillColor(34, 197, 94); // Verde
+            }
+            docPdf.rect(progressBarX, yPos, progressWidth, progressBarHeight, 'F');
+            
+            // Borda da barra
+            docPdf.setDrawColor(0, 0, 0);
+            docPdf.setLineWidth(0.1);
+            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'S');
+            
+            // Texto da porcentagem
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            docPdf.setTextColor(0, 0, 0);
+            docPdf.text(`${orderProgress.toFixed(1)}%`, progressBarX + progressBarWidth + 5, yPos + 6);
+            
+            yPos += progressBarHeight + 15;
+
             // Tabela do cronograma
             const tableBody: any[][] = [];
             selectedOrder.items.forEach(item => {
@@ -1743,6 +1783,18 @@ export default function OrdersPage() {
                             fontStyle: 'bold', 
                             fillColor: '#f0f0f0',
                             fontSize: 9
+                        } 
+                    }]);
+                    
+                    // Linha com barra de progresso do item
+                    const itemProgress = calculateItemProgress(item);
+                    tableBody.push([{ 
+                        content: `Progresso: ${itemProgress.toFixed(1)}%`, 
+                        colSpan: 5, 
+                        styles: { 
+                            fontSize: 8,
+                            textColor: '#666666',
+                            cellPadding: { top: 2, right: 3, bottom: 2, left: 3 }
                         } 
                     }]);
                     
@@ -1786,6 +1838,43 @@ export default function OrdersPage() {
                 didParseCell: (data) => {
                     if (data.cell.raw && (data.cell.raw as any).colSpan) {
                         data.cell.styles.halign = 'left';
+                    }
+                },
+                didDrawCell: (data) => {
+                    // Verifica se é uma linha de progresso do item
+                    if (data.cell.raw && typeof data.cell.raw === 'string' && data.cell.raw.startsWith('Progresso:')) {
+                        const progressText = data.cell.raw as string;
+                        const progressMatch = progressText.match(/(\d+\.?\d*)%/);
+                        
+                        if (progressMatch) {
+                            const progress = parseFloat(progressMatch[1]);
+                            
+                            // Posição e dimensões da barra
+                            const barX = data.cell.x + 70; // Posição após o texto "Progresso: XX%"
+                            const barY = data.cell.y + 2;
+                            const barWidth = 80;
+                            const barHeight = 4;
+                            
+                            // Fundo da barra (cinza claro)
+                            docPdf.setFillColor(230, 230, 230);
+                            docPdf.rect(barX, barY, barWidth, barHeight, 'F');
+                            
+                            // Barra de progresso colorida
+                            const fillWidth = (progress / 100) * barWidth;
+                            if (progress < 30) {
+                                docPdf.setFillColor(239, 68, 68); // Vermelho
+                            } else if (progress < 70) {
+                                docPdf.setFillColor(245, 158, 11); // Amarelo
+                            } else {
+                                docPdf.setFillColor(34, 197, 94); // Verde
+                            }
+                            docPdf.rect(barX, barY, fillWidth, barHeight, 'F');
+                            
+                            // Borda da barra
+                            docPdf.setDrawColor(150, 150, 150);
+                            docPdf.setLineWidth(0.1);
+                            docPdf.rect(barX, barY, barWidth, barHeight, 'S');
+                        }
                     }
                 },
                 margin: { left: 15, right: 15 }
