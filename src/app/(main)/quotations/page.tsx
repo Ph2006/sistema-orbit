@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy, Package } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy, Package, ChevronUp, ChevronDown } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -589,6 +589,38 @@ export default function QuotationsPage() {
         toast({
             title: "Item duplicado!",
             description: "O item foi duplicado e adicionado ao final da lista. Você pode editá-lo conforme necessário.",
+        });
+    };
+
+    const handleMoveItemUp = (index: number) => {
+        if (index === 0) return; // Não pode mover o primeiro item para cima
+        
+        const currentItem = watchedItems[index];
+        const previousItem = watchedItems[index - 1];
+        
+        // Trocar as posições
+        update(index - 1, currentItem);
+        update(index, previousItem);
+        
+        toast({
+            title: "Item movido!",
+            description: "O item foi movido para cima na lista.",
+        });
+    };
+
+    const handleMoveItemDown = (index: number) => {
+        if (index === watchedItems.length - 1) return; // Não pode mover o último item para baixo
+        
+        const currentItem = watchedItems[index];
+        const nextItem = watchedItems[index + 1];
+        
+        // Trocar as posições
+        update(index, nextItem);
+        update(index + 1, currentItem);
+        
+        toast({
+            title: "Item movido!",
+            description: "O item foi movido para baixo na lista.",
         });
     };
     
@@ -1368,7 +1400,7 @@ export default function QuotationsPage() {
                                                                     )}
                                                                 </CardTitle>
                                                                 <CardDescription>
-                                                                    Use o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
+                                                                    Use as setas para reordenar os itens, o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
                                                                     {editIndex !== null && " Clique no ✓ para salvar ou ✗ para cancelar a edição."}
                                                                 </CardDescription>
                                                             </CardHeader>
@@ -1384,7 +1416,7 @@ export default function QuotationsPage() {
                                                             <TableHead className="w-[120px]">Imposto (%)</TableHead>
                                                             <TableHead className="w-[140px]">Lead Time</TableHead>
                                                             <TableHead className="w-[180px]">Total c/ Imp.</TableHead>
-                                                            <TableHead className="w-[160px] text-right">Ações</TableHead>
+                                                            <TableHead className="w-[220px] text-right">Ações</TableHead>
                                                         </TableRow>
                                                     </TableHeader>
                                                     <TableBody>
@@ -1521,6 +1553,28 @@ export default function QuotationsPage() {
                                                                     <TableCell className="text-right font-bold p-3 text-base">{totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</TableCell>
                                                                     <TableCell className="text-right p-3">
                                                                         <div className="flex items-center justify-center gap-1">
+                                                                            <Button 
+                                                                                type="button" 
+                                                                                variant="ghost" 
+                                                                                size="icon"
+                                                                                onClick={() => handleMoveItemUp(index)}
+                                                                                title="Mover item para cima"
+                                                                                disabled={index === 0}
+                                                                                className="h-9 w-9 hover:bg-green-50"
+                                                                            >
+                                                                                <ChevronUp className="h-4 w-4" />
+                                                                            </Button>
+                                                                            <Button 
+                                                                                type="button" 
+                                                                                variant="ghost" 
+                                                                                size="icon"
+                                                                                onClick={() => handleMoveItemDown(index)}
+                                                                                title="Mover item para baixo"
+                                                                                disabled={index === watchedItems.length - 1}
+                                                                                className="h-9 w-9 hover:bg-green-50"
+                                                                            >
+                                                                                <ChevronDown className="h-4 w-4" />
+                                                                            </Button>
                                                                             <Button 
                                                                                 type="button" 
                                                                                 variant="ghost" 
