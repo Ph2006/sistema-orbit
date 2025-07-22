@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -2925,6 +2925,107 @@ export default function OrdersPage() {
         }
     };
 
+    // FUNÇÃO PARA ANÁLISE DE ENTREGA
+    const analyzeOrderDelivery = (order: Order) => {
+        const summary = {
+            totalItems: order.items.length,
+            completedItems: 0,
+            onTimeItems: 0,
+            earlyItems: 0,
+            lateItems: 0,
+            pendingItems: 0,
+            overdueItems: 0
+        };
+
+        const itemAnalyses = order.items.map((item) => {
+            const hasShippingDate = !!item.shippingDate;
+            const hasDeliveryDate = !!order.deliveryDate;
+            
+            let deliveryStatus = 'pending';
+            let daysDifference = 0;
+            
+            if (hasShippingDate && hasDeliveryDate) {
+                summary.completedItems++;
+                const shippingDate = item.shippingDate instanceof Date ? item.shippingDate : new Date(item.shippingDate);
+                const deliveryDate = order.deliveryDate instanceof Date ? order.deliveryDate : new Date(order.deliveryDate);
+                
+                daysDifference = Math.ceil((shippingDate.getTime() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24));
+                
+                if (daysDifference < 0) {
+                    deliveryStatus = 'early';
+                    summary.earlyItems++;
+                } else if (daysDifference === 0) {
+                    deliveryStatus = 'on-time';
+                    summary.onTimeItems++;
+                } else {
+                    deliveryStatus = 'late';
+                    summary.lateItems++;
+                }
+            } else if (hasDeliveryDate && !hasShippingDate) {
+                const deliveryDate = order.deliveryDate instanceof Date ? order.deliveryDate : new Date(order.deliveryDate);
+                const today = new Date();
+                
+                if (today > deliveryDate) {
+                    deliveryStatus = 'overdue';
+                    daysDifference = Math.ceil((today.getTime() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24));
+                    summary.overdueItems++;
+                } else {
+                    summary.pendingItems++;
+                }
+            } else {
+                summary.pendingItems++;
+            }
+
+            return {
+                itemId: item.id,
+                description: item.description,
+                shippingDate: item.shippingDate,
+                deliveryStatus,
+                daysDifference: Math.abs(daysDifference),
+                hasShippingDate,
+                hasDeliveryDate
+            };
+        });
+
+        return { summary, itemAnalyses };
+    };
+
+    // COMPONENTE BOTÃO DE RELATÓRIO DE ENTREGA
+    const DeliveryReportButton = ({ order }: { order: Order }) => {
+        const handleGenerateDeliveryReport = () => {
+            try {
+                const analysis = analyzeOrderDelivery(order);
+                
+                toast({
+                    title: "Relatório de Entrega",
+                    description: `${analysis.summary.completedItems} itens embarcados de ${analysis.summary.totalItems} total. Performance: ${((analysis.summary.onTimeItems + analysis.summary.earlyItems) / Math.max(analysis.summary.totalItems, 1) * 100).toFixed(1)}%`
+                });
+
+                // Log detalhado para o console
+                console.log('📊 [Relatório de Entrega]', {
+                    pedido: order.quotationNumber,
+                    cliente: order.customer.name,
+                    análise: analysis
+                });
+                
+            } catch (error) {
+                console.error('Erro ao gerar relatório de entrega:', error);
+                toast({
+                    variant: "destructive",
+                    title: "Erro",
+                    description: "Não foi possível gerar o relatório de entrega"
+                });
+            }
+        };
+
+        return (
+            <Button onClick={handleGenerateDeliveryReport} variant="outline" size="sm">
+                <TrendingUp className="mr-2 h-4 w-4" />
+                Relatório de Entrega
+            </Button>
+        );
+    };
+
     // FUNÇÃO AUXILIAR para debug do Firestore
     const debugFirestoreData = async (orderId: string) => {
         try {
@@ -3670,6 +3771,126 @@ export default function OrdersPage() {
                     </CardContent>
                   </Card>
 
+                  {/* Preview dos Dados de Entrega - Adicione após a seção de documentos */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5" />
+                        Performance de Entrega
+                      </CardTitle>
+                      <CardDescription>
+                        Análise dos dados de embarque e pontualidade das entregas
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {(() => {
+                        const analysis = analyzeOrderDelivery(selectedOrder);
+                        const hasData = analysis.summary.completedItems > 0;
+                        
+                        if (!hasData) {
+                          return (
+                            <div className="text-center py-6 text-muted-foreground">
+                              <Clock className="h-8 w-8 mx-auto mb-2" />
+                              <p className="text-sm">Nenhum dado de embarque disponível ainda</p>
+                            </div>
+                          );
+                        }
+                        
+                        const overallRate = analysis.summary.totalItems > 0 ? 
+                          ((analysis.summary.onTimeItems + analysis.summary.earlyItems) / analysis.summary.totalItems) * 100 : 0;
+                        
+                        return (
+                          <div className="space-y-4">
+                            {/* Índice de Performance */}
+                            <div className="flex items-center justify-between p-4 bg-secondary rounded-lg">
+                              <div>
+                                <p className="text-sm font-medium text-muted-foreground">Índice de Entrega no Prazo</p>
+                                <p className="text-2xl font-bold">{overallRate.toFixed(1)}%</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {analysis.summary.onTimeItems + analysis.summary.earlyItems} de {analysis.summary.totalItems} itens
+                                </p>
+                              </div>
+                              <div className={`p-3 rounded-full ${
+                                overallRate >= 80 ? 'bg-green-100 text-green-600' :
+                                overallRate >= 60 ? 'bg-yellow-100 text-yellow-600' :
+                                'bg-red-100 text-red-600'
+                              }`}>
+                                {overallRate >= 80 ? <TrendingUp className="h-6 w-6" /> :
+                                 overallRate >= 60 ? <Clock className="h-6 w-6" /> :
+                                 <TrendingDown className="h-6 w-6" />}
+                              </div>
+                            </div>
+                            
+                            {/* Resumo por Status */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                              <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
+                                <div className="flex items-center justify-center mb-1">
+                                  <CheckCircle className="h-4 w-4 text-green-600" />
+                                </div>
+                                <p className="font-semibold text-green-800">{analysis.summary.onTimeItems}</p>
+                                <p className="text-green-600">No Prazo</p>
+                              </div>
+                              
+                              <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                <div className="flex items-center justify-center mb-1">
+                                  <TrendingUp className="h-4 w-4 text-blue-600" />
+                                </div>
+                                <p className="font-semibold text-blue-800">{analysis.summary.earlyItems}</p>
+                                <p className="text-blue-600">Antecipadas</p>
+                              </div>
+                              
+                              <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
+                                <div className="flex items-center justify-center mb-1">
+                                  <AlertTriangle className="h-4 w-4 text-red-600" />
+                                </div>
+                                <p className="font-semibold text-red-800">{analysis.summary.lateItems}</p>
+                                <p className="text-red-600">Atrasadas</p>
+                              </div>
+                              
+                              <div className="text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                <div className="flex items-center justify-center mb-1">
+                                  <Clock className="h-4 w-4 text-gray-600" />
+                                </div>
+                                <p className="font-semibold text-gray-800">{analysis.summary.pendingItems}</p>
+                                <p className="text-gray-600">Pendentes</p>
+                              </div>
+                            </div>
+                            
+                            {/* Itens com Problemas */}
+                            {(analysis.summary.lateItems > 0 || analysis.summary.overdueItems > 0) && (
+                              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <AlertTriangle className="h-4 w-4 text-red-600" />
+                                  <p className="text-sm font-medium text-red-800">Itens com Atraso</p>
+                                </div>
+                                <div className="space-y-1">
+                                  {analysis.itemAnalyses
+                                    .filter(item => item.deliveryStatus === 'late' || item.deliveryStatus === 'overdue')
+                                    .slice(0, 3)
+                                    .map(item => (
+                                      <p key={item.itemId} className="text-xs text-red-700">
+                                        • {item.description.substring(0, 40)}... 
+                                        ({item.deliveryStatus === 'late' ? `${item.daysDifference}d atrasado` : `${item.daysDifference}d vencido`})
+                                      </p>
+                                    ))}
+                                  {analysis.itemAnalyses.filter(item => 
+                                    item.deliveryStatus === 'late' || item.deliveryStatus === 'overdue'
+                                  ).length > 3 && (
+                                    <p className="text-xs text-red-600">
+                                      +{analysis.itemAnalyses.filter(item => 
+                                        item.deliveryStatus === 'late' || item.deliveryStatus === 'overdue'
+                                      ).length - 3} outros itens com atraso
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </CardContent>
+                  </Card>
+
                   {/* Lista de Itens */}
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
@@ -3850,7 +4071,7 @@ export default function OrdersPage() {
             {/* Footer de visualização */}
             <SheetFooter className="flex-shrink-0 pt-4 border-t">
               <div className="flex items-center justify-between w-full gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {selectedItems.size > 0 && (
                     <Button onClick={handleGeneratePackingSlip} variant="outline">
                       <ReceiptText className="mr-2 h-4 w-4" />
@@ -3861,7 +4082,11 @@ export default function OrdersPage() {
                     <CalendarClock className="mr-2 h-4 w-4" />
                     Exportar Cronograma
                   </Button>
+                  
+                  {/* NOVO BOTÃO DE RELATÓRIO DE ENTREGA */}
+                  <DeliveryReportButton order={selectedOrder} />
                 </div>
+                
                 <div className="flex items-center gap-2">
                   <Button variant="outline" onClick={() => setIsEditing(true)}>
                     <Edit className="mr-2 h-4 w-4" />
