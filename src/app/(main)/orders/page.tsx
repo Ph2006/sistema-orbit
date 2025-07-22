@@ -2944,7 +2944,7 @@ export default function OrdersPage() {
             let deliveryStatus = 'pending';
             let daysDifference = 0;
             
-            if (hasShippingDate && hasDeliveryDate) {
+            if (hasShippingDate && hasDeliveryDate && order.deliveryDate) {
                 summary.completedItems++;
                 const shippingDate = item.shippingDate instanceof Date ? item.shippingDate : new Date(item.shippingDate);
                 const deliveryDate = order.deliveryDate instanceof Date ? order.deliveryDate : new Date(order.deliveryDate);
@@ -2961,7 +2961,7 @@ export default function OrdersPage() {
                     deliveryStatus = 'late';
                     summary.lateItems++;
                 }
-            } else if (hasDeliveryDate && !hasShippingDate) {
+            } else if (hasDeliveryDate && !hasShippingDate && order.deliveryDate) {
                 const deliveryDate = order.deliveryDate instanceof Date ? order.deliveryDate : new Date(order.deliveryDate);
                 const today = new Date();
                 
@@ -3022,6 +3022,228 @@ export default function OrdersPage() {
             <Button onClick={handleGenerateDeliveryReport} variant="outline" size="sm">
                 <TrendingUp className="mr-2 h-4 w-4" />
                 Relatório de Entrega
+            </Button>
+        );
+    };
+
+    // MÉTODO ALTERNATIVO - Geração de relatório com PDF
+    const handleGenerateDeliveryReportAlternative = async (order: Order) => {
+        if (!order) {
+            toast({
+                variant: "destructive",
+                title: "Erro",
+                description: "Dados do pedido não encontrados.",
+            });
+            return;
+        }
+
+        const toastId = toast({ 
+            title: "Gerando Relatório...", 
+            description: "Preparando dados e criando PDF...",
+            duration: 10000 
+        });
+
+        try {
+            // Analisar dados
+            const analysis = analyzeOrderDelivery(order);
+            console.log('Análise completa:', analysis);
+            
+            // Criar PDF com configuração mais específica
+            const docPdf = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a4'
+            });
+            
+            const pageWidth = docPdf.internal.pageSize.getWidth();
+            const pageHeight = docPdf.internal.pageSize.getHeight();
+            let yPos = 20;
+
+            // Título simples para teste
+            docPdf.setFontSize(18);
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text('RELATÓRIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+
+            // Dados básicos do pedido
+            docPdf.setFontSize(12);
+            docPdf.setFont('helvetica', 'normal');
+            docPdf.text(`Pedido: ${order.quotationNumber || 'N/A'}`, 20, yPos);
+            yPos += 8;
+            docPdf.text(`Cliente: ${order.customer?.name || 'N/A'}`, 20, yPos);
+            yPos += 8;
+            docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 20, yPos);
+            yPos += 15;
+
+            // Índice de performance
+            const overallRate = analysis.summary.totalItems > 0 ? 
+                ((analysis.summary.onTimeItems + analysis.summary.earlyItems) / analysis.summary.totalItems) * 100 : 0;
+            
+            docPdf.setFontSize(14);
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text('ÍNDICE DE PONTUALIDADE:', 20, yPos);
+            docPdf.setFontSize(24);
+            docPdf.text(`${overallRate.toFixed(1)}%`, pageWidth - 20, yPos, { align: 'right' });
+            yPos += 20;
+
+            // Resumo
+            docPdf.setFontSize(10);
+            docPdf.setFont('helvetica', 'normal');
+            docPdf.text(`Total de itens: ${analysis.summary.totalItems}`, 20, yPos);
+            yPos += 6;
+            docPdf.text(`Entregues no prazo: ${analysis.summary.onTimeItems}`, 20, yPos);
+            yPos += 6;
+            docPdf.text(`Entregues antecipado: ${analysis.summary.earlyItems}`, 20, yPos);
+            yPos += 6;
+            docPdf.text(`Entregues com atraso: ${analysis.summary.lateItems}`, 20, yPos);
+            yPos += 6;
+            docPdf.text(`Pendentes: ${analysis.summary.pendingItems}`, 20, yPos);
+            yPos += 15;
+
+            // Tabela simples
+            if (analysis.itemAnalyses.length > 0) {
+                const tableData = analysis.itemAnalyses.slice(0, 10).map(item => {
+                    let status = 'Pendente';
+                    switch (item.deliveryStatus) {
+                        case 'early': status = `Antecip. ${item.daysDifference}d`; break;
+                        case 'on-time': status = 'No Prazo'; break;
+                        case 'late': status = `Atraso ${item.daysDifference}d`; break;
+                        case 'overdue': status = `Vencido ${item.daysDifference}d`; break;
+                    }
+                    
+                    return [
+                        item.itemId || '-',
+                        item.description.length > 30 ? item.description.substring(0, 30) + '...' : item.description,
+                        'N/A', // expectedDate placeholder
+                        'Pendente', // actualDate placeholder  
+                        status
+                    ];
+                });
+
+                autoTable(docPdf, {
+                    startY: yPos,
+                    head: [['Item', 'Descrição', 'Previsto', 'Real', 'Status']],
+                    body: tableData,
+                    styles: { fontSize: 8, cellPadding: 3 },
+                    headStyles: { fillColor: [70, 130, 180], textColor: 255 },
+                    columnStyles: {
+                        0: { cellWidth: 20 },
+                        1: { cellWidth: 80 },
+                        2: { cellWidth: 25 },
+                        3: { cellWidth: 25 },
+                        4: { cellWidth: 35 }
+                    }
+                });
+            }
+
+            // Gerar nome do arquivo único
+            const timestamp = format(new Date(), 'yyyyMMdd_HHmmss');
+            const filename = `Relatorio_Entrega_${order.quotationNumber || 'Pedido'}_${timestamp}.pdf`;
+
+            console.log('Tentando fazer download do arquivo:', filename);
+
+            // MÉTODO 1: Save padrão
+            try {
+                docPdf.save(filename);
+                console.log('Download iniciado com método padrão');
+                
+                setTimeout(() => {
+                    toast({
+                        title: "✅ Relatório Gerado!",
+                        description: `Arquivo: ${filename}`,
+                    });
+                }, 1000);
+                
+                return;
+            } catch (saveError) {
+                console.warn('Método padrão falhou:', saveError);
+            }
+
+            // MÉTODO 2: Blob + URL manual
+            try {
+                const pdfBlob = docPdf.output('blob');
+                const url = URL.createObjectURL(pdfBlob);
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                link.style.display = 'none';
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                
+                console.log('Download iniciado com método manual');
+                
+                toast({
+                    title: "✅ Relatório Gerado!",
+                    description: `Arquivo: ${filename}`,
+                });
+                
+                return;
+            } catch (blobError) {
+                console.warn('Método blob falhou:', blobError);
+            }
+
+            // MÉTODO 3: Data URI fallback
+            try {
+                const pdfDataUri = docPdf.output('datauristring');
+                
+                const link = document.createElement('a');
+                link.href = pdfDataUri;
+                link.download = filename;
+                link.style.display = 'none';
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                console.log('Download iniciado com data URI');
+                
+                toast({
+                    title: "✅ Relatório Gerado!",
+                    description: `Arquivo: ${filename}`,
+                });
+                
+            } catch (dataUriError) {
+                console.error('Todos os métodos de download falharam:', dataUriError);
+                throw new Error('Não foi possível fazer o download do arquivo');
+            }
+
+        } catch (error) {
+            console.error("Erro completo:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao Gerar Relatório",
+                description: `Falha: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            });
+        }
+    };
+
+    // COMPONENTE DE BOTÃO ATUALIZADO para teste
+    const DeliveryReportButtonFixed = ({ order }: { order: Order }) => {
+        const [isGenerating, setIsGenerating] = useState(false);
+        
+        const handleClick = async () => {
+            setIsGenerating(true);
+            try {
+                await handleGenerateDeliveryReportAlternative(order);
+            } finally {
+                setIsGenerating(false);
+            }
+        };
+        
+        return (
+            <Button 
+                onClick={handleClick}
+                disabled={isGenerating}
+                variant="outline"
+                className="flex items-center gap-2"
+            >
+                <FileText className="h-4 w-4" />
+                {isGenerating ? 'Gerando...' : 'Relatório de Entrega'}
             </Button>
         );
     };
@@ -4084,7 +4306,7 @@ export default function OrdersPage() {
                   </Button>
                   
                   {/* NOVO BOTÃO DE RELATÓRIO DE ENTREGA */}
-                  <DeliveryReportButton order={selectedOrder} />
+                  <DeliveryReportButtonFixed order={selectedOrder} />
                 </div>
                 
                 <div className="flex items-center gap-2">
