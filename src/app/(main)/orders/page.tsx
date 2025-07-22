@@ -2116,13 +2116,150 @@ export default function OrdersPage() {
         }
     };
 
+    // ==========================================
+    // CORREÇÃO DEFINITIVA DO SALVAMENTO NO FIRESTORE
+    // ==========================================
+
+    // 1. FUNÇÃO PARA VERIFICAR E CORRIGIR ESTRUTURA DOS DADOS
+    const validateAndCleanItemData = (item: any) => {
+        console.log('🧹 [validateAndCleanItemData] Limpando item:', item.id);
+        
+        // Remove campos undefined, null vazios e problemáticos
+        const cleanItem = {
+            id: item.id || `item_${Date.now()}`,
+            description: item.description || '',
+            quantity: Number(item.quantity) || 0,
+            unitWeight: Number(item.unitWeight) || 0,
+            code: item.code || '',
+            itemNumber: item.itemNumber || '',
+            // Garante que campos opcionais sejam removidos se undefined
+            ...(item.itemDeliveryDate && { itemDeliveryDate: item.itemDeliveryDate }),
+            ...(item.shippingDate && { shippingDate: item.shippingDate }),
+            ...(item.shippingList && { shippingList: item.shippingList }),
+            ...(item.invoiceNumber && { invoiceNumber: item.invoiceNumber }),
+        };
+        
+        // Processar productionPlan de forma mais cuidadosa
+        if (item.productionPlan && Array.isArray(item.productionPlan)) {
+            cleanItem.productionPlan = item.productionPlan
+                .filter(stage => stage && stage.stageName) // Remove etapas vazias
+                .map(stage => ({
+                    stageName: String(stage.stageName).trim(),
+                    status: stage.status || 'Pendente',
+                    durationDays: Number(stage.durationDays) || 0,
+                    useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                    startDate: stage.startDate || null,
+                    completedDate: stage.completedDate || null,
+                }));
+        } else {
+            cleanItem.productionPlan = [];
+        }
+        
+        console.log('🧹 [validateAndCleanItemData] Item limpo:', {
+            id: cleanItem.id,
+            planStages: cleanItem.productionPlan.length,
+            planSummary: cleanItem.productionPlan.map(s => ({
+                name: s.stageName,
+                status: s.status,
+                hasStart: !!s.startDate,
+                hasEnd: !!s.completedDate
+            }))
+        });
+        
+        return cleanItem;
+    };
+
+    // 3. FUNÇÃO DE VERIFICAÇÃO MANUAL DOS DADOS
+    const manualDataCheck = async (orderId: string, itemId: string) => {
+        console.log('🔍 [manualDataCheck] =================================');
+        console.log('🔍 [manualDataCheck] VERIFICAÇÃO MANUAL DOS DADOS');
+        console.log('🔍 [manualDataCheck] =================================');
+        
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", orderId);
+            const orderSnap = await getDoc(orderRef);
+            
+            if (orderSnap.exists()) {
+                const data = orderSnap.data();
+                const targetItem = data.items?.find((item: any) => item.id === itemId);
+                
+                console.log('🔍 [manualDataCheck] Documento encontrado:', {
+                    orderId,
+                    lastUpdate: data.lastUpdate?.toDate?.()?.toISOString() || 'N/A',
+                    itemsTotal: data.items?.length || 0,
+                    targetItem: targetItem ? {
+                        id: targetItem.id,
+                        description: targetItem.description,
+                        planStages: targetItem.productionPlan?.length || 0,
+                        lastProgressUpdate: targetItem.lastProgressUpdate?.toDate?.()?.toISOString() || 'N/A',
+                        detailedPlan: targetItem.productionPlan?.map((stage: any) => ({
+                            stageName: stage.stageName,
+                            status: stage.status,
+                            durationDays: stage.durationDays,
+                            useBusinessDays: stage.useBusinessDays,
+                            startDate: stage.startDate ? {
+                                type: typeof stage.startDate,
+                                isTimestamp: !!stage.startDate.toDate,
+                                value: stage.startDate.toDate ? stage.startDate.toDate().toISOString() : stage.startDate
+                            } : null,
+                            completedDate: stage.completedDate ? {
+                                type: typeof stage.completedDate,
+                                isTimestamp: !!stage.completedDate.toDate,
+                                value: stage.completedDate.toDate ? stage.completedDate.toDate().toISOString() : stage.completedDate
+                            } : null
+                        })) || []
+                    } : 'Item não encontrado'
+                });
+            } else {
+                console.error('❌ [manualDataCheck] Documento não encontrado');
+            }
+        } catch (error) {
+            console.error('❌ [manualDataCheck] Erro:', error);
+        }
+        
+        console.log('🔍 [manualDataCheck] =================================');
+    };
+
+    // 4. BOTÃO DE VERIFICAÇÃO MANUAL PARA ADICIONAR NO MODAL
+    const ManualCheckButton = () => (
+        <Button 
+            type="button" 
+            variant="outline" 
+            size="sm"
+            onClick={() => {
+                if (selectedOrder && itemToTrack) {
+                    manualDataCheck(selectedOrder.id, itemToTrack.id);
+                }
+            }}
+            className="text-xs bg-blue-50 hover:bg-blue-100 border-blue-200"
+        >
+            🔍 Verificar Firestore
+        </Button>
+    );
+
+    // 2. FUNÇÃO CORRIGIDA DE SALVAMENTO QUE PRESERVA TODOS OS DADOS
     const handleSaveProgress = async () => {
-        if (!selectedOrder || !itemToTrack) return;
+        if (!selectedOrder || !itemToTrack) {
+            console.error('❌ [handleSaveProgress] Dados obrigatórios ausentes');
+            return;
+        }
+
+        console.log('💾 [handleSaveProgress] =================================');
+        console.log('💾 [handleSaveProgress] INICIANDO SALVAMENTO COMPLETO');
+        console.log('💾 [handleSaveProgress] =================================');
+        console.log('💾 [handleSaveProgress] Order ID:', selectedOrder.id);
+        console.log('💾 [handleSaveProgress] Item ID:', itemToTrack.id);
+        console.log('💾 [handleSaveProgress] Plano editado:', editedPlan.map(s => ({
+            name: s.stageName,
+            status: s.status,
+            start: s.startDate ? s.startDate.toISOString() : null,
+            end: s.completedDate ? s.completedDate.toISOString() : null,
+            duration: s.durationDays,
+            businessDays: s.useBusinessDays
+        })));
 
         try {
-            console.log('💾 Iniciando salvamento do progresso...');
-            console.log('📊 Plano editado a ser salvo:', editedPlan);
-
+            // 1. Buscar dados atuais do pedido COMPLETOS
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
             const currentOrderSnap = await getDoc(orderRef);
             
@@ -2131,105 +2268,176 @@ export default function OrdersPage() {
             }
             
             const currentOrderData = currentOrderSnap.data();
+            console.log('💾 [handleSaveProgress] Dados atuais carregados, itens:', currentOrderData.items?.length || 0);
 
-            // CORREÇÃO: Mapeamento mais cuidadoso dos itens
-            const itemsForFirestore = currentOrderData.items.map((item: any) => {
-                let planForFirestore: any[];
+            // 2. Converter plano editado para formato Firestore com validação
+            const convertedProductionPlan = editedPlan
+                .filter(stage => stage.stageName && stage.stageName.trim()) // Remove etapas vazias
+                .map((stage, index) => {
+                    console.log(`💾 [handleSaveProgress] Convertendo etapa ${index + 1}: ${stage.stageName}`);
+                    
+                    let startTimestamp = null;
+                    let endTimestamp = null;
+                    
+                    // Conversão de data de início
+                    if (stage.startDate) {
+                        if (stage.startDate instanceof Date && !isNaN(stage.startDate.getTime())) {
+                            startTimestamp = Timestamp.fromDate(stage.startDate);
+                            console.log(`💾 [handleSaveProgress] ✓ Data início convertida: ${stage.startDate.toISOString()}`);
+                        } else {
+                            console.warn(`💾 [handleSaveProgress] ⚠️ Data início inválida ignorada:`, stage.startDate);
+                        }
+                    }
+                    
+                    // Conversão de data de conclusão
+                    if (stage.completedDate) {
+                        if (stage.completedDate instanceof Date && !isNaN(stage.completedDate.getTime())) {
+                            endTimestamp = Timestamp.fromDate(stage.completedDate);
+                            console.log(`💾 [handleSaveProgress] ✓ Data fim convertida: ${stage.completedDate.toISOString()}`);
+                        } else {
+                            console.warn(`💾 [handleSaveProgress] ⚠️ Data fim inválida ignorada:`, stage.completedDate);
+                        }
+                    }
+                    
+                    const convertedStage = {
+                        stageName: String(stage.stageName).trim(),
+                        status: String(stage.status || 'Pendente'),
+                        durationDays: Number(stage.durationDays) || 0,
+                        useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                        startDate: startTimestamp,
+                        completedDate: endTimestamp,
+                    };
+                    
+                    console.log(`💾 [handleSaveProgress] ✓ Etapa ${index + 1} convertida:`, {
+                        name: convertedStage.stageName,
+                        status: convertedStage.status,
+                        duration: convertedStage.durationDays,
+                        businessDays: convertedStage.useBusinessDays,
+                        hasStart: !!convertedStage.startDate,
+                        hasEnd: !!convertedStage.completedDate
+                    });
+                    
+                    return convertedStage;
+                });
 
+            console.log('💾 [handleSaveProgress] Plano convertido completo:', convertedProductionPlan.length, 'etapas');
+
+            // 3. Atualizar APENAS o item específico preservando TODOS os outros dados
+            const updatedItems = currentOrderData.items.map((item: any) => {
                 if (item.id === itemToTrack.id) {
-                    // CORREÇÃO: Conversão mais cuidadosa das datas para Timestamp
-                    planForFirestore = editedPlan.map(p => {
-                        console.log('🔄 Convertendo etapa para Firestore:', {
-                            stageName: p.stageName,
-                            startDate: p.startDate,
-                            completedDate: p.completedDate,
-                            status: p.status
-                        });
+                    console.log('💾 [handleSaveProgress] ✓ Atualizando item alvo:', item.id);
+                    
+                    // Limpar e validar dados do item
+                    const cleanedItem = validateAndCleanItemData(item);
+                    
+                    // Substituir APENAS o productionPlan
+                    cleanedItem.productionPlan = convertedProductionPlan;
+                    cleanedItem.lastProgressUpdate = Timestamp.now();
+                    
+                    console.log('💾 [handleSaveProgress] ✓ Item atualizado com novo plano');
+                    return cleanedItem;
+                } else {
+                    // Para outros itens, limpar mas manter dados existentes
+                    const cleanedItem = validateAndCleanItemData(item);
+                    
+                    // Preservar productionPlan existente com limpeza
+                    if (item.productionPlan && Array.isArray(item.productionPlan)) {
+                        cleanedItem.productionPlan = item.productionPlan.map(stage => ({
+                            stageName: String(stage.stageName || '').trim(),
+                            status: String(stage.status || 'Pendente'),
+                            durationDays: Number(stage.durationDays) || 0,
+                            useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                            startDate: stage.startDate || null,
+                            completedDate: stage.completedDate || null,
+                        }));
+                    }
+                    
+                    return cleanedItem;
+                }
+            });
 
-                        return {
-                            stageName: p.stageName || '',
-                            status: p.status || 'Pendente',
-                            durationDays: Number(p.durationDays) || 0,
-                            useBusinessDays: p.useBusinessDays !== false, // Default true
-                            // CORREÇÃO: Conversão segura de datas
-                            startDate: p.startDate && p.startDate instanceof Date && !isNaN(p.startDate.getTime()) 
-                                ? Timestamp.fromDate(p.startDate) 
-                                : null,
-                            completedDate: p.completedDate && p.completedDate instanceof Date && !isNaN(p.completedDate.getTime()) 
-                                ? Timestamp.fromDate(p.completedDate) 
-                                : null,
-                        };
+            console.log('💾 [handleSaveProgress] Total de itens processados:', updatedItems.length);
+
+            // 4. PREPARAR DADOS PARA SALVAMENTO FINAL
+            const updateData = {
+                items: updatedItems,
+                lastUpdate: Timestamp.now(),
+                lastProgressUpdate: Timestamp.now(),
+                // Preserva outros campos do pedido
+                ...(currentOrderData.customer && { customer: currentOrderData.customer }),
+                ...(currentOrderData.quotationNumber && { quotationNumber: currentOrderData.quotationNumber }),
+                ...(currentOrderData.status && { status: currentOrderData.status }),
+                ...(currentOrderData.deliveryDate && { deliveryDate: currentOrderData.deliveryDate }),
+                ...(currentOrderData.driveLink && { driveLink: currentOrderData.driveLink }),
+                ...(currentOrderData.documents && { documents: currentOrderData.documents }),
+            };
+
+            console.log('💾 [handleSaveProgress] Dados finais preparados para salvamento');
+
+            // 5. SALVAR NO FIRESTORE COM MERGE
+            await updateDoc(orderRef, updateData);
+            console.log('💾 [handleSaveProgress] ✅ DADOS SALVOS NO FIRESTORE COM SUCESSO!');
+
+            // 6. VERIFICAÇÃO IMEDIATA DOS DADOS SALVOS
+            console.log('🔍 [handleSaveProgress] Verificando dados salvos...');
+            const verificationSnap = await getDoc(orderRef);
+            if (verificationSnap.exists()) {
+                const savedData = verificationSnap.data();
+                const savedItem = savedData.items.find((item: any) => item.id === itemToTrack.id);
+                
+                if (savedItem && savedItem.productionPlan) {
+                    console.log('✅ [handleSaveProgress] VERIFICAÇÃO: Dados salvos corretamente:', {
+                        itemId: savedItem.id,
+                        planStages: savedItem.productionPlan.length,
+                        stages: savedItem.productionPlan.map((s: any) => ({
+                            name: s.stageName,
+                            status: s.status,
+                            start: s.startDate ? (s.startDate.toDate ? s.startDate.toDate().toISOString() : 'Invalid') : null,
+                            end: s.completedDate ? (s.completedDate.toDate ? s.completedDate.toDate().toISOString() : 'Invalid') : null
+                        }))
                     });
                 } else {
-                    // Para outros itens, preserva o plano existente
-                    planForFirestore = (item.productionPlan || []).map((p: any) => ({
-                        ...p,
-                        startDate: p.startDate && !(p.startDate instanceof Timestamp) 
-                            ? Timestamp.fromDate(new Date(p.startDate)) 
-                            : (p.startDate || null),
-                        completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) 
-                            ? Timestamp.fromDate(new Date(p.completedDate)) 
-                            : (p.completedDate || null),
-                        status: p.status || 'Pendente',
-                        stageName: p.stageName || '',
-                        durationDays: Number(p.durationDays) || 0,
-                        useBusinessDays: p.useBusinessDays !== false,
-                    }));
+                    console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Item não encontrado ou sem plano');
                 }
+            } else {
+                console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Documento não existe');
+            }
 
-                // CORREÇÃO: Remove campos desnecessários e preserva estrutura
-                const { product_code, ...restOfItem } = item as any;
-                return {
-                    ...restOfItem,
-                    id: item.id || `${selectedOrder.id}-${Math.random()}`,
-                    itemNumber: item.itemNumber || '',
-                    productionPlan: planForFirestore
-                };
-            });
-
-            console.log('💾 Dados a serem salvos no Firestore:', itemsForFirestore);
-
-            // CORREÇÃO: Remove campos undefined antes de enviar para o Firestore
-            const cleanedItems = removeUndefinedFields(itemsForFirestore);
-            
-            // CORREÇÃO: Atualização do documento
-            await updateDoc(orderRef, { 
-                items: cleanedItems,
-                // Adiciona timestamp de última atualização para debug
-                lastProgressUpdate: Timestamp.now()
-            });
-
-            // Verifica se todos os itens foram concluídos
-            const allItemsCompleted = itemsForFirestore.every((item: any) => {
+            // 7. Verificar status geral
+            const allItemsCompleted = updatedItems.every((item: any) => {
                 if (item.productionPlan && item.productionPlan.length > 0) {
                     return item.productionPlan.every((p: any) => p.status === 'Concluído');
                 }
                 return true;
             });
 
-            if (allItemsCompleted && selectedOrder.status !== 'Concluído') {
-                const statusUpdate = removeUndefinedFields({ 
+            if (allItemsCompleted && currentOrderData.status !== 'Concluído') {
+                await updateDoc(orderRef, { 
                     status: "Concluído",
-                    completedAt: Timestamp.now() // Para rastreamento
+                    completedAt: Timestamp.now()
                 });
-                await updateDoc(orderRef, statusUpdate);
                 
                 toast({ 
-                    title: "Pedido Concluído!", 
-                    description: "Todos os itens foram finalizados e o status do pedido foi atualizado automaticamente." 
+                    title: "🎉 Pedido Concluído!", 
+                    description: "Todos os itens foram finalizados. Status atualizado automaticamente." 
                 });
             } else {
                 toast({ 
-                    title: "Progresso salvo com sucesso!", 
-                    description: "As etapas de produção foram atualizadas no sistema." 
+                    title: "✅ Progresso Salvo!", 
+                    description: "As etapas foram salvas e estarão disponíveis em todos os dispositivos." 
                 });
             }
 
+            // 8. Fechar modal
             setIsProgressModalOpen(false);
             setItemToTrack(null);
 
-            // CORREÇÃO: Recarrega os dados para garantir consistência
-            console.log('🔄 Recarregando dados do pedido...');
+            // 9. RECARREGAR DADOS LOCAIS
+            console.log('🔄 [handleSaveProgress] Recarregando dados locais...');
+            
+            // Aguardar um pouco para garantir que o Firestore processou
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             const allOrders = await fetchOrders();
             const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
             
@@ -2239,17 +2447,23 @@ export default function OrdersPage() {
                     ...updatedOrderInList,
                     status: updatedOrderInList.status as any,
                 });
-                console.log('✅ Dados do pedido atualizados no estado');
+                console.log('✅ [handleSaveProgress] Estado local atualizado com sucesso');
             } else {
-                console.warn('⚠️ Pedido não encontrado após atualização');
+                console.warn('⚠️ [handleSaveProgress] Pedido não encontrado após recarregamento');
             }
 
+            console.log('💾 [handleSaveProgress] =================================');
+            console.log('💾 [handleSaveProgress] SALVAMENTO CONCLUÍDO COM SUCESSO');
+            console.log('💾 [handleSaveProgress] =================================');
+
         } catch (error) {
-            console.error("❌ Erro ao salvar progresso:", error);
+            console.error("❌ [handleSaveProgress] ERRO CRÍTICO:", error);
+            console.error("❌ [handleSaveProgress] Stack:", error.stack);
+            
             toast({ 
                 variant: "destructive", 
-                title: "Erro ao salvar progresso", 
-                description: `Não foi possível salvar as alterações: ${error.message || 'Erro desconhecido'}` 
+                title: "Erro Crítico no Salvamento", 
+                description: `Falha ao salvar: ${error instanceof Error ? error.message : 'Erro desconhecido'}. Tente novamente.` 
             });
         }
     };
@@ -3939,18 +4153,21 @@ export default function OrdersPage() {
                       </div>
                     </div>
                     
-                    {/* Adicione também um botão de debug temporário no final do modal */}
+                    {/* Botões de debug e verificação no final do modal */}
                     <div className="pt-4 border-t">
                       <div className="flex items-center justify-between">
-                        <Button 
-                          type="button" 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => selectedOrder && debugFirestoreData(selectedOrder.id)}
-                          className="text-xs"
-                        >
-                          🔍 Debug Firestore
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button 
+                            type="button" 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => selectedOrder && debugFirestoreData(selectedOrder.id)}
+                            className="text-xs"
+                          >
+                            🔍 Debug Firestore
+                          </Button>
+                          <ManualCheckButton />
+                        </div>
                         <div className="text-xs text-muted-foreground">
                           {editedPlan.length} etapas • {editedPlan.filter(s => s.status === 'Concluído').length} concluídas
                         </div>
