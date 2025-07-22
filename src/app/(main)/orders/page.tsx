@@ -2676,6 +2676,94 @@ export default function OrdersPage() {
         })));
     };
 
+    // FUNÇÃO AUXILIAR para criação segura de datas
+    const createSafeDate = (dateString: string): Date | null => {
+        if (!dateString) return null;
+        
+        try {
+            // Para strings no formato YYYY-MM-DD, cria data local
+            if (dateString.includes('-')) {
+                const [year, month, day] = dateString.split('-').map(Number);
+                const date = new Date(year, month - 1, day); // month - 1 porque Date usa 0-11
+                
+                if (!isNaN(date.getTime())) {
+                    console.log('📅 [createSafeDate] Criada data local:', {
+                        input: dateString,
+                        output: date,
+                        formatted: format(date, 'dd/MM/yyyy')
+                    });
+                    return date;
+                }
+            }
+            
+            // Fallback para outros formatos
+            const date = new Date(dateString);
+            if (!isNaN(date.getTime())) {
+                console.log('📅 [createSafeDate] Criada data fallback:', { input: dateString, output: date });
+                return date;
+            }
+            
+            console.warn('📅 [createSafeDate] Data inválida:', dateString);
+            return null;
+        } catch (error) {
+            console.error('📅 [createSafeDate] Erro ao criar data:', { dateString, error });
+            return null;
+        }
+    };
+
+    // FUNÇÃO AUXILIAR para debug do Firestore
+    const debugFirestoreData = async (orderId: string) => {
+        try {
+            console.log('🔍 [DEBUG] Buscando dados do Firestore para pedido:', orderId);
+            
+            const orderRef = doc(db, "companies", "mecald", "orders", orderId);
+            const orderSnap = await getDoc(orderRef);
+            
+            if (!orderSnap.exists()) {
+                console.error('🔍 [DEBUG] Pedido não encontrado no Firestore');
+                toast({
+                    variant: "destructive",
+                    title: "Debug Firestore",
+                    description: "Pedido não encontrado no banco de dados"
+                });
+                return;
+            }
+            
+            const orderData = orderSnap.data();
+            console.log('🔍 [DEBUG] Dados do pedido no Firestore:', orderData);
+            
+            if (orderData.items && Array.isArray(orderData.items)) {
+                orderData.items.forEach((item: any, index: number) => {
+                    console.log(`🔍 [DEBUG] Item ${index + 1}:`, {
+                        id: item.id,
+                        description: item.description,
+                        productionPlan: item.productionPlan?.map((stage: any) => ({
+                            stageName: stage.stageName,
+                            status: stage.status,
+                            startDate: stage.startDate,
+                            completedDate: stage.completedDate,
+                            durationDays: stage.durationDays,
+                            useBusinessDays: stage.useBusinessDays
+                        }))
+                    });
+                });
+            }
+            
+            toast({
+                title: "Debug Firestore Completo",
+                description: "Dados exibidos no console do navegador (F12)"
+            });
+            
+        } catch (error) {
+            console.error('🔍 [DEBUG] Erro ao buscar dados do Firestore:', error);
+            toast({
+                variant: "destructive",
+                title: "Erro no Debug",
+                description: "Não foi possível buscar os dados do Firestore"
+            });
+        }
+    };
+
     return (
         <div className="w-full">
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -3731,7 +3819,9 @@ export default function OrdersPage() {
                                   </div>
                                 </div>
                               </div>
+                              {/* Seção de datas corrigida */}
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                {/* Data de Início */}
                                 <div className="space-y-2">
                                   <Label>Data de Início</Label>
                                   {stage.status === 'Concluído' ? (
@@ -3747,12 +3837,15 @@ export default function OrdersPage() {
                                   ) : (
                                     <Input
                                       type="date"
-                                      value={stage.startDate ? format(new Date(stage.startDate), "yyyy-MM-dd") : ""}
+                                      value={stage.startDate && !isNaN(stage.startDate.getTime()) ? format(stage.startDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
-                                        console.log('📅 Alterando data de início:', e.target.value);
-                                        handlePlanChange(index, 'startDate', e.target.value || null);
+                                        console.log('📅 [INPUT] Data de início alterada:', e.target.value);
+                                        const newDate = e.target.value ? createSafeDate(e.target.value) : null;
+                                        console.log('📅 [INPUT] Data convertida:', newDate);
+                                        handlePlanChange(index, 'startDate', newDate);
                                       }}
                                       className="w-full"
+                                      placeholder="Selecione a data de início"
                                     />
                                   )}
                                   {stage.startDate && !isBusinessDay(stage.startDate) && stage.status !== 'Concluído' && (
@@ -3763,6 +3856,7 @@ export default function OrdersPage() {
                                   )}
                                 </div>
                                 
+                                {/* Data de Conclusão */}
                                 <div className="space-y-2">
                                   <Label>Data de Conclusão</Label>
                                   {stage.status === 'Concluído' ? (
@@ -3778,12 +3872,15 @@ export default function OrdersPage() {
                                   ) : (
                                     <Input
                                       type="date"
-                                      value={stage.completedDate ? format(new Date(stage.completedDate), "yyyy-MM-dd") : ""}
+                                      value={stage.completedDate && !isNaN(stage.completedDate.getTime()) ? format(stage.completedDate, "yyyy-MM-dd") : ""}
                                       onChange={(e) => {
-                                        console.log('📅 Alterando data de conclusão:', e.target.value);
-                                        handlePlanChange(index, 'completedDate', e.target.value || null);
+                                        console.log('📅 [INPUT] Data de conclusão alterada:', e.target.value);
+                                        const newDate = e.target.value ? createSafeDate(e.target.value) : null;
+                                        console.log('📅 [INPUT] Data convertida:', newDate);
+                                        handlePlanChange(index, 'completedDate', newDate);
                                       }}
                                       className="w-full"
+                                      placeholder="Selecione a data de conclusão"
                                     />
                                   )}
                                   {stage.completedDate && !isBusinessDay(stage.completedDate) && stage.status !== 'Concluído' && (
@@ -3841,6 +3938,25 @@ export default function OrdersPage() {
                         </Button>
                       </div>
                     </div>
+                    
+                    {/* Adicione também um botão de debug temporário no final do modal */}
+                    <div className="pt-4 border-t">
+                      <div className="flex items-center justify-between">
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => selectedOrder && debugFirestoreData(selectedOrder.id)}
+                          className="text-xs"
+                        >
+                          🔍 Debug Firestore
+                        </Button>
+                        <div className="text-xs text-muted-foreground">
+                          {editedPlan.length} etapas • {editedPlan.filter(s => s.status === 'Concluído').length} concluídas
+                        </div>
+                      </div>
+                    </div>
+
                     <DialogFooter>
                       <div className="flex items-center justify-between w-full">
                         <div className="text-sm text-muted-foreground">
