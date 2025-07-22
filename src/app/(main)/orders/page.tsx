@@ -997,7 +997,7 @@ export default function OrdersPage() {
     }, [filteredOrders]);
 
     // Gera os dias do mês atual para o calendário
-    const generateCalendarDays = (date: Date) => {
+    const generateCalendarDays = (date: Date): { days: Date[], firstDay: Date, lastDay: Date } => {
         const year = date.getFullYear();
         const month = date.getMonth();
         
@@ -1006,7 +1006,7 @@ export default function OrdersPage() {
         const startDate = new Date(firstDay);
         startDate.setDate(startDate.getDate() - firstDay.getDay()); // Começa no domingo
         
-        const days = [];
+        const days: Date[] = [];
         const current = new Date(startDate);
         
         // Gera 42 dias (6 semanas) para preencher o calendário
@@ -1377,14 +1377,35 @@ export default function OrdersPage() {
       const newPlan = [...editedPlan];
       const updatedStage = { ...newPlan[stageIndex] };
       
-      // Atualiza o campo específico - SIMPLIFICADO
+      // CORREÇÃO: Atualiza o campo específico com tratamento melhor de datas
       if (field === 'startDate' || field === 'completedDate') {
-        if (value === null || value === '') {
+        if (value === null || value === '' || value === undefined) {
           updatedStage[field] = null;
         } else {
-          // Correção simples para fuso horário
-          const inputDate = new Date(value + 'T00:00:00');
-          updatedStage[field] = inputDate;
+          // CORREÇÃO: Tratamento mais robusto para conversão de datas
+          let dateToSet;
+          if (typeof value === 'string') {
+            // Se é string de data (YYYY-MM-DD), cria data local
+            if (value.includes('-')) {
+              const [year, month, day] = value.split('-').map(Number);
+              dateToSet = new Date(year, month - 1, day); // month - 1 porque Date usa 0-11
+            } else {
+              dateToSet = new Date(value);
+            }
+          } else if (value instanceof Date) {
+            dateToSet = new Date(value);
+          } else {
+            console.warn('Formato de data não reconhecido:', value);
+            dateToSet = null;
+          }
+          
+          // Valida se a data é válida
+          if (dateToSet && !isNaN(dateToSet.getTime())) {
+            updatedStage[field] = dateToSet;
+          } else {
+            console.warn('Data inválida detectada, definindo como null');
+            updatedStage[field] = null;
+          }
         }
       } else if (field === 'durationDays') {
         const numValue = value === '' ? 0 : parseFloat(value);
@@ -1399,24 +1420,29 @@ export default function OrdersPage() {
       // RECÁLCULO AUTOMÁTICO INTELIGENTE
       if (field === 'durationDays') {
         console.log('🎯 Recalculando por alteração de duração na etapa:', stageIndex);
-        // Quando altera duração, recalcula a data de conclusão da etapa atual e todas as seguintes
         recalculateFromStage(newPlan, stageIndex);
       } else if (field === 'useBusinessDays') {
         console.log('🎯 Recalculando por alteração de tipo de cronograma');
-        // Quando altera tipo de cronograma, recalcula tudo
         recalculateFromFirstStage(newPlan);
       } else if (field === 'startDate') {
         console.log('🎯 Recalculando a partir da etapa alterada:', stageIndex);
-        // Quando altera data de início, recalcula a data de conclusão e etapas seguintes
         recalculateFromStage(newPlan, stageIndex);
       } else if (field === 'status' && value === 'Concluído') {
         console.log('🎯 Etapa marcada como concluída - definindo data de conclusão');
         // Quando marca como concluído, define data de conclusão como hoje se não estiver definida
         if (!updatedStage.completedDate) {
           updatedStage.completedDate = new Date();
+          newPlan[stageIndex] = updatedStage;
         }
-        newPlan[stageIndex] = updatedStage;
       }
+      
+      // CORREÇÃO: Log para debug
+      console.log('🔧 Estado atualizado:', {
+        stageIndex,
+        field,
+        newValue: updatedStage[field],
+        fullStage: updatedStage
+      });
       
       // Atualiza o estado
       setEditedPlan(newPlan);
@@ -2013,49 +2039,77 @@ export default function OrdersPage() {
     };
 
     const handleOpenProgressModal = async (item: OrderItem) => {
+        console.log('🔍 Abrindo modal de progresso para item:', item.id, item.description);
+        
         setItemToTrack(item);
         setIsProgressModalOpen(true);
         setEditedPlan([]);
         setIsFetchingPlan(true);
 
         try {
-            let productTemplateMap = new Map<string, number>();
+            let productTemplateMap = new Map<string, any>();
+            
+            // Busca template do produto se houver código
             if (item.code) {
+                console.log('🔍 Buscando template para produto:', item.code);
                 const productRef = doc(db, "companies", "mecald", "products", item.code);
                 const productSnap = await getDoc(productRef);
+                
                 if (productSnap.exists()) {
                     const template = productSnap.data().productionPlanTemplate || [];
                     template.forEach((stage: any) => {
-                        productTemplateMap.set(stage.stageName, stage.durationDays || 0);
+                        productTemplateMap.set(stage.stageName, {
+                            durationDays: stage.durationDays || 0,
+                            useBusinessDays: stage.useBusinessDays !== false
+                        });
                     });
+                    console.log('📋 Template encontrado:', Array.from(productTemplateMap.entries()));
                 }
             }
 
             let finalPlan: ProductionStage[];
 
             if (item.productionPlan && item.productionPlan.length > 0) {
-                finalPlan = item.productionPlan.map(stage => ({
-                    ...stage,
-                    startDate: stage.startDate ? new Date(stage.startDate) : null,
-                    completedDate: stage.completedDate ? new Date(stage.completedDate) : null,
-                    durationDays: stage.durationDays ?? productTemplateMap.get(stage.stageName) ?? 0,
-                    useBusinessDays: stage.useBusinessDays ?? true, // Default para dias úteis se não especificado
-                }));
+                console.log('📊 Usando plano existente do item');
+                
+                // CORREÇÃO: Conversão mais cuidadosa das datas existentes
+                finalPlan = item.productionPlan.map(stage => {
+                    const templateData = productTemplateMap.get(stage.stageName) || {};
+                    
+                    return {
+                        stageName: stage.stageName || '',
+                        status: stage.status || 'Pendente',
+                        durationDays: stage.durationDays ?? templateData.durationDays ?? 0,
+                        useBusinessDays: stage.useBusinessDays ?? templateData.useBusinessDays ?? true,
+                        // CORREÇÃO: Conversão segura de datas do Firestore
+                        startDate: stage.startDate ? safeToDate(stage.startDate) : null,
+                        completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
+                    };
+                });
             } else {
-                finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, durationDays]) => ({
+                console.log('📋 Criando plano a partir do template');
+                
+                // Cria plano a partir do template
+                finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, templateData]) => ({
                     stageName,
-                    durationDays,
+                    durationDays: templateData.durationDays,
+                    useBusinessDays: templateData.useBusinessDays,
                     status: "Pendente",
                     startDate: null,
                     completedDate: null,
-                    useBusinessDays: true, // Default para dias úteis
                 }));
             }
+
+            console.log('📊 Plano final carregado:', finalPlan);
             setEditedPlan(finalPlan);
 
         } catch(error) {
-            console.error("Error preparing production plan:", error);
-            toast({ variant: "destructive", title: "Erro ao carregar plano", description: "Não foi possível carregar os dados do plano." });
+            console.error("❌ Erro ao preparar plano de produção:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao carregar plano", 
+                description: "Não foi possível carregar os dados do plano de produção." 
+            });
             setEditedPlan([]);
         } finally {
             setIsFetchingPlan(false);
@@ -2064,91 +2118,139 @@ export default function OrdersPage() {
 
     const handleSaveProgress = async () => {
         if (!selectedOrder || !itemToTrack) return;
-    
+
         try {
+            console.log('💾 Iniciando salvamento do progresso...');
+            console.log('📊 Plano editado a ser salvo:', editedPlan);
+
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
             const currentOrderSnap = await getDoc(orderRef);
+            
             if (!currentOrderSnap.exists()) {
                 throw new Error("Pedido não encontrado no banco de dados.");
             }
+            
             const currentOrderData = currentOrderSnap.data();
 
+            // CORREÇÃO: Mapeamento mais cuidadoso dos itens
             const itemsForFirestore = currentOrderData.items.map((item: any) => {
                 let planForFirestore: any[];
-    
+
                 if (item.id === itemToTrack.id) {
-                    planForFirestore = editedPlan.map(p => ({
-                        ...p,
-                        startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
-                        completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
-                        status: p.status || 'Pendente',
-                        stageName: p.stageName || '',
-                        durationDays: p.durationDays || 0,
-                    }));
+                    // CORREÇÃO: Conversão mais cuidadosa das datas para Timestamp
+                    planForFirestore = editedPlan.map(p => {
+                        console.log('🔄 Convertendo etapa para Firestore:', {
+                            stageName: p.stageName,
+                            startDate: p.startDate,
+                            completedDate: p.completedDate,
+                            status: p.status
+                        });
+
+                        return {
+                            stageName: p.stageName || '',
+                            status: p.status || 'Pendente',
+                            durationDays: Number(p.durationDays) || 0,
+                            useBusinessDays: p.useBusinessDays !== false, // Default true
+                            // CORREÇÃO: Conversão segura de datas
+                            startDate: p.startDate && p.startDate instanceof Date && !isNaN(p.startDate.getTime()) 
+                                ? Timestamp.fromDate(p.startDate) 
+                                : null,
+                            completedDate: p.completedDate && p.completedDate instanceof Date && !isNaN(p.completedDate.getTime()) 
+                                ? Timestamp.fromDate(p.completedDate) 
+                                : null,
+                        };
+                    });
                 } else {
+                    // Para outros itens, preserva o plano existente
                     planForFirestore = (item.productionPlan || []).map((p: any) => ({
                         ...p,
-                        startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : (p.startDate || null),
-                        completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : (p.completedDate || null),
+                        startDate: p.startDate && !(p.startDate instanceof Timestamp) 
+                            ? Timestamp.fromDate(new Date(p.startDate)) 
+                            : (p.startDate || null),
+                        completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) 
+                            ? Timestamp.fromDate(new Date(p.completedDate)) 
+                            : (p.completedDate || null),
                         status: p.status || 'Pendente',
                         stageName: p.stageName || '',
-                        durationDays: p.durationDays || 0,
+                        durationDays: Number(p.durationDays) || 0,
+                        useBusinessDays: p.useBusinessDays !== false,
                     }));
                 }
-                const { id, product_code, ...restOfItem } = item as any;
-                return {...restOfItem, id: item.id, itemNumber: item.itemNumber || '', productionPlan: planForFirestore };
-            });
-    
-            // Remove campos undefined antes de enviar para o Firestore
-            const cleanedItems = removeUndefinedFields(itemsForFirestore);
-            await updateDoc(orderRef, { items: cleanedItems });
 
-            const updatedItemsForCheck = itemsForFirestore.map((item: any) => ({
-                ...item,
-                productionPlan: (item.productionPlan || []).map((p: any) => ({
-                    ...p,
-                    startDate: safeToDate(p.startDate),
-                    completedDate: safeToDate(p.completedDate),
-                }))
-            }));
+                // CORREÇÃO: Remove campos desnecessários e preserva estrutura
+                const { product_code, ...restOfItem } = item as any;
+                return {
+                    ...restOfItem,
+                    id: item.id || `${selectedOrder.id}-${Math.random()}`,
+                    itemNumber: item.itemNumber || '',
+                    productionPlan: planForFirestore
+                };
+            });
+
+            console.log('💾 Dados a serem salvos no Firestore:', itemsForFirestore);
+
+            // CORREÇÃO: Remove campos undefined antes de enviar para o Firestore
+            const cleanedItems = removeUndefinedFields(itemsForFirestore);
             
-            const allItemsCompleted = updatedItemsForCheck.every(
-                (item: any) => {
-                    if (item.productionPlan && item.productionPlan.length > 0) {
-                         return item.productionPlan.every((p: any) => p.status === 'Concluído');
-                    }
-                    return true;
+            // CORREÇÃO: Atualização do documento
+            await updateDoc(orderRef, { 
+                items: cleanedItems,
+                // Adiciona timestamp de última atualização para debug
+                lastProgressUpdate: Timestamp.now()
+            });
+
+            // Verifica se todos os itens foram concluídos
+            const allItemsCompleted = itemsForFirestore.every((item: any) => {
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    return item.productionPlan.every((p: any) => p.status === 'Concluído');
                 }
-            );
+                return true;
+            });
 
             if (allItemsCompleted && selectedOrder.status !== 'Concluído') {
-                // Remove campos undefined antes de enviar para o Firestore
-                const statusUpdate = removeUndefinedFields({ status: "Concluído" });
+                const statusUpdate = removeUndefinedFields({ 
+                    status: "Concluído",
+                    completedAt: Timestamp.now() // Para rastreamento
+                });
                 await updateDoc(orderRef, statusUpdate);
+                
                 toast({ 
                     title: "Pedido Concluído!", 
                     description: "Todos os itens foram finalizados e o status do pedido foi atualizado automaticamente." 
                 });
             } else {
-                toast({ title: "Progresso salvo!", description: "As etapas de produção foram atualizadas." });
-            }
-            
-            setIsProgressModalOpen(false);
-            setItemToTrack(null);
-    
-            const allOrders = await fetchOrders();
-            const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
-            if (updatedOrderInList) {
-                setSelectedOrder(updatedOrderInList);
-                 form.reset({
-                    ...updatedOrderInList,
-                    status: updatedOrderInList.status as any,
+                toast({ 
+                    title: "Progresso salvo com sucesso!", 
+                    description: "As etapas de produção foram atualizadas no sistema." 
                 });
             }
 
+            setIsProgressModalOpen(false);
+            setItemToTrack(null);
+
+            // CORREÇÃO: Recarrega os dados para garantir consistência
+            console.log('🔄 Recarregando dados do pedido...');
+            const allOrders = await fetchOrders();
+            const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
+            
+            if (updatedOrderInList) {
+                setSelectedOrder(updatedOrderInList);
+                form.reset({
+                    ...updatedOrderInList,
+                    status: updatedOrderInList.status as any,
+                });
+                console.log('✅ Dados do pedido atualizados no estado');
+            } else {
+                console.warn('⚠️ Pedido não encontrado após atualização');
+            }
+
         } catch (error) {
-            console.error("Error saving progress:", error);
-            toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar o progresso do item." });
+            console.error("❌ Erro ao salvar progresso:", error);
+            toast({ 
+                variant: "destructive", 
+                title: "Erro ao salvar progresso", 
+                description: `Não foi possível salvar as alterações: ${error.message || 'Erro desconhecido'}` 
+            });
         }
     };
     
@@ -2562,7 +2664,17 @@ export default function OrdersPage() {
         }
     };
 
-
+    // FUNÇÃO AUXILIAR MELHORADA para debug
+    const logProgressState = (context: string, plan: ProductionStage[]) => {
+        console.log(`📊 ${context}:`, plan.map(stage => ({
+            name: stage.stageName,
+            status: stage.status,
+            start: stage.startDate ? format(stage.startDate, 'dd/MM/yyyy') : 'null',
+            end: stage.completedDate ? format(stage.completedDate, 'dd/MM/yyyy') : 'null',
+            duration: stage.durationDays,
+            businessDays: stage.useBusinessDays
+        })));
+    };
 
     return (
         <div className="w-full">
