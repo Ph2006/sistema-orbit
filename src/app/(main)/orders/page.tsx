@@ -177,6 +177,7 @@ const isBusinessDay = (date: Date): boolean => {
   return !isWeekend(date) && !isHoliday(date);
 };
 
+// 3. FUNÇÃO AUXILIAR CORRIGIDA - Adicionar dias úteis (corrigida para não pular um dia extra)
 const addBusinessDays = (startDate: Date, days: number): Date => {
   if (days === 0) return new Date(startDate);
   
@@ -236,12 +237,15 @@ interface BusinessDayInfoProps {
   expectedDuration: number;
 }
 
-function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) {
+// 4. COMPONENTE ATUALIZADO - Informações de dias úteis com lógica corrigida
+const BusinessDayInfo = ({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) => {
   if (!startDate || !endDate) return null;
   
   const expectedDurationNum = Number(expectedDuration) || 0;
   const isSameDate = isSameDay(startDate, endDate);
-  const isNextDay = !isSameDate && isSameDay(endDate, addDays(startDate, 1));
+  
+  // CORREÇÃO: Para duração maior que 1, a tarefa deve terminar após os dias especificados
+  const actualDaysDifference = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
   
   return (
     <div className="text-xs mt-2 p-2 rounded bg-blue-50 text-blue-700 border border-blue-200">
@@ -250,15 +254,15 @@ function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayIn
         <span>{expectedDurationNum} dia(s)</span>
       </div>
       
-      {isSameDate && (
+      {isSameDate && expectedDurationNum <= 1 && (
         <p className="text-blue-600 mt-1">
           ✓ Tarefa executada no mesmo dia (duração ≤ 1 dia)
         </p>
       )}
       
-      {isNextDay && expectedDurationNum > 1 && (
+      {!isSameDate && expectedDurationNum > 1 && (
         <p className="text-green-600 mt-1">
-          ✓ Tarefa termina no próximo dia (duração &gt; 1 dia)
+          ✓ Cronograma sequencial: próxima tarefa inicia em {format(endDate, 'dd/MM/yyyy')}
         </p>
       )}
       
@@ -275,11 +279,11 @@ function BusinessDayInfo({ startDate, endDate, expectedDuration }: BusinessDayIn
       )}
       
       <p className="text-blue-600 mt-1 text-xs">
-        💡 Tarefas com duração ≤ 1 dia terminam no mesmo dia. Tarefas maiores que 1 dia terminam em dias subsequentes
+        💡 Tarefas são executadas sequencialmente: a próxima sempre inicia no mesmo dia que a anterior termina
       </p>
     </div>
   );
-}
+};
 
 const calculateTotalWeight = (items: OrderItem[]): number => {
     if (!items || !Array.isArray(items)) return 0;
@@ -1448,11 +1452,11 @@ export default function OrdersPage() {
       setEditedPlan(newPlan);
     };
 
-    // Função para recalcular a partir de uma etapa específica
+    // 1. FUNÇÃO CORRIGIDA - Recalcular a partir de uma etapa específica
     const recalculateFromStage = (plan: ProductionStage[], fromIndex: number) => {
       console.log('🔄 Recalculando cronograma a partir da etapa:', fromIndex);
       
-      // Primeiro recalcula a data de conclusão da etapa atual
+      // Primeiro recalcula a data de conclusão da etapa atual se ela tem data de início
       const currentStage = plan[fromIndex];
       if (currentStage.startDate) {
         const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
@@ -1465,7 +1469,7 @@ export default function OrdersPage() {
             currentStage.completedDate = new Date(currentStage.startDate);
           } else {
             currentStage.completedDate = new Date(currentStage.startDate);
-            currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration));
+            currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration) - 1);
           }
         } else {
           // Dias úteis
@@ -1473,12 +1477,12 @@ export default function OrdersPage() {
             // Tarefas de 1 dia ou menos terminam no mesmo dia
             currentStage.completedDate = new Date(currentStage.startDate);
           } else {
-            currentStage.completedDate = addBusinessDays(currentStage.startDate, Math.ceil(duration));
+            currentStage.completedDate = addBusinessDays(currentStage.startDate, Math.ceil(duration) - 1);
           }
         }
       }
       
-      // Agora recalcula todas as etapas subsequentes
+      // CORREÇÃO PRINCIPAL: Agora recalcula todas as etapas subsequentes SEQUENCIALMENTE
       let currentWorkingDate = currentStage.completedDate;
       
       for (let i = fromIndex + 1; i < plan.length; i++) {
@@ -1487,33 +1491,36 @@ export default function OrdersPage() {
         const useBusinessDaysOnly = stage.useBusinessDays !== false;
         
         if (currentWorkingDate) {
+          // CORREÇÃO: A próxima tarefa SEMPRE inicia no MESMO DIA que a anterior termina
+          stage.startDate = new Date(currentWorkingDate);
+          
           if (!useBusinessDaysOnly) {
             // Dias corridos
-            stage.startDate = new Date(currentWorkingDate);
-            stage.startDate.setDate(stage.startDate.getDate() + 1);
-            
             if (duration <= 1) {
               // Tarefas de 1 dia ou menos terminam no mesmo dia
               stage.completedDate = new Date(stage.startDate);
             } else {
               stage.completedDate = new Date(stage.startDate);
-              stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
+              stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration) - 1);
             }
           } else {
-            // Dias úteis
-            stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
+            // Dias úteis - ajustar para próximo dia útil se necessário
+            if (!isBusinessDay(stage.startDate)) {
+              stage.startDate = getNextBusinessDay(stage.startDate);
+            }
             
             if (duration <= 1) {
               // Tarefas de 1 dia ou menos terminam no mesmo dia
               stage.completedDate = new Date(stage.startDate);
             } else {
-              stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration));
+              stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration) - 1);
             }
           }
           
+          // Atualiza para a próxima iteração - SEMPRE usa a data de conclusão da tarefa atual
           currentWorkingDate = new Date(stage.completedDate);
           
-          console.log(`✅ Etapa ${i + 1}: ${stage.stageName} | Início: ${stage.startDate.toLocaleDateString()} | Fim: ${stage.completedDate.toLocaleDateString()} | Duração: ${duration} dias | Tipo: ${useBusinessDaysOnly ? 'Úteis' : 'Corridos'}`);
+          console.log(`✅ Etapa ${i + 1}: ${stage.stageName} | Início: ${stage.startDate.toLocaleDateString()} | Fim: ${stage.completedDate.toLocaleDateString()} | Duração: ${duration} dias`);
         } else {
           // Se não há data de trabalho, limpa as datas
           stage.startDate = null;
@@ -1522,12 +1529,11 @@ export default function OrdersPage() {
       }
     };
 
-    // Função simplificada de recálculo completo
+    // 2. FUNÇÃO CORRIGIDA - Recalcular cronograma completo
     const recalculateFromFirstStage = (plan: ProductionStage[]) => {
       console.log('🔄 Recalculando cronograma completo...');
       
       let currentWorkingDate: Date | null = null;
-      let dailyAccumulation = 0;
       
       for (let i = 0; i < plan.length; i++) {
         const stage = plan[i];
@@ -1538,7 +1544,6 @@ export default function OrdersPage() {
           // Primeira etapa - usa data definida pelo usuário
           if (stage.startDate) {
             currentWorkingDate = new Date(stage.startDate);
-            dailyAccumulation = 0;
           } else {
             // Se não há data na primeira etapa, limpa todas as outras
             for (let j = 1; j < plan.length; j++) {
@@ -1548,15 +1553,13 @@ export default function OrdersPage() {
             return;
           }
         } else {
-          // Etapas subsequentes - calcula a partir da anterior
+          // CORREÇÃO: Etapas subsequentes iniciam no MESMO DIA que a anterior termina
           if (currentWorkingDate) {
-            if (!useBusinessDaysOnly) {
-              // Dias corridos
-              stage.startDate = new Date(currentWorkingDate);
-              stage.startDate.setDate(stage.startDate.getDate() + 1);
-            } else {
-              // Dias úteis
-              stage.startDate = getNextBusinessDay(new Date(currentWorkingDate));
+            stage.startDate = new Date(currentWorkingDate);
+            
+            // Para dias úteis, ajustar se a data de início cair em fim de semana/feriado
+            if (useBusinessDaysOnly && !isBusinessDay(stage.startDate)) {
+              stage.startDate = getNextBusinessDay(stage.startDate);
             }
           } else {
             stage.startDate = null;
@@ -1565,38 +1568,31 @@ export default function OrdersPage() {
           }
         }
         
-        // SEMPRE calcula data de conclusão baseada na duração
+        // Calcular data de conclusão baseada na duração
         if (stage.startDate) {
           if (!useBusinessDaysOnly) {
-            // Dias corridos - conta todos os dias incluindo fins de semana
+            // Dias corridos
             if (duration <= 1) {
               // Tarefas de 1 dia ou menos terminam no mesmo dia
               stage.completedDate = new Date(stage.startDate);
             } else {
               stage.completedDate = new Date(stage.startDate);
-              stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration));
+              // CORREÇÃO: Subtrai 1 porque se dura 2 dias e inicia dia 1, termina dia 2 (não dia 3)
+              stage.completedDate.setDate(stage.completedDate.getDate() + Math.ceil(duration) - 1);
             }
-            currentWorkingDate = new Date(stage.completedDate);
-            dailyAccumulation = 0;
           } else {
-            // Dias úteis com acúmulo
-            if (i === 0) {
-              dailyAccumulation = duration;
-            } else {
-              dailyAccumulation += duration;
-            }
-            
-            if (dailyAccumulation >= 1) {
-              const daysToAdd = Math.ceil(dailyAccumulation);
-              stage.completedDate = addBusinessDays(stage.startDate, daysToAdd);
-              currentWorkingDate = new Date(stage.completedDate);
-              dailyAccumulation = dailyAccumulation - daysToAdd;
-            } else {
-              // Tarefas que se acumulam e ainda não atingiram 1 dia terminam no mesmo dia
+            // Dias úteis
+            if (duration <= 1) {
+              // Tarefas de 1 dia ou menos terminam no mesmo dia
               stage.completedDate = new Date(stage.startDate);
-              currentWorkingDate = new Date(stage.startDate);
+            } else {
+              // CORREÇÃO: Para dias úteis, também subtrai 1
+              stage.completedDate = addBusinessDays(stage.startDate, Math.ceil(duration) - 1);
             }
           }
+          
+          // SEMPRE atualiza currentWorkingDate para a data de conclusão da tarefa atual
+          currentWorkingDate = new Date(stage.completedDate);
           
           console.log(`✅ Etapa ${i + 1}: ${stage.stageName} | Início: ${stage.startDate.toLocaleDateString()} | Fim: ${stage.completedDate.toLocaleDateString()} | Duração: ${duration} dias | Tipo: ${useBusinessDaysOnly ? 'Úteis' : 'Corridos'}`);
         }
