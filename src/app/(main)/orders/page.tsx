@@ -500,6 +500,10 @@ export default function OrdersPage() {
     const { user, loading: authLoading } = useAuth();
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+    
+    // Estados para deletar itens do pedido
+    const [isItemDeleteDialogOpen, setIsItemDeleteDialogOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState<{ index: number; item: OrderItem } | null>(null);
 
     // Progress tracking state
     const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
@@ -1372,7 +1376,34 @@ export default function OrdersPage() {
         }
     };
 
+    // FUNÇÃO PARA DELETAR UM ITEM
+    const handleDeleteItem = (index: number) => {
+      const currentItems = form.getValues("items");
+      const itemToRemove = currentItems[index];
+      
+      setItemToDelete({ index, item: itemToRemove });
+      setIsItemDeleteDialogOpen(true);
+    };
 
+    // FUNÇÃO PARA CONFIRMAR A EXCLUSÃO
+    const handleConfirmDeleteItem = () => {
+      if (!itemToDelete) return;
+      
+      const currentItems = form.getValues("items");
+      const updatedItems = currentItems.filter((_, index) => index !== itemToDelete.index);
+      
+      // Atualizar o formulário
+      form.setValue("items", updatedItems);
+      
+      // Fechar dialog
+      setIsItemDeleteDialogOpen(false);
+      setItemToDelete(null);
+      
+      toast({
+        title: "Item removido!",
+        description: `O item "${itemToDelete.item.description}" foi removido do pedido.`,
+      });
+    };
 
     // CORREÇÃO SIMPLES E DIRETA - handlePlanChange
     const handlePlanChange = (stageIndex: number, field: string, value: any) => {
@@ -3962,146 +3993,234 @@ export default function OrdersPage() {
                       </CardContent>
                     </Card>
 
-                    {/* Itens do Pedido */}
+                    {/* Itens do Pedido - MODO DE EDIÇÃO COM BOTÕES DE EXCLUSÃO */}
                     <Card>
-                      <CardHeader><CardTitle>Itens do Pedido (Editável)</CardTitle></CardHeader>
+                      <CardHeader>
+                        <CardTitle className="flex items-center justify-between">
+                          <span>Itens do Pedido (Editável)</span>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Package className="h-4 w-4" />
+                            <span>{fields.length} {fields.length === 1 ? 'item' : 'itens'}</span>
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
                       <CardContent className="space-y-4">
-                        {fields.map((field, index) => {
-                          const itemProgress = calculateItemProgress(watchedItems[index] || {});
-                          return (
-                            <Card key={field.id} className="p-4 bg-secondary">
-                              <div className="space-y-4">
-                                <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>Descrição do Item {index + 1}</FormLabel>
-                                    <FormControl><Textarea placeholder="Descrição completa do item" {...field} /></FormControl>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}/>
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                                  <FormField control={form.control} name={`items.${index}.itemNumber`} render={({ field }) => (
+                        {fields.length === 0 ? (
+                          <div className="text-center py-8 text-muted-foreground">
+                            <Package className="h-8 w-8 mx-auto mb-2" />
+                            <p>Nenhum item no pedido</p>
+                            <p className="text-xs">Este pedido não possui itens cadastrados.</p>
+                          </div>
+                        ) : (
+                          fields.map((field, index) => {
+                            const itemProgress = calculateItemProgress(watchedItems[index] || {});
+                            return (
+                              <Card key={field.id} className="p-4 bg-secondary relative">
+                                {/* Botão de Exclusão no Canto Superior Direito */}
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="absolute top-2 right-2 h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => handleDeleteItem(index)}
+                                  title={`Remover item "${watchedItems[index]?.description || 'este item'}"`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+
+                                <div className="space-y-4 pr-10"> {/* Adicionar padding-right para evitar sobreposição com botão */}
+                                  {/* Header do Item com Número */}
+                                  <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                                    <div className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+                                      {index + 1}
+                                    </div>
+                                    <h4 className="font-medium text-sm text-muted-foreground">
+                                      Item do Pedido {index + 1}
+                                      {itemProgress === 100 && (
+                                        <Badge variant="default" className="ml-2 bg-green-600 hover:bg-green-600/90">
+                                          <CheckCircle className="mr-1 h-3 w-3" />
+                                          Concluído
+                                        </Badge>
+                                      )}
+                                    </h4>
+                                  </div>
+
+                                  <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
                                     <FormItem>
-                                      <FormLabel>Nº Item PC</FormLabel>
-                                      <FormControl><Input placeholder="Ex: 001" {...field} value={field.value || ''} /></FormControl>
-                                      <FormMessage />
-                                      <FormDescription className="text-xs">Nº do item conforme Pedido de Compra do cliente</FormDescription>
-                                    </FormItem>
-                                  )}/>
-                                  <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Código</FormLabel>
-                                      <FormControl><Input placeholder="Cód. Produto" {...field} value={field.value || ''} /></FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}/>
-                                  <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Quantidade</FormLabel>
-                                      <FormControl><Input type="number" placeholder="0" {...field} value={field.value ?? ''} /></FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}/>
-                                  <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Peso Unit. (kg)</FormLabel>
-                                      <FormControl><Input type="number" step="0.01" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}/>
-                                  <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Entrega do Item</FormLabel>
+                                      <FormLabel>Descrição do Item</FormLabel>
                                       <FormControl>
-                                        <Input
-                                          type="date"
-                                          value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
-                                          onChange={(e) => {
-                                            console.log('🔥 DATA ENTREGA ITEM ALTERADA:', e.target.value);
-                                            if (e.target.value) {
-                                              field.onChange(new Date(e.target.value));
-                                            } else {
-                                              field.onChange(null);
-                                            }
-                                          }}
-                                          className="w-full"
+                                        <Textarea 
+                                          placeholder="Descrição completa do item" 
+                                          {...field} 
+                                          className="min-h-[80px]"
                                         />
                                       </FormControl>
                                       <FormMessage />
                                     </FormItem>
                                   )}/>
-                                </div>
-                                {itemProgress === 100 && (
-                                  <>
-                                    <Separator className="my-3" />
-                                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                                      <div className="flex items-center gap-2 mb-3">
-                                        <CheckCircle className="h-5 w-5 text-green-600" />
-                                        <h5 className="font-semibold text-green-800">Item Concluído - Preencha as Informações de Embarque</h5>
-                                      </div>
-                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
-                                          <FormItem>
-                                            <FormLabel>Lista de Embarque (LE)</FormLabel>
-                                            <FormControl><Input placeholder="Nº da LE" {...field} value={field.value ?? ''} /></FormControl>
-                                            <FormMessage />
-                                          </FormItem>
-                                        )}/>
-                                        <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
-                                          <FormItem>
-                                            <FormLabel>Nota Fiscal (NF-e) *</FormLabel>
-                                            <FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl>
-                                            <FormMessage />
-                                          </FormItem>
-                                        )}/>
-                                        <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
-                                          <FormItem>
-                                            <FormLabel>Data de Embarque *</FormLabel>
-                                            <FormControl>
-                                              <Input
-                                                type="date"
-                                                value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
-                                                onChange={(e) => {
-                                                  console.log('🔥 DATA EMBARQUE ALTERADA:', e.target.value);
-                                                  if (e.target.value) {
-                                                    field.onChange(new Date(e.target.value));
-                                                  } else {
-                                                    field.onChange(null);
-                                                  }
-                                                }}
-                                                className="w-full"
-                                              />
-                                            </FormControl>
-                                            <FormMessage />
-                                          </FormItem>
-                                        )}/>
-                                      </div>
-                                      {watchedItems[index]?.shippingDate && selectedOrder.deliveryDate && (
-                                        <div className="mt-3">
-                                          {new Date(watchedItems[index].shippingDate) <= selectedOrder.deliveryDate ? (
-                                            <div className="flex items-center gap-2 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
-                                              <CheckCircle className="h-4 w-4" />
-                                              <span className="font-medium">Item será entregue no prazo</span>
-                                            </div>
-                                          ) : (
-                                            <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
-                                              <AlertTriangle className="h-4 w-4" />
-                                              <span className="font-medium">
-                                                Item será entregue {Math.ceil((new Date(watchedItems[index].shippingDate).getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
-                                              </span>
-                                            </div>
-                                          )}
+
+                                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    <FormField control={form.control} name={`items.${index}.itemNumber`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Nº Item PC</FormLabel>
+                                        <FormControl>
+                                          <Input placeholder="Ex: 001" {...field} value={field.value || ''} />
+                                        </FormControl>
+                                        <FormMessage />
+                                        <FormDescription className="text-xs">
+                                          Nº do item conforme Pedido de Compra do cliente
+                                        </FormDescription>
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Código</FormLabel>
+                                        <FormControl>
+                                          <Input placeholder="Cód. Produto" {...field} value={field.value || ''} />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Quantidade</FormLabel>
+                                        <FormControl>
+                                          <Input 
+                                            type="number" 
+                                            placeholder="0" 
+                                            {...field} 
+                                            value={field.value ?? ''} 
+                                            min="0"
+                                            step="1"
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Peso Unit. (kg)</FormLabel>
+                                        <FormControl>
+                                          <Input 
+                                            type="number" 
+                                            step="0.01" 
+                                            placeholder="0.00" 
+                                            {...field} 
+                                            value={field.value ?? ''} 
+                                            min="0"
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Entrega do Item</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            type="date"
+                                            value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                            onChange={(e) => {
+                                              if (e.target.value) {
+                                                field.onChange(new Date(e.target.value));
+                                              } else {
+                                                field.onChange(null);
+                                              }
+                                            }}
+                                            className="w-full"
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}/>
+                                  </div>
+
+                                  {/* Seção de Embarque para Itens Concluídos */}
+                                  {itemProgress === 100 && (
+                                    <>
+                                      <Separator className="my-3" />
+                                      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                          <CheckCircle className="h-5 w-5 text-green-600" />
+                                          <h5 className="font-semibold text-green-800">Item Concluído - Preencha as Informações de Embarque</h5>
                                         </div>
-                                      )}
-                                      <p className="text-xs text-muted-foreground mt-2">
-                                        * Campos obrigatórios para finalização do embarque
-                                      </p>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            </Card>
-                          );
-                        })}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                          <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel>Lista de Embarque (LE)</FormLabel>
+                                              <FormControl>
+                                                <Input placeholder="Nº da LE" {...field} value={field.value ?? ''} />
+                                              </FormControl>
+                                              <FormMessage />
+                                            </FormItem>
+                                          )}/>
+
+                                          <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel>Nota Fiscal (NF-e) *</FormLabel>
+                                              <FormControl>
+                                                <Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} />
+                                              </FormControl>
+                                              <FormMessage />
+                                            </FormItem>
+                                          )}/>
+
+                                          <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel>Data de Embarque *</FormLabel>
+                                              <FormControl>
+                                                <Input
+                                                  type="date"
+                                                  value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                                  onChange={(e) => {
+                                                    if (e.target.value) {
+                                                      field.onChange(new Date(e.target.value));
+                                                    } else {
+                                                      field.onChange(null);
+                                                    }
+                                                  }}
+                                                  className="w-full"
+                                                />
+                                              </FormControl>
+                                              <FormMessage />
+                                            </FormItem>
+                                          )}/>
+                                        </div>
+
+                                        {/* Indicador de Atraso/Antecipação */}
+                                        {watchedItems[index]?.shippingDate && selectedOrder.deliveryDate && (
+                                          <div className="mt-3">
+                                            {new Date(watchedItems[index].shippingDate) <= selectedOrder.deliveryDate ? (
+                                              <div className="flex items-center gap-2 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
+                                                <CheckCircle className="h-4 w-4" />
+                                                <span className="font-medium">Item será entregue no prazo</span>
+                                              </div>
+                                            ) : (
+                                              <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
+                                                <AlertTriangle className="h-4 w-4" />
+                                                <span className="font-medium">
+                                                  Item será entregue {Math.ceil((new Date(watchedItems[index].shippingDate).getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
+                                                </span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                          * Campos obrigatórios para finalização do embarque
+                                        </p>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </Card>
+                            );
+                          })
+                        )}
                       </CardContent>
                     </Card>
                   </div>
@@ -4751,6 +4870,48 @@ export default function OrdersPage() {
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
+            </AlertDialog>
+
+            {/* Alert Dialog para Exclusão de Itens */}
+            <AlertDialog open={isItemDeleteDialogOpen} onOpenChange={setIsItemDeleteDialogOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Remover Item do Pedido</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Você tem certeza que deseja remover este item do pedido?
+                    {itemToDelete && (
+                      <div className="mt-2 p-3 bg-muted rounded-lg">
+                        <p className="font-medium text-foreground">
+                          Item {itemToDelete.index + 1}: {itemToDelete.item.description}
+                        </p>
+                        {itemToDelete.item.itemNumber && (
+                          <p className="text-sm text-muted-foreground">
+                            Nº Item PC: {itemToDelete.item.itemNumber}
+                          </p>
+                        )}
+                        {itemToDelete.item.code && (
+                          <p className="text-sm text-muted-foreground">
+                            Código: {itemToDelete.item.code}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <p className="mt-2 text-sm">
+                      <strong>Atenção:</strong> Esta ação não pode ser desfeita. O item será removido permanentemente do pedido.
+                    </p>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction 
+                    onClick={handleConfirmDeleteItem} 
+                    className="bg-destructive hover:bg-destructive/90"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Sim, remover item
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
             </AlertDialog>
         </div>
     );
