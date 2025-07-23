@@ -754,6 +754,76 @@ export default function OrdersPage() {
         });
     }, []);
 
+    // COMPONENTE PERSONALIZADO PARA DATA DE ENTREGA DO ITEM (ALTERNATIVA MAIS ROBUSTA)
+    const ItemDeliveryDateField = ({ form, index }: { form: any; index: number }) => {
+      const [inputValue, setInputValue] = useState("");
+      const fieldValue = form.watch(`items.${index}.itemDeliveryDate`);
+
+      // Sincronizar valor do input com o valor do formulário
+      useEffect(() => {
+        if (fieldValue) {
+          try {
+            const dateToFormat = fieldValue instanceof Date ? fieldValue : new Date(fieldValue);
+            if (!isNaN(dateToFormat.getTime())) {
+              setInputValue(format(dateToFormat, "yyyy-MM-dd"));
+            } else {
+              setInputValue("");
+            }
+          } catch (error) {
+            console.warn('Erro ao formatar data:', error);
+            setInputValue("");
+          }
+        } else {
+          setInputValue("");
+        }
+      }, [fieldValue]);
+
+      const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+        console.log('📅 [CUSTOM] Valor do input:', newValue);
+        
+        setInputValue(newValue);
+        
+        if (newValue) {
+          try {
+            const [year, month, day] = newValue.split('-').map(Number);
+            const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+            
+            if (!isNaN(newDate.getTime())) {
+              console.log('📅 [CUSTOM] Data válida criada:', newDate);
+              form.setValue(`items.${index}.itemDeliveryDate`, newDate);
+            } else {
+              console.warn('📅 [CUSTOM] Data inválida:', newValue);
+            }
+          } catch (error) {
+            console.error('📅 [CUSTOM] Erro ao processar data:', error);
+          }
+        } else {
+          console.log('📅 [CUSTOM] Data limpa');
+          form.setValue(`items.${index}.itemDeliveryDate`, null);
+        }
+      };
+
+      return (
+        <FormItem>
+          <FormLabel>Entrega do Item</FormLabel>
+          <FormControl>
+            <Input
+              type="date"
+              value={inputValue}
+              onChange={handleDateChange}
+              className="w-full"
+              placeholder="Selecione a data de entrega"
+            />
+          </FormControl>
+          <FormMessage />
+          <FormDescription className="text-xs text-muted-foreground">
+            Data específica de entrega deste item (opcional)
+          </FormDescription>
+        </FormItem>
+      );
+    };
+
     const handleViewOrder = (order: Order) => {
         setSelectedOrder(order);
         form.reset({
@@ -793,34 +863,77 @@ export default function OrdersPage() {
     const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
         if (!selectedOrder) return;
 
+        console.log('💾 [SUBMIT] Valores do formulário:', values);
+
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
             
-            const itemsToSave = values.items.map(formItem => {
-                const originalItem = selectedOrder.items.find(i => i.id === formItem.id);
-                const planToSave = originalItem?.productionPlan?.map(p => ({
-                    ...p,
-                    startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : (p.startDate || null),
-                    completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : (p.completedDate || null),
-                    status: p.status || 'Pendente',
-                    stageName: p.stageName || '',
-                    durationDays: p.durationDays || 0,
-                })) || [];
+            // CORREÇÃO: Processamento mais cuidadoso das datas dos itens
+            const itemsToSave = values.items.map((formItem, itemIndex) => {
+              console.log(`💾 [SUBMIT] Processando item ${itemIndex + 1}:`, formItem);
+              
+              const originalItem = selectedOrder.items.find(i => i.id === formItem.id);
+              const planToSave = originalItem?.productionPlan?.map(p => ({
+                ...p,
+                startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : (p.startDate || null),
+                completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : (p.completedDate || null),
+                status: p.status || 'Pendente',
+                stageName: p.stageName || '',
+                durationDays: p.durationDays || 0,
+              })) || [];
 
-                return {
-                    ...formItem,
-                    id: formItem.id || '',
-                    itemNumber: formItem.itemNumber || '',
-                    description: formItem.description || '',
-                    quantity: formItem.quantity || 0,
-                    unitWeight: formItem.unitWeight || 0,
-                    unitPrice: formItem.unitPrice || 0,
-                    code: formItem.code || '',
-                    itemDeliveryDate: formItem.itemDeliveryDate ? Timestamp.fromDate(new Date(formItem.itemDeliveryDate)) : null,
-                    shippingDate: formItem.shippingDate ? Timestamp.fromDate(new Date(formItem.shippingDate)) : null,
-                    productionPlan: planToSave,
-                };
+              // CORREÇÃO: Conversão cuidadosa das datas do item
+              let itemDeliveryTimestamp = null;
+              let shippingTimestamp = null;
+
+              if (formItem.itemDeliveryDate) {
+                try {
+                  const deliveryDate = formItem.itemDeliveryDate instanceof Date 
+                    ? formItem.itemDeliveryDate 
+                    : new Date(formItem.itemDeliveryDate);
+                  
+                  if (!isNaN(deliveryDate.getTime())) {
+                    itemDeliveryTimestamp = Timestamp.fromDate(deliveryDate);
+                    console.log('✅ [SUBMIT] Data de entrega convertida:', deliveryDate.toISOString());
+                  }
+                } catch (error) {
+                  console.warn('⚠️ [SUBMIT] Erro ao converter data de entrega:', error);
+                }
+              }
+
+              if (formItem.shippingDate) {
+                try {
+                  const shippingDate = formItem.shippingDate instanceof Date 
+                    ? formItem.shippingDate 
+                    : new Date(formItem.shippingDate);
+                  
+                  if (!isNaN(shippingDate.getTime())) {
+                    shippingTimestamp = Timestamp.fromDate(shippingDate);
+                    console.log('✅ [SUBMIT] Data de embarque convertida:', shippingDate.toISOString());
+                  }
+                } catch (error) {
+                  console.warn('⚠️ [SUBMIT] Erro ao converter data de embarque:', error);
+                }
+              }
+
+              return {
+                ...formItem,
+                id: formItem.id || '',
+                itemNumber: formItem.itemNumber || '',
+                description: formItem.description || '',
+                quantity: formItem.quantity || 0,
+                unitWeight: formItem.unitWeight || 0,
+                unitPrice: formItem.unitPrice || 0,
+                code: formItem.code || '',
+                itemDeliveryDate: itemDeliveryTimestamp,
+                shippingDate: shippingTimestamp,
+                shippingList: formItem.shippingList || '',
+                invoiceNumber: formItem.invoiceNumber || '',
+                productionPlan: planToSave,
+              };
             });
+
+            console.log('💾 [SUBMIT] Itens processados para salvamento:', itemsToSave);
 
             const totalWeight = calculateTotalWeight(itemsToSave);
             
@@ -838,6 +951,8 @@ export default function OrdersPage() {
                 items: itemsToSave || [],
                 totalWeight: totalWeight || 0,
             };
+
+            console.log('💾 [SUBMIT] Dados finais para Firestore:', dataToSave);
 
             // Remove campos undefined antes de enviar para o Firestore
             const cleanedData = removeUndefinedFields(dataToSave);
@@ -4180,26 +4295,47 @@ export default function OrdersPage() {
                                       </FormItem>
                                     )}/>
 
-                                    <FormField control={form.control} name={`items.${index}.itemDeliveryDate`} render={({ field }) => (
-                                      <FormItem>
-                                        <FormLabel>Entrega do Item</FormLabel>
-                                        <FormControl>
-                                          <Input
-                                            type="date"
-                                            value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
-                                            onChange={(e) => {
-                                              if (e.target.value) {
-                                                field.onChange(new Date(e.target.value));
-                                              } else {
-                                                field.onChange(null);
+                                    <FormField 
+                                      control={form.control} 
+                                      name={`items.${index}.itemDeliveryDate`} 
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel>Entrega do Item</FormLabel>
+                                          <FormControl>
+                                            <Input
+                                              type="date"
+                                              value={
+                                                field.value 
+                                                  ? (field.value instanceof Date 
+                                                      ? format(field.value, "yyyy-MM-dd") 
+                                                      : format(new Date(field.value), "yyyy-MM-dd")
+                                                    )
+                                                  : ""
                                               }
-                                            }}
-                                            className="w-full"
-                                          />
-                                        </FormControl>
-                                        <FormMessage />
-                                      </FormItem>
-                                    )}/>
+                                              onChange={(e) => {
+                                                console.log('📅 [ITEM DELIVERY] Mudança detectada:', e.target.value);
+                                                if (e.target.value) {
+                                                  // Criar data de forma mais robusta
+                                                  const [year, month, day] = e.target.value.split('-').map(Number);
+                                                  const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+                                                  console.log('📅 [ITEM DELIVERY] Nova data criada:', newDate);
+                                                  field.onChange(newDate);
+                                                } else {
+                                                  console.log('📅 [ITEM DELIVERY] Data limpa');
+                                                  field.onChange(null);
+                                                }
+                                              }}
+                                              className="w-full"
+                                              placeholder="Selecione a data de entrega"
+                                            />
+                                          </FormControl>
+                                          <FormMessage />
+                                          <FormDescription className="text-xs text-muted-foreground">
+                                            Data específica de entrega deste item (opcional)
+                                          </FormDescription>
+                                        </FormItem>
+                                      )}
+                                    />
                                   </div>
 
                                   {/* Seção de Embarque para Itens Concluídos */}
@@ -4232,26 +4368,42 @@ export default function OrdersPage() {
                                             </FormItem>
                                           )}/>
 
-                                          <FormField control={form.control} name={`items.${index}.shippingDate`} render={({ field }) => (
-                                            <FormItem>
-                                              <FormLabel>Data de Embarque *</FormLabel>
-                                              <FormControl>
-                                                <Input
-                                                  type="date"
-                                                  value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
-                                                  onChange={(e) => {
-                                                    if (e.target.value) {
-                                                      field.onChange(new Date(e.target.value));
-                                                    } else {
-                                                      field.onChange(null);
+                                          <FormField 
+                                            control={form.control} 
+                                            name={`items.${index}.shippingDate`} 
+                                            render={({ field }) => (
+                                              <FormItem>
+                                                <FormLabel>Data de Embarque *</FormLabel>
+                                                <FormControl>
+                                                  <Input
+                                                    type="date"
+                                                    value={
+                                                      field.value 
+                                                        ? (field.value instanceof Date 
+                                                            ? format(field.value, "yyyy-MM-dd") 
+                                                            : format(new Date(field.value), "yyyy-MM-dd")
+                                                          )
+                                                        : ""
                                                     }
-                                                  }}
-                                                  className="w-full"
-                                                />
-                                              </FormControl>
-                                              <FormMessage />
-                                            </FormItem>
-                                          )}/>
+                                                    onChange={(e) => {
+                                                      console.log('📅 [SHIPPING] Mudança detectada:', e.target.value);
+                                                      if (e.target.value) {
+                                                        const [year, month, day] = e.target.value.split('-').map(Number);
+                                                        const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+                                                        console.log('📅 [SHIPPING] Nova data criada:', newDate);
+                                                        field.onChange(newDate);
+                                                      } else {
+                                                        console.log('📅 [SHIPPING] Data limpa');
+                                                        field.onChange(null);
+                                                      }
+                                                    }}
+                                                    className="w-full"
+                                                  />
+                                                </FormControl>
+                                                <FormMessage />
+                                              </FormItem>
+                                            )}
+                                          />
                                         </div>
 
                                         {/* Indicador de Atraso/Antecipação */}
