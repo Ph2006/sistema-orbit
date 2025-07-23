@@ -2919,66 +2919,82 @@ export default function OrdersPage() {
         }
     };
 
-    // FUNÇÃO ATUALIZADA DE ANÁLISE DE ITENS (com dados corretos dos itens)
+    // FUNÇÃO CORRIGIDA DE ANÁLISE DE ITENS (com LE e NF corretas)
     const analyzeItemDelivery = (item: OrderItem, orderDeliveryDate?: Date) => {
-        const analysis = {
-            itemId: item.id,
-            itemNumber: item.itemNumber || 'N/A', // Número do item no PC
-            code: item.code || 'N/A', // Código do produto
-            description: item.description,
-            quantity: item.quantity,
-            
-            // Dados de embarque
-            hasShippingList: !!(item.shippingList && item.shippingList.trim()),
-            shippingList: item.shippingList || 'Não informada',
-            hasInvoice: !!(item.invoiceNumber && item.invoiceNumber.trim()),
-            invoiceNumber: item.invoiceNumber || 'Não informada',
-            hasShippingDate: !!item.shippingDate,
-            shippingDate: item.shippingDate,
-            
-            // CORREÇÃO: Usar data de entrega do item primeiro, depois do pedido
-            expectedDate: item.itemDeliveryDate || orderDeliveryDate,
-            actualDate: item.shippingDate,
-            
-            // Status da entrega
-            deliveryStatus: 'pending', // 'early', 'ontime', 'late', 'pending'
-            daysDifference: 0,
-            isComplete: false,
-            
-            // Progresso do item
-            progress: calculateItemProgress(item),
-        };
+      console.log('🔍 Analisando item:', {
+        id: item.id,
+        description: item.description,
+        shippingList: item.shippingList,
+        invoiceNumber: item.invoiceNumber,
+        shippingDate: item.shippingDate
+      });
 
-        // Verificar se o item está completo
-        analysis.isComplete = analysis.hasShippingList && analysis.hasInvoice && analysis.hasShippingDate;
+      const analysis = {
+        itemId: item.id,
+        itemNumber: item.itemNumber || 'N/A',
+        code: item.code || 'N/A',
+        description: item.description,
+        quantity: item.quantity,
+        
+        // CORREÇÃO: Verificação mais robusta dos dados de embarque
+        hasShippingList: !!(item.shippingList && item.shippingList.trim() && item.shippingList !== 'Não informada'),
+        shippingList: item.shippingList && item.shippingList.trim() ? item.shippingList.trim() : 'Não informada',
+        hasInvoice: !!(item.invoiceNumber && item.invoiceNumber.trim() && item.invoiceNumber !== 'Não informada'),
+        invoiceNumber: item.invoiceNumber && item.invoiceNumber.trim() ? item.invoiceNumber.trim() : 'Não informada',
+        hasShippingDate: !!item.shippingDate,
+        shippingDate: item.shippingDate,
+        
+        // Datas para análise
+        expectedDate: item.itemDeliveryDate || orderDeliveryDate,
+        actualDate: item.shippingDate,
+        
+        // Status da entrega
+        deliveryStatus: 'pending',
+        daysDifference: 0,
+        isComplete: false,
+        
+        // Progresso do item
+        progress: calculateItemProgress(item),
+      };
 
-        // Calcular diferença de dias se houver data de embarque
-        if (analysis.actualDate && analysis.expectedDate) {
-            const diffTime = analysis.actualDate.getTime() - analysis.expectedDate.getTime();
-            analysis.daysDifference = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            
-            if (analysis.daysDifference < 0) {
-                analysis.deliveryStatus = 'early';
-                analysis.daysDifference = Math.abs(analysis.daysDifference);
-            } else if (analysis.daysDifference === 0) {
-                analysis.deliveryStatus = 'ontime';
-            } else {
-                analysis.deliveryStatus = 'late';
-            }
-        } else if (analysis.expectedDate && !analysis.actualDate) {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const expectedDateOnly = new Date(analysis.expectedDate);
-            expectedDateOnly.setHours(0, 0, 0, 0);
-            
-            if (expectedDateOnly < today) {
-                analysis.deliveryStatus = 'overdue';
-                const diffTime = today.getTime() - expectedDateOnly.getTime();
-                analysis.daysDifference = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            }
+      // CORREÇÃO: Verificação mais rigorosa de completude
+      analysis.isComplete = analysis.hasShippingList && analysis.hasInvoice && analysis.hasShippingDate;
+
+      console.log('📊 Resultado da análise:', {
+        hasShippingList: analysis.hasShippingList,
+        shippingList: analysis.shippingList,
+        hasInvoice: analysis.hasInvoice,
+        invoiceNumber: analysis.invoiceNumber,
+        isComplete: analysis.isComplete
+      });
+
+      // Calcular diferença de dias se houver data de embarque
+      if (analysis.actualDate && analysis.expectedDate) {
+        const diffTime = analysis.actualDate.getTime() - analysis.expectedDate.getTime();
+        analysis.daysDifference = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        if (analysis.daysDifference < 0) {
+          analysis.deliveryStatus = 'early';
+          analysis.daysDifference = Math.abs(analysis.daysDifference);
+        } else if (analysis.daysDifference === 0) {
+          analysis.deliveryStatus = 'ontime';
+        } else {
+          analysis.deliveryStatus = 'late';
         }
+      } else if (analysis.expectedDate && !analysis.actualDate) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const expectedDateOnly = new Date(analysis.expectedDate);
+        expectedDateOnly.setHours(0, 0, 0, 0);
+        
+        if (expectedDateOnly < today) {
+          analysis.deliveryStatus = 'overdue';
+          const diffTime = today.getTime() - expectedDateOnly.getTime();
+          analysis.daysDifference = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        }
+      }
 
-        return analysis;
+      return analysis;
     };
 
     // FUNÇÃO PARA ANÁLISE DE ENTREGA DO PEDIDO (usando a nova análise de itens)
@@ -3204,356 +3220,403 @@ export default function OrdersPage() {
         </SheetFooter>
     );
 
-    // FUNÇÃO DE GERAÇÃO DO RELATÓRIO COM HEADER COMPLETO DA EMPRESA
+    // FUNÇÃO CORRIGIDA DE GERAÇÃO DO RELATÓRIO (com tabela corrigida)
     const handleGenerateDeliveryReport = async (order: Order) => {
-        if (!order) {
-            toast({
-                variant: "destructive",
-                title: "Erro",
-                description: "Dados do pedido não encontrados.",
-            });
-            return;
-        }
+      if (!order) {
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "Dados do pedido não encontrados.",
+        });
+        return;
+      }
 
-        toast({ title: "Gerando Relatório de Entrega...", description: "Por favor, aguarde." });
+      toast({ title: "Gerando Relatório de Entrega...", description: "Por favor, aguarde." });
 
+      try {
+        // Analisar dados de entrega
+        const analysis = analyzeOrderDelivery(order);
+        
+        console.log('📋 Análise completa do pedido:', analysis);
+        
+        // Buscar dados da empresa
+        let companyData: CompanyData = {};
         try {
-            // Analisar dados de entrega
-            const analysis = analyzeOrderDelivery(order);
-            
-            // BUSCAR DADOS COMPLETOS DA EMPRESA
-            let companyData: CompanyData = {};
-            try {
-                const companyRef = doc(db, "companies", "mecald", "settings", "company");
-                const docSnap = await getDoc(companyRef);
-                companyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
-            } catch (error) {
-                console.warn("Não foi possível carregar dados da empresa:", error);
-            }
-            
-            // Criar o PDF
-            const docPdf = new jsPDF();
-            const pageWidth = docPdf.internal.pageSize.width;
-            const pageHeight = docPdf.internal.pageSize.height;
-            let yPos = 15;
-
-            // HEADER COMPLETO COM LOGO E DADOS DA EMPRESA (igual ao romaneio)
-            if (companyData.logo?.preview) {
-                try {
-                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
-                } catch (e) {
-                    console.warn("Erro ao adicionar logo:", e);
-                }
-            }
-
-            // Informações da empresa ao lado da logo (padrão do romaneio)
-            let textX = 65;
-            let textY = yPos;
-            docPdf.setFontSize(18).setFont('helvetica', 'bold');
-            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
-            textY += 6;
-            
-            docPdf.setFontSize(9).setFont('helvetica', 'normal');
-            if (companyData.endereco) {
-                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
-                docPdf.text(addressLines, textX, textY);
-                textY += (addressLines.length * 4);
-            }
-            if (companyData.cnpj) {
-                docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
-                textY += 4;
-            }
-            if (companyData.email) {
-                docPdf.text(`Email: ${companyData.email}`, textX, textY);
-                textY += 4;
-            }
-            if (companyData.celular) {
-                docPdf.text(`Telefone: ${companyData.celular}`, textX, textY);
-            }
-
-            yPos = 55;
-
-            // Título do documento
-            docPdf.setFontSize(16).setFont('helvetica', 'bold');
-            docPdf.text('RELATÓRIO DE ENTREGA E PERFORMANCE', pageWidth / 2, yPos, { align: 'center' });
-            yPos += 15;
-
-            // Informações do pedido em duas colunas (padrão romaneio)
-            docPdf.setFontSize(11).setFont('helvetica', 'normal');
-            
-            // Coluna esquerda
-            const leftColumnX = 15;
-            let leftColumnY = yPos;
-            docPdf.setFont('helvetica', 'bold');
-            docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
-            leftColumnY += 6;
-            docPdf.setFont('helvetica', 'normal');
-            docPdf.text(`Pedido Nº: ${order.quotationNumber || 'N/A'}`, leftColumnX, leftColumnY);
-            leftColumnY += 5;
-            docPdf.text(`Cliente: ${order.customer?.name || 'N/A'}`, leftColumnX, leftColumnY);
-            leftColumnY += 5;
-            if (order.projectName) {
-                docPdf.text(`Projeto: ${order.projectName}`, leftColumnX, leftColumnY);
-                leftColumnY += 5;
-            }
-            
-            // Coluna direita
-            const rightColumnX = pageWidth / 2 + 10;
-            let rightColumnY = yPos + 6;
-            docPdf.text(`OS Interna: ${order.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
-            rightColumnY += 5;
-            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
-            rightColumnY += 5;
-            if (order.deliveryDate) {
-                docPdf.text(`Data de Entrega Geral: ${format(order.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
-                rightColumnY += 5;
-            }
-            docPdf.text(`Status: ${order.status}`, rightColumnX, rightColumnY);
-            
-            yPos = Math.max(leftColumnY, rightColumnY) + 10;
-
-            // Progresso geral do pedido
-            const orderProgress = calculateOrderProgress(order);
-            
-            docPdf.setFontSize(10).setFont('helvetica', 'bold');
-            docPdf.text('PROGRESSO GERAL DO PEDIDO:', 15, yPos);
-            yPos += 8;
-            
-            // Barra de progresso geral
-            const progressBarWidth = 120;
-            const progressBarHeight = 8;
-            const progressBarX = 15;
-            
-            // Fundo da barra
-            docPdf.setFillColor(230, 230, 230);
-            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'F');
-            
-            // Barra colorida
-            const progressWidth = (orderProgress / 100) * progressBarWidth;
-            if (orderProgress < 30) {
-                docPdf.setFillColor(239, 68, 68);
-            } else if (orderProgress < 70) {
-                docPdf.setFillColor(245, 158, 11);
-            } else {
-                docPdf.setFillColor(34, 197, 94);
-            }
-            docPdf.rect(progressBarX, yPos, progressWidth, progressBarHeight, 'F');
-            
-            // Borda
-            docPdf.setDrawColor(0, 0, 0);
-            docPdf.setLineWidth(0.1);
-            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'S');
-            
-            // Texto da porcentagem
-            docPdf.setFontSize(9).setFont('helvetica', 'normal');
-            docPdf.setTextColor(0, 0, 0);
-            docPdf.text(`${orderProgress.toFixed(1)}%`, progressBarX + progressBarWidth + 5, yPos + 6);
-            
-            yPos += progressBarHeight + 15;
-
-            // Resumo de Performance em cards
-            docPdf.setFontSize(12).setFont('helvetica', 'bold');
-            docPdf.text('RESUMO DE PERFORMANCE DE ENTREGA', 15, yPos);
-            yPos += 10;
-
-            // Cards de performance
-            const cardWidth = (pageWidth - 45) / 3;
-            const cardHeight = 25;
-            const cardStartX = 15;
-            
-            // Card 1: Taxa de Entrega no Prazo
-            docPdf.setFillColor(34, 197, 94);
-            docPdf.rect(cardStartX, yPos, cardWidth, cardHeight, 'F');
-            docPdf.setTextColor(255, 255, 255);
-            docPdf.setFontSize(10).setFont('helvetica', 'bold');
-            docPdf.text('NO PRAZO', cardStartX + cardWidth/2, yPos + 8, { align: 'center' });
-            docPdf.setFontSize(14);
-            docPdf.text(`${analysis.summary.onTimeRate.toFixed(1)}%`, cardStartX + cardWidth/2, yPos + 16, { align: 'center' });
-            docPdf.setFontSize(7).setFont('helvetica', 'normal');
-            docPdf.text(`${analysis.summary.onTimeItems} itens`, cardStartX + cardWidth/2, yPos + 21, { align: 'center' });
-
-            // Card 2: Entregas Antecipadas
-            docPdf.setFillColor(59, 130, 246);
-            docPdf.rect(cardStartX + cardWidth + 5, yPos, cardWidth, cardHeight, 'F');
-            docPdf.setFontSize(10).setFont('helvetica', 'bold');
-            docPdf.text('ANTECIPADAS', cardStartX + cardWidth + 5 + cardWidth/2, yPos + 8, { align: 'center' });
-            docPdf.setFontSize(14);
-            docPdf.text(`${analysis.summary.earlyRate.toFixed(1)}%`, cardStartX + cardWidth + 5 + cardWidth/2, yPos + 16, { align: 'center' });
-            docPdf.setFontSize(7).setFont('helvetica', 'normal');
-            docPdf.text(`${analysis.summary.earlyItems} itens`, cardStartX + cardWidth + 5 + cardWidth/2, yPos + 21, { align: 'center' });
-
-            // Card 3: Entregas Atrasadas
-            docPdf.setFillColor(239, 68, 68);
-            docPdf.rect(cardStartX + (cardWidth + 5) * 2, yPos, cardWidth, cardHeight, 'F');
-            docPdf.setFontSize(10).setFont('helvetica', 'bold');
-            docPdf.text('ATRASADAS', cardStartX + (cardWidth + 5) * 2 + cardWidth/2, yPos + 8, { align: 'center' });
-            docPdf.setFontSize(14);
-            docPdf.text(`${analysis.summary.lateRate.toFixed(1)}%`, cardStartX + (cardWidth + 5) * 2 + cardWidth/2, yPos + 16, { align: 'center' });
-            docPdf.setFontSize(7).setFont('helvetica', 'normal');
-            docPdf.text(`${analysis.summary.lateItems} itens`, cardStartX + (cardWidth + 5) * 2 + cardWidth/2, yPos + 21, { align: 'center' });
-
-            yPos += cardHeight + 20;
-
-            // Índice de Performance Geral
-            docPdf.setTextColor(0, 0, 0);
-            docPdf.setFontSize(12).setFont('helvetica', 'bold');
-            docPdf.text('ÍNDICE GERAL DE PONTUALIDADE:', 15, yPos);
-            
-            const overallOnTimeRate = analysis.summary.totalItems > 0 ? 
-                ((analysis.summary.onTimeItems + analysis.summary.earlyItems) / analysis.summary.totalItems) * 100 : 0;
-            
-            docPdf.setFontSize(20);
-            const color = overallOnTimeRate >= 80 ? [34, 197, 94] : overallOnTimeRate >= 60 ? [245, 158, 11] : [239, 68, 68];
-            docPdf.setTextColor(color[0], color[1], color[2]);
-            docPdf.text(`${overallOnTimeRate.toFixed(1)}%`, pageWidth - 15, yPos + 5, { align: 'right' });
-            
-            yPos += 20;
-
-            // Verificar se precisa de nova página
-            if (yPos + 60 > pageHeight - 20) {
-                docPdf.addPage();
-                yPos = 20;
-            }
-
-            // Tabela detalhada dos itens (ATUALIZADA COM COLUNAS CORRETAS)
-            docPdf.setTextColor(0, 0, 0);
-            docPdf.setFontSize(12).setFont('helvetica', 'bold');
-            docPdf.text('DETALHAMENTO POR ITEM', 15, yPos);
-            yPos += 10;
-
-            const tableBody = analysis.itemAnalyses.map(item => {
-                let statusText = '';
-                let deliveryText = '';
-                
-                switch (item.deliveryStatus) {
-                    case 'early':
-                        statusText = `Antecipado ${item.daysDifference}d`;
-                        deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
-                        break;
-                    case 'ontime':
-                        statusText = 'No Prazo';
-                        deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
-                        break;
-                    case 'late':
-                        statusText = `Atrasado ${item.daysDifference}d`;
-                        deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
-                        break;
-                    case 'overdue':
-                        statusText = `Vencido ${item.daysDifference}d`;
-                        deliveryText = 'Não entregue';
-                        break;
-                    default:
-                        statusText = 'Pendente';
-                        deliveryText = 'Não entregue';
-                }
-
-                return [
-                    item.itemNumber || '-', // Nº Item PC
-                    item.code || '-', // Código
-                    item.description.length > 30 ? item.description.substring(0, 30) + '...' : item.description,
-                    item.expectedDate ? format(item.expectedDate, 'dd/MM/yy') : 'N/A', // Data prevista do item
-                    deliveryText, // Data real
-                    statusText, // Status
-                    item.shippingList && item.shippingList !== 'Não informada' ? '✓' : '✗', // Lista Embarque
-                    item.invoiceNumber && item.invoiceNumber !== 'Não informada' ? '✓' : '✗', // Nota Fiscal
-                ];
-            });
-            
-            autoTable(docPdf, {
-                startY: yPos,
-                head: [['Nº Item PC', 'Código', 'Descrição', 'Entrega Prevista', 'Entrega Real', 'Status', 'LE', 'NF']],
-                body: tableBody,
-                styles: { 
-                    fontSize: 7, 
-                    cellPadding: 2,
-                    overflow: 'linebreak'
-                },
-                headStyles: { 
-                    fillColor: [37, 99, 235], 
-                    fontSize: 8, 
-                    textColor: 255,
-                    fontStyle: 'bold'
-                },
-                columnStyles: {
-                    0: { cellWidth: 18, halign: 'center' }, // Nº Item PC
-                    1: { cellWidth: 18, halign: 'center' }, // Código
-                    2: { cellWidth: 50 }, // Descrição
-                    3: { cellWidth: 22, halign: 'center' }, // Prevista
-                    4: { cellWidth: 22, halign: 'center' }, // Real
-                    5: { cellWidth: 28, halign: 'center' }, // Status
-                    6: { cellWidth: 10, halign: 'center' }, // LE
-                    7: { cellWidth: 10, halign: 'center' }, // NF
-                },
-                didParseCell: (data) => {
-                    // Colorir células baseado no status
-                    if (data.column.index === 5 && data.section === 'body') {
-                        const status = data.cell.raw as string;
-                        if (status.includes('Antecipado')) {
-                            data.cell.styles.fillColor = [219, 234, 254];
-                            data.cell.styles.textColor = [37, 99, 235];
-                        } else if (status === 'No Prazo') {
-                            data.cell.styles.fillColor = [220, 252, 231];
-                            data.cell.styles.textColor = [21, 128, 61];
-                        } else if (status.includes('Atrasado') || status.includes('Vencido')) {
-                            data.cell.styles.fillColor = [254, 226, 226];
-                            data.cell.styles.textColor = [185, 28, 28];
-                        }
-                    }
-                }
-            });
-
-            // Rodapé com resumo executivo
-            const finalY = (docPdf as any).lastAutoTable.finalY + 15;
-            
-            if (finalY + 30 < pageHeight - 20) {
-                docPdf.setFontSize(10).setFont('helvetica', 'bold');
-                docPdf.text('RESUMO EXECUTIVO:', 15, finalY);
-                let summaryY = finalY + 8;
-                
-                docPdf.setFontSize(9).setFont('helvetica', 'normal');
-                docPdf.text(`• Total de itens no pedido: ${analysis.summary.totalItems}`, 15, summaryY);
-                summaryY += 5;
-                docPdf.text(`• Itens com dados de embarque completos: ${analysis.summary.completedItems} (${analysis.summary.completionRate.toFixed(1)}%)`, 15, summaryY);
-                summaryY += 5;
-                docPdf.text(`• Taxa de entrega dentro ou antes do prazo: ${(analysis.summary.onTimeRate + analysis.summary.earlyRate).toFixed(1)}%`, 15, summaryY);
-                summaryY += 5;
-                
-                const itemsWithSpecificDates = analysis.itemAnalyses.filter(item => item.expectedDate && item.expectedDate !== order.deliveryDate).length;
-                if (itemsWithSpecificDates > 0) {
-                    docPdf.text(`• Itens com datas de entrega específicas: ${itemsWithSpecificDates}`, 15, summaryY);
-                    summaryY += 5;
-                }
-                
-                summaryY += 5;
-                docPdf.setFontSize(8).setFont('helvetica', 'italic');
-                docPdf.text(
-                    `Relatório gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
-                    pageWidth / 2,
-                    summaryY,
-                    { align: 'center' }
-                );
-            }
-
-            // Gerar nome do arquivo
-            const timestamp = format(new Date(), 'yyyyMMdd_HHmm');
-            const filename = `Relatorio_Entrega_${order.quotationNumber || 'Pedido'}_${timestamp}.pdf`;
-
-            // Salvar o arquivo
-            docPdf.save(filename);
-            
-            toast({
-                title: "✅ Relatório Gerado com Sucesso!",
-                description: `O arquivo "${filename}" foi baixado automaticamente.`,
-            });
-
+          const companyRef = doc(db, "companies", "mecald", "settings", "company");
+          const docSnap = await getDoc(companyRef);
+          companyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
         } catch (error) {
-            console.error("Erro completo ao gerar relatório:", error);
-            toast({
-                variant: "destructive",
-                title: "Erro ao Gerar Relatório",
-                description: `Falha na geração: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-            });
+          console.warn("Não foi possível carregar dados da empresa:", error);
         }
+        
+        // Criar o PDF
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let yPos = 15;
+
+        // Header com logo e dados da empresa (mesmo código anterior)
+        if (companyData.logo?.preview) {
+          try {
+            docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+          } catch (e) {
+            console.warn("Erro ao adicionar logo:", e);
+          }
+        }
+
+        let textX = 65;
+        let textY = yPos;
+        docPdf.setFontSize(18).setFont('helvetica', 'bold');
+        docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+        textY += 6;
+        
+        docPdf.setFontSize(9).setFont('helvetica', 'normal');
+        if (companyData.endereco) {
+            const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+            docPdf.text(addressLines, textX, textY);
+            textY += (addressLines.length * 4);
+        }
+        if (companyData.cnpj) {
+            docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+            textY += 4;
+        }
+        if (companyData.email) {
+            docPdf.text(`Email: ${companyData.email}`, textX, textY);
+            textY += 4;
+        }
+        if (companyData.celular) {
+            docPdf.text(`Telefone: ${companyData.celular}`, textX, textY);
+        }
+
+        yPos = 55;
+
+        // Título e informações do pedido (mesmo código anterior até os cards)
+        docPdf.setFontSize(16).setFont('helvetica', 'bold');
+        docPdf.text('RELATÓRIO DE ENTREGA E PERFORMANCE', pageWidth / 2, yPos, { align: 'center' });
+        yPos += 15;
+
+        // Informações do pedido em duas colunas (padrão romaneio)
+        docPdf.setFontSize(11).setFont('helvetica', 'normal');
+        
+        // Coluna esquerda
+        const leftColumnX = 15;
+        let leftColumnY = yPos;
+        docPdf.setFont('helvetica', 'bold');
+        docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+        leftColumnY += 6;
+        docPdf.setFont('helvetica', 'normal');
+        docPdf.text(`Pedido Nº: ${order.quotationNumber || 'N/A'}`, leftColumnX, leftColumnY);
+        leftColumnY += 5;
+        docPdf.text(`Cliente: ${order.customer?.name || 'N/A'}`, leftColumnX, leftColumnY);
+        leftColumnY += 5;
+        if (order.projectName) {
+            docPdf.text(`Projeto: ${order.projectName}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+        }
+        
+        // Coluna direita
+        const rightColumnX = pageWidth / 2 + 10;
+        let rightColumnY = yPos + 6;
+        docPdf.text(`OS Interna: ${order.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
+        rightColumnY += 5;
+        docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+        rightColumnY += 5;
+        if (order.deliveryDate) {
+            docPdf.text(`Data de Entrega Geral: ${format(order.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+        }
+        docPdf.text(`Status: ${order.status}`, rightColumnX, rightColumnY);
+        
+        yPos = Math.max(leftColumnY, rightColumnY) + 10;
+
+        // Progresso geral do pedido
+        const orderProgress = calculateOrderProgress(order);
+        
+        docPdf.setFontSize(10).setFont('helvetica', 'bold');
+        docPdf.text('PROGRESSO GERAL DO PEDIDO:', 15, yPos);
+        yPos += 8;
+        
+        // Barra de progresso geral
+        const progressBarWidth = 120;
+        const progressBarHeight = 8;
+        const progressBarX = 15;
+        
+        // Fundo da barra
+        docPdf.setFillColor(230, 230, 230);
+        docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'F');
+        
+        // Barra colorida
+        const progressWidth = (orderProgress / 100) * progressBarWidth;
+        if (orderProgress < 30) {
+            docPdf.setFillColor(239, 68, 68);
+        } else if (orderProgress < 70) {
+            docPdf.setFillColor(245, 158, 11);
+        } else {
+            docPdf.setFillColor(34, 197, 94);
+        }
+        docPdf.rect(progressBarX, yPos, progressWidth, progressBarHeight, 'F');
+        
+        // Borda
+        docPdf.setDrawColor(0, 0, 0);
+        docPdf.setLineWidth(0.1);
+        docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'S');
+        
+        // Texto da porcentagem
+        docPdf.setFontSize(9).setFont('helvetica', 'normal');
+        docPdf.setTextColor(0, 0, 0);
+        docPdf.text(`${orderProgress.toFixed(1)}%`, progressBarX + progressBarWidth + 5, yPos + 6);
+        
+        yPos += progressBarHeight + 15;
+
+        // Resumo de Performance em cards
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('RESUMO DE PERFORMANCE DE ENTREGA', 15, yPos);
+        yPos += 10;
+
+        // Cards de performance
+        const cardWidth = (pageWidth - 45) / 3;
+        const cardHeight = 25;
+        const cardStartX = 15;
+        
+        // Card 1: Taxa de Entrega no Prazo
+        docPdf.setFillColor(34, 197, 94);
+        docPdf.rect(cardStartX, yPos, cardWidth, cardHeight, 'F');
+        docPdf.setTextColor(255, 255, 255);
+        docPdf.setFontSize(10).setFont('helvetica', 'bold');
+        docPdf.text('NO PRAZO', cardStartX + cardWidth/2, yPos + 8, { align: 'center' });
+        docPdf.setFontSize(14);
+        docPdf.text(`${analysis.summary.onTimeRate.toFixed(1)}%`, cardStartX + cardWidth/2, yPos + 16, { align: 'center' });
+        docPdf.setFontSize(7).setFont('helvetica', 'normal');
+        docPdf.text(`${analysis.summary.onTimeItems} itens`, cardStartX + cardWidth/2, yPos + 21, { align: 'center' });
+
+        // Card 2: Entregas Antecipadas
+        docPdf.setFillColor(59, 130, 246);
+        docPdf.rect(cardStartX + cardWidth + 5, yPos, cardWidth, cardHeight, 'F');
+        docPdf.setFontSize(10).setFont('helvetica', 'bold');
+        docPdf.text('ANTECIPADAS', cardStartX + cardWidth + 5 + cardWidth/2, yPos + 8, { align: 'center' });
+        docPdf.setFontSize(14);
+        docPdf.text(`${analysis.summary.earlyRate.toFixed(1)}%`, cardStartX + cardWidth + 5 + cardWidth/2, yPos + 16, { align: 'center' });
+        docPdf.setFontSize(7).setFont('helvetica', 'normal');
+        docPdf.text(`${analysis.summary.earlyItems} itens`, cardStartX + cardWidth + 5 + cardWidth/2, yPos + 21, { align: 'center' });
+
+        // Card 3: Entregas Atrasadas
+        docPdf.setFillColor(239, 68, 68);
+        docPdf.rect(cardStartX + (cardWidth + 5) * 2, yPos, cardWidth, cardHeight, 'F');
+        docPdf.setFontSize(10).setFont('helvetica', 'bold');
+        docPdf.text('ATRASADAS', cardStartX + (cardWidth + 5) * 2 + cardWidth/2, yPos + 8, { align: 'center' });
+        docPdf.setFontSize(14);
+        docPdf.text(`${analysis.summary.lateRate.toFixed(1)}%`, cardStartX + (cardWidth + 5) * 2 + cardWidth/2, yPos + 16, { align: 'center' });
+        docPdf.setFontSize(7).setFont('helvetica', 'normal');
+        docPdf.text(`${analysis.summary.lateItems} itens`, cardStartX + (cardWidth + 5) * 2 + cardWidth/2, yPos + 21, { align: 'center' });
+
+        yPos += cardHeight + 20;
+
+        // Índice de Performance Geral
+        docPdf.setTextColor(0, 0, 0);
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('ÍNDICE GERAL DE PONTUALIDADE:', 15, yPos);
+        
+        const overallOnTimeRate = analysis.summary.totalItems > 0 ? 
+            ((analysis.summary.onTimeItems + analysis.summary.earlyItems) / analysis.summary.totalItems) * 100 : 0;
+        
+        docPdf.setFontSize(20);
+        const color = overallOnTimeRate >= 80 ? [34, 197, 94] : overallOnTimeRate >= 60 ? [245, 158, 11] : [239, 68, 68];
+        docPdf.setTextColor(color[0], color[1], color[2]);
+        docPdf.text(`${overallOnTimeRate.toFixed(1)}%`, pageWidth - 15, yPos + 5, { align: 'right' });
+        
+        yPos += 20;
+
+        // Verificar se precisa de nova página
+        if (yPos + 60 > pageHeight - 20) {
+            docPdf.addPage();
+            yPos = 20;
+        }
+
+        // Pular para a parte da tabela que precisa ser corrigida
+        yPos = 140; // Ajustar conforme necessário baseado no layout anterior
+
+        // TABELA CORRIGIDA DOS ITENS
+        docPdf.setTextColor(0, 0, 0);
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('DETALHAMENTO POR ITEM', 15, yPos);
+        yPos += 10;
+
+        const tableBody = analysis.itemAnalyses.map(item => {
+          console.log('📋 Processando item para tabela:', {
+            itemNumber: item.itemNumber,
+            code: item.code,
+            description: item.description,
+            shippingList: item.shippingList,
+            invoiceNumber: item.invoiceNumber,
+            hasShippingList: item.hasShippingList,
+            hasInvoice: item.hasInvoice
+          });
+
+          let statusText = '';
+          let deliveryText = '';
+          
+          switch (item.deliveryStatus) {
+            case 'early':
+              statusText = `Antecipado ${item.daysDifference}d`;
+              deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
+              break;
+            case 'ontime':
+              statusText = 'No Prazo';
+              deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
+              break;
+            case 'late':
+              statusText = `Atrasado ${item.daysDifference}d`;
+              deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
+              break;
+            case 'overdue':
+              statusText = `Vencido ${item.daysDifference}d`;
+              deliveryText = 'Não entregue';
+              break;
+            default:
+              statusText = 'Pendente';
+              deliveryText = 'Não entregue';
+          }
+
+          // CORREÇÃO PRINCIPAL: Mostrar os dados reais de LE e NF
+          const leStatus = item.hasShippingList ? 
+            (item.shippingList.length > 10 ? item.shippingList.substring(0, 10) + '...' : item.shippingList) : 
+            'Pendente';
+          
+          const nfStatus = item.hasInvoice ? 
+            (item.invoiceNumber.length > 10 ? item.invoiceNumber.substring(0, 10) + '...' : item.invoiceNumber) : 
+            'Pendente';
+
+          console.log('📋 Dados finais para tabela:', {
+            leStatus,
+            nfStatus,
+            originalLE: item.shippingList,
+            originalNF: item.invoiceNumber
+          });
+
+          return [
+            item.itemNumber || '-',
+            item.code || '-',
+            item.description.length > 30 ? item.description.substring(0, 30) + '...' : item.description,
+            item.expectedDate ? format(item.expectedDate, 'dd/MM/yy') : 'N/A',
+            deliveryText,
+            statusText,
+            leStatus, // CORREÇÃO: Mostrar número real da LE ou "Pendente"
+            nfStatus, // CORREÇÃO: Mostrar número real da NF ou "Pendente"
+          ];
+        });
+        
+        console.log('📋 Dados da tabela final:', tableBody);
+        
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [['Nº Item PC', 'Código', 'Descrição', 'Entrega Prevista', 'Entrega Real', 'Status', 'Lista Embarque', 'Nota Fiscal']],
+          body: tableBody,
+          styles: { 
+            fontSize: 7, 
+            cellPadding: 2,
+            overflow: 'linebreak'
+          },
+          headStyles: { 
+            fillColor: [37, 99, 235], 
+            fontSize: 8, 
+            textColor: 255,
+            fontStyle: 'bold'
+          },
+          columnStyles: {
+            0: { cellWidth: 18, halign: 'center' }, // Nº Item PC
+            1: { cellWidth: 18, halign: 'center' }, // Código
+            2: { cellWidth: 45 }, // Descrição
+            3: { cellWidth: 20, halign: 'center' }, // Prevista
+            4: { cellWidth: 20, halign: 'center' }, // Real
+            5: { cellWidth: 25, halign: 'center' }, // Status
+            6: { cellWidth: 22, halign: 'center' }, // Lista Embarque - AUMENTADO
+            7: { cellWidth: 22, halign: 'center' }, // Nota Fiscal - AUMENTADO
+          },
+          didParseCell: (data) => {
+            // Colorir células baseado no status
+            if (data.column.index === 5 && data.section === 'body') {
+              const status = data.cell.raw as string;
+              if (status.includes('Antecipado')) {
+                data.cell.styles.fillColor = [219, 234, 254];
+                data.cell.styles.textColor = [37, 99, 235];
+              } else if (status === 'No Prazo') {
+                data.cell.styles.fillColor = [220, 252, 231];
+                data.cell.styles.textColor = [21, 128, 61];
+              } else if (status.includes('Atrasado') || status.includes('Vencido')) {
+                data.cell.styles.fillColor = [254, 226, 226];
+                data.cell.styles.textColor = [185, 28, 28];
+              }
+            }
+            
+            // CORREÇÃO: Destacar LE e NF preenchidas
+            if ((data.column.index === 6 || data.column.index === 7) && data.section === 'body') {
+              const cellValue = data.cell.raw as string;
+              if (cellValue !== 'Pendente' && cellValue !== '-') {
+                data.cell.styles.fillColor = [220, 252, 231]; // Verde claro
+                data.cell.styles.textColor = [21, 128, 61]; // Verde escuro
+                data.cell.styles.fontStyle = 'bold';
+              } else {
+                data.cell.styles.fillColor = [254, 226, 226]; // Vermelho claro
+                data.cell.styles.textColor = [185, 28, 28]; // Vermelho escuro
+              }
+            }
+          }
+        });
+
+        // Rodapé (mesmo código anterior)
+        const finalY = (docPdf as any).lastAutoTable.finalY + 15;
+        
+        if (finalY + 30 < pageHeight - 20) {
+          docPdf.setFontSize(10).setFont('helvetica', 'bold');
+          docPdf.text('RESUMO EXECUTIVO:', 15, finalY);
+          let summaryY = finalY + 8;
+          
+          docPdf.setFontSize(9).setFont('helvetica', 'normal');
+          docPdf.text(`• Total de itens no pedido: ${analysis.summary.totalItems}`, 15, summaryY);
+          summaryY += 5;
+          docPdf.text(`• Itens com dados de embarque completos: ${analysis.summary.completedItems} (${analysis.summary.completionRate.toFixed(1)}%)`, 15, summaryY);
+          summaryY += 5;
+          
+          // ADICIONAR: Resumo específico de LE e NF
+          const itemsWithLE = analysis.itemAnalyses.filter(item => item.hasShippingList).length;
+          const itemsWithNF = analysis.itemAnalyses.filter(item => item.hasInvoice).length;
+          
+          docPdf.text(`• Itens com Lista de Embarque: ${itemsWithLE}/${analysis.summary.totalItems}`, 15, summaryY);
+          summaryY += 5;
+          docPdf.text(`• Itens com Nota Fiscal: ${itemsWithNF}/${analysis.summary.totalItems}`, 15, summaryY);
+          summaryY += 5;
+          
+          docPdf.text(`• Taxa de entrega dentro ou antes do prazo: ${(analysis.summary.onTimeRate + analysis.summary.earlyRate).toFixed(1)}%`, 15, summaryY);
+          summaryY += 10;
+          
+          docPdf.setFontSize(8).setFont('helvetica', 'italic');
+          docPdf.text(
+            `Relatório gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+            pageWidth / 2,
+            summaryY,
+            { align: 'center' }
+          );
+        }
+
+        // Salvar arquivo
+        const timestamp = format(new Date(), 'yyyyMMdd_HHmm');
+        const filename = `Relatorio_Entrega_${order.quotationNumber || 'Pedido'}_${timestamp}.pdf`;
+        
+        docPdf.save(filename);
+        
+        toast({
+          title: "✅ Relatório Gerado com Sucesso!",
+          description: `O arquivo "${filename}" foi baixado com informações completas de LE e NF.`,
+        });
+
+      } catch (error) {
+        console.error("Erro completo ao gerar relatório:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro ao Gerar Relatório",
+          description: `Falha na geração: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+        });
+      }
     };
 
 
