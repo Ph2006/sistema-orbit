@@ -3035,6 +3035,7 @@ export default function OrdersPage() {
     };
 
     // CORREÇÃO 1: CÁLCULO CORRETO DE DIAS DE ATRASO
+    // CORREÇÃO: Função analyzeItemDelivery com cálculo correto de dias de diferença
     const analyzeItemDelivery = (item: OrderItem, orderDeliveryDate?: Date) => {
       console.log('🔍 Analisando item:', {
         id: item.id,
@@ -3082,31 +3083,32 @@ export default function OrdersPage() {
         const actualDateNormalized = new Date(analysis.actualDate);
         actualDateNormalized.setHours(0, 0, 0, 0);
         
-        // Calcular diferença em dias
+        // Calcular diferença em milissegundos e converter para dias
         const diffTime = actualDateNormalized.getTime() - expectedDateNormalized.getTime();
-        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)); // Usar Math.round para ser mais preciso
+        const diffDays = diffTime / (1000 * 60 * 60 * 24); // Não usar Math.round aqui
         
-        console.log('📅 Cálculo de diferença:', {
-          expectedNormalized: expectedDateNormalized.toISOString(),
-          actualNormalized: actualDateNormalized.toISOString(),
+        console.log('📅 Cálculo de diferença CORRIGIDO:', {
+          expectedNormalized: expectedDateNormalized.toISOString().split('T')[0],
+          actualNormalized: actualDateNormalized.toISOString().split('T')[0],
           diffTime,
-          diffDays
+          diffDays,
+          diffDaysRounded: Math.round(Math.abs(diffDays))
         });
         
-        analysis.daysDifference = Math.abs(diffDays);
+        // Armazenar sempre o valor absoluto para exibição
+        analysis.daysDifference = Math.round(Math.abs(diffDays));
         
+        // Definir status baseado no sinal da diferença
         if (diffDays < 0) {
-          analysis.deliveryStatus = 'early'; // Entregue antes do prazo
+          analysis.deliveryStatus = 'early'; // Entregue antes do prazo (negativo)
+          console.log('✅ Status: ANTECIPADO -', analysis.daysDifference, 'dias');
         } else if (diffDays === 0) {
           analysis.deliveryStatus = 'ontime'; // Entregue no prazo exato
+          console.log('✅ Status: NO PRAZO EXATO');
         } else {
-          analysis.deliveryStatus = 'late'; // Entregue com atraso
+          analysis.deliveryStatus = 'late'; // Entregue com atraso (positivo)
+          console.log('❌ Status: ATRASADO +', analysis.daysDifference, 'dias');
         }
-        
-        console.log('📊 Status calculado:', {
-          status: analysis.deliveryStatus,
-          daysDifference: analysis.daysDifference
-        });
         
       } else if (analysis.expectedDate && !analysis.actualDate) {
         // Item vencido (sem entrega)
@@ -3119,6 +3121,7 @@ export default function OrdersPage() {
           analysis.deliveryStatus = 'overdue';
           const diffTime = today.getTime() - expectedDateOnly.getTime();
           analysis.daysDifference = Math.round(diffTime / (1000 * 60 * 60 * 24));
+          console.log('⚠️ Status: VENCIDO -', analysis.daysDifference, 'dias');
         }
       }
 
@@ -3154,6 +3157,97 @@ export default function OrdersPage() {
         }
 
         return { summary, itemAnalyses };
+    };
+
+    // CORREÇÃO: Componente de visualização das mensagens de entrega no modal
+    const DeliveryStatusMessage = ({ item, orderDeliveryDate }: { item: OrderItem, orderDeliveryDate?: Date }) => {
+      if (!item.shippingDate) return null;
+      
+      // Usar a data de entrega específica do item ou a data geral do pedido
+      const expectedDate = item.itemDeliveryDate || orderDeliveryDate;
+      if (!expectedDate) return null;
+
+      // Normalizar datas para meia-noite
+      const shippingDate = new Date(item.shippingDate);
+      shippingDate.setHours(0, 0, 0, 0);
+      
+      const deliveryDate = new Date(expectedDate);
+      deliveryDate.setHours(0, 0, 0, 0);
+      
+      // Calcular diferença em dias (negativo = antecipado, positivo = atrasado)
+      const diffTime = shippingDate.getTime() - deliveryDate.getTime();
+      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+      
+      console.log('🎨 Renderizando status de entrega:', {
+        shipping: format(shippingDate, 'dd/MM/yyyy'),
+        expected: format(deliveryDate, 'dd/MM/yyyy'),
+        diffDays,
+        status: diffDays < 0 ? 'early' : diffDays === 0 ? 'ontime' : 'late'
+      });
+
+      if (diffDays < 0) {
+        // Entregue antes do prazo (valor negativo)
+        const daysEarly = Math.abs(diffDays);
+        return (
+          <div className="flex items-center gap-2 p-2 bg-blue-100 border border-blue-300 rounded text-sm text-blue-800">
+            <TrendingUp className="h-4 w-4" />
+            <span className="font-medium">
+              Item entregue {daysEarly} dia{daysEarly !== 1 ? 's' : ''} antes do prazo
+            </span>
+          </div>
+        );
+      } else if (diffDays === 0) {
+        // Entregue no prazo exato
+        return (
+          <div className="flex items-center gap-2 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
+            <CheckCircle className="h-4 w-4" />
+            <span className="font-medium">Item entregue exatamente no prazo</span>
+          </div>
+        );
+      } else {
+        // Entregue com atraso (valor positivo)
+        return (
+          <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
+            <AlertTriangle className="h-4 w-4" />
+            <span className="font-medium">
+              Item entregue {diffDays} dia{diffDays !== 1 ? 's' : ''} após o prazo
+            </span>
+          </div>
+        );
+      }
+    };
+
+    // CORREÇÃO: Badge de status para o item
+    const DeliveryStatusBadge = ({ item, orderDeliveryDate }: { item: OrderItem, orderDeliveryDate?: Date }) => {
+      if (!item.shippingDate || !orderDeliveryDate) return null;
+
+      const analysis = analyzeItemDelivery(item, orderDeliveryDate);
+      
+      switch (analysis.deliveryStatus) {
+        case 'early':
+          return (
+            <Badge variant="default" className="bg-blue-500 hover:bg-blue-500/90 text-xs">
+              <TrendingUp className="mr-1 h-3 w-3" />
+              Antecipado ({analysis.daysDifference}d)
+            </Badge>
+          );
+        case 'ontime':
+          return (
+            <Badge variant="default" className="bg-green-600 hover:bg-green-600/90 text-xs">
+              <CheckCircle className="mr-1 h-3 w-3" />
+              No Prazo
+            </Badge>
+          );
+        case 'late':
+          return (
+            <Badge variant="destructive" className="text-xs">
+              <AlertTriangle className="mr-1 h-3 w-3" />
+              Atrasado ({analysis.daysDifference}d)
+            </Badge>
+          );
+        default:
+          return null;
+      }
     };
 
     // COMPONENTE DO BOTÃO LIMPO (sem debug)
