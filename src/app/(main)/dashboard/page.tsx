@@ -78,31 +78,83 @@ function safeFormatMonth(dateValue: any): string | null {
 function formatCustomerName(name: string): string {
   if (!name || name === "Desconhecido") return "Desconhecido";
   
-  return name
+  let formattedName = name
     // Remove caracteres especiais excessivos e normaliza espaços
     .replace(/\s+/g, ' ')
-    .trim()
-    // Capitaliza apenas a primeira letra de cada palavra importante
+    .replace(/[^\w\s\-\&\.\,\/]/g, ' ')
+    .trim();
+
+  // Aplica capitalização palavra por palavra
+  formattedName = formattedName
     .split(' ')
     .map(word => {
-      // Palavras que devem permanecer em minúsculas
-      const lowercase = ['da', 'de', 'do', 'das', 'dos', 'e', 'em', 'na', 'no', 'para', 'por', 'com'];
+      if (!word) return '';
+      
+      // Palavras que devem permanecer em minúsculas (exceto se for a primeira palavra)
+      const lowercase = ['da', 'de', 'do', 'das', 'dos', 'e', 'em', 'na', 'no', 'para', 'por', 'com', 'a', 'o', 'as', 'os'];
       
       if (lowercase.includes(word.toLowerCase())) {
         return word.toLowerCase();
       }
       
-      // Capitaliza a primeira letra
+      // Capitaliza a primeira letra e mantém o resto em minúscula
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
-    .join(' ')
-    // Ajustes específicos para abreviações comuns
+    .filter(word => word.length > 0) // Remove palavras vazias
+    .join(' ');
+
+  // Ajustes específicos para abreviações e termos comuns
+  formattedName = formattedName
     .replace(/\bLtda\b/gi, 'Ltda')
     .replace(/\bS\.?a\.?\b/gi, 'S.A.')
     .replace(/\bLlc\b/gi, 'LLC')
     .replace(/\bInc\b/gi, 'Inc')
-    // Limita o tamanho para evitar nomes muito longos
-    .substring(0, 50);
+    .replace(/\bBrasil\b/gi, 'Brasil')
+    .replace(/\bMinas\s+Gerais\b/gi, 'Minas Gerais')
+    .replace(/\bSao\s+Paulo\b/gi, 'São Paulo')
+    .replace(/\bSão\s+Paulo\b/gi, 'São Paulo')
+    .replace(/\bRio\s+de\s+Janeiro\b/gi, 'Rio de Janeiro')
+    // Ajusta separadores comuns
+    .replace(/\s*-\s*/g, ' - ')
+    .replace(/\s*\/\s*/g, ' / ')
+    .replace(/\s*\&\s*/g, ' & ');
+
+  // Garante que a primeira palavra sempre comece com maiúscula
+  if (formattedName.length > 0) {
+    formattedName = formattedName.charAt(0).toUpperCase() + formattedName.slice(1);
+  }
+
+// Função para criar versão abreviada do nome para gráficos
+function getShortCustomerName(fullName: string): string {
+  if (!fullName || fullName === "Desconhecido") return "Desconhecido";
+  
+  // Se o nome for curto, retorna como está
+  if (fullName.length <= 25) return fullName;
+  
+  // Estratégias para abreviar
+  let shortName = fullName;
+  
+  // Remove partes menos importantes
+  shortName = shortName
+    .replace(/\s+Ltda.*$/i, ' Ltda')
+    .replace(/\s+S\.A\..*$/i, ' S.A.')
+    .replace(/\s+-\s+.*$/i, '')
+    .replace(/\s+\/\s+.*$/i, '');
+  
+  // Se ainda for muito longo, pega apenas as primeiras palavras importantes
+  if (shortName.length > 25) {
+    const words = shortName.split(' ');
+    const importantWords = words.filter(word => 
+      !['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'na', 'no'].includes(word.toLowerCase())
+    );
+    
+    if (importantWords.length > 2) {
+      shortName = importantWords.slice(0, 2).join(' ');
+      if (words.includes('Ltda')) shortName += ' Ltda';
+    }
+  }
+  
+  return shortName.substring(0, 25).trim();
 }
 
 export default function DashboardPage() {
