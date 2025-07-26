@@ -74,6 +74,37 @@ function safeFormatMonth(dateValue: any): string | null {
   }
 }
 
+// Função para limpar e formatar nomes de clientes
+function formatCustomerName(name: string): string {
+  if (!name || name === "Desconhecido") return "Desconhecido";
+  
+  return name
+    // Remove caracteres especiais excessivos e normaliza espaços
+    .replace(/\s+/g, ' ')
+    .trim()
+    // Capitaliza apenas a primeira letra de cada palavra importante
+    .split(' ')
+    .map(word => {
+      // Palavras que devem permanecer em minúsculas
+      const lowercase = ['da', 'de', 'do', 'das', 'dos', 'e', 'em', 'na', 'no', 'para', 'por', 'com'];
+      
+      if (lowercase.includes(word.toLowerCase())) {
+        return word.toLowerCase();
+      }
+      
+      // Capitaliza a primeira letra
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ')
+    // Ajustes específicos para abreviações comuns
+    .replace(/\bLtda\b/gi, 'Ltda')
+    .replace(/\bS\.?a\.?\b/gi, 'S.A.')
+    .replace(/\bLlc\b/gi, 'LLC')
+    .replace(/\bInc\b/gi, 'Inc')
+    // Limita o tamanho para evitar nomes muito longos
+    .substring(0, 50);
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -99,7 +130,9 @@ export default function DashboardPage() {
 
           ordersSnapshot.forEach(doc => {
             const order = doc.data();
-            const customerName = order.customer?.name || order.customerName || "Desconhecido";
+            // Aplica formatação ao nome do cliente
+            const rawCustomerName = order.customer?.name || order.customerName || "Desconhecido";
+            const customerName = formatCustomerName(rawCustomerName);
             
             if (!customerDataMap.has(customerName)) {
                 customerDataMap.set(customerName, { deliveredWeight: 0, ncCount: 0, onTimeItems: 0, totalItems: 0 });
@@ -156,7 +189,9 @@ export default function DashboardPage() {
           const qualityReports = qualitySnapshot.docs.map(doc => doc.data());
           qualityReports.forEach(report => {
               if (report.customerName) {
-                const customerEntry = customerDataMap.get(report.customerName);
+                // Aplica a mesma formatação para os nomes nos relatórios de qualidade
+                const formattedCustomerName = formatCustomerName(report.customerName);
+                const customerEntry = customerDataMap.get(formattedCustomerName);
                 if(customerEntry) {
                     customerEntry.ncCount++;
                 }
@@ -197,7 +232,10 @@ export default function DashboardPage() {
               }
           }).slice(-6);
           
-          const customerAnalysis = Array.from(customerDataMap.entries()).map(([name, data]) => ({ name, ...data }));
+          const customerAnalysis = Array.from(customerDataMap.entries())
+            .map(([name, data]) => ({ name, ...data }))
+            // Ordena por peso entregue (maior para menor)
+            .sort((a, b) => b.deliveredWeight - a.deliveredWeight);
 
           setData({
             totalProducedWeight,
