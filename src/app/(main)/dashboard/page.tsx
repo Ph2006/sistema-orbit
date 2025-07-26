@@ -19,6 +19,7 @@ interface MonthlyData {
 
 interface CustomerData {
   name: string;
+  shortName?: string;
   deliveredWeight: number;
   ncCount: number;
   onTimeItems: number;
@@ -35,7 +36,6 @@ interface DashboardData {
   customerAnalysis: CustomerData[];
 }
 
-// Função para converter Timestamp ou string em Date de forma segura
 function safeParseDate(dateValue: any): Date | null {
   if (!dateValue) return null;
   
@@ -61,7 +61,6 @@ function safeParseDate(dateValue: any): Date | null {
   }
 }
 
-// Função para formatar mês de forma segura
 function safeFormatMonth(dateValue: any): string | null {
   const date = safeParseDate(dateValue);
   if (!date) return null;
@@ -74,36 +73,30 @@ function safeFormatMonth(dateValue: any): string | null {
   }
 }
 
-// Função para limpar e formatar nomes de clientes
 function formatCustomerName(name: string): string {
   if (!name || name === "Desconhecido") return "Desconhecido";
   
   let formattedName = name
-    // Remove caracteres especiais excessivos e normaliza espaços
     .replace(/\s+/g, ' ')
     .replace(/[^\w\s\-\&\.\,\/]/g, ' ')
     .trim();
 
-  // Aplica capitalização palavra por palavra
   formattedName = formattedName
     .split(' ')
     .map(word => {
       if (!word) return '';
       
-      // Palavras que devem permanecer em minúsculas (exceto se for a primeira palavra)
       const lowercase = ['da', 'de', 'do', 'das', 'dos', 'e', 'em', 'na', 'no', 'para', 'por', 'com', 'a', 'o', 'as', 'os'];
       
       if (lowercase.includes(word.toLowerCase())) {
         return word.toLowerCase();
       }
       
-      // Capitaliza a primeira letra e mantém o resto em minúscula
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
-    .filter(word => word.length > 0) // Remove palavras vazias
+    .filter(word => word.length > 0)
     .join(' ');
 
-  // Ajustes específicos para abreviações e termos comuns
   formattedName = formattedName
     .replace(/\bLtda\b/gi, 'Ltda')
     .replace(/\bS\.?a\.?\b/gi, 'S.A.')
@@ -114,34 +107,30 @@ function formatCustomerName(name: string): string {
     .replace(/\bSao\s+Paulo\b/gi, 'São Paulo')
     .replace(/\bSão\s+Paulo\b/gi, 'São Paulo')
     .replace(/\bRio\s+de\s+Janeiro\b/gi, 'Rio de Janeiro')
-    // Ajusta separadores comuns
     .replace(/\s*-\s*/g, ' - ')
     .replace(/\s*\/\s*/g, ' / ')
     .replace(/\s*\&\s*/g, ' & ');
 
-  // Garante que a primeira palavra sempre comece com maiúscula
   if (formattedName.length > 0) {
     formattedName = formattedName.charAt(0).toUpperCase() + formattedName.slice(1);
   }
 
-// Função para criar versão abreviada do nome para gráficos
+  return formattedName.substring(0, 60).trim();
+}
+
 function getShortCustomerName(fullName: string): string {
   if (!fullName || fullName === "Desconhecido") return "Desconhecido";
   
-  // Se o nome for curto, retorna como está
   if (fullName.length <= 25) return fullName;
   
-  // Estratégias para abreviar
   let shortName = fullName;
   
-  // Remove partes menos importantes
   shortName = shortName
     .replace(/\s+Ltda.*$/i, ' Ltda')
     .replace(/\s+S\.A\..*$/i, ' S.A.')
     .replace(/\s+-\s+.*$/i, '')
     .replace(/\s+\/\s+.*$/i, '');
   
-  // Se ainda for muito longo, pega apenas as primeiras palavras importantes
   if (shortName.length > 25) {
     const words = shortName.split(' ');
     const importantWords = words.filter(word => 
@@ -182,7 +171,6 @@ export default function DashboardPage() {
 
           ordersSnapshot.forEach(doc => {
             const order = doc.data();
-            // Aplica formatação ao nome do cliente
             const rawCustomerName = order.customer?.name || order.customerName || "Desconhecido";
             const customerName = formatCustomerName(rawCustomerName);
             
@@ -205,21 +193,18 @@ export default function DashboardPage() {
                 }
 
                 if (item.shippingDate) {
-                  // Parsear shippingDate de forma segura
                   const shippingDate = safeParseDate(item.shippingDate);
                   
                   if (shippingDate) {
                     totalShippedItems++;
                     customerEntry.totalItems++;
                     
-                    // Formatar mês de forma segura
                     const monthKey = safeFormatMonth(shippingDate);
                     if (monthKey) {
                       monthlyProductionMap.set(monthKey, (monthlyProductionMap.get(monthKey) || 0) + itemWeight);
                     }
                     customerEntry.deliveredWeight += itemWeight;
 
-                    // Parsear itemDeliveryDate de forma segura
                     const itemDeliveryDate = safeParseDate(item.itemDeliveryDate);
                     
                     if (itemDeliveryDate) {
@@ -241,7 +226,6 @@ export default function DashboardPage() {
           const qualityReports = qualitySnapshot.docs.map(doc => doc.data());
           qualityReports.forEach(report => {
               if (report.customerName) {
-                // Aplica a mesma formatação para os nomes nos relatórios de qualidade
                 const formattedCustomerName = formatCustomerName(report.customerName);
                 const customerEntry = customerDataMap.get(formattedCustomerName);
                 if(customerEntry) {
@@ -259,9 +243,8 @@ export default function DashboardPage() {
           
           const monthlyProduction = sortedMonthlyEntries.map(([monthKey, weight]) => {
               try {
-                // Criar data de forma mais segura
                 const [year, month] = monthKey.split('-');
-                const date = new Date(parseInt(year), parseInt(month) - 1, 15); // Usar dia 15 para evitar problemas de timezone
+                const date = new Date(parseInt(year), parseInt(month) - 1, 15);
                 
                 if (isValid(date)) {
                   return {
@@ -285,8 +268,11 @@ export default function DashboardPage() {
           }).slice(-6);
           
           const customerAnalysis = Array.from(customerDataMap.entries())
-            .map(([name, data]) => ({ name, ...data }))
-            // Ordena por peso entregue (maior para menor)
+            .map(([name, data]) => ({ 
+              name, 
+              shortName: getShortCustomerName(name),
+              ...data 
+            }))
             .sort((a, b) => b.deliveredWeight - a.deliveredWeight);
 
           setData({
