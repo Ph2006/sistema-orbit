@@ -2290,23 +2290,37 @@ export default function QualityPage() {
         const pageHeight = docPdf.internal.pageSize.height;
         let y = 15;
         
-        if (companyData.logo?.preview) { try { docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); } catch(e) { console.error("Error adding image to PDF:", e) } }
+        // Header com logo e título
+        if (companyData.logo?.preview) { 
+            try { 
+                docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15); 
+            } catch(e) { 
+                console.error("Error adding image to PDF:", e) 
+            } 
+        }
         docPdf.setFontSize(16).setFont(undefined, 'bold');
         docPdf.text(`Relatório Dimensional Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 8, { align: 'center' });
-        y += 25;
+        y += 30;
 
-        docPdf.setFontSize(10).setFont(undefined, 'normal');
-        docPdf.text(`Pedido: ${orderInfo?.number || 'N/A'}`, 15, y);
-        docPdf.text(`Cliente: ${orderInfo?.customerName || 'N/A'}`, 15, y + 5);
-        docPdf.text(`Item: ${report.itemName} (Cód: ${itemInfo?.code || 'N/A'})`, 15, y + 10);
-        
-        docPdf.text(`Data: ${format(report.inspectionDate, 'dd/MM/yy')}`, pageWidth - 15, y, { align: 'right' });
-        docPdf.text(`Inspetor: ${report.inspectedBy}`, pageWidth - 15, y + 5, { align: 'right' });
-        docPdf.text(`Resultado Geral: ${report.overallResult}`, pageWidth - 15, y + 10, { align: 'right' });
-        if (report.quantityInspected) {
-          docPdf.text(`Quantidade Inspecionada: ${report.quantityInspected}`, 15, y + 15);
-        }
-        y += 25;
+        // Cabeçalho organizado usando tabela para evitar sobreposição
+        autoTable(docPdf, {
+            startY: y,
+            theme: 'plain',
+            styles: { fontSize: 9, cellPadding: 1 },
+            body: [
+                ['Pedido:', `${orderInfo?.number || 'N/A'}`, 'Data:', format(report.inspectionDate, 'dd/MM/yyyy')],
+                ['Cliente:', `${orderInfo?.customerName || 'N/A'}`, 'Inspetor:', report.inspectedBy],
+                ['Item:', `${report.itemName}`, 'Código:', `${itemInfo?.code || 'N/A'}`],
+                ['Resultado Geral:', report.overallResult, 'Qtd. Inspecionada:', report.quantityInspected || 'N/A']
+            ] as any,
+            columnStyles: {
+                0: { fontStyle: 'bold', cellWidth: 25 },
+                1: { cellWidth: 65 },
+                2: { fontStyle: 'bold', cellWidth: 25 },
+                3: { cellWidth: 65 }
+            }
+        });
+        y = (docPdf as any).lastAutoTable.finalY + 10;
 
         const body = report.measurements.map(m => {
             const instrument = calibrations.find(c => c.equipmentName === m.instrumentUsed);
