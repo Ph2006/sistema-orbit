@@ -1,11 +1,10 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
 import { collection, getDocs, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format } from "date-fns";
+import { format, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { BarChart, Package, Percent, Truck, Wrench, AlertTriangle, CheckCircle, Scale } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -34,6 +33,45 @@ interface DashboardData {
   internalNcRate: number;
   monthlyProduction: MonthlyData[];
   customerAnalysis: CustomerData[];
+}
+
+// Função para converter Timestamp ou string em Date de forma segura
+function safeParseDate(dateValue: any): Date | null {
+  if (!dateValue) return null;
+  
+  try {
+    if (dateValue instanceof Timestamp) {
+      const date = dateValue.toDate();
+      return isValid(date) ? date : null;
+    }
+    
+    if (typeof dateValue === 'string' || typeof dateValue === 'number') {
+      const date = new Date(dateValue);
+      return isValid(date) ? date : null;
+    }
+    
+    if (dateValue instanceof Date) {
+      return isValid(dateValue) ? dateValue : null;
+    }
+    
+    return null;
+  } catch (error) {
+    console.warn('Erro ao converter data:', dateValue, error);
+    return null;
+  }
+}
+
+// Função para formatar mês de forma segura
+function safeFormatMonth(dateValue: any): string | null {
+  const date = safeParseDate(dateValue);
+  if (!date) return null;
+  
+  try {
+    return format(date, "yyyy-MM");
+  } catch (error) {
+    console.warn('Erro ao formatar mês:', dateValue, error);
+    return null;
+  }
 }
 
 export default function DashboardPage() {
@@ -82,24 +120,32 @@ export default function DashboardPage() {
                 }
 
                 if (item.shippingDate) {
-                  totalShippedItems++;
-                  customerEntry.totalItems++;
+                  // Parsear shippingDate de forma segura
+                  const shippingDate = safeParseDate(item.shippingDate);
                   
-                  const shippingDate = item.shippingDate instanceof Timestamp ? item.shippingDate.toDate() : new Date(item.shippingDate);
-                  
-                  const monthKey = format(shippingDate, "yyyy-MM");
-                  monthlyProductionMap.set(monthKey, (monthlyProductionMap.get(monthKey) || 0) + itemWeight);
-                  customerEntry.deliveredWeight += itemWeight;
+                  if (shippingDate) {
+                    totalShippedItems++;
+                    customerEntry.totalItems++;
+                    
+                    // Formatar mês de forma segura
+                    const monthKey = safeFormatMonth(shippingDate);
+                    if (monthKey) {
+                      monthlyProductionMap.set(monthKey, (monthlyProductionMap.get(monthKey) || 0) + itemWeight);
+                    }
+                    customerEntry.deliveredWeight += itemWeight;
 
-                  const itemDeliveryDate = item.itemDeliveryDate instanceof Timestamp ? item.itemDeliveryDate.toDate() : (item.itemDeliveryDate ? new Date(item.itemDeliveryDate) : null);
-                  if (itemDeliveryDate) {
-                    const sDate = new Date(shippingDate);
-                    sDate.setHours(0, 0, 0, 0);
-                    const dDate = new Date(itemDeliveryDate);
-                    dDate.setHours(0, 0, 0, 0);
-                    if (sDate <= dDate) {
-                      totalOnTimeItems++;
-                      customerEntry.onTimeItems++;
+                    // Parsear itemDeliveryDate de forma segura
+                    const itemDeliveryDate = safeParseDate(item.itemDeliveryDate);
+                    
+                    if (itemDeliveryDate) {
+                      const sDate = new Date(shippingDate);
+                      sDate.setHours(0, 0, 0, 0);
+                      const dDate = new Date(itemDeliveryDate);
+                      dDate.setHours(0, 0, 0, 0);
+                      if (sDate <= dDate) {
+                        totalOnTimeItems++;
+                        customerEntry.onTimeItems++;
+                      }
                     }
                   }
                 }
@@ -125,11 +171,30 @@ export default function DashboardPage() {
             .sort(([a], [b]) => a.localeCompare(b));
           
           const monthlyProduction = sortedMonthlyEntries.map(([monthKey, weight]) => {
-              const date = new Date(monthKey + '-02');
-              return {
-                  month: format(date, 'MMM', { locale: ptBR }),
-                  weight,
-              };
+              try {
+                // Criar data de forma mais segura
+                const [year, month] = monthKey.split('-');
+                const date = new Date(parseInt(year), parseInt(month) - 1, 15); // Usar dia 15 para evitar problemas de timezone
+                
+                if (isValid(date)) {
+                  return {
+                      month: format(date, 'MMM', { locale: ptBR }),
+                      weight,
+                  };
+                } else {
+                  console.warn('Data inválida para monthKey:', monthKey);
+                  return {
+                      month: monthKey,
+                      weight,
+                  };
+                }
+              } catch (error) {
+                console.warn('Erro ao processar monthKey:', monthKey, error);
+                return {
+                    month: monthKey,
+                    weight,
+                };
+              }
           }).slice(-6);
           
           const customerAnalysis = Array.from(customerDataMap.entries()).map(([name, data]) => ({ name, ...data }));
