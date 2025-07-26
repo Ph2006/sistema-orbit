@@ -1087,28 +1087,29 @@ export default function OrdersPage() {
         return grouped;
     }, [filteredOrders]);
 
-    // Organiza os pedidos por mês para visualização Kanban
+    // Organiza os pedidos por mês para visualização Kanban - CORRIGIDO
     const ordersByMonth = useMemo(() => {
         const grouped = new Map<string, { orders: Order[], totalWeight: number }>();
         const completedOrders: Order[] = [];
         let completedWeight = 0;
         
-                                filteredOrders.forEach(order => {
-                            if (order.status === 'Concluído') {
-                                completedOrders.push(order);
-                                completedWeight += order.totalWeight || 0;
-                            } else if (order.deliveryDate) {
-                                const monthKey = format(order.deliveryDate, 'yyyy-MM');
-                                
-                                if (!grouped.has(monthKey)) {
-                                    grouped.set(monthKey, { orders: [], totalWeight: 0 });
-                                }
-                                
-                                const monthData = grouped.get(monthKey)!;
-                                monthData.orders.push(order);
-                                monthData.totalWeight += order.totalWeight || 0;
-                            }
-                        });
+        filteredOrders.forEach(order => {
+            if (order.status === 'Concluído') {
+                completedOrders.push(order);
+                completedWeight += order.totalWeight || 0;
+            } else if (order.deliveryDate) {
+                // CORREÇÃO: Usar format corretamente para evitar problemas de timezone
+                const monthKey = format(order.deliveryDate, 'yyyy-MM');
+                
+                if (!grouped.has(monthKey)) {
+                    grouped.set(monthKey, { orders: [], totalWeight: 0 });
+                }
+                
+                const monthData = grouped.get(monthKey)!;
+                monthData.orders.push(order);
+                monthData.totalWeight += order.totalWeight || 0;
+            }
+        });
 
         // Ordena as chaves por data (mês mais antigo primeiro)
         const sortedEntries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
@@ -1143,7 +1144,7 @@ export default function OrdersPage() {
 
     const { days: calendarDays, firstDay, lastDay } = generateCalendarDays(calendarDate);
 
-    // Componente Kanban
+    // Componente Kanban - SEÇÃO CORRIGIDA
     const KanbanView = () => {
         const allColumns = [
             ...ordersByMonth.monthColumns,
@@ -1175,12 +1176,21 @@ export default function OrdersPage() {
                     <div className="flex w-max space-x-4 p-4 min-w-full">
                         {allColumns.map(([monthKey, monthData]) => {
                             const isCompleted = monthKey === 'completed';
-                            const monthLabel = isCompleted 
-                                ? 'Concluídos' 
-                                : new Date(monthKey + '-01').toLocaleDateString('pt-BR', { 
+                            
+                            // CORREÇÃO PRINCIPAL: Formatação correta do nome do mês
+                            let monthLabel = '';
+                            if (isCompleted) {
+                                monthLabel = 'Concluídos';
+                            } else {
+                                // Criar uma data válida a partir da chave YYYY-MM
+                                const [year, month] = monthKey.split('-');
+                                const dateForLabel = new Date(parseInt(year), parseInt(month) - 1, 1);
+                                
+                                monthLabel = dateForLabel.toLocaleDateString('pt-BR', { 
                                     month: 'short', 
                                     year: 'numeric' 
                                 }).replace('.', '');
+                            }
                             
                             return (
                                 <div key={monthKey} className="flex-shrink-0 w-72">
