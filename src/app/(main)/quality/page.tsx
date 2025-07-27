@@ -2326,12 +2326,17 @@ export default function QualityPage() {
             const instrument = calibrations.find(c => c.equipmentName === m.instrumentUsed);
             const instrumentDisplay = instrument ? `${instrument.equipmentName} (${instrument.internalCode})` : m.instrumentUsed;
             
+            // Calcular a diferença (Nominal - Medido)
+            const difference = (m.nominalValue - m.measuredValue).toFixed(3);
+            const differenceText = difference.startsWith('-') ? difference : `+${difference}`;
+            
             return [
                 m.dimensionName,
                 m.nominalValue.toString(),
                 m.toleranceMin || '-',
                 m.toleranceMax || '-', 
                 m.measuredValue.toString(),
+                differenceText,
                 instrumentDisplay,
                 m.result
             ];
@@ -2339,13 +2344,43 @@ export default function QualityPage() {
 
         autoTable(docPdf, {
             startY: y,
-            head: [['Dimensão', 'Nominal', 'Tolerância 1', 'Tolerância 2', 'Medido', 'Instrumento', 'Resultado']],
+            head: [['Dimensão', 'Nominal', 'Tolerância 1', 'Tolerância 2', 'Medido', 'Diferença', 'Instrumento', 'Resultado']],
             body: body,
-            headStyles: { fillColor: [40, 40, 40] },
+            headStyles: { 
+                fillColor: [40, 40, 40],
+                fontSize: 7,  // Tamanho menor para cabeçalhos
+                fontStyle: 'bold'
+            },
+            bodyStyles: {
+                fontSize: 7   // Tamanho menor para o corpo da tabela
+            },
+            columnStyles: {
+                0: { cellWidth: 35 },  // Dimensão
+                1: { cellWidth: 18 },  // Nominal
+                2: { cellWidth: 18 },  // Tolerância 1
+                3: { cellWidth: 18 },  // Tolerância 2
+                4: { cellWidth: 18 },  // Medido
+                5: { cellWidth: 18, fontStyle: 'bold' },  // Diferença (em negrito)
+                6: { cellWidth: 45 },  // Instrumento
+                7: { cellWidth: 20 }   // Resultado
+            },
             didParseCell: (data) => {
-                if(data.section === 'body' && data.column.index === 6) {
+                // Destacar resultados não conformes em vermelho
+                if(data.section === 'body' && data.column.index === 7) {
                     if (data.cell.text[0] === 'Não Conforme') {
                         data.cell.styles.textColor = [255, 0, 0];
+                        data.cell.styles.fontStyle = 'bold';
+                    }
+                }
+                // Destacar diferenças em cores diferentes
+                if(data.section === 'body' && data.column.index === 5) {
+                    const diffValue = parseFloat(data.cell.text[0].replace('+', ''));
+                    if (diffValue > 0) {
+                        data.cell.styles.textColor = [255, 140, 0]; // Laranja para positivo
+                    } else if (diffValue < 0) {
+                        data.cell.styles.textColor = [0, 100, 200]; // Azul para negativo
+                    } else {
+                        data.cell.styles.textColor = [0, 150, 0]; // Verde para zero
                     }
                 }
             }
