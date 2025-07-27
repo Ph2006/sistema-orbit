@@ -1866,11 +1866,11 @@ export default function OrdersPage() {
             docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
             textY += 6;
             
-            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');  // Reduzido de 9 para 8
             if (companyData.endereco) {
                 const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
                 docPdf.text(addressLines, textX, textY);
-                textY += (addressLines.length * 4);
+                textY += (addressLines.length * 3.5);  // Reduzido de 4 para 3.5
             }
             if (companyData.cnpj) {
                 docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
@@ -1881,19 +1881,19 @@ export default function OrdersPage() {
             docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
     
-            docPdf.setFontSize(11).setFont('helvetica', 'normal');
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');  // Reduzido de 11 para 10
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
             docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 7;
+            yPos += 6;  // Reduzido de 7 para 6
             
             docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, 15, yPos);
             if (selectedOrder.deliveryDate) {
                 docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
             }
-            yPos += 7;
+            yPos += 6;  // Reduzido de 7 para 6
 
             docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
-            yPos += 12;
+            yPos += 10; // Reduzido de 12 para 10
     
             const tableBody = itemsToInclude.map(item => {
                 const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
@@ -1931,17 +1931,17 @@ export default function OrdersPage() {
                 finalY = 15;
             }
     
-            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.setFontSize(11).setFont('helvetica', 'bold');  // Reduzido de 12 para 11
             docPdf.text(
                 `Peso Total dos Itens: ${totalWeightOfSelection.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, 
-                pageWidth - 15, finalY + 15, { align: 'right' }
+                pageWidth - 15, finalY + 12, { align: 'right' }  // Reduzido de 15 para 12
             );
 
-            docPdf.setFontSize(10).setFont('helvetica', 'normal');
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');  // Reduzido de 10 para 9
             docPdf.text('Recebido por:', 15, footerStartY);
             docPdf.line(40, footerStartY, 120, footerStartY);
-            docPdf.text('Data:', 15, footerStartY + 10);
-            docPdf.line(28, footerStartY + 10, 85, footerStartY + 10);
+            docPdf.text('Data:', 15, footerStartY + 8);  // Reduzido de 10 para 8
+            docPdf.line(28, footerStartY + 8, 85, footerStartY + 8);
     
             docPdf.save(`Romaneio_${selectedOrder.quotationNumber}.pdf`);
             
