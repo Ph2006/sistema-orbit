@@ -37,6 +37,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+// ✅ FUNÇÃO HELPER PARA CONVERTER DATAS
+const convertFirestoreDate = (dateField: any): Date => {
+  if (!dateField) return new Date();
+  
+  if (typeof dateField.toDate === 'function') {
+    // É um Timestamp do Firestore
+    return dateField.toDate();
+  } else if (dateField instanceof Date) {
+    // É um objeto Date JavaScript
+    return dateField;
+  } else if (typeof dateField === 'string') {
+    // É uma string de data
+    return new Date(dateField);
+  } else {
+    // Fallback para data atual
+    return new Date();
+  }
+};
+
 // === COMPONENTE VISUAL DE INDICADOR DE TAMANHO ===
 const DataSizeIndicator = ({ data, maxSizeKB = 900 }: { data: any, maxSizeKB?: number }) => {
     const currentSizeKB = (JSON.stringify(data).length / 1024);
@@ -909,8 +928,25 @@ export default function QualityPage() {
       const reportsList = reportsSnapshot.docs.map(doc => {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
+        
+        // ✅ CORREÇÃO: Verificar tipo do campo date
+        let reportDate;
+        if (data.date) {
+          if (typeof data.date.toDate === 'function') {
+            reportDate = data.date.toDate();
+          } else if (data.date instanceof Date) {
+            reportDate = data.date;
+          } else if (typeof data.date === 'string') {
+            reportDate = new Date(data.date);
+          } else {
+            reportDate = new Date();
+          }
+        } else {
+          reportDate = new Date();
+        }
+        
         return {
-          id: doc.id, date: data.date.toDate(), orderId: data.orderId, orderNumber: order?.number || 'N/A',
+          id: doc.id, date: reportDate, orderId: data.orderId, orderNumber: order?.number || 'N/A',
           item: { id: data.itemId, description: data.itemDescription }, customerName: order?.customerName || 'N/A',
           description: data.description, type: data.type, status: data.status, photos: data.photos || [],
           responsibleNc: data.responsibleNc || 'N/A', // ✅ ADICIONAR ESTA LINHA
@@ -924,11 +960,39 @@ export default function QualityPage() {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
         const item = order?.items.find(i => i.id === data.itemId);
+        
+        // ✅ CORREÇÃO: Verificar tipo dos campos de data
+        let openingDate;
+        if (data.openingDate) {
+          if (typeof data.openingDate.toDate === 'function') {
+            openingDate = data.openingDate.toDate();
+          } else if (data.openingDate instanceof Date) {
+            openingDate = data.openingDate;
+          } else if (typeof data.openingDate === 'string') {
+            openingDate = new Date(data.openingDate);
+          } else {
+            openingDate = new Date();
+          }
+        } else {
+          openingDate = new Date();
+        }
+        
+        let deadline = null;
+        if (data.deadline) {
+          if (typeof data.deadline.toDate === 'function') {
+            deadline = data.deadline.toDate();
+          } else if (data.deadline instanceof Date) {
+            deadline = data.deadline;
+          } else if (typeof data.deadline === 'string') {
+            deadline = new Date(data.deadline);
+          }
+        }
+        
         return {
           id: doc.id,
           ...data,
-          openingDate: data.openingDate.toDate(),
-          deadline: data.deadline?.toDate() || null,
+          openingDate,
+          deadline,
           orderNumber: order?.number || 'N/A',
           itemName: item?.description || 'N/A',
           itemCode: item?.code || 'N/A',
@@ -938,7 +1002,24 @@ export default function QualityPage() {
 
       const calibrationsList = calibrationsSnapshot.docs.map(doc => {
         const data = doc.data();
-        return { id: doc.id, ...data, lastCalibrationDate: data.lastCalibrationDate.toDate() } as Calibration;
+        
+        // ✅ CORREÇÃO: Verificar tipo do campo lastCalibrationDate
+        let lastCalibrationDate;
+        if (data.lastCalibrationDate) {
+          if (typeof data.lastCalibrationDate.toDate === 'function') {
+            lastCalibrationDate = data.lastCalibrationDate.toDate();
+          } else if (data.lastCalibrationDate instanceof Date) {
+            lastCalibrationDate = data.lastCalibrationDate;
+          } else if (typeof data.lastCalibrationDate === 'string') {
+            lastCalibrationDate = new Date(data.lastCalibrationDate);
+          } else {
+            lastCalibrationDate = new Date();
+          }
+        } else {
+          lastCalibrationDate = new Date();
+        }
+        
+        return { id: doc.id, ...data, lastCalibrationDate } as Calibration;
       });
       setCalibrations(calibrationsList);
 
@@ -951,8 +1032,25 @@ export default function QualityPage() {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
         const item = order?.items.find(i => i.id === data.itemId);
+        
+        // ✅ CORREÇÃO: Verificar tipo do campo receiptDate
+        let receiptDate;
+        if (data.receiptDate) {
+          if (typeof data.receiptDate.toDate === 'function') {
+            receiptDate = data.receiptDate.toDate();
+          } else if (data.receiptDate instanceof Date) {
+            receiptDate = data.receiptDate;
+          } else if (typeof data.receiptDate === 'string') {
+            receiptDate = new Date(data.receiptDate);
+          } else {
+            receiptDate = new Date();
+          }
+        } else {
+          receiptDate = new Date();
+        }
+        
         return {
-          id: doc.id, ...data, receiptDate: data.receiptDate.toDate(),
+          id: doc.id, ...data, receiptDate,
           orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado',
         } as RawMaterialInspection;
       }).sort((a, b) => (parseInt((a.reportNumber || '0').replace(/[^0-9]/g, '')) || 0) - (parseInt((b.reportNumber || '0').replace(/[^0-9]/g, '')) || 0));
@@ -973,10 +1071,30 @@ export default function QualityPage() {
         
         const overallResult = (data.measurements || []).every((m: any) => m.result === "Conforme") ? "Conforme" : "Não Conforme";
         
+        // ✅ CORREÇÃO: Verificar tipo do campo inspectionDate
+        let inspectionDate;
+        if (data.inspectionDate) {
+          if (typeof data.inspectionDate.toDate === 'function') {
+            // É um Timestamp do Firestore
+            inspectionDate = data.inspectionDate.toDate();
+          } else if (data.inspectionDate instanceof Date) {
+            // É um objeto Date JavaScript
+            inspectionDate = data.inspectionDate;
+          } else if (typeof data.inspectionDate === 'string') {
+            // É uma string de data
+            inspectionDate = new Date(data.inspectionDate);
+          } else {
+            // Fallback para data atual
+            inspectionDate = new Date();
+          }
+        } else {
+          inspectionDate = new Date();
+        }
+        
         return {
             id: doc.id, 
             ...data, 
-            inspectionDate: data.inspectionDate.toDate(),
+            inspectionDate,
             orderNumber: data.orderNumber || order?.number || 'N/A', 
             itemName: itemDescription,
             itemCode: data.itemCode || 'N/A',
@@ -989,7 +1107,30 @@ export default function QualityPage() {
           const data = doc.data();
           const order = ordersList.find(o => o.id === data.orderId);
           const item = order?.items.find(i => i.id === data.itemId);
-          return { id: doc.id, ...data, inspectionDate: data.inspectionDate.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado' } as WeldingInspection;
+          
+          // ✅ CORREÇÃO: Verificar tipo do campo inspectionDate
+          let inspectionDate;
+          if (data.inspectionDate) {
+            if (typeof data.inspectionDate.toDate === 'function') {
+              inspectionDate = data.inspectionDate.toDate();
+            } else if (data.inspectionDate instanceof Date) {
+              inspectionDate = data.inspectionDate;
+            } else if (typeof data.inspectionDate === 'string') {
+              inspectionDate = new Date(data.inspectionDate);
+            } else {
+              inspectionDate = new Date();
+            }
+          } else {
+            inspectionDate = new Date();
+          }
+          
+          return { 
+            id: doc.id, 
+            ...data, 
+            inspectionDate, 
+            orderNumber: order?.number || 'N/A', 
+            itemName: item?.description || 'Item não encontrado' 
+          } as WeldingInspection;
       }).sort((a,b) => (parseInt((b.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)) - (parseInt((a.reportNumber || 'END-0').replace(/[^0-9]/g, ''), 10)));
       setWeldingInspections(weldInspectionsList);
 
@@ -997,19 +1138,67 @@ export default function QualityPage() {
           const data = doc.data();
           const order = ordersList.find(o => o.id === data.orderId);
           const item = order?.items.find(i => i.id === data.itemId);
-          return { id: doc.id, ...data, inspectionDate: data.conclusion.inspectionDate?.toDate(), orderNumber: order?.number || 'N/A', itemName: item?.description || 'Item não encontrado', result: data.conclusion.finalResult } as PaintingReport;
-      }).sort((a,b) => (b.conclusion?.inspectionDate?.toDate()?.getTime() || 0) - (a.conclusion?.inspectionDate?.toDate()?.getTime() || 0));
+          
+          // ✅ CORREÇÃO: Verificar tipo do campo inspectionDate
+          let inspectionDate = null;
+          if (data.conclusion?.inspectionDate) {
+            if (typeof data.conclusion.inspectionDate.toDate === 'function') {
+              inspectionDate = data.conclusion.inspectionDate.toDate();
+            } else if (data.conclusion.inspectionDate instanceof Date) {
+              inspectionDate = data.conclusion.inspectionDate;
+            } else if (typeof data.conclusion.inspectionDate === 'string') {
+              inspectionDate = new Date(data.conclusion.inspectionDate);
+            }
+          }
+          
+          return { 
+            id: doc.id, 
+            ...data, 
+            inspectionDate, 
+            orderNumber: order?.number || 'N/A', 
+            itemName: item?.description || 'Item não encontrado', 
+            result: data.conclusion.finalResult 
+          } as PaintingReport;
+      }).sort((a,b) => (b.inspectionDate?.getTime() || 0) - (a.inspectionDate?.getTime() || 0));
       setPaintingReports(paintReportsList);
       
       const lpReportsList = liquidPenetrantReportsSnapshot.docs.map(doc => {
         const data = doc.data();
         const order = ordersList.find(o => o.id === data.orderId);
         const item = order?.items.find(i => i.id === data.itemId);
+        
+        // ✅ CORREÇÃO: Verificar tipo dos campos de data
+        let inspectionDate;
+        if (data.inspectionDate) {
+          if (typeof data.inspectionDate.toDate === 'function') {
+            inspectionDate = data.inspectionDate.toDate();
+          } else if (data.inspectionDate instanceof Date) {
+            inspectionDate = data.inspectionDate;
+          } else if (typeof data.inspectionDate === 'string') {
+            inspectionDate = new Date(data.inspectionDate);
+          } else {
+            inspectionDate = new Date();
+          }
+        } else {
+          inspectionDate = new Date();
+        }
+        
+        let consumableValidity = null;
+        if (data.consumableValidity) {
+          if (typeof data.consumableValidity.toDate === 'function') {
+            consumableValidity = data.consumableValidity.toDate();
+          } else if (data.consumableValidity instanceof Date) {
+            consumableValidity = data.consumableValidity;
+          } else if (typeof data.consumableValidity === 'string') {
+            consumableValidity = new Date(data.consumableValidity);
+          }
+        }
+        
         return {
           id: doc.id,
           ...data,
-          inspectionDate: data.inspectionDate.toDate(),
-          consumableValidity: data.consumableValidity?.toDate() || null,
+          inspectionDate,
+          consumableValidity,
           orderNumber: order?.number || "N/A",
           itemName: item?.description || "Item não encontrado",
         } as LiquidPenetrantReport;
@@ -1020,10 +1209,27 @@ export default function QualityPage() {
           const data = doc.data();
           const order = ordersList.find(o => o.id === data.orderId);
           const item = order?.items.find(i => i.id === data.itemId);
+          
+          // ✅ CORREÇÃO: Verificar tipo do campo inspectionDate
+          let inspectionDate;
+          if (data.inspectionDate) {
+            if (typeof data.inspectionDate.toDate === 'function') {
+              inspectionDate = data.inspectionDate.toDate();
+            } else if (data.inspectionDate instanceof Date) {
+              inspectionDate = data.inspectionDate;
+            } else if (typeof data.inspectionDate === 'string') {
+              inspectionDate = new Date(data.inspectionDate);
+            } else {
+              inspectionDate = new Date();
+            }
+          } else {
+            inspectionDate = new Date();
+          }
+          
           return {
               id: doc.id,
               ...data,
-              inspectionDate: data.inspectionDate.toDate(),
+              inspectionDate,
               orderNumber: order?.number || "N/A",
               itemName: item?.description || "Item não encontrado",
           } as UltrasoundReport;
@@ -1033,13 +1239,63 @@ export default function QualityPage() {
       const lessonsList = lessonsLearnedSnapshot.docs.map(doc => {
           const data = doc.data();
           const order = ordersList.find(o => o.id === data.orderId);
+          
+          // ✅ CORREÇÃO: Verificar tipo dos campos de data
+          let emissionDate;
+          if (data.emissionDate) {
+            if (typeof data.emissionDate.toDate === 'function') {
+              emissionDate = data.emissionDate.toDate();
+            } else if (data.emissionDate instanceof Date) {
+              emissionDate = data.emissionDate;
+            } else if (typeof data.emissionDate === 'string') {
+              emissionDate = new Date(data.emissionDate);
+            } else {
+              emissionDate = new Date();
+            }
+          } else {
+            emissionDate = new Date();
+          }
+          
+          let occurrenceDate = null;
+          if (data.occurrenceDate) {
+            if (typeof data.occurrenceDate.toDate === 'function') {
+              occurrenceDate = data.occurrenceDate.toDate();
+            } else if (data.occurrenceDate instanceof Date) {
+              occurrenceDate = data.occurrenceDate;
+            } else if (typeof data.occurrenceDate === 'string') {
+              occurrenceDate = new Date(data.occurrenceDate);
+            }
+          }
+          
+          let actionDeadline = null;
+          if (data.actionDeadline) {
+            if (typeof data.actionDeadline.toDate === 'function') {
+              actionDeadline = data.actionDeadline.toDate();
+            } else if (data.actionDeadline instanceof Date) {
+              actionDeadline = data.actionDeadline;
+            } else if (typeof data.actionDeadline === 'string') {
+              actionDeadline = new Date(data.actionDeadline);
+            }
+          }
+          
+          let closeDate = null;
+          if (data.closeDate) {
+            if (typeof data.closeDate.toDate === 'function') {
+              closeDate = data.closeDate.toDate();
+            } else if (data.closeDate instanceof Date) {
+              closeDate = data.closeDate;
+            } else if (typeof data.closeDate === 'string') {
+              closeDate = new Date(data.closeDate);
+            }
+          }
+          
           return {
               id: doc.id,
               ...data,
-              emissionDate: data.emissionDate.toDate(),
-              occurrenceDate: data.occurrenceDate?.toDate() || null,
-              actionDeadline: data.actionDeadline?.toDate() || null,
-              closeDate: data.closeDate?.toDate() || null,
+              emissionDate,
+              occurrenceDate,
+              actionDeadline,
+              closeDate,
               orderNumber: order?.number || 'N/A',
           } as LessonsLearnedReport;
       });
