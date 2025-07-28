@@ -1410,6 +1410,49 @@ export default function QualityPage() {
         setIsInspectionsDetailOpen(true);
     };
 
+    // ✅ NOVA FUNÇÃO PARA DUPLICAR RELATÓRIO DIMENSIONAL
+    const handleDuplicateDimensionalReport = (originalReport: DimensionalReport) => {
+        console.log("=== DUPLICANDO RELATÓRIO DIMENSIONAL ===");
+        console.log("Relatório original:", originalReport);
+        
+        // Gerar novo ID e limpar campos específicos
+        const duplicatedData = {
+            ...originalReport,
+            id: undefined, // Remove ID para criar novo
+            reportNumber: '', // Será gerado automaticamente
+            inspectionDate: new Date(), // Data atual
+            notes: originalReport.notes ? `${originalReport.notes} (Duplicado do relatório ${originalReport.reportNumber})` : 'Duplicado',
+            photos: [], // Remove fotos por segurança
+            measurements: originalReport.measurements.map(measurement => ({
+                ...measurement,
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9), // Novo ID para cada medição
+                measuredValue: 0, // Zerar valores medidos para nova inspeção
+                result: "Conforme" as const, // Reset do resultado
+            })),
+            partIdentifier: '', // Limpar identificador da peça para seleção manual
+            quantityInspected: 1, // Reset quantidade
+            customerInspector: '', // Limpar inspetor do cliente
+        };
+        
+        // Configurar o formulário com os dados duplicados
+        setSelectedInspection(null); // Importante: não é edição, é novo relatório
+        setDialogType('dimensional');
+        
+        // Preencher o formulário
+        dimensionalReportForm.reset(duplicatedData);
+        
+        // Abrir o formulário
+        setIsInspectionFormOpen(true);
+        
+        // Notificar o usuário
+        toast({
+            title: "Relatório duplicado",
+            description: `Relatório ${originalReport.reportNumber} foi duplicado. Ajuste os valores medidos antes de salvar.`,
+        });
+        
+        console.log("✓ Formulário preenchido com dados duplicados");
+    };
+
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
       console.log("=== SALVANDO RELATÓRIO DE MATERIAL ===");
@@ -3567,9 +3610,35 @@ export default function QualityPage() {
                                           <TableCell>{format(rep.inspectionDate, 'dd/MM/yy')}</TableCell><TableCell>{rep.itemName}</TableCell>
                                           <TableCell><Badge variant={getStatusVariant(rep.overallResult)}>{rep.overallResult}</Badge></TableCell><TableCell>{rep.inspectedBy}</TableCell>
                                           <TableCell className="text-right">
-                                              <Button variant="ghost" size="icon" onClick={() => handleDimensionalReportPDF(rep)}><FileDown className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" onClick={() => handleOpenDimensionalForm(rep)}><Pencil className="h-4 w-4" /></Button>
-                                              <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'dimensional')}><Trash2 className="h-4 w-4" /></Button>
+                                              <DropdownMenu>
+                                                  <DropdownMenuTrigger asChild>
+                                                      <Button variant="ghost" size="icon">
+                                                          <MoreVertical className="h-4 w-4" />
+                                                      </Button>
+                                                  </DropdownMenuTrigger>
+                                                  <DropdownMenuContent align="end">
+                                                      <DropdownMenuItem onClick={() => handleDimensionalReportPDF(rep)}>
+                                                          <FileDown className="mr-2 h-4 w-4" />
+                                                          Exportar PDF
+                                                      </DropdownMenuItem>
+                                                      <DropdownMenuItem onClick={() => handleOpenDimensionalForm(rep)}>
+                                                          <Pencil className="mr-2 h-4 w-4" />
+                                                          Editar
+                                                      </DropdownMenuItem>
+                                                      <DropdownMenuItem onClick={() => handleDuplicateDimensionalReport(rep)}>
+                                                          <Plus className="mr-2 h-4 w-4" />
+                                                          Duplicar Relatório
+                                                      </DropdownMenuItem>
+                                                      <DropdownMenuSeparator />
+                                                      <DropdownMenuItem 
+                                                          onClick={() => handleDeleteInspectionClick(rep, 'dimensional')}
+                                                          className="text-destructive"
+                                                      >
+                                                          <Trash2 className="mr-2 h-4 w-4" />
+                                                          Excluir
+                                                      </DropdownMenuItem>
+                                                  </DropdownMenuContent>
+                                              </DropdownMenu>
                                           </TableCell></TableRow>
                                       )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório dimensional para este pedido.</TableCell></TableRow>}
                                       </TableBody></Table>}
@@ -3763,7 +3832,10 @@ export default function QualityPage() {
           <DialogHeader>
             <DialogTitle>
                 {dialogType === 'material' && (selectedInspection ? 'Editar Inspeção de Material' : 'Nova Inspeção de Material')}
-                {dialogType === 'dimensional' && (selectedInspection ? 'Editar Relatório Dimensional' : 'Novo Relatório Dimensional')}
+                {dialogType === 'dimensional' && (
+    selectedInspection ? 'Editar Relatório Dimensional' : 
+    (dimensionalReportForm?.getValues('measurements')?.length > 0 && !selectedInspection ? 'Novo Relatório Dimensional (Duplicado)' : 'Novo Relatório Dimensional')
+)}
                 {dialogType === 'welding' && (selectedInspection ? 'Editar Ensaio Visual de Solda' : 'Novo Ensaio Visual de Solda')}
                 {dialogType === 'painting' && (selectedInspection ? 'Editar Relatório de Pintura' : 'Novo Relatório Técnico de Pintura')}
                 {dialogType === 'liquidPenetrant' && (selectedInspection ? 'Editar Relatório de LP' : 'Novo Relatório de LP')}
@@ -4011,7 +4083,10 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             });
         }
     }, [calibrations]);
-    // ...rest of the code...
+    
+    // ✅ VERIFICAR SE É DUPLICAÇÃO
+    const isDuplicating = !selectedInspection && form.getValues('measurements')?.length > 0;
+    
     const watchedOrderId = form.watch("orderId");
     const watchedItemId = form.watch("itemId");
     const availableItems = useMemo(() => { if (!watchedOrderId) return []; return orders.find(o => o.id === watchedOrderId)?.items || []; }, [watchedOrderId, orders]);
@@ -4312,6 +4387,28 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
     };
 
     return (<>
+        {/* ✅ INDICADOR DE DUPLICAÇÃO */}
+        {isDuplicating && (
+            <Card className="border-blue-200 bg-blue-50">
+                <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <Plus className="h-5 w-5 text-blue-600" />
+                        Relatório Duplicado
+                    </CardTitle>
+                    <CardDescription>
+                        Este é um novo relatório baseado em um relatório existente. 
+                        As medições foram resetadas para nova inspeção.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="flex items-center gap-2 text-sm text-blue-700">
+                        <AlertCircle className="h-4 w-4" />
+                        Lembre-se de ajustar os valores medidos antes de salvar o relatório.
+                    </div>
+                </CardContent>
+            </Card>
+        )}
+        
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Pedido</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
             <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Item Afetado</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item do pedido" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
@@ -4488,6 +4585,11 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
                 <h4 className="font-medium flex items-center gap-2">
                     <PlusCircle className="h-4 w-4 text-green-600" />
                     Adicionar Nova Medição
+                    {isDuplicating && (
+                        <Badge variant="secondary" className="ml-2">
+                            Relatório Duplicado - Valores Resetados
+                        </Badge>
+                    )}
                 </h4>
                 <div>
                     <Label>Nome da Dimensão</Label>
