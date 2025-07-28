@@ -287,11 +287,11 @@ const rawMaterialInspectionSchema = z.object({
 });
 
 const dimensionalMeasurementSchema = z.object({
-  id: z.string(),
+  // REMOVER o campo id obrigatório
   dimensionName: z.string().min(1, "O nome da dimensão é obrigatório."),
   nominalValue: z.coerce.number(),
-  toleranceMin: z.string().optional(), // Mudou de number para string
-  toleranceMax: z.string().optional(), // Mudou de number para string
+  toleranceMin: z.string().optional(),
+  toleranceMax: z.string().optional(), 
   measuredValue: z.coerce.number(),
   instrumentUsed: z.string({ required_error: "O instrumento é obrigatório." }),
   result: z.enum(["Conforme", "Não Conforme"]),
@@ -1410,29 +1410,47 @@ export default function QualityPage() {
         setIsInspectionsDetailOpen(true);
     };
 
-    // ✅ NOVA FUNÇÃO PARA DUPLICAR RELATÓRIO DIMENSIONAL
+    // ✅ FUNÇÃO CORRIGIDA PARA DUPLICAR RELATÓRIO DIMENSIONAL
     const handleDuplicateDimensionalReport = (originalReport: DimensionalReport) => {
         console.log("=== DUPLICANDO RELATÓRIO DIMENSIONAL ===");
         console.log("Relatório original:", originalReport);
         
-        // Gerar novo ID e limpar campos específicos
+        // Limpar campos undefined e preparar dados para duplicação
         const duplicatedData = {
-            ...originalReport,
-            id: undefined, // Remove ID para criar novo
-            reportNumber: '', // Será gerado automaticamente
-            inspectionDate: new Date(), // Data atual
-            notes: originalReport.notes ? `${originalReport.notes} (Duplicado do relatório ${originalReport.reportNumber})` : 'Duplicado',
-            photos: [], // Remove fotos por segurança
-            measurements: originalReport.measurements.map(measurement => ({
-                ...measurement,
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9), // Novo ID para cada medição
-                measuredValue: 0, // Zerar valores medidos para nova inspeção
-                result: "Conforme" as const, // Reset do resultado
-            })),
-            partIdentifier: '', // Limpar identificador da peça para seleção manual
-            quantityInspected: 1, // Reset quantidade
+            // Campos obrigatórios
+            orderId: originalReport.orderId || '',
+            itemId: originalReport.itemId || '',
+            inspectedBy: originalReport.inspectedBy || '',
+            inspectionDate: new Date(),
+            
+            // Campos opcionais com fallback
+            notes: originalReport.notes ? `${originalReport.notes} (Duplicado do relatório ${originalReport.reportNumber})` : 'Relatório duplicado',
+            quantityInspected: originalReport.quantityInspected || 1,
+            partIdentifier: '', // Limpar para seleção manual
             customerInspector: '', // Limpar inspetor do cliente
+            photos: [], // Remove fotos por segurança
+            
+            // Medições com valores resetados e IDs limpos
+            measurements: originalReport.measurements.map(measurement => ({
+                dimensionName: measurement.dimensionName || '',
+                nominalValue: measurement.nominalValue || 0,
+                toleranceMin: measurement.toleranceMin || '',
+                toleranceMax: measurement.toleranceMax || '',
+                measuredValue: 0, // Zerar valores medidos para nova inspeção
+                instrumentUsed: measurement.instrumentUsed || '',
+                result: "Conforme" as const, // Reset do resultado
+                // Não incluir ID - será gerado automaticamente
+            })),
         };
+        
+        // Remover campos undefined
+        Object.keys(duplicatedData).forEach(key => {
+            if (duplicatedData[key] === undefined) {
+                delete duplicatedData[key];
+            }
+        });
+        
+        console.log("Dados duplicados preparados:", duplicatedData);
         
         // Configurar o formulário com os dados duplicados
         setSelectedInspection(null); // Importante: não é edição, é novo relatório
@@ -1559,23 +1577,52 @@ export default function QualityPage() {
         quantityInspected: values.quantityInspected || null,
         notes: values.notes || null,
         photos: values.photos || [],
-        measurements: values.measurements || [],
+        
+        // Limpar measurements de campos undefined
+        measurements: (values.measurements || []).map(measurement => ({
+          dimensionName: measurement.dimensionName || '',
+          nominalValue: Number(measurement.nominalValue) || 0,
+          toleranceMin: measurement.toleranceMin || null,
+          toleranceMax: measurement.toleranceMax || null,
+          measuredValue: Number(measurement.measuredValue) || 0,
+          instrumentUsed: measurement.instrumentUsed || '',
+          result: measurement.result || 'Conforme',
+          // Não incluir ID no Firestore
+        })),
         
         // DADOS DO ITEM - SALVANDO EXPLICITAMENTE
-        itemId: values.itemId,
-        itemCode: selectedItem.code || null,
-        itemDescription: selectedItem.description,
-        itemQuantity: selectedItem.quantity || null,
+        itemId: values.itemId || null,
+        itemCode: selectedItem?.code || null,
+        itemDescription: selectedItem?.description || 'Item não especificado',
+        itemQuantity: selectedItem?.quantity || null,
         
         // DADOS DO PEDIDO
-        orderId: values.orderId,
+        orderId: values.orderId || null,
         orderNumber: selectedOrder?.number || 'N/A',
         customerName: selectedOrder?.customerName || 'N/A',
         projectName: selectedOrder?.projectName || null,
       };
+
+      // Remover campos undefined recursivamente
+      const cleanData = (obj) => {
+        if (Array.isArray(obj)) {
+          return obj.map(cleanData);
+        } else if (obj !== null && typeof obj === 'object') {
+          const cleaned = {};
+          Object.keys(obj).forEach(key => {
+            if (obj[key] !== undefined) {
+              cleaned[key] = cleanData(obj[key]);
+            }
+          });
+          return cleaned;
+        }
+        return obj;
+      };
+
+      const finalDataToSave = cleanData(dataToSave);
       
       // VALIDAÇÃO DO TAMANHO
-      const dataSize = JSON.stringify(dataToSave).length;
+      const dataSize = JSON.stringify(finalDataToSave).length;
       console.log(`Tamanho dos dados: ${(dataSize / 1024).toFixed(1)}KB`);
       
       if (dataSize > 900000) { // 900KB
@@ -1589,13 +1636,13 @@ export default function QualityPage() {
       
       console.log("=== DADOS FINAIS PARA FIRESTORE ===");
       console.log("Item salvo:", {
-          itemId: dataToSave.itemId,
-          itemCode: dataToSave.itemCode,
-          itemDescription: dataToSave.itemDescription
+          itemId: finalDataToSave.itemId,
+          itemCode: finalDataToSave.itemCode,
+          itemDescription: finalDataToSave.itemDescription
       });
 
        if (selectedInspection) {
-         await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), dataToSave, { merge: true });
+         await setDoc(doc(db, "companies", "mecald", "dimensionalReports", selectedInspection.id), finalDataToSave, { merge: true });
          toast({ title: "Relatório atualizado!" });
        } else {
         const reportsSnapshot = await getDocs(collection(db, "companies", "mecald", "dimensionalReports"));
@@ -1604,7 +1651,7 @@ export default function QualityPage() {
             .filter(n => !isNaN(n) && Number.isFinite(n));
         const highestNumber = Math.max(0, ...existingNumbers);
         const newReportNumber = (highestNumber + 1).toString().padStart(4, '0');
-        const finalData = { ...dataToSave, reportNumber: newReportNumber };
+        const finalData = { ...finalDataToSave, reportNumber: newReportNumber };
 
          await addDoc(collection(db, "companies", "mecald", "dimensionalReports"), finalData);
          console.log("✓ Relatório salvo com item:", finalData.itemDescription);
@@ -4266,12 +4313,12 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             }
         }
         
+        // Adicionar medição SEM campo ID
         fieldArrayProps.append({
-            id: Date.now().toString(),
             dimensionName: newMeasurement.dimensionName,
             nominalValue: nominal,
-            toleranceMin: newMeasurement.toleranceMin || undefined,
-            toleranceMax: newMeasurement.toleranceMax || undefined,
+            toleranceMin: newMeasurement.toleranceMin || null,
+            toleranceMax: newMeasurement.toleranceMax || null,
             measuredValue: measured,
             instrumentUsed: newMeasurement.instrumentUsed,
             result: result,
