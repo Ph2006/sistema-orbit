@@ -465,47 +465,62 @@ export default function MaterialsPage() {
 };
 
     const onCuttingPlanSubmit = async (data: CuttingPlan) => {
-    try {
-        const dataToSave: any = { 
-            ...data, 
-            createdAt: Timestamp.fromDate(data.createdAt), 
-            deliveryDate: data.deliveryDate ? Timestamp.fromDate(new Date(data.deliveryDate)) : null 
-        };
-        
-        // Tratar o campo customer
-        if (data.customer && data.customer.id && data.customer.name) {
-            dataToSave.customer = {
-                id: data.customer.id,
-                name: data.customer.name
+        try {
+            // Helper function to recursively remove undefined values
+            const removeUndefinedFields = (obj: any): any => {
+                if (obj === null || typeof obj !== 'object') {
+                    return obj;
+                }
+                
+                if (Array.isArray(obj)) {
+                    return obj.map(removeUndefinedFields);
+                }
+                
+                const cleaned: any = {};
+                for (const [key, value] of Object.entries(obj)) {
+                    if (value !== undefined) {
+                        cleaned[key] = removeUndefinedFields(value);
+                    }
+                }
+                return cleaned;
             };
-        } else {
-            delete dataToSave.customer;
-        }
-        
-        // Limpar campos undefined
-        Object.keys(dataToSave).forEach(key => {
-            if (dataToSave[key] === undefined) {
-                delete dataToSave[key];
+
+            const dataToSave: any = { 
+                ...data, 
+                createdAt: Timestamp.fromDate(data.createdAt), 
+                deliveryDate: data.deliveryDate ? Timestamp.fromDate(new Date(data.deliveryDate)) : null 
+            };
+            
+            // Handle customer field properly
+            if (data.customer && data.customer.id && data.customer.name) {
+                dataToSave.customer = {
+                    id: data.customer.id,
+                    name: data.customer.name
+                };
+            } else {
+                delete dataToSave.customer;
             }
-        });
-        
-        if (selectedCuttingPlan) {
-            await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), dataToSave);
-        } else {
-            const planNumbers = cuttingPlansList.map(p => parseInt(p.planNumber || "0", 10)).filter(n => !isNaN(n));
-            const highestNumber = planNumbers.length > 0 ? Math.max(...planNumbers) : 0;
-            dataToSave.planNumber = (highestNumber + 1).toString().padStart(5, '0');
-            await addDoc(collection(db, "companies", "mecald", "cuttingPlans"), dataToSave);
+            
+            // Remove all undefined fields recursively
+            const cleanedDataToSave = removeUndefinedFields(dataToSave);
+            
+            if (selectedCuttingPlan) {
+                await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), cleanedDataToSave);
+            } else {
+                const planNumbers = cuttingPlansList.map(p => parseInt(p.planNumber || "0", 10)).filter(n => !isNaN(n));
+                const highestNumber = planNumbers.length > 0 ? Math.max(...planNumbers) : 0;
+                cleanedDataToSave.planNumber = (highestNumber + 1).toString().padStart(5, '0');
+                await addDoc(collection(db, "companies", "mecald", "cuttingPlans"), cleanedDataToSave);
+            }
+            
+            toast({ title: selectedCuttingPlan ? "Plano atualizado!" : "Plano de Corte criado!" });
+            setIsCuttingPlanFormOpen(false);
+            await fetchRequisitions();
+        } catch (error) {
+            console.error("Error saving cutting plan:", error);
+            toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar o plano de corte." });
         }
-        
-        toast({ title: selectedCuttingPlan ? "Plano atualizado!" : "Plano de Corte criado!" });
-        setIsCuttingPlanFormOpen(false);
-        await fetchRequisitions();
-    } catch (error) {
-        console.error("Error saving cutting plan:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar o plano de corte." });
-    }
-};
+    };
 
     const handleExportPDF = async (requisitionToExport: Requisition) => {
         toast({ title: "Gerando PDF...", description: "Aguarde enquanto o arquivo é preparado." });
