@@ -373,11 +373,41 @@ export default function MaterialsPage() {
         };
         const finalHistory = [...(data.history || []), newHistoryEntry];
         
+        // CORREÇÃO: Preservar dados existentes dos itens (especialmente peso e dados de precificação)
+        let mergedItems = data.items;
+        
+        if (selectedRequisition) {
+            // Se estamos editando, precisamos preservar dados que podem ter sido adicionados em outras telas
+            const existingReq = requisitions.find(r => r.id === selectedRequisition.id);
+            if (existingReq) {
+                mergedItems = data.items.map(editedItem => {
+                    const existingItem = existingReq.items.find(ei => ei.id === editedItem.id);
+                    if (existingItem) {
+                        // Preservar campos importantes que podem ter sido preenchidos em costs/page.tsx
+                        return {
+                            ...editedItem,
+                            // Preservar dados de precificação e recebimento
+                            weight: existingItem.weight || editedItem.weight,
+                            weightUnit: existingItem.weightUnit || editedItem.weightUnit,
+                            supplierName: existingItem.supplierName || editedItem.supplierName,
+                            invoiceNumber: existingItem.invoiceNumber || editedItem.invoiceNumber,
+                            invoiceItemValue: existingItem.invoiceItemValue || editedItem.invoiceItemValue,
+                            certificateNumber: existingItem.certificateNumber || editedItem.certificateNumber,
+                            storageLocation: existingItem.storageLocation || editedItem.storageLocation,
+                            deliveryReceiptDate: existingItem.deliveryReceiptDate || editedItem.deliveryReceiptDate,
+                            inspectionStatus: existingItem.inspectionStatus || editedItem.inspectionStatus,
+                        };
+                    }
+                    return editedItem;
+                });
+            }
+        }
+        
         const dataToSave: any = { 
             ...data, 
             history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), 
             date: Timestamp.fromDate(data.date), 
-            items: data.items.map(item => ({ 
+            items: mergedItems.map(item => ({ 
                 ...item, 
                 deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, 
                 deliveryReceiptDate: item.deliveryReceiptDate ? Timestamp.fromDate(new Date(item.deliveryReceiptDate)) : null
