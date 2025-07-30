@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
@@ -364,122 +363,227 @@ export default function MaterialsPage() {
     };
     
     const onRequisitionSubmit = async (data: Requisition) => {
-    try {
-        const newHistoryEntry = { 
-            timestamp: new Date(), 
-            user: user?.email || "Sistema", 
-            action: selectedRequisition ? "Edição" : "Criação", 
-            details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` 
-        };
-        const finalHistory = [...(data.history || []), newHistoryEntry];
-        
-        // CORREÇÃO: Preservar dados existentes dos itens (especialmente peso e dados de precificação)
-        let mergedItems = data.items;
-        
-        if (selectedRequisition) {
-            // Se estamos editando, precisamos preservar dados que podem ter sido adicionados em outras telas
-            const existingReq = requisitions.find(r => r.id === selectedRequisition.id);
-            if (existingReq) {
-                mergedItems = data.items.map(editedItem => {
-                    const existingItem = existingReq.items.find(ei => ei.id === editedItem.id);
-                    if (existingItem) {
-                        // Preservar campos importantes que podem ter sido preenchidos em costs/page.tsx
-                        return {
-                            ...editedItem,
-                            // Preservar dados de precificação e recebimento
-                            weight: existingItem.weight || editedItem.weight,
-                            weightUnit: existingItem.weightUnit || editedItem.weightUnit,
-                            supplierName: existingItem.supplierName || editedItem.supplierName,
-                            invoiceNumber: existingItem.invoiceNumber || editedItem.invoiceNumber,
-                            invoiceItemValue: existingItem.invoiceItemValue || editedItem.invoiceItemValue,
-                            certificateNumber: existingItem.certificateNumber || editedItem.certificateNumber,
-                            storageLocation: existingItem.storageLocation || editedItem.storageLocation,
-                            deliveryReceiptDate: existingItem.deliveryReceiptDate || editedItem.deliveryReceiptDate,
-                            inspectionStatus: existingItem.inspectionStatus || editedItem.inspectionStatus,
-                        };
-                    }
-                    return editedItem;
-                });
-            }
-        }
-        
-        const dataToSave: any = { 
-            ...data, 
-            history: finalHistory.map(h => ({ ...h, timestamp: Timestamp.fromDate(h.timestamp) })), 
-            date: Timestamp.fromDate(data.date), 
-            items: mergedItems.map(item => ({ 
-                ...item, 
-                deliveryDate: item.deliveryDate ? Timestamp.fromDate(new Date(item.deliveryDate)) : null, 
-                deliveryReceiptDate: item.deliveryReceiptDate ? Timestamp.fromDate(new Date(item.deliveryReceiptDate)) : null
-            })) 
-        };
-        
-        // Limpar campos undefined para evitar erro no Firestore
-        if (data.generalNotes === undefined || data.generalNotes === null || data.generalNotes === '') {
-            delete dataToSave.generalNotes;
-        }
-        
-        // Corrigir o problema do campo customer
-        if (data.customer && data.customer.id && data.customer.name) {
-            dataToSave.customer = {
-                id: data.customer.id,
-                name: data.customer.name
-            };
-        } else {
-            // Se customer não tem dados válidos, remover do objeto
-            delete dataToSave.customer;
-        }
-        
-        if (data.approval && data.approval.approvedBy) { 
-            dataToSave.approval = { 
-                ...data.approval, 
-                approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null 
-            };
-        } else { 
-            delete dataToSave.approval;
-        }
-
-        // Limpar outros campos que podem ser undefined
-        Object.keys(dataToSave).forEach(key => {
-            if (dataToSave[key] === undefined) {
-                delete dataToSave[key];
-            }
-        });
-
-        if (selectedRequisition) {
-            await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), dataToSave);
-        } else {
-            const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
-            const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
-            dataToSave.requisitionNumber = (highestNumber + 1).toString().padStart(5, '0');
-            await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), dataToSave);
-        }
-        
-        toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
-        setIsRequisitionFormOpen(false);
-        await fetchRequisitions();
-    } catch (error) {
-        console.error("Error saving requisition:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar a requisição." });
-    }
-};
-
-    const onCuttingPlanSubmit = async (data: CuttingPlan) => {
         try {
-            // Helper function to recursively remove undefined values
-            const removeUndefinedFields = (obj: any): any => {
-                if (obj === null || typeof obj !== 'object') {
+            const newHistoryEntry = { 
+                timestamp: new Date(), 
+                user: user?.email || "Sistema", 
+                action: selectedRequisition ? "Edição" : "Criação", 
+                details: `Requisição ${selectedRequisition ? 'editada' : 'criada'}.` 
+            };
+            const finalHistory = [...(data.history || []), newHistoryEntry];
+            
+            // CORREÇÃO: Preservar dados existentes dos itens (especialmente peso e dados de precificação)
+            let mergedItems = data.items;
+            
+            if (selectedRequisition) {
+                // Se estamos editando, precisamos preservar dados que podem ter sido adicionados em outras telas
+                const existingReq = requisitions.find(r => r.id === selectedRequisition.id);
+                if (existingReq) {
+                    mergedItems = data.items.map(editedItem => {
+                        const existingItem = existingReq.items.find(ei => ei.id === editedItem.id);
+                        if (existingItem) {
+                            // Preservar campos importantes que podem ter sido preenchidos em costs/page.tsx
+                            return {
+                                ...editedItem,
+                                // Preservar dados de precificação e recebimento
+                                weight: existingItem.weight || editedItem.weight,
+                                weightUnit: existingItem.weightUnit || editedItem.weightUnit,
+                                supplierName: existingItem.supplierName || editedItem.supplierName,
+                                invoiceNumber: existingItem.invoiceNumber || editedItem.invoiceNumber,
+                                invoiceItemValue: existingItem.invoiceItemValue || editedItem.invoiceItemValue,
+                                certificateNumber: existingItem.certificateNumber || editedItem.certificateNumber,
+                                storageLocation: existingItem.storageLocation || editedItem.storageLocation,
+                                deliveryReceiptDate: existingItem.deliveryReceiptDate || editedItem.deliveryReceiptDate,
+                                inspectionStatus: existingItem.inspectionStatus || editedItem.inspectionStatus,
+                            };
+                        }
+                        return editedItem;
+                    });
+                }
+            }
+            
+            // More aggressive cleanup function
+            const cleanFirestoreData = (obj: any): any => {
+                if (obj === null) {
+                    return null;
+                }
+                
+                if (obj === undefined) {
+                    return null; // Convert undefined to null
+                }
+                
+                if (typeof obj !== 'object') {
                     return obj;
                 }
                 
                 if (Array.isArray(obj)) {
-                    return obj.map(removeUndefinedFields);
+                    return obj.map(cleanFirestoreData).filter(item => item !== undefined);
                 }
                 
                 const cleaned: any = {};
                 for (const [key, value] of Object.entries(obj)) {
-                    if (value !== undefined) {
-                        cleaned[key] = removeUndefinedFields(value);
+                    const cleanedValue = cleanFirestoreData(value);
+                    if (cleanedValue !== undefined) {
+                        cleaned[key] = cleanedValue;
+                    }
+                }
+                return cleaned;
+            };
+            
+            // Prepare base data with explicit null handling
+            const baseData = {
+                date: Timestamp.fromDate(data.date),
+                status: data.status,
+                requestedBy: data.requestedBy || null,
+                department: data.department || null,
+                orderId: data.orderId || null,
+                generalNotes: data.generalNotes || null,
+                history: finalHistory.map(h => ({ 
+                    ...h, 
+                    timestamp: Timestamp.fromDate(h.timestamp),
+                    user: h.user || "Sistema",
+                    action: h.action || "Ação",
+                    details: h.details || null
+                })),
+                items: mergedItems.map(item => {
+                    const cleanItem: any = {
+                        id: item.id,
+                        description: item.description,
+                        quantityRequested: Number(item.quantityRequested) || 0,
+                        unit: item.unit,
+                        status: item.status || "Pendente",
+                        quantityFulfilled: Number(item.quantityFulfilled) || 0,
+                        inspectionStatus: item.inspectionStatus || "Pendente"
+                    };
+                    
+                    // Only add optional fields if they have values
+                    if (item.code) cleanItem.code = item.code;
+                    if (item.material) cleanItem.material = item.material;
+                    if (item.dimensao) cleanItem.dimensao = item.dimensao;
+                    if (item.pesoUnitario !== undefined && item.pesoUnitario !== null) {
+                        cleanItem.pesoUnitario = Number(item.pesoUnitario) || 0;
+                    }
+                    if (item.notes) cleanItem.notes = item.notes;
+                    if (item.deliveryDate) {
+                        cleanItem.deliveryDate = Timestamp.fromDate(new Date(item.deliveryDate));
+                    }
+                    if (item.deliveryReceiptDate) {
+                        cleanItem.deliveryReceiptDate = Timestamp.fromDate(new Date(item.deliveryReceiptDate));
+                    }
+                    
+                    // Preserve existing fields for cost center
+                    if (item.supplierName) cleanItem.supplierName = item.supplierName;
+                    if (item.invoiceNumber) cleanItem.invoiceNumber = item.invoiceNumber;
+                    if (item.invoiceItemValue !== undefined && item.invoiceItemValue !== null) {
+                        cleanItem.invoiceItemValue = Number(item.invoiceItemValue) || 0;
+                    }
+                    if (item.certificateNumber) cleanItem.certificateNumber = item.certificateNumber;
+                    if (item.storageLocation) cleanItem.storageLocation = item.storageLocation;
+                    if (item.weight !== undefined && item.weight !== null) {
+                        cleanItem.weight = Number(item.weight) || 0;
+                    }
+                    if (item.weightUnit) cleanItem.weightUnit = item.weightUnit;
+                    
+                    return cleanItem;
+                })
+            };
+            
+            // Handle customer field
+            if (data.customer && data.customer.id && data.customer.name) {
+                baseData.customer = {
+                    id: data.customer.id,
+                    name: data.customer.name
+                };
+            }
+            
+            // Handle approval field
+            if (data.approval && data.approval.approvedBy) {
+                baseData.approval = {
+                    approvedBy: data.approval.approvedBy,
+                    approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null,
+                    justification: data.approval.justification || null
+                };
+            }
+            
+            // Final cleanup
+            const finalData = cleanFirestoreData(baseData);
+            
+            // Debug logging
+            console.log("Final data being sent to Firestore:", JSON.stringify(finalData, null, 2));
+            
+            // Check for any remaining undefined values
+            const checkForUndefined = (obj: any, path: string = ''): string[] => {
+                const undefinedPaths: string[] = [];
+                
+                if (obj === undefined) {
+                    undefinedPaths.push(path);
+                    return undefinedPaths;
+                }
+                
+                if (typeof obj === 'object' && obj !== null) {
+                    if (Array.isArray(obj)) {
+                        obj.forEach((item, index) => {
+                            undefinedPaths.push(...checkForUndefined(item, `${path}[${index}]`));
+                        });
+                    } else {
+                        Object.entries(obj).forEach(([key, value]) => {
+                            undefinedPaths.push(...checkForUndefined(value, path ? `${path}.${key}` : key));
+                        });
+                    }
+                }
+                
+                return undefinedPaths;
+            };
+            
+            const undefinedPaths = checkForUndefined(finalData);
+            if (undefinedPaths.length > 0) {
+                console.error("Found undefined values at paths:", undefinedPaths);
+                throw new Error(`Found undefined values at: ${undefinedPaths.join(', ')}`);
+            }
+            
+            if (selectedRequisition) {
+                await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), finalData);
+            } else {
+                const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
+                const highestNumber = reqNumbers.length > 0 ? Math.max(...reqNumbers) : 0;
+                finalData.requisitionNumber = (highestNumber + 1).toString().padStart(5, '0');
+                await addDoc(collection(db, "companies", "mecald", "materialRequisitions"), finalData);
+            }
+            
+            toast({ title: selectedRequisition ? "Requisição atualizada!" : "Requisição criada!" });
+            setIsRequisitionFormOpen(false);
+            await fetchRequisitions();
+        } catch (error) {
+            console.error("Error saving requisition:", error);
+            toast({ variant: "destructive", title: "Erro ao salvar", description: "Ocorreu um erro ao salvar a requisição." });
+        }
+    };
+
+    const onCuttingPlanSubmit = async (data: CuttingPlan) => {
+        try {
+            // Helper function to recursively remove undefined values
+            const cleanFirestoreData = (obj: any): any => {
+                if (obj === null) {
+                    return null;
+                }
+                
+                if (obj === undefined) {
+                    return null; // Convert undefined to null
+                }
+                
+                if (typeof obj !== 'object') {
+                    return obj;
+                }
+                
+                if (Array.isArray(obj)) {
+                    return obj.map(cleanFirestoreData).filter(item => item !== undefined);
+                }
+                
+                const cleaned: any = {};
+                for (const [key, value] of Object.entries(obj)) {
+                    const cleanedValue = cleanFirestoreData(value);
+                    if (cleanedValue !== undefined) {
+                        cleaned[key] = cleanedValue;
                     }
                 }
                 return cleaned;
@@ -502,7 +606,7 @@ export default function MaterialsPage() {
             }
             
             // Remove all undefined fields recursively
-            const cleanedDataToSave = removeUndefinedFields(dataToSave);
+            const cleanedDataToSave = cleanFirestoreData(dataToSave);
             
             if (selectedCuttingPlan) {
                 await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), cleanedDataToSave);
@@ -748,8 +852,7 @@ export default function MaterialsPage() {
     const handleUpdateItem = () => { if (editItemIndex === null) return; const dataToValidate = { ...currentItem, quantityRequested: Number(currentItem.quantityRequested) || 0, pesoUnitario: Number(currentItem.pesoUnitario) || 0, }; const result = requisitionItemSchema.safeParse(dataToValidate); if (!result.success) { const firstError = result.error.errors[0]; toast({ variant: 'destructive', title: `Erro de validação: ${firstError.path[0]}`, description: firstError.message }); return; } updateReqItem(editItemIndex, result.data); setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); setEditItemIndex(null); };
     const handleEditItem = (index: number) => { setEditItemIndex(index); setCurrentItem(requisitionForm.getValues(`items.${index}`)); };
     const handleCancelEditItem = () => { setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); setEditItemIndex(null); };
-
-    return (
+return (
         <>
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
@@ -931,65 +1034,65 @@ export default function MaterialsPage() {
                             <CardContent>
                                 {isLoading ? <Skeleton className="h-64 w-full" /> : (
                                     <>
-                                                                {!selectedOrderFolder ? (
-                            // Folder view - show OS folders
-                            <>
-                                {/* Statistics */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                                    <StatCard 
-                                        title="OS's com Planos" 
-                                        value={cuttingPlanFolders.length.toString()} 
-                                        icon={Folder} 
-                                        description="Ordens de serviço com planos de corte" 
-                                    />
-                                    <StatCard 
-                                        title="Total de Planos" 
-                                        value={cuttingPlansList.length.toString()} 
-                                        icon={GanttChart} 
-                                        description="Planos de corte no sistema" 
-                                    />
-                                    <StatCard 
-                                        title="Planos Sem OS" 
-                                        value={cuttingPlansList.filter(p => !p.orderId).length.toString()} 
-                                        icon={AlertTriangle} 
-                                        description="Planos não vinculados a OS" 
-                                    />
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {cuttingPlanFolders.map(folder => (
-                                                    <Card 
-                                                        key={folder.orderId}
-                                                        className="cursor-pointer hover:shadow-md transition-shadow"
-                                                        onClick={() => setSelectedOrderFolder(folder.orderId)}
-                                                    >
-                                                        <CardContent className="flex items-center p-6">
-                                                            <div className="flex items-center space-x-4 w-full">
-                                                                <div className="flex-shrink-0">
-                                                                    <Folder className="h-8 w-8 text-blue-500" />
-                                                                </div>
-                                                                <div className="flex-1 min-w-0">
-                                                                                                                                        <h3 className="font-medium text-sm text-gray-100 truncate">
-                                                                         OS {folder.order.internalOS}
-                                                                     </h3>
-                                                                    <p className="text-sm text-gray-500 truncate">
-                                                                        {folder.order.customerName}
-                                                                    </p>
-                                                                    <div className="flex items-center mt-1">
-                                                                        <Badge variant="secondary" className="text-xs">
-                                                                            {folder.plansCount} plano{folder.plansCount !== 1 ? 's' : ''}
-                                                                        </Badge>
+                                        {!selectedOrderFolder ? (
+                                            // Folder view - show OS folders
+                                            <>
+                                                {/* Statistics */}
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                                    <StatCard 
+                                                        title="OS's com Planos" 
+                                                        value={cuttingPlanFolders.length.toString()} 
+                                                        icon={Folder} 
+                                                        description="Ordens de serviço com planos de corte" 
+                                                    />
+                                                    <StatCard 
+                                                        title="Total de Planos" 
+                                                        value={cuttingPlansList.length.toString()} 
+                                                        icon={GanttChart} 
+                                                        description="Planos de corte no sistema" 
+                                                    />
+                                                    <StatCard 
+                                                        title="Planos Sem OS" 
+                                                        value={cuttingPlansList.filter(p => !p.orderId).length.toString()} 
+                                                        icon={AlertTriangle} 
+                                                        description="Planos não vinculados a OS" 
+                                                    />
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {cuttingPlanFolders.map(folder => (
+                                                        <Card 
+                                                            key={folder.orderId}
+                                                            className="cursor-pointer hover:shadow-md transition-shadow"
+                                                            onClick={() => setSelectedOrderFolder(folder.orderId)}
+                                                        >
+                                                            <CardContent className="flex items-center p-6">
+                                                                <div className="flex items-center space-x-4 w-full">
+                                                                    <div className="flex-shrink-0">
+                                                                        <Folder className="h-8 w-8 text-blue-500" />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <h3 className="font-medium text-sm text-gray-100 truncate">
+                                                                            OS {folder.order.internalOS}
+                                                                        </h3>
+                                                                        <p className="text-sm text-gray-500 truncate">
+                                                                            {folder.order.customerName}
+                                                                        </p>
+                                                                        <div className="flex items-center mt-1">
+                                                                            <Badge variant="secondary" className="text-xs">
+                                                                                {folder.plansCount} plano{folder.plansCount !== 1 ? 's' : ''}
+                                                                            </Badge>
+                                                                        </div>
                                                                     </div>
                                                                 </div>
-                                                            </div>
-                                                        </CardContent>
-                                                    </Card>
-                                                ))}
-                                                {cuttingPlanFolders.length === 0 && (
-                                                    <div className="col-span-full text-center py-8">
-                                                        <p className="text-gray-500">Nenhuma OS com planos de corte encontrada.</p>
-                                                    </div>
-                                                )}
-                                            </div>
+                                                            </CardContent>
+                                                        </Card>
+                                                    ))}
+                                                    {cuttingPlanFolders.length === 0 && (
+                                                        <div className="col-span-full text-center py-8">
+                                                            <p className="text-gray-500">Nenhuma OS com planos de corte encontrada.</p>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </>
                                         ) : (
                                             // Plan view - show plans in selected folder
@@ -1212,4 +1315,4 @@ export default function MaterialsPage() {
             </AlertDialog>
         </>
     );
-}
+}"use client";
