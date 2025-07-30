@@ -202,6 +202,34 @@ const safeFormatDate = (date: any, formatString: string, fallback: string = 'Dat
     }
 };
 
+// Função utilitária para limpar valores undefined recursivamente
+const cleanFirestoreData = (obj: any): any => {
+    if (obj === null || obj === undefined) {
+        return null;
+    }
+    
+    if (obj instanceof Date || obj?.toDate) {
+        return obj; // Manter Timestamps e Dates como estão
+    }
+    
+    if (Array.isArray(obj)) {
+        return obj.map(item => cleanFirestoreData(item)).filter(item => item !== null && item !== undefined);
+    }
+    
+    if (typeof obj === 'object') {
+        const cleaned: any = {};
+        for (const [key, value] of Object.entries(obj)) {
+            const cleanedValue = cleanFirestoreData(value);
+            if (cleanedValue !== undefined && cleanedValue !== null) {
+                cleaned[key] = cleanedValue;
+            }
+        }
+        return Object.keys(cleaned).length > 0 ? cleaned : null;
+    }
+    
+    return obj;
+};
+
 // Biblioteca global de insumos para caldeiraria e usinagem
 const insumosBiblioteca = {
     "MATERIAS_PRIMAS": [
@@ -1180,7 +1208,7 @@ export default function CostsPage() {
                 description += ` (Totalmente precificada)`;
             }
             
-            // Criar novo lançamento consolidado da requisição
+            // Criar novo lançamento consolidado da requisição - ANTES da limpeza
             const requisitionCostEntry = {
                 id: `req-${requisitionId}-${Date.now()}`,
                 description: description,
@@ -1195,19 +1223,31 @@ export default function CostsPage() {
                 itemsWithValues: itemsWithValues,
                 totalItems: totalItems,
                 completionPercentage: progress,
-                lastPriceUpdate: reqData.lastPriceUpdate,
+                lastPriceUpdate: reqData.lastPriceUpdate || null, // Evitar undefined
                 sourceType: 'requisition_total',
                 items: items.map(item => ({
-                    description: item.description,
-                    quantity: item.quantityRequested,
+                    description: item.description || '',
+                    quantity: item.quantityRequested || 0,
                     value: item.invoiceItemValue || 0,
-                    weight: item.weight,
-                    weightUnit: item.weightUnit,
+                    weight: item.weight || null, // null ao invés de undefined
+                    weightUnit: item.weightUnit || 'kg',
                     hasPricing: !!(item.invoiceItemValue && item.invoiceItemValue > 0)
                 }))
             };
             
-            console.log('💾 Novo lançamento de custo:', requisitionCostEntry);
+            // LIMPAR DADOS antes de salvar no Firestore
+            const cleanedCostEntry = cleanFirestoreData(requisitionCostEntry);
+            
+            console.log('💾 Novo lançamento de custo (antes da limpeza):', requisitionCostEntry);
+            console.log('🧹 Novo lançamento de custo (após limpeza):', cleanedCostEntry);
+            
+            // Verificar se ainda há valores undefined
+            const hasUndefined = JSON.stringify(cleanedCostEntry).includes('undefined');
+            if (hasUndefined) {
+                console.error('❌ AINDA HÁ VALORES UNDEFINED após limpeza!');
+                console.error('Objeto problemático:', cleanedCostEntry);
+                throw new Error('Dados ainda contêm valores undefined após limpeza');
+            }
             
             // Primeiro, vamos tentar remover os lançamentos antigos usando arrayRemove
             if (oldEntriesForThisReq.length > 0) {
@@ -1216,8 +1256,10 @@ export default function CostsPage() {
                 // Remover lançamentos antigos um por um
                 for (const oldEntry of oldEntriesForThisReq) {
                     console.log(`🗑️ Removendo lançamento: ${oldEntry.id}`);
+                    // Limpar também o objeto a ser removido
+                    const cleanedOldEntry = cleanFirestoreData(oldEntry);
                     await updateDoc(orderRef, {
-                        costEntries: arrayRemove(oldEntry)
+                        costEntries: arrayRemove(cleanedOldEntry)
                     });
                 }
                 
@@ -1227,7 +1269,7 @@ export default function CostsPage() {
             // Adicionar o novo lançamento
             console.log('📝 Adicionando novo lançamento...');
             await updateDoc(orderRef, {
-                costEntries: arrayUnion(requisitionCostEntry)
+                costEntries: arrayUnion(cleanedCostEntry)
             });
             console.log('✅ Novo lançamento adicionado');
             
@@ -1267,16 +1309,19 @@ export default function CostsPage() {
                 isFromRequisition: true,
                 isPending: true,
                 items: items.map((item: any) => ({
-                    description: item.description,
-                    quantity: item.quantityRequested,
+                    description: item.description || '',
+                    quantity: item.quantityRequested || 0,
                     value: 0,
-                    weight: item.weight || null,
+                    weight: item.weight || null, // null ao invés de undefined
                     weightUnit: item.weightUnit || 'kg'
                 }))
             };
             
+            // Limpar dados antes de salvar
+            const cleanedEntry = cleanFirestoreData(initialCostEntry);
+            
             await updateDoc(orderRef, {
-                costEntries: arrayUnion(initialCostEntry)
+                costEntries: arrayUnion(cleanedEntry)
             });
             
         } catch (error) {
