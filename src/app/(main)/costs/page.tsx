@@ -1076,7 +1076,10 @@ export default function CostsPage() {
                     description: "Requisição não vinculada a uma OS." 
                 });
             }
-            setIsFormOpen(false);
+
+            // CORREÇÃO: NÃO fechar o modal nem mudar de aba automaticamente
+            // Deixar o usuário decidir quando sair da tela de precificação
+            // setIsFormOpen(false); // REMOVIDO
             
             // Forçar refresh de dados de forma mais robusta
             console.log('🔄 Atualizando interface após edição...');
@@ -1089,6 +1092,13 @@ export default function CostsPage() {
             await fetchOrders();
             
             console.log('✅ Interface atualizada');
+            
+            // MELHORIA: Mostrar toast com opção de continuar precificando ou voltar
+            toast({
+                title: "🎉 Item salvo com sucesso!",
+                description: "Você pode continuar precificando outros itens ou fechar esta janela quando terminar.",
+                duration: 7000
+            });
             
         } catch (error: any) {
             console.error("Error updating item:", error);
@@ -2638,12 +2648,62 @@ export default function CostsPage() {
       </div>
 
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="sm:max-w-3xl"> {/* Aumentado para acomodar mais informações */}
             <DialogHeader>
                 <DialogTitle>Atualizar Item de Requisição</DialogTitle>
                 <DialogDescription>
                     {selectedItem?.description}
                 </DialogDescription>
+                
+                {/* MELHORIA: Mostrar informações detalhadas do item para melhor identificação */}
+                <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                            <span className="font-semibold text-blue-800">📏 Dimensão:</span>
+                            <p className="font-medium">
+                                {(() => {
+                                    // Buscar dados completos do item na requisição original
+                                    const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
+                                    const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
+                                    return fullItem?.dimensao || 'Não especificada';
+                                })()}
+                            </p>
+                        </div>
+                        <div>
+                            <span className="font-semibold text-blue-800">🔧 Material:</span>
+                            <p className="font-medium">
+                                {(() => {
+                                    const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
+                                    const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
+                                    return fullItem?.material || 'Não especificado';
+                                })()}
+                            </p>
+                        </div>
+                        <div>
+                            <span className="font-semibold text-blue-800">📦 Código:</span>
+                            <p className="font-medium">
+                                {(() => {
+                                    const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
+                                    const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
+                                    return fullItem?.code || 'Não informado';
+                                })()}
+                            </p>
+                        </div>
+                    </div>
+                    
+                    {/* Mostrar quantidade solicitada */}
+                    <div className="mt-3 pt-3 border-t border-blue-200">
+                        <span className="font-semibold text-blue-800">📊 Quantidade Solicitada:</span>
+                        <span className="ml-2 font-bold text-blue-900">
+                            {selectedItem?.quantityRequested} {(() => {
+                                const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
+                                const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
+                                return fullItem?.unit || 'unidades';
+                            })()}
+                        </span>
+                    </div>
+                </div>
+                
                 <div className={`mt-3 p-3 rounded-lg border ${selectedItem?.weight ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
                     <div className="flex items-center gap-2">
                         <span className="font-semibold">⚖️ Peso do Material:</span>
@@ -2709,66 +2769,66 @@ export default function CostsPage() {
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                                            <FormField control={itemForm.control} name="weight" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel className="flex items-center gap-2">
-                                                ⚖️ Peso do Material
-                                                {!selectedItem?.weight && <span className="text-orange-500 text-xs">(Obrigatório)</span>}
-                                            </FormLabel>
-                                            <FormControl>
-                                                <Input 
-                                                    type="number" 
-                                                    step="0.001" 
-                                                    placeholder={selectedItem?.weight ? selectedItem.weight.toString() : "Ex: 15.5"} 
-                                                    {...field} 
-                                                    value={field.value ?? ''} 
-                                                    className={!selectedItem?.weight && !field.value ? 'border-orange-300 focus:border-orange-500' : ''}
-                                                />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}/>
-                                    <FormField control={itemForm.control} name="weightUnit" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Unidade</FormLabel>
-                                            <Select onValueChange={field.onChange} value={field.value || "kg"}>
-                                                <FormControl>
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="Unidade" />
-                                                    </SelectTrigger>
-                                                </FormControl>
-                                                <SelectContent>
-                                                    <SelectItem value="kg">kg (quilograma)</SelectItem>
-                                                    <SelectItem value="g">g (grama)</SelectItem>
-                                                    <SelectItem value="t">t (tonelada)</SelectItem>
-                                                    <SelectItem value="m">m (metro)</SelectItem>
-                                                    <SelectItem value="m²">m² (metro quadrado)</SelectItem>
-                                                    <SelectItem value="m³">m³ (metro cúbico)</SelectItem>
-                                                    <SelectItem value="l">l (litro)</SelectItem>
-                                                    <SelectItem value="un">un (unidade)</SelectItem>
-                                                    <SelectItem value="pç">pç (peça)</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                            <FormMessage />
-                                        </FormItem>
+                        <FormField control={itemForm.control} name="weight" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel className="flex items-center gap-2">
+                                    ⚖️ Peso do Material
+                                    {!selectedItem?.weight && <span className="text-orange-500 text-xs">(Obrigatório)</span>}
+                                </FormLabel>
+                                <FormControl>
+                                    <Input 
+                                        type="number" 
+                                        step="0.001" 
+                                        placeholder={selectedItem?.weight ? selectedItem.weight.toString() : "Ex: 15.5"} 
+                                        {...field} 
+                                        value={field.value ?? ''} 
+                                        className={!selectedItem?.weight && !field.value ? 'border-orange-300 focus:border-orange-500' : ''}
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}/>
+                        <FormField control={itemForm.control} name="weightUnit" render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Unidade</FormLabel>
+                                <Select onValueChange={field.onChange} value={field.value || "kg"}>
+                                    <FormControl>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Unidade" />
+                                        </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                        <SelectItem value="kg">kg (quilograma)</SelectItem>
+                                        <SelectItem value="g">g (grama)</SelectItem>
+                                        <SelectItem value="t">t (tonelada)</SelectItem>
+                                        <SelectItem value="m">m (metro)</SelectItem>
+                                        <SelectItem value="m²">m² (metro quadrado)</SelectItem>
+                                        <SelectItem value="m³">m³ (metro cúbico)</SelectItem>
+                                        <SelectItem value="l">l (litro)</SelectItem>
+                                        <SelectItem value="un">un (unidade)</SelectItem>
+                                        <SelectItem value="pç">pç (peça)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <FormMessage />
+                            </FormItem>
                         )}/>
                         <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel className="flex items-center gap-2">
-                                                💰 Valor do Item (R$)
-                                                {!selectedItem?.invoiceItemValue && <span className="text-blue-500 text-xs">(Para cálculo de custo)</span>}
-                                            </FormLabel>
-                                            <FormControl>
-                                                <Input 
-                                                    type="number" 
-                                                    step="0.01" 
-                                                    placeholder="0.00" 
-                                                    {...field} 
-                                                    value={field.value ?? ''} 
-                                                />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
+                            <FormItem>
+                                <FormLabel className="flex items-center gap-2">
+                                    💰 Valor do Item (R$)
+                                    {!selectedItem?.invoiceItemValue && <span className="text-blue-500 text-xs">(Para cálculo de custo)</span>}
+                                </FormLabel>
+                                <FormControl>
+                                    <Input 
+                                        type="number" 
+                                        step="0.01" 
+                                        placeholder="0.00" 
+                                        {...field} 
+                                        value={field.value ?? ''} 
+                                    />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
                         )}/>
                     </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
