@@ -1,4 +1,4 @@
-
+}"use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -1293,4 +1293,4 @@ return (
             </AlertDialog>
         </>
     );
-}"use client";
+
