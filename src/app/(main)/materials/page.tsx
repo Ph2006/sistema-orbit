@@ -1,4 +1,6 @@
+
 "use client";
+
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -205,7 +207,7 @@ const standaloneCuttingPlanSchema = z.object({
 type CuttingPlan = z.infer<typeof standaloneCuttingPlanSchema>;
 type CuttingPlanItem = z.infer<typeof cuttingPlanItemSchema>;
 
-type OrderInfo = { id: string; internalOS: string; customerName: string; customerId: string, deliveryDate?: Date; };
+type OrderInfo = { id: string; internalOS: string; customerName: string; customerId: string, deliveryDate?: Date; status?: string; };
 type TeamMember = { id: string; name: string };
 type CompanyData = {
     nomeFantasia?: string;
@@ -247,6 +249,7 @@ export default function MaterialsPage() {
     const [selectedCuttingPlan, setSelectedCuttingPlan] = useState<CuttingPlan | null>(null);
     const [cuttingPlanToDelete, setCuttingPlanToDelete] = useState<CuttingPlan | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+    const [searchOS, setSearchOS] = useState("");
     
     // New state for folder navigation
     const [selectedOrderFolder, setSelectedOrderFolder] = useState<string | null>(null);
@@ -281,6 +284,17 @@ export default function MaterialsPage() {
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: cuttingPlanForm.control, name: "items" });
     const watchedCutPlanOrderId = cuttingPlanForm.watch("orderId");
 
+    const filteredOrders = useMemo(() => {
+        if (!searchOS.trim()) return orders;
+        
+        const query = searchOS.toLowerCase();
+        return orders.filter(order => 
+            order.internalOS.toLowerCase().includes(query) ||
+            order.customerName.toLowerCase().includes(query) ||
+            (order.status && order.status.toLowerCase().includes(query))
+        );
+    }, [orders, searchOS]);
+
     const fetchRequisitions = useCallback(async () => {
         if (!user) return;
         setIsLoading(true);
@@ -296,7 +310,7 @@ export default function MaterialsPage() {
             const ordersDataList = ordersSnapshot.docs
               .map(doc => {
                   const data = doc.data();
-                  if (['Concluído', 'Cancelado'].includes(data.status) || !data.internalOS) return null;
+                  if (!data.internalOS) return null; // Remove o filtro de status, mantém apenas a verificação de internalOS
                   let deliveryDate: Date | undefined = undefined;
                     if (data.deliveryDate) {
                         if (typeof data.deliveryDate.toDate === 'function') {
@@ -305,7 +319,14 @@ export default function MaterialsPage() {
                             deliveryDate = new Date(data.deliveryDate);
                         }
                     }
-                  return { id: doc.id, internalOS: data.internalOS.toString(), customerName: data.customer?.name || data.customerName || 'N/A', customerId: data.customer?.id || data.customerId || '', deliveryDate: deliveryDate };
+                  return { 
+                      id: doc.id, 
+                      internalOS: data.internalOS.toString(), 
+                      customerName: data.customer?.name || data.customerName || 'N/A', 
+                      customerId: data.customer?.id || data.customerId || '', 
+                      deliveryDate: deliveryDate,
+                      status: data.status || 'N/A' // Adicionar status para exibição
+                  };
               }).filter((order): order is OrderInfo => order !== null);
             setOrders(ordersDataList);
 
@@ -319,19 +340,50 @@ export default function MaterialsPage() {
             
             const reqsList = reqsSnapshot.docs.map(d => {
                 const data = d.data();
+                
+                // Função para conversão segura de timestamps
+                const safeToDate = (timestamp: any): Date | null => {
+                    if (!timestamp) return null;
+                    if (timestamp instanceof Date) return timestamp;
+                    if (typeof timestamp.toDate === 'function') {
+                        try {
+                            return timestamp.toDate();
+                        } catch (error) {
+                            console.warn("Erro ao converter timestamp:", error);
+                            return null;
+                        }
+                    }
+                    if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+                        try {
+                            const date = new Date(timestamp);
+                            return isNaN(date.getTime()) ? null : date;
+                        } catch (error) {
+                            console.warn("Erro ao converter data:", error);
+                            return null;
+                        }
+                    }
+                    return null;
+                };
+                
                 return { 
                     ...data, 
                     id: d.id, 
-                    date: data.date.toDate(), 
+                    date: safeToDate(data.date) || new Date(), // Fallback para data atual se conversão falhar
                     customer: data.customer || undefined, 
-                    approval: data.approval ? { ...data.approval, approvalDate: data.approval.approvalDate?.toDate() || null, } : {}, 
+                    approval: data.approval ? { 
+                        ...data.approval, 
+                        approvalDate: safeToDate(data.approval.approvalDate) || null,
+                    } : {}, 
                     items: (data.items || []).map((item: any, index: number) => ({ 
                         id: item.id || `${d.id}-${index}`, 
                         ...item, 
-                        deliveryDate: item.deliveryDate?.toDate() || null,
-                        deliveryReceiptDate: item.deliveryReceiptDate?.toDate() || null
+                        deliveryDate: safeToDate(item.deliveryDate) || null,
+                        deliveryReceiptDate: safeToDate(item.deliveryReceiptDate) || null
                     })), 
-                    history: (data.history || []).map((h: any) => ({...h, timestamp: h.timestamp.toDate()})), 
+                    history: (data.history || []).map((h: any) => ({
+                        ...h, 
+                        timestamp: safeToDate(h.timestamp) || new Date()
+                    })), 
                 } as Requisition;
             });
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
@@ -361,6 +413,13 @@ export default function MaterialsPage() {
     useEffect(() => {
         setSearchQuery("");
     }, [activeTab, selectedOrderFolder]);
+
+    // Clear OS search when requisition form closes
+    useEffect(() => {
+        if (!isRequisitionFormOpen) {
+            setSearchOS("");
+        }
+    }, [isRequisitionFormOpen]);
     
     // Corrected useEffect for customer linking
     useEffect(() => {
@@ -1145,7 +1204,42 @@ return (
                                         <FormField control={requisitionForm.control} name="status" render={({ field }) => ( <FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent>{RequisitionStatus.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
                                         <FormField control={requisitionForm.control} name="requestedBy" render={({ field }) => ( <FormItem><FormLabel>Responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um responsável"/></SelectTrigger></FormControl><SelectContent>{team.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
                                         <FormField control={requisitionForm.control} name="department" render={({ field }) => ( <FormItem><FormLabel>Departamento</FormLabel><FormControl><Input placeholder="Ex: Produção" {...field} value={field.value ?? ''} /></FormControl><FormMessage/></FormItem> )} />
-                                        <FormField control={requisitionForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>OS Vinculada</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS"/></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                                        <FormField control={requisitionForm.control} name="orderId" render={({ field }) => ( 
+                                            <FormItem>
+                                                <FormLabel>OS Vinculada</FormLabel>
+                                                <div className="space-y-2">
+                                                    <div className="relative">
+                                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                                        <Input
+                                                            placeholder="Buscar OS..."
+                                                            value={searchOS}
+                                                            onChange={(e) => setSearchOS(e.target.value)}
+                                                            className="pl-9"
+                                                        />
+                                                    </div>
+                                                    <Select onValueChange={field.onChange} value={field.value}>
+                                                        <FormControl>
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder="Selecione uma OS"/>
+                                                            </SelectTrigger>
+                                                        </FormControl>
+                                                        <SelectContent className="max-h-60">
+                                                            {filteredOrders.map(o => (
+                                                                <SelectItem key={o.id} value={o.id}>
+                                                                    <div className="flex flex-col">
+                                                                        <span>OS: {o.internalOS}</span>
+                                                                        <span className="text-xs text-muted-foreground">
+                                                                            {o.customerName} • Status: {o.status}
+                                                                        </span>
+                                                                    </div>
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <FormMessage />
+                                            </FormItem> 
+                                        )}/>
                                          <FormItem><FormLabel>Cliente Vinculado</FormLabel><Input value={requisitionForm.watch('customer.name') || 'Selecione uma OS'} disabled /></FormItem>
                                     </CardContent>
                                   </Card>
