@@ -36,6 +36,81 @@ import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/comp
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 
+// Função utilitária para limpar dados do Firestore
+const cleanFirestoreData = (obj: any): any => {
+    if (obj === null || obj === undefined) {
+        return null;
+    }
+    
+    if (typeof obj !== 'object') {
+        return obj;
+    }
+    
+    if (Array.isArray(obj)) {
+        return obj.map(cleanFirestoreData).filter(item => item !== null && item !== undefined);
+    }
+    
+    const cleaned: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined) {
+            const cleanedValue = cleanFirestoreData(value);
+            if (cleanedValue !== undefined) {
+                cleaned[key] = cleanedValue;
+            }
+        }
+    }
+    return cleaned;
+};
+
+// Função para preparar um item da requisição para o Firestore
+const prepareRequisitionItem = (item: RequisitionItem): any => {
+    const cleanItem: any = {
+        id: item.id,
+        description: item.description,
+        quantityRequested: Number(item.quantityRequested) || 0,
+        unit: item.unit,
+        status: item.status || "Pendente",
+        quantityFulfilled: Number(item.quantityFulfilled) || 0,
+        inspectionStatus: item.inspectionStatus || "Pendente"
+    };
+    
+    // Adicionar campos opcionais apenas se tiverem valores válidos
+    if (item.code && item.code.trim()) cleanItem.code = item.code.trim();
+    if (item.material && item.material.trim()) cleanItem.material = item.material.trim();
+    if (item.dimensao && item.dimensao.trim()) cleanItem.dimensao = item.dimensao.trim();
+    if (item.notes && item.notes.trim()) cleanItem.notes = item.notes.trim();
+    
+    // Campos numéricos
+    if (item.pesoUnitario !== undefined && item.pesoUnitario !== null && !isNaN(Number(item.pesoUnitario))) {
+        cleanItem.pesoUnitario = Number(item.pesoUnitario);
+    }
+    if (item.invoiceItemValue !== undefined && item.invoiceItemValue !== null && !isNaN(Number(item.invoiceItemValue))) {
+        cleanItem.invoiceItemValue = Number(item.invoiceItemValue);
+    }
+    
+    // Campos de data
+    if (item.deliveryDate && item.deliveryDate instanceof Date) {
+        cleanItem.deliveryDate = Timestamp.fromDate(item.deliveryDate);
+    }
+    if (item.deliveryReceiptDate && item.deliveryReceiptDate instanceof Date) {
+        cleanItem.deliveryReceiptDate = Timestamp.fromDate(item.deliveryReceiptDate);
+    }
+    
+    // Campos do centro de custos
+    if (item.supplierName && item.supplierName.trim()) cleanItem.supplierName = item.supplierName.trim();
+    if (item.invoiceNumber && item.invoiceNumber.trim()) cleanItem.invoiceNumber = item.invoiceNumber.trim();
+    if (item.certificateNumber && item.certificateNumber.trim()) cleanItem.certificateNumber = item.certificateNumber.trim();
+    if (item.storageLocation && item.storageLocation.trim()) cleanItem.storageLocation = item.storageLocation.trim();
+    
+    // Campos adicionais que podem existir
+    if (item.weight !== undefined && item.weight !== null && !isNaN(Number(item.weight))) {
+        cleanItem.weight = Number(item.weight);
+    }
+    if (item.weightUnit && item.weightUnit.trim()) cleanItem.weightUnit = item.weightUnit.trim();
+    
+    return cleanItem;
+};
+
 // Schemas & Constants
 const itemStatuses = ["Pendente", "Estoque", "Recebido (Aguardando Inspeção)", "Inspecionado e Aprovado", "Inspecionado e Rejeitado"] as const;
 const inspectionStatuses = ["Pendente", "Aprovado", "Aprovado com ressalvas", "Rejeitado"] as const;
@@ -372,7 +447,7 @@ export default function MaterialsPage() {
             };
             const finalHistory = [...(data.history || []), newHistoryEntry];
             
-            // CORREÇÃO: Preservar dados existentes dos itens (especialmente peso e dados de precificação)
+            // Preservar dados existentes dos itens (especialmente peso e dados de precificação)
             let mergedItems = data.items;
             
             if (selectedRequisition) {
@@ -385,12 +460,12 @@ export default function MaterialsPage() {
                             // Preservar campos importantes que podem ter sido preenchidos em costs/page.tsx
                             return {
                                 ...editedItem,
-                                // Preservar dados de precificação e recebimento
-                                weight: existingItem.weight || editedItem.weight,
+                                // Preservar dados de precificação e recebimento se já existirem
+                                weight: existingItem.weight !== undefined ? existingItem.weight : editedItem.weight,
                                 weightUnit: existingItem.weightUnit || editedItem.weightUnit,
                                 supplierName: existingItem.supplierName || editedItem.supplierName,
                                 invoiceNumber: existingItem.invoiceNumber || editedItem.invoiceNumber,
-                                invoiceItemValue: existingItem.invoiceItemValue || editedItem.invoiceItemValue,
+                                invoiceItemValue: existingItem.invoiceItemValue !== undefined ? existingItem.invoiceItemValue : editedItem.invoiceItemValue,
                                 certificateNumber: existingItem.certificateNumber || editedItem.certificateNumber,
                                 storageLocation: existingItem.storageLocation || editedItem.storageLocation,
                                 deliveryReceiptDate: existingItem.deliveryReceiptDate || editedItem.deliveryReceiptDate,
@@ -402,91 +477,30 @@ export default function MaterialsPage() {
                 }
             }
             
-            // More aggressive cleanup function
-            const cleanFirestoreData = (obj: any): any => {
-                if (obj === null) {
-                    return null;
-                }
-                
-                if (obj === undefined) {
-                    return null; // Convert undefined to null
-                }
-                
-                if (typeof obj !== 'object') {
-                    return obj;
-                }
-                
-                if (Array.isArray(obj)) {
-                    return obj.map(cleanFirestoreData).filter(item => item !== undefined);
-                }
-                
-                const cleaned: any = {};
-                for (const [key, value] of Object.entries(obj)) {
-                    const cleanedValue = cleanFirestoreData(value);
-                    if (cleanedValue !== undefined) {
-                        cleaned[key] = cleanedValue;
-                    }
-                }
-                return cleaned;
-            };
-            
-            // Prepare base data with explicit null handling
-            const baseData = {
+            // Preparar dados base
+            const baseData: any = {
                 date: Timestamp.fromDate(data.date),
                 status: data.status,
-                requestedBy: data.requestedBy || null,
-                department: data.department || null,
-                orderId: data.orderId || null,
-                generalNotes: data.generalNotes || null,
+                requestedBy: data.requestedBy,
                 history: finalHistory.map(h => ({ 
-                    ...h, 
                     timestamp: Timestamp.fromDate(h.timestamp),
                     user: h.user || "Sistema",
                     action: h.action || "Ação",
                     details: h.details || null
                 })),
-                items: mergedItems.map(item => {
-                    const cleanItem: any = {
-                        id: item.id,
-                        description: item.description,
-                        quantityRequested: Number(item.quantityRequested) || 0,
-                        unit: item.unit,
-                        status: item.status || "Pendente",
-                        quantityFulfilled: Number(item.quantityFulfilled) || 0,
-                        inspectionStatus: item.inspectionStatus || "Pendente"
-                    };
-                    
-                    // Only add optional fields if they have values
-                    if (item.code) cleanItem.code = item.code;
-                    if (item.material) cleanItem.material = item.material;
-                    if (item.dimensao) cleanItem.dimensao = item.dimensao;
-                    if (item.pesoUnitario !== undefined && item.pesoUnitario !== null) {
-                        cleanItem.pesoUnitario = Number(item.pesoUnitario) || 0;
-                    }
-                    if (item.notes) cleanItem.notes = item.notes;
-                    if (item.deliveryDate) {
-                        cleanItem.deliveryDate = Timestamp.fromDate(new Date(item.deliveryDate));
-                    }
-                    if (item.deliveryReceiptDate) {
-                        cleanItem.deliveryReceiptDate = Timestamp.fromDate(new Date(item.deliveryReceiptDate));
-                    }
-                    
-                    // Preserve existing fields for cost center
-                    if (item.supplierName) cleanItem.supplierName = item.supplierName;
-                    if (item.invoiceNumber) cleanItem.invoiceNumber = item.invoiceNumber;
-                    if (item.invoiceItemValue !== undefined && item.invoiceItemValue !== null) {
-                        cleanItem.invoiceItemValue = Number(item.invoiceItemValue) || 0;
-                    }
-                    if (item.certificateNumber) cleanItem.certificateNumber = item.certificateNumber;
-                    if (item.storageLocation) cleanItem.storageLocation = item.storageLocation;
-                    if (item.weight !== undefined && item.weight !== null) {
-                        cleanItem.weight = Number(item.weight) || 0;
-                    }
-                    if (item.weightUnit) cleanItem.weightUnit = item.weightUnit;
-                    
-                    return cleanItem;
-                })
+                items: mergedItems.map(item => prepareRequisitionItem(item))
             };
+            
+            // Adicionar campos opcionais apenas se tiverem valores
+            if (data.department && data.department.trim()) {
+                baseData.department = data.department.trim();
+            }
+            if (data.orderId && data.orderId.trim()) {
+                baseData.orderId = data.orderId.trim();
+            }
+            if (data.generalNotes && data.generalNotes.trim()) {
+                baseData.generalNotes = data.generalNotes.trim();
+            }
             
             // Handle customer field
             if (data.customer && data.customer.id && data.customer.name) {
@@ -497,51 +511,21 @@ export default function MaterialsPage() {
             }
             
             // Handle approval field
-            if (data.approval && data.approval.approvedBy) {
+            if (data.approval && data.approval.approvedBy && data.approval.approvedBy.trim()) {
                 baseData.approval = {
-                    approvedBy: data.approval.approvedBy,
+                    approvedBy: data.approval.approvedBy.trim(),
                     approvalDate: data.approval.approvalDate ? Timestamp.fromDate(new Date(data.approval.approvalDate)) : null,
-                    justification: data.approval.justification || null
+                    justification: (data.approval.justification && data.approval.justification.trim()) ? data.approval.justification.trim() : null
                 };
             }
             
-            // Final cleanup
+            // Limpeza final para remover qualquer undefined restante
             const finalData = cleanFirestoreData(baseData);
             
             // Debug logging
             console.log("Final data being sent to Firestore:", JSON.stringify(finalData, null, 2));
             
-            // Check for any remaining undefined values
-            const checkForUndefined = (obj: any, path: string = ''): string[] => {
-                const undefinedPaths: string[] = [];
-                
-                if (obj === undefined) {
-                    undefinedPaths.push(path);
-                    return undefinedPaths;
-                }
-                
-                if (typeof obj === 'object' && obj !== null) {
-                    if (Array.isArray(obj)) {
-                        obj.forEach((item, index) => {
-                            undefinedPaths.push(...checkForUndefined(item, `${path}[${index}]`));
-                        });
-                    } else {
-                        Object.entries(obj).forEach(([key, value]) => {
-                            undefinedPaths.push(...checkForUndefined(value, path ? `${path}.${key}` : key));
-                        });
-                    }
-                }
-                
-                return undefinedPaths;
-            };
-            
-            const undefinedPaths = checkForUndefined(finalData);
-            if (undefinedPaths.length > 0) {
-                console.error("Found undefined values at paths:", undefinedPaths);
-                throw new Error(`Found undefined values at: ${undefinedPaths.join(', ')}`);
-            }
-            
-            if (selectedRequisition) {
+            if (selectedRequisition && selectedRequisition.id) {
                 await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", selectedRequisition.id), finalData);
             } else {
                 const reqNumbers = requisitions.map(r => parseInt(r.requisitionNumber || "0", 10)).filter(n => !isNaN(n));
@@ -561,39 +545,35 @@ export default function MaterialsPage() {
 
     const onCuttingPlanSubmit = async (data: CuttingPlan) => {
         try {
-            // Helper function to recursively remove undefined values
-            const cleanFirestoreData = (obj: any): any => {
-                if (obj === null) {
-                    return null;
-                }
-                
-                if (obj === undefined) {
-                    return null; // Convert undefined to null
-                }
-                
-                if (typeof obj !== 'object') {
-                    return obj;
-                }
-                
-                if (Array.isArray(obj)) {
-                    return obj.map(cleanFirestoreData).filter(item => item !== undefined);
-                }
-                
-                const cleaned: any = {};
-                for (const [key, value] of Object.entries(obj)) {
-                    const cleanedValue = cleanFirestoreData(value);
-                    if (cleanedValue !== undefined) {
-                        cleaned[key] = cleanedValue;
-                    }
-                }
-                return cleaned;
-            };
-
             const dataToSave: any = { 
-                ...data, 
-                createdAt: Timestamp.fromDate(data.createdAt), 
-                deliveryDate: data.deliveryDate ? Timestamp.fromDate(new Date(data.deliveryDate)) : null 
+                createdAt: Timestamp.fromDate(data.createdAt),
+                stockLength: Number(data.stockLength),
+                kerf: Number(data.kerf),
+                items: data.items.map(item => ({
+                    id: item.id,
+                    description: item.description,
+                    length: Number(item.length),
+                    quantity: Number(item.quantity),
+                    ...(item.code && item.code.trim() && { code: item.code.trim() })
+                }))
             };
+            
+            // Adicionar campos opcionais apenas se tiverem valores
+            if (data.materialDescription && data.materialDescription.trim()) {
+                dataToSave.materialDescription = data.materialDescription.trim();
+            }
+            if (data.orderId && data.orderId.trim()) {
+                dataToSave.orderId = data.orderId.trim();
+            }
+            if (data.deliveryDate) {
+                dataToSave.deliveryDate = Timestamp.fromDate(new Date(data.deliveryDate));
+            }
+            if (data.patterns) {
+                dataToSave.patterns = data.patterns;
+            }
+            if (data.summary) {
+                dataToSave.summary = data.summary;
+            }
             
             // Handle customer field properly
             if (data.customer && data.customer.id && data.customer.name) {
@@ -601,14 +581,12 @@ export default function MaterialsPage() {
                     id: data.customer.id,
                     name: data.customer.name
                 };
-            } else {
-                delete dataToSave.customer;
             }
             
-            // Remove all undefined fields recursively
+            // Limpeza final
             const cleanedDataToSave = cleanFirestoreData(dataToSave);
             
-            if (selectedCuttingPlan) {
+            if (selectedCuttingPlan && selectedCuttingPlan.id) {
                 await updateDoc(doc(db, "companies", "mecald", "cuttingPlans", selectedCuttingPlan.id), cleanedDataToSave);
             } else {
                 const planNumbers = cuttingPlansList.map(p => parseInt(p.planNumber || "0", 10)).filter(n => !isNaN(n));
