@@ -1485,9 +1485,79 @@ return (
                                     </Card>
                                     {reqItems.length > 0 && (
                                         <Card><CardHeader><CardTitle>Itens Adicionados</CardTitle></CardHeader>
-                                            <CardContent><Table><TableHeader><TableRow><TableHead>Descrição</TableHead><TableHead>Qtd.</TableHead><TableHead>Unid.</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
-                                                    <TableBody>{reqItems.map((item, index) => ( <TableRow key={item.id} className={cn(editItemIndex === index && "bg-secondary")}><TableCell className="font-medium">{item.description}</TableCell><TableCell>{item.quantityRequested}</TableCell><TableCell>{item.unit}</TableCell><TableCell>{item.status}</TableCell><TableCell className="text-right"><Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}><Pencil className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => removeReqItem(index)}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow> ))}</TableBody>
-                                                </Table></CardContent>
+                                            <CardContent>
+                                                <div className="overflow-x-auto">
+                                                    <Table>
+                                                        <TableHeader>
+                                                            <TableRow>
+                                                                <TableHead>Descrição</TableHead>
+                                                                <TableHead>Dimensão</TableHead>
+                                                                <TableHead>Qtd.</TableHead>
+                                                                <TableHead>Unid.</TableHead>
+                                                                <TableHead>Peso Unit. (kg)</TableHead>
+                                                                <TableHead>Entrega Prev.</TableHead>
+                                                                <TableHead>Status</TableHead>
+                                                                <TableHead className="text-right">Ações</TableHead>
+                                                            </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                            {reqItems.map((item, index) => ( 
+                                                                <TableRow key={item.id} className={cn(editItemIndex === index && "bg-secondary")}>
+                                                                    <TableCell className="font-medium">{item.description}</TableCell>
+                                                                    <TableCell>{item.dimensao || '-'}</TableCell>
+                                                                    <TableCell>{item.quantityRequested}</TableCell>
+                                                                    <TableCell>{item.unit}</TableCell>
+                                                                    <TableCell>{item.pesoUnitario ? item.pesoUnitario.toFixed(2) : '-'}</TableCell>
+                                                                    <TableCell>
+                                                                        {(() => {
+                                                                            if (!item.deliveryDate) return '-';
+                                                                            try {
+                                                                                // Se for um Timestamp do Firestore
+                                                                                if (item.deliveryDate && typeof item.deliveryDate.toDate === 'function') {
+                                                                                    return format(item.deliveryDate.toDate(), 'dd/MM/yyyy');
+                                                                                }
+                                                                                // Se for uma string ou número
+                                                                                if (typeof item.deliveryDate === 'string' || typeof item.deliveryDate === 'number') {
+                                                                                    const parsedDate = new Date(item.deliveryDate);
+                                                                                    if (!isNaN(parsedDate.getTime())) {
+                                                                                        return format(parsedDate, 'dd/MM/yyyy');
+                                                                                    }
+                                                                                }
+                                                                                // Se já for um objeto Date
+                                                                                if (item.deliveryDate instanceof Date && !isNaN(item.deliveryDate.getTime())) {
+                                                                                    return format(item.deliveryDate, 'dd/MM/yyyy');
+                                                                                }
+                                                                                return '-';
+                                                                            } catch (error) {
+                                                                                console.warn('Erro ao formatar data de entrega do item na tabela:', error);
+                                                                                return '-';
+                                                                            }
+                                                                        })()}
+                                                                    </TableCell>
+                                                                    <TableCell>
+                                                                        <Badge variant={
+                                                                            item.status === 'Pendente' ? 'secondary' :
+                                                                            item.status === 'Estoque' ? 'outline' :
+                                                                            item.status === 'Inspecionado e Aprovado' ? 'default' :
+                                                                            'outline'
+                                                                        }>
+                                                                            {item.status}
+                                                                        </Badge>
+                                                                    </TableCell>
+                                                                    <TableCell className="text-right">
+                                                                        <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(index)}>
+                                                                            <Pencil className="h-4 w-4" />
+                                                                        </Button>
+                                                                        <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => removeReqItem(index)}>
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                        </Button>
+                                                                    </TableCell>
+                                                                </TableRow> 
+                                                            ))}
+                                                        </TableBody>
+                                                    </Table>
+                                                </div>
+                                            </CardContent>
                                         </Card>
                                     )}
                                 </TabsContent>
