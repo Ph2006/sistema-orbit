@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, ArrowUp, ArrowDown, Clock, CalendarIcon, Download, FileText } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -289,6 +289,10 @@ export default function ProductsPage() {
   
   const [isDeleteStageDialogOpen, setIsDeleteStageDialogOpen] = useState(false);
   const [stageToDeleteConfirmation, setStageToDeleteConfirmation] = useState<string | null>(null);
+
+  // Estados para drag and drop
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null);
 
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
@@ -618,23 +622,99 @@ export default function ProductsPage() {
     setIsCopyPopoverOpen(false);
   };
 
-  const handleMoveStage = async (index: number, direction: 'up' | 'down') => {
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === manufacturingStages.length - 1) return;
+  // Funções de drag and drop para reordenar etapas
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.currentTarget.outerHTML);
+    
+    // Efeito visual sutil
+    setTimeout(() => {
+      if (e.currentTarget) {
+        e.currentTarget.style.opacity = '0.5';
+      }
+    }, 0);
+  }, []);
+
+  const handleDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget) {
+      e.currentTarget.style.opacity = '';
+    }
+    setDraggedIndex(null);
+    setDraggedOverIndex(null);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    
+    if (draggedIndex === null || draggedIndex === dropIndex) return;
 
     const newStages = [...manufacturingStages];
-    const newIndex = direction === 'up' ? index - 1 : index + 1;
-    const [movedItem] = newStages.splice(index, 1);
-    newStages.splice(newIndex, 0, movedItem);
-
+    const draggedItem = newStages[draggedIndex];
+    
+    // Remove o item da posição original
+    newStages.splice(draggedIndex, 1);
+    
+    // Insere na nova posição
+    const insertIndex = draggedIndex < dropIndex ? dropIndex - 1 : dropIndex;
+    newStages.splice(insertIndex, 0, draggedItem);
+    
     try {
-        await updateDoc(stagesDocRef, { stages: newStages });
-        toast({ title: "Ordem das etapas atualizada!" });
-        await fetchStages(); 
+      // Atualiza no Firebase
+      await updateDoc(stagesDocRef, { stages: newStages });
+      toast({ title: "Ordem das etapas atualizada!" });
+      await fetchStages(); 
     } catch (error) {
-        console.error("Error moving stage:", error);
-        toast({ variant: "destructive", title: "Erro ao mover etapa" });
+      console.error("Error reordering stages:", error);
+      toast({ variant: "destructive", title: "Erro ao reordenar etapas" });
     }
+  }, [draggedIndex, manufacturingStages, stagesDocRef, fetchStages, toast]);
+
+  // Componente de item de etapa arrastável
+  const DraggableStageItem = ({ stage, index, onEdit, onDelete, isDragging }: {
+    stage: string;
+    index: number;
+    onEdit: (stage: string, index: number) => void;
+    onDelete: (stage: string) => void;
+    isDragging: boolean;
+  }) => {
+    return (
+      <div
+        draggable
+        onDragStart={(e) => handleDragStart(e, index)}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDrop={(e) => handleDrop(e, index)}
+        className={`flex items-center justify-between rounded-md border p-3 cursor-move transition-all duration-200 ${
+          isDragging 
+            ? 'opacity-50 scale-95 border-primary bg-primary/5' 
+            : 'hover:border-primary/50 hover:shadow-sm'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing" />
+          <span className="font-medium">{stage}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" onClick={() => onEdit(stage, index)}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-destructive hover:text-destructive" 
+            onClick={() => onDelete(stage)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   const handleEditStageClick = (stageName: string, index: number) => {
@@ -1232,7 +1312,8 @@ export default function ProductsPage() {
                     <CardHeader>
                         <CardTitle>Etapas de Fabricação</CardTitle>
                         <CardDescription>
-                            Cadastre e gerencie as etapas do seu processo produtivo. Elas serão usadas para calcular o lead time dos produtos.
+                            Cadastre e gerencie as etapas do seu processo produtivo. 
+                            <strong> Arraste e solte para reordenar rapidamente.</strong>
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
@@ -1241,44 +1322,66 @@ export default function ProductsPage() {
                                 placeholder="Nome da nova etapa (ex: Solda, Pintura)"
                                 value={newStageName}
                                 onChange={(e) => setNewStageName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddStage()}
                             />
                             <Button onClick={handleAddStage}>
                                 <PlusCircle className="mr-2 h-4 w-4" />
                                 Adicionar Etapa
                             </Button>
                         </div>
+                        
                         <Separator />
+                        
                         {isLoadingStages ? (
                             <Skeleton className="h-24 w-full" />
                         ) : (
                             <div>
-                                <h3 className="text-sm font-medium text-muted-foreground mb-4">ETAPAS CADASTRADAS</h3>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-sm font-medium text-muted-foreground">
+                                        ETAPAS CADASTRADAS ({manufacturingStages.length})
+                                    </h3>
+                                    {manufacturingStages.length > 1 && (
+                                        <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                            <GripVertical className="h-3 w-3" />
+                                            Arraste para reordenar
+                                        </div>
+                                    )}
+                                </div>
+                                
                                 {manufacturingStages.length > 0 ? (
                                     <div className="space-y-2">
-                                    {manufacturingStages.map((stage, index) => (
-                                        <div key={stage} className="flex items-center justify-between rounded-md border p-3">
-                                            <p className="font-medium">{stage}</p>
-                                            <div className="flex items-center gap-1">
-                                                <Button variant="ghost" size="icon" onClick={() => handleMoveStage(index, 'up')} disabled={index === 0}>
-                                                    <ArrowUp className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" onClick={() => handleMoveStage(index, 'down')} disabled={index === manufacturingStages.length - 1}>
-                                                    <ArrowDown className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" onClick={() => handleEditStageClick(stage, index)}>
-                                                    <Pencil className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteStageClick(stage)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    ))}
-
+                                        {manufacturingStages.map((stage, index) => (
+                                            <DraggableStageItem
+                                                key={`${stage}-${index}`}
+                                                stage={stage}
+                                                index={index}
+                                                onEdit={handleEditStageClick}
+                                                onDelete={handleDeleteStageClick}
+                                                isDragging={draggedIndex === index}
+                                            />
+                                        ))}
                                     </div>
                                 ) : (
-                                    <p className="text-center text-muted-foreground py-4">Nenhuma etapa cadastrada.</p>
+                                    <div className="text-center py-8 text-muted-foreground">
+                                        <div className="mb-2 text-2xl">📋</div>
+                                        <p className="font-medium">Nenhuma etapa cadastrada</p>
+                                        <p className="text-sm">Adicione a primeira etapa acima</p>
+                                    </div>
                                 )}
+                            </div>
+                        )}
+                        
+                        {/* Dicas de uso */}
+                        {manufacturingStages.length > 1 && (
+                            <div className="bg-muted/30 rounded-lg p-4 text-sm border">
+                                <div className="font-medium mb-2 flex items-center gap-2">
+                                    💡 Dicas de uso
+                                </div>
+                                <ul className="space-y-1 text-muted-foreground text-xs">
+                                    <li>• <strong>Arrastar:</strong> Clique e arraste usando o ícone ⋮⋮ para reordenar</li>
+                                    <li>• <strong>Lead time:</strong> A ordem das etapas afeta o cálculo do tempo total</li>
+                                    <li>• <strong>Salvamento:</strong> Mudanças são salvas automaticamente no Firebase</li>
+                                </ul>
                             </div>
                         )}
                     </CardContent>
