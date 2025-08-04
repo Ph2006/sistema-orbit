@@ -527,6 +527,7 @@ export default function OrdersPage() {
     // Estados para controlar posição do scroll no Kanban
     const [kanbanScrollPosition, setKanbanScrollPosition] = useState(0);
     const kanbanScrollRef = useRef<HTMLDivElement>(null);
+    const [shouldRestoreScroll, setShouldRestoreScroll] = useState(false);
 
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
@@ -748,6 +749,14 @@ export default function OrdersPage() {
         }
     }, [user, authLoading]);
 
+    // Efeito para limpar estados quando mudar de modo de visualização
+    useEffect(() => {
+        if (viewMode !== 'kanban') {
+            setKanbanScrollPosition(0);
+            setShouldRestoreScroll(false);
+        }
+    }, [viewMode]);
+
     // Debug dos componentes para verificar se estão carregados corretamente
     useEffect(() => {
         console.log('🔍 Verificando componentes:', {
@@ -831,7 +840,10 @@ export default function OrdersPage() {
     const handleViewOrder = (order: Order) => {
         // Capturar posição atual do scroll antes de abrir o modal
         if (viewMode === 'kanban' && kanbanScrollRef.current) {
-            setKanbanScrollPosition(kanbanScrollRef.current.scrollLeft);
+            const currentScrollPosition = kanbanScrollRef.current.scrollLeft;
+            console.log('🔄 Capturando posição do scroll:', currentScrollPosition);
+            setKanbanScrollPosition(currentScrollPosition);
+            setShouldRestoreScroll(true);
         }
         
         setSelectedOrder(order);
@@ -1164,16 +1176,58 @@ export default function OrdersPage() {
         
         // Efeito para restaurar posição do scroll após renderização
         useEffect(() => {
-            if (kanbanScrollRef.current && kanbanScrollPosition > 0) {
-                const timer = setTimeout(() => {
+            if (kanbanScrollRef.current && shouldRestoreScroll && kanbanScrollPosition > 0) {
+                console.log('🔄 Tentando restaurar scroll para posição:', kanbanScrollPosition);
+                
+                // Função para restaurar o scroll
+                const restoreScroll = () => {
                     if (kanbanScrollRef.current) {
                         kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
+                        console.log('✅ Scroll restaurado para:', kanbanScrollRef.current.scrollLeft);
+                        setShouldRestoreScroll(false);
                     }
-                }, 100); // Pequeno delay para garantir que o DOM foi renderizado
+                };
                 
-                return () => clearTimeout(timer);
+                // Tentar restaurar imediatamente
+                restoreScroll();
+                
+                // Backup: tentar novamente após um breve delay
+                const timer1 = setTimeout(restoreScroll, 50);
+                const timer2 = setTimeout(restoreScroll, 150);
+                const timer3 = setTimeout(restoreScroll, 300);
+                
+                return () => {
+                    clearTimeout(timer1);
+                    clearTimeout(timer2);
+                    clearTimeout(timer3);
+                };
             }
-        }, [kanbanScrollPosition]);
+        }, [kanbanScrollPosition, shouldRestoreScroll]);
+
+        // Efeito para restaurar scroll quando o modal fecha
+        useEffect(() => {
+            if (!isSheetOpen && viewMode === 'kanban' && shouldRestoreScroll && kanbanScrollRef.current) {
+                console.log('🔄 Modal fechado, restaurando scroll...');
+                const restoreScroll = () => {
+                    if (kanbanScrollRef.current) {
+                        kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
+                        console.log('✅ Scroll restaurado após fechar modal:', kanbanScrollRef.current.scrollLeft);
+                        setShouldRestoreScroll(false);
+                    }
+                };
+                
+                // Restaurar com múltiplas tentativas
+                const timer1 = setTimeout(restoreScroll, 100);
+                const timer2 = setTimeout(restoreScroll, 250);
+                const timer3 = setTimeout(restoreScroll, 500);
+                
+                return () => {
+                    clearTimeout(timer1);
+                    clearTimeout(timer2);
+                    clearTimeout(timer3);
+                };
+            }
+        }, [isSheetOpen, viewMode, kanbanScrollPosition, shouldRestoreScroll]);
         
         if (totalOrdersToShow === 0) {
             return (
@@ -4044,10 +4098,8 @@ export default function OrdersPage() {
     setIsEditing(false); 
     setSelectedItems(new Set()); 
     setProgressClipboard(null);
-    // Resetar posição do scroll quando não estiver mais no modo kanban
-    if (viewMode !== 'kanban') {
-      setKanbanScrollPosition(0);
-    }
+    // Não resetar a posição imediatamente quando fechar o modal
+    // O useEffect cuidará da restauração
   } 
 }}>
   <SheetContent className="w-full sm:max-w-4xl flex flex-col h-full">
