@@ -525,10 +525,8 @@ export default function OrdersPage() {
     const [calendarDate, setCalendarDate] = useState(new Date());
 
     // Estados para controlar posição do scroll no Kanban
-    const [kanbanScrollPosition, setKanbanScrollPosition] = useState(0);
     const kanbanScrollRef = useRef<HTMLDivElement>(null);
-    const [shouldRestoreScroll, setShouldRestoreScroll] = useState(false);
-    const [preventScrollReset, setPreventScrollReset] = useState(false);
+    const scrollPositionRef = useRef<number>(0);
 
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
@@ -753,9 +751,8 @@ export default function OrdersPage() {
     // Efeito para limpar estados quando mudar de modo de visualização
     useEffect(() => {
         if (viewMode !== 'kanban') {
-            setKanbanScrollPosition(0);
-            setShouldRestoreScroll(false);
-            setPreventScrollReset(false);
+            scrollPositionRef.current = 0;
+            sessionStorage.removeItem('kanbanScrollPosition');
         }
     }, [viewMode]);
 
@@ -840,17 +837,13 @@ export default function OrdersPage() {
     };
 
     const handleViewOrder = (order: Order) => {
-        // Capturar posição atual do scroll antes de abrir o modal
+        // Salvar posição atual do scroll
         if (viewMode === 'kanban' && kanbanScrollRef.current) {
-            const currentScrollPosition = kanbanScrollRef.current.scrollLeft;
-            console.log('🔄 Capturando posição do scroll:', currentScrollPosition);
-            setKanbanScrollPosition(currentScrollPosition);
-            setPreventScrollReset(true);
+            scrollPositionRef.current = kanbanScrollRef.current.scrollLeft;
+            console.log('💾 Salvando posição do scroll:', scrollPositionRef.current);
             
-            // Bloquear o scroll temporariamente
-            if (kanbanScrollRef.current) {
-                kanbanScrollRef.current.style.overflow = 'hidden';
-            }
+            // Salvar também no sessionStorage como backup
+            sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
         }
         
         setSelectedOrder(order);
@@ -862,17 +855,6 @@ export default function OrdersPage() {
         setIsEditing(false);
         setSelectedItems(new Set());
         setIsSheetOpen(true);
-        
-        // Restaurar o scroll após o modal abrir
-        if (viewMode === 'kanban') {
-            setTimeout(() => {
-                if (kanbanScrollRef.current) {
-                    kanbanScrollRef.current.style.overflow = 'auto';
-                    kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
-                    console.log('🔄 Scroll restaurado imediatamente:', kanbanScrollRef.current.scrollLeft);
-                }
-            }, 50);
-        }
     };
 
         // Função helper para remover campos undefined (Firestore não aceita undefined)
@@ -1192,22 +1174,37 @@ export default function OrdersPage() {
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
-        // Efeito para manter posição do scroll
+        // Efeito para restaurar scroll quando componente renderiza ou modal fecha
         useEffect(() => {
-            if (preventScrollReset && kanbanScrollRef.current && viewMode === 'kanban') {
-                console.log('🔄 Aplicando posição salva:', kanbanScrollPosition);
-                kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
+            if (viewMode === 'kanban' && kanbanScrollRef.current) {
+                const restorePosition = () => {
+                    // Tentar restaurar da ref primeiro
+                    let savedPosition = scrollPositionRef.current;
+                    
+                    // Se não houver na ref, tentar do sessionStorage
+                    if (savedPosition === 0) {
+                        const stored = sessionStorage.getItem('kanbanScrollPosition');
+                        if (stored) {
+                            savedPosition = parseInt(stored, 10);
+                        }
+                    }
+                    
+                    if (savedPosition > 0 && kanbanScrollRef.current) {
+                        console.log('🔄 Restaurando posição:', savedPosition);
+                        kanbanScrollRef.current.scrollLeft = savedPosition;
+                        console.log('✅ Posição atual após restauração:', kanbanScrollRef.current.scrollLeft);
+                    }
+                };
+                
+                // Restaurar imediatamente
+                restorePosition();
+                
+                // E também após um pequeno delay para garantir
+                const timer = setTimeout(restorePosition, 100);
+                
+                return () => clearTimeout(timer);
             }
-        }, [preventScrollReset, kanbanScrollPosition, viewMode]);
-
-        // Efeito para limpar quando modal fecha
-        useEffect(() => {
-            if (!isSheetOpen && preventScrollReset) {
-                console.log('🔄 Modal fechado, limpando estados');
-                setPreventScrollReset(false);
-                setShouldRestoreScroll(false);
-            }
-        }, [isSheetOpen, preventScrollReset]);
+        }, [viewMode, isSheetOpen]);
         
         if (totalOrdersToShow === 0) {
             return (
@@ -1231,10 +1228,10 @@ export default function OrdersPage() {
                 <div className="w-full overflow-x-auto" 
                      ref={kanbanScrollRef}
                      onScroll={(e) => {
-                         if (!preventScrollReset && viewMode === 'kanban') {
-                             const target = e.target as HTMLDivElement;
-                             setKanbanScrollPosition(target.scrollLeft);
-                         }
+                         const target = e.target as HTMLDivElement;
+                         scrollPositionRef.current = target.scrollLeft;
+                         // Também salvar no sessionStorage em tempo real
+                         sessionStorage.setItem('kanbanScrollPosition', target.scrollLeft.toString());
                      }}
                 >
                     <div className="flex w-max space-x-4 p-4 min-w-full">
@@ -4086,8 +4083,21 @@ export default function OrdersPage() {
     setIsEditing(false); 
     setSelectedItems(new Set()); 
     setProgressClipboard(null);
-    // Não resetar a posição imediatamente quando fechar o modal
-    // O useEffect cuidará da restauração
+    
+    // Restaurar scroll quando fechar o modal
+    if (viewMode === 'kanban' && kanbanScrollRef.current) {
+      const savedPosition = scrollPositionRef.current || 
+        parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
+      
+      if (savedPosition > 0) {
+        setTimeout(() => {
+          if (kanbanScrollRef.current) {
+            console.log('🔄 Restaurando ao fechar modal:', savedPosition);
+            kanbanScrollRef.current.scrollLeft = savedPosition;
+          }
+        }, 100);
+      }
+    }
   } 
 }}>
   <SheetContent className="w-full sm:max-w-4xl flex flex-col h-full">
