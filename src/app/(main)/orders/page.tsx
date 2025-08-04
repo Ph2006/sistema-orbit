@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -524,6 +524,10 @@ export default function OrdersPage() {
     const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
     const [calendarDate, setCalendarDate] = useState(new Date());
 
+    // Estados para controlar posição do scroll no Kanban
+    const [kanbanScrollPosition, setKanbanScrollPosition] = useState(0);
+    const kanbanScrollRef = useRef<HTMLDivElement>(null);
+
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
     });
@@ -825,6 +829,11 @@ export default function OrdersPage() {
     };
 
     const handleViewOrder = (order: Order) => {
+        // Capturar posição atual do scroll antes de abrir o modal
+        if (viewMode === 'kanban' && kanbanScrollRef.current) {
+            setKanbanScrollPosition(kanbanScrollRef.current.scrollLeft);
+        }
+        
         setSelectedOrder(order);
         form.reset({
             ...order,
@@ -1153,6 +1162,19 @@ export default function OrdersPage() {
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
+        // Efeito para restaurar posição do scroll após renderização
+        useEffect(() => {
+            if (kanbanScrollRef.current && kanbanScrollPosition > 0) {
+                const timer = setTimeout(() => {
+                    if (kanbanScrollRef.current) {
+                        kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
+                    }
+                }, 100); // Pequeno delay para garantir que o DOM foi renderizado
+                
+                return () => clearTimeout(timer);
+            }
+        }, [kanbanScrollPosition]);
+        
         if (totalOrdersToShow === 0) {
             return (
                 <div className="text-center py-12">
@@ -1172,7 +1194,7 @@ export default function OrdersPage() {
 
         return (
             <div className="w-full">
-                <div className="w-full overflow-x-auto">
+                <div className="w-full overflow-x-auto" ref={kanbanScrollRef}>
                     <div className="flex w-max space-x-4 p-4 min-w-full">
                         {allColumns.map(([monthKey, monthData]) => {
                             const isCompleted = monthKey === 'completed';
@@ -4021,7 +4043,11 @@ export default function OrdersPage() {
   if (!open) { 
     setIsEditing(false); 
     setSelectedItems(new Set()); 
-    setProgressClipboard(null); 
+    setProgressClipboard(null);
+    // Resetar posição do scroll quando não estiver mais no modo kanban
+    if (viewMode !== 'kanban') {
+      setKanbanScrollPosition(0);
+    }
   } 
 }}>
   <SheetContent className="w-full sm:max-w-4xl flex flex-col h-full">
