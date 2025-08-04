@@ -390,7 +390,37 @@ export default function MaterialsPage() {
 
             const plansList = cutPlansSnapshot.docs.map(d => {
                 const data = d.data();
-                return { ...data, id: d.id, createdAt: data.createdAt.toDate(), deliveryDate: data.deliveryDate?.toDate() || null } as CuttingPlan;
+                
+                // Função para conversão segura de timestamps (similar à usada para requisições)
+                const safeToDate = (timestamp: any): Date | null => {
+                    if (!timestamp) return null;
+                    if (timestamp instanceof Date) return timestamp;
+                    if (typeof timestamp.toDate === 'function') {
+                        try {
+                            return timestamp.toDate();
+                        } catch (error) {
+                            console.warn("Erro ao converter timestamp:", error);
+                            return null;
+                        }
+                    }
+                    if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+                        try {
+                            const date = new Date(timestamp);
+                            return isNaN(date.getTime()) ? null : date;
+                        } catch (error) {
+                            console.warn("Erro ao converter data:", error);
+                            return null;
+                        }
+                    }
+                    return null;
+                };
+                
+                return { 
+                    ...data, 
+                    id: d.id, 
+                    createdAt: safeToDate(data.createdAt) || new Date(), // Fallback para data atual se conversão falhar
+                    deliveryDate: safeToDate(data.deliveryDate) || null // Fallback para null se conversão falhar
+                } as CuttingPlan;
             });
             setCuttingPlansList(plansList.sort((a, b) => (parseInt(b.planNumber || "0") || 0) - (parseInt(a.planNumber || "0") || 0)));
             
