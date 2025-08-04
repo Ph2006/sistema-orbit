@@ -844,6 +844,11 @@ export default function OrdersPage() {
             console.log('🔄 Capturando posição do scroll:', currentScrollPosition);
             setKanbanScrollPosition(currentScrollPosition);
             setShouldRestoreScroll(true);
+            
+            // IMPORTANTE: Prevenir qualquer scroll durante a abertura do modal
+            if (kanbanScrollRef.current) {
+                kanbanScrollRef.current.style.scrollBehavior = 'auto';
+            }
         }
         
         setSelectedOrder(order);
@@ -1174,57 +1179,51 @@ export default function OrdersPage() {
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
-        // Efeito para restaurar posição do scroll após renderização
+        // Efeito para manter scroll fixo quando modal está aberto
         useEffect(() => {
-            if (kanbanScrollRef.current && shouldRestoreScroll && kanbanScrollPosition > 0) {
-                console.log('🔄 Tentando restaurar scroll para posição:', kanbanScrollPosition);
+            if (isSheetOpen && viewMode === 'kanban' && kanbanScrollRef.current && kanbanScrollPosition > 0) {
+                console.log('🔒 Modal aberto, mantendo scroll fixo na posição:', kanbanScrollPosition);
                 
-                // Função para restaurar o scroll
-                const restoreScroll = () => {
+                const maintainScroll = () => {
                     if (kanbanScrollRef.current) {
                         kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
-                        console.log('✅ Scroll restaurado para:', kanbanScrollRef.current.scrollLeft);
-                        setShouldRestoreScroll(false);
                     }
                 };
                 
-                // Tentar restaurar imediatamente
-                restoreScroll();
-                
-                // Backup: tentar novamente após um breve delay
-                const timer1 = setTimeout(restoreScroll, 50);
-                const timer2 = setTimeout(restoreScroll, 150);
-                const timer3 = setTimeout(restoreScroll, 300);
+                // Manter a posição fixa enquanto o modal estiver aberto
+                maintainScroll();
+                const interval = setInterval(maintainScroll, 100);
                 
                 return () => {
-                    clearTimeout(timer1);
-                    clearTimeout(timer2);
-                    clearTimeout(timer3);
+                    clearInterval(interval);
                 };
             }
-        }, [kanbanScrollPosition, shouldRestoreScroll]);
+        }, [isSheetOpen, viewMode, kanbanScrollPosition]);
 
         // Efeito para restaurar scroll quando o modal fecha
         useEffect(() => {
             if (!isSheetOpen && viewMode === 'kanban' && shouldRestoreScroll && kanbanScrollRef.current) {
                 console.log('🔄 Modal fechado, restaurando scroll...');
+                
                 const restoreScroll = () => {
                     if (kanbanScrollRef.current) {
                         kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
                         console.log('✅ Scroll restaurado após fechar modal:', kanbanScrollRef.current.scrollLeft);
                         setShouldRestoreScroll(false);
+                        
+                        // Restaurar comportamento normal do scroll
+                        kanbanScrollRef.current.style.scrollBehavior = 'smooth';
                     }
                 };
                 
-                // Restaurar com múltiplas tentativas
-                const timer1 = setTimeout(restoreScroll, 100);
-                const timer2 = setTimeout(restoreScroll, 250);
-                const timer3 = setTimeout(restoreScroll, 500);
+                // Restaurar imediatamente e com backup
+                restoreScroll();
+                const timer1 = setTimeout(restoreScroll, 50);
+                const timer2 = setTimeout(restoreScroll, 150);
                 
                 return () => {
                     clearTimeout(timer1);
                     clearTimeout(timer2);
-                    clearTimeout(timer3);
                 };
             }
         }, [isSheetOpen, viewMode, kanbanScrollPosition, shouldRestoreScroll]);
@@ -1248,7 +1247,10 @@ export default function OrdersPage() {
 
         return (
             <div className="w-full">
-                <div className="w-full overflow-x-auto" ref={kanbanScrollRef}>
+                <div className="w-full overflow-x-auto scroll-smooth" 
+                     ref={kanbanScrollRef}
+                     style={{ scrollBehavior: isSheetOpen ? 'auto' : 'smooth' }}
+                >
                     <div className="flex w-max space-x-4 p-4 min-w-full">
                         {allColumns.map(([monthKey, monthData]) => {
                             const isCompleted = monthKey === 'completed';
