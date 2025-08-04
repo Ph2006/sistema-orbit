@@ -528,6 +528,7 @@ export default function OrdersPage() {
     const [kanbanScrollPosition, setKanbanScrollPosition] = useState(0);
     const kanbanScrollRef = useRef<HTMLDivElement>(null);
     const [shouldRestoreScroll, setShouldRestoreScroll] = useState(false);
+    const [preventScrollReset, setPreventScrollReset] = useState(false);
 
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
@@ -754,6 +755,7 @@ export default function OrdersPage() {
         if (viewMode !== 'kanban') {
             setKanbanScrollPosition(0);
             setShouldRestoreScroll(false);
+            setPreventScrollReset(false);
         }
     }, [viewMode]);
 
@@ -843,11 +845,11 @@ export default function OrdersPage() {
             const currentScrollPosition = kanbanScrollRef.current.scrollLeft;
             console.log('🔄 Capturando posição do scroll:', currentScrollPosition);
             setKanbanScrollPosition(currentScrollPosition);
-            setShouldRestoreScroll(true);
+            setPreventScrollReset(true);
             
-            // IMPORTANTE: Prevenir qualquer scroll durante a abertura do modal
+            // Bloquear o scroll temporariamente
             if (kanbanScrollRef.current) {
-                kanbanScrollRef.current.style.scrollBehavior = 'auto';
+                kanbanScrollRef.current.style.overflow = 'hidden';
             }
         }
         
@@ -860,6 +862,17 @@ export default function OrdersPage() {
         setIsEditing(false);
         setSelectedItems(new Set());
         setIsSheetOpen(true);
+        
+        // Restaurar o scroll após o modal abrir
+        if (viewMode === 'kanban') {
+            setTimeout(() => {
+                if (kanbanScrollRef.current) {
+                    kanbanScrollRef.current.style.overflow = 'auto';
+                    kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
+                    console.log('🔄 Scroll restaurado imediatamente:', kanbanScrollRef.current.scrollLeft);
+                }
+            }, 50);
+        }
     };
 
         // Função helper para remover campos undefined (Firestore não aceita undefined)
@@ -1179,54 +1192,22 @@ export default function OrdersPage() {
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
-        // Efeito para manter scroll fixo quando modal está aberto
+        // Efeito para manter posição do scroll
         useEffect(() => {
-            if (isSheetOpen && viewMode === 'kanban' && kanbanScrollRef.current && kanbanScrollPosition > 0) {
-                console.log('🔒 Modal aberto, mantendo scroll fixo na posição:', kanbanScrollPosition);
-                
-                const maintainScroll = () => {
-                    if (kanbanScrollRef.current) {
-                        kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
-                    }
-                };
-                
-                // Manter a posição fixa enquanto o modal estiver aberto
-                maintainScroll();
-                const interval = setInterval(maintainScroll, 100);
-                
-                return () => {
-                    clearInterval(interval);
-                };
+            if (preventScrollReset && kanbanScrollRef.current && viewMode === 'kanban') {
+                console.log('🔄 Aplicando posição salva:', kanbanScrollPosition);
+                kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
             }
-        }, [isSheetOpen, viewMode, kanbanScrollPosition]);
+        }, [preventScrollReset, kanbanScrollPosition, viewMode]);
 
-        // Efeito para restaurar scroll quando o modal fecha
+        // Efeito para limpar quando modal fecha
         useEffect(() => {
-            if (!isSheetOpen && viewMode === 'kanban' && shouldRestoreScroll && kanbanScrollRef.current) {
-                console.log('🔄 Modal fechado, restaurando scroll...');
-                
-                const restoreScroll = () => {
-                    if (kanbanScrollRef.current) {
-                        kanbanScrollRef.current.scrollLeft = kanbanScrollPosition;
-                        console.log('✅ Scroll restaurado após fechar modal:', kanbanScrollRef.current.scrollLeft);
-                        setShouldRestoreScroll(false);
-                        
-                        // Restaurar comportamento normal do scroll
-                        kanbanScrollRef.current.style.scrollBehavior = 'smooth';
-                    }
-                };
-                
-                // Restaurar imediatamente e com backup
-                restoreScroll();
-                const timer1 = setTimeout(restoreScroll, 50);
-                const timer2 = setTimeout(restoreScroll, 150);
-                
-                return () => {
-                    clearTimeout(timer1);
-                    clearTimeout(timer2);
-                };
+            if (!isSheetOpen && preventScrollReset) {
+                console.log('🔄 Modal fechado, limpando estados');
+                setPreventScrollReset(false);
+                setShouldRestoreScroll(false);
             }
-        }, [isSheetOpen, viewMode, kanbanScrollPosition, shouldRestoreScroll]);
+        }, [isSheetOpen, preventScrollReset]);
         
         if (totalOrdersToShow === 0) {
             return (
@@ -1247,9 +1228,14 @@ export default function OrdersPage() {
 
         return (
             <div className="w-full">
-                <div className="w-full overflow-x-auto scroll-smooth" 
+                <div className="w-full overflow-x-auto" 
                      ref={kanbanScrollRef}
-                     style={{ scrollBehavior: isSheetOpen ? 'auto' : 'smooth' }}
+                     onScroll={(e) => {
+                         if (!preventScrollReset && viewMode === 'kanban') {
+                             const target = e.target as HTMLDivElement;
+                             setKanbanScrollPosition(target.scrollLeft);
+                         }
+                     }}
                 >
                     <div className="flex w-max space-x-4 p-4 min-w-full">
                         {allColumns.map(([monthKey, monthData]) => {
