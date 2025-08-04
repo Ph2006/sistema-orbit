@@ -709,18 +709,100 @@ export default function MaterialsPage() {
             
             docPdf.setFontSize(10);
             const subheaderY = 35;
-            docPdf.text(`Data: ${format(new Date(requisitionToExport.date), 'dd/MM/yyyy')}`, 15, subheaderY);
+            docPdf.text(`Data: ${(() => {
+                try {
+                    // Se for um Timestamp do Firestore
+                    if (requisitionToExport.date && typeof requisitionToExport.date.toDate === 'function') {
+                        return format(requisitionToExport.date.toDate(), 'dd/MM/yyyy');
+                    }
+                    // Se for uma string ou número
+                    if (typeof requisitionToExport.date === 'string' || typeof requisitionToExport.date === 'number') {
+                        const parsedDate = new Date(requisitionToExport.date);
+                        if (!isNaN(parsedDate.getTime())) {
+                            return format(parsedDate, 'dd/MM/yyyy');
+                        }
+                    }
+                    // Se já for um objeto Date
+                    if (requisitionToExport.date instanceof Date && !isNaN(requisitionToExport.date.getTime())) {
+                        return format(requisitionToExport.date, 'dd/MM/yyyy');
+                    }
+                    return 'N/A';
+                } catch (error) {
+                    console.warn('Erro ao formatar data da requisição:', error);
+                    return 'N/A';
+                }
+            })()}`, 15, subheaderY);
             docPdf.text(`Solicitante: ${requisitionToExport.requestedBy}`, 15, subheaderY + 5);
             docPdf.text(`Status: ${requisitionToExport.status}`, 15, subheaderY + 10);
             const os = orderInfo?.internalOS || 'N/A';
             const customerName = orderInfo?.customerName || 'N/A';
-            const orderDeliveryDate = orderInfo?.deliveryDate ? format(new Date(orderInfo.deliveryDate), 'dd/MM/yyyy') : 'N/A';
+            const orderDeliveryDate = (() => {
+                if (!orderInfo?.deliveryDate) return 'N/A';
+                try {
+                    // Se for um Timestamp do Firestore
+                    if (orderInfo.deliveryDate && typeof orderInfo.deliveryDate.toDate === 'function') {
+                        return format(orderInfo.deliveryDate.toDate(), 'dd/MM/yyyy');
+                    }
+                    // Se for uma string ou número
+                    if (typeof orderInfo.deliveryDate === 'string' || typeof orderInfo.deliveryDate === 'number') {
+                        const parsedDate = new Date(orderInfo.deliveryDate);
+                        if (!isNaN(parsedDate.getTime())) {
+                            return format(parsedDate, 'dd/MM/yyyy');
+                        }
+                    }
+                    // Se já for um objeto Date
+                    if (orderInfo.deliveryDate instanceof Date && !isNaN(orderInfo.deliveryDate.getTime())) {
+                        return format(orderInfo.deliveryDate, 'dd/MM/yyyy');
+                    }
+                    return 'N/A';
+                } catch (error) {
+                    console.warn('Erro ao formatar data de entrega do pedido:', error);
+                    return 'N/A';
+                }
+            })();
             docPdf.text(`OS Vinculada: ${os}`, pageWidth - 15, subheaderY, { align: 'right' });
             docPdf.text(`Cliente: ${customerName}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
             docPdf.text(`Entrega do Pedido: ${orderDeliveryDate}`, pageWidth - 15, subheaderY + 10, { align: 'right' });
 
             const head = [['Cód.', 'Descrição', 'Dimensão', 'Material', 'Qtd.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
-            const body = requisitionToExport.items.map(item => [ item.code || '-', item.description, item.dimensao || '-', item.material || '-', item.quantityRequested.toString(), (item.pesoUnitario || 0).toFixed(2), item.deliveryDate ? format(new Date(item.deliveryDate), 'dd/MM/yyyy') : 'N/A', item.status || 'Pendente', ]);
+            const body = requisitionToExport.items.map(item => {
+                // Função para conversão segura de data
+                const formatDeliveryDate = (date: any) => {
+                    if (!date) return 'N/A';
+                    try {
+                        // Se for um Timestamp do Firestore
+                        if (date && typeof date.toDate === 'function') {
+                            return format(date.toDate(), 'dd/MM/yyyy');
+                        }
+                        // Se for uma string ou número
+                        if (typeof date === 'string' || typeof date === 'number') {
+                            const parsedDate = new Date(date);
+                            if (!isNaN(parsedDate.getTime())) {
+                                return format(parsedDate, 'dd/MM/yyyy');
+                            }
+                        }
+                        // Se já for um objeto Date
+                        if (date instanceof Date && !isNaN(date.getTime())) {
+                            return format(date, 'dd/MM/yyyy');
+                        }
+                        return 'N/A';
+                    } catch (error) {
+                        console.warn('Erro ao formatar data de entrega:', error);
+                        return 'N/A';
+                    }
+                };
+                
+                return [
+                    item.code || '-', 
+                    item.description, 
+                    item.dimensao || '-', 
+                    item.material || '-', 
+                    item.quantityRequested.toString(), 
+                    (item.pesoUnitario || 0).toFixed(2), 
+                    formatDeliveryDate(item.deliveryDate), 
+                    item.status || 'Pendente'
+                ];
+            });
             autoTable(docPdf, { startY: 55, head, body, styles: { fontSize: 8 }, headStyles: { fillColor: [40, 40, 40] }, columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 }, 4: { cellWidth: 20, halign: 'center' }, 5: { cellWidth: 25, halign: 'center' }, 6: { cellWidth: 25, halign: 'center' }, 7: { cellWidth: 40 }, } });
 
             let finalY = (docPdf as any).lastAutoTable.finalY + 10;
@@ -764,7 +846,40 @@ export default function MaterialsPage() {
             y = 50;
     
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('Parâmetros de Entrada', 15, y); y += 6;
-            autoTable(docPdf, { startY: y, theme: 'plain', styles: { fontSize: 9 }, body: [ ['Material da Barra:', plan.materialDescription || 'Não especificado'], ['Comprimento da Barra:', `${plan.stockLength} mm`], ['Espessura do Corte (Kerf):', `${plan.kerf} mm`], ['Entrega Prevista do Corte:', plan.deliveryDate ? format(new Date(plan.deliveryDate), 'dd/MM/yyyy') : 'N/A'], ], });
+            autoTable(docPdf, { 
+                startY: y, 
+                theme: 'plain', 
+                styles: { fontSize: 9 }, 
+                body: [ 
+                    ['Material da Barra:', plan.materialDescription || 'Não especificado'], 
+                    ['Comprimento da Barra:', `${plan.stockLength} mm`], 
+                    ['Espessura do Corte (Kerf):', `${plan.kerf} mm`], 
+                    ['Entrega Prevista do Corte:', (() => {
+                        if (!plan.deliveryDate) return 'N/A';
+                        try {
+                            // Se for um Timestamp do Firestore
+                            if (plan.deliveryDate && typeof plan.deliveryDate.toDate === 'function') {
+                                return format(plan.deliveryDate.toDate(), 'dd/MM/yyyy');
+                            }
+                            // Se for uma string ou número
+                            if (typeof plan.deliveryDate === 'string' || typeof plan.deliveryDate === 'number') {
+                                const parsedDate = new Date(plan.deliveryDate);
+                                if (!isNaN(parsedDate.getTime())) {
+                                    return format(parsedDate, 'dd/MM/yyyy');
+                                }
+                            }
+                            // Se já for um objeto Date
+                            if (plan.deliveryDate instanceof Date && !isNaN(plan.deliveryDate.getTime())) {
+                                return format(plan.deliveryDate, 'dd/MM/yyyy');
+                            }
+                            return 'N/A';
+                        } catch (error) {
+                            console.warn('Erro ao formatar data de entrega do plano:', error);
+                            return 'N/A';
+                        }
+                    })()], 
+                ], 
+            });
             y = (docPdf as any).lastAutoTable.finalY + 10;
     
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('Itens a Cortar', 15, y); y += 6;
@@ -982,7 +1097,30 @@ return (
                                         <TableRow key={item.fullId}>
                                         <TableCell>{item.description}</TableCell>
                                         <TableCell>{item.requisitionNumber}</TableCell>
-                                        <TableCell>{item.deliveryDate ? format(item.deliveryDate, 'dd/MM/yyyy') : 'N/A'}</TableCell>
+                                        <TableCell>{(() => {
+                                            if (!item.deliveryDate) return 'N/A';
+                                            try {
+                                                // Se for um Timestamp do Firestore
+                                                if (item.deliveryDate && typeof item.deliveryDate.toDate === 'function') {
+                                                    return format(item.deliveryDate.toDate(), 'dd/MM/yyyy');
+                                                }
+                                                // Se for uma string ou número
+                                                if (typeof item.deliveryDate === 'string' || typeof item.deliveryDate === 'number') {
+                                                    const parsedDate = new Date(item.deliveryDate);
+                                                    if (!isNaN(parsedDate.getTime())) {
+                                                        return format(parsedDate, 'dd/MM/yyyy');
+                                                    }
+                                                }
+                                                // Se já for um objeto Date
+                                                if (item.deliveryDate instanceof Date && !isNaN(item.deliveryDate.getTime())) {
+                                                    return format(item.deliveryDate, 'dd/MM/yyyy');
+                                                }
+                                                return 'N/A';
+                                            } catch (error) {
+                                                console.warn('Erro ao formatar data de entrega do item atrasado:', error);
+                                                return 'N/A';
+                                            }
+                                        })()}</TableCell>
                                         </TableRow>
                                     ))}
                                     </TableBody>
@@ -1180,7 +1318,30 @@ return (
                                                                 <TableCell className="font-medium">{plan.planNumber}</TableCell>
                                                                 <TableCell>{plan.materialDescription || 'N/A'}</TableCell>
                                                                 <TableCell>{format(plan.createdAt, 'dd/MM/yyyy')}</TableCell>
-                                                                <TableCell>{plan.deliveryDate ? format(plan.deliveryDate, 'dd/MM/yyyy') : 'N/A'}</TableCell>
+                                                                <TableCell>{(() => {
+                                                                    if (!plan.deliveryDate) return 'N/A';
+                                                                    try {
+                                                                        // Se for um Timestamp do Firestore
+                                                                        if (plan.deliveryDate && typeof plan.deliveryDate.toDate === 'function') {
+                                                                            return format(plan.deliveryDate.toDate(), 'dd/MM/yyyy');
+                                                                        }
+                                                                        // Se for uma string ou número
+                                                                        if (typeof plan.deliveryDate === 'string' || typeof plan.deliveryDate === 'number') {
+                                                                            const parsedDate = new Date(plan.deliveryDate);
+                                                                            if (!isNaN(parsedDate.getTime())) {
+                                                                                return format(parsedDate, 'dd/MM/yyyy');
+                                                                            }
+                                                                        }
+                                                                        // Se já for um objeto Date
+                                                                        if (plan.deliveryDate instanceof Date && !isNaN(plan.deliveryDate.getTime())) {
+                                                                            return format(plan.deliveryDate, 'dd/MM/yyyy');
+                                                                        }
+                                                                        return 'N/A';
+                                                                    } catch (error) {
+                                                                        console.warn('Erro ao formatar data de entrega do plano:', error);
+                                                                        return 'N/A';
+                                                                    }
+                                                                })()}</TableCell>
                                                                 <TableCell className="text-right">
                                                                   <Button variant="ghost" size="icon" onClick={() => handleExportCutPlanPDF(plan)} title="Exportar PDF">
                                                                     <FileDown className="h-4 w-4" />
@@ -1292,7 +1453,29 @@ return (
                                                     <div><Label>Quantidade</Label><Input type="number" step="0.01" placeholder="1" value={currentItem.quantityRequested || ''} onChange={e => handleCurrentItemChange('quantityRequested', e.target.value)} /></div>
                                                     <div><Label>Unidade</Label><Input placeholder="kg, m, pç" value={currentItem.unit} onChange={e => handleCurrentItemChange('unit', e.target.value)} /></div>
                                                     <div><Label>Peso Unit. (kg)</Label><Input type="number" step="0.01" value={currentItem.pesoUnitario || ''} onChange={e => handleCurrentItemChange('pesoUnitario', e.target.value)} /></div>
-                                                    <div className="flex flex-col space-y-2"><Label>Entrega Prevista</Label><Popover><PopoverTrigger asChild><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !currentItem.deliveryDate && "text-muted-foreground")}>{currentItem.deliveryDate ? format(currentItem.deliveryDate, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={currentItem.deliveryDate || undefined} onSelect={date => handleCurrentItemChange('deliveryDate', date)} /></PopoverContent></Popover></div>
+                                                    <div className="flex flex-col space-y-2"><Label>Entrega Prevista</Label><Popover><PopoverTrigger asChild><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !currentItem.deliveryDate && "text-muted-foreground")}>{currentItem.deliveryDate ? (() => {
+                                                        try {
+                                                            // Se for um Timestamp do Firestore
+                                                            if (currentItem.deliveryDate && typeof currentItem.deliveryDate.toDate === 'function') {
+                                                                return format(currentItem.deliveryDate.toDate(), "dd/MM/yyyy");
+                                                            }
+                                                            // Se for uma string ou número
+                                                            if (typeof currentItem.deliveryDate === 'string' || typeof currentItem.deliveryDate === 'number') {
+                                                                const parsedDate = new Date(currentItem.deliveryDate);
+                                                                if (!isNaN(parsedDate.getTime())) {
+                                                                    return format(parsedDate, "dd/MM/yyyy");
+                                                                }
+                                                            }
+                                                            // Se já for um objeto Date
+                                                            if (currentItem.deliveryDate instanceof Date && !isNaN(currentItem.deliveryDate.getTime())) {
+                                                                return format(currentItem.deliveryDate, "dd/MM/yyyy");
+                                                            }
+                                                            return 'Data inválida';
+                                                        } catch (error) {
+                                                            console.warn('Erro ao formatar data de entrega do item:', error);
+                                                            return 'Data inválida';
+                                                        }
+                                                    })() : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={currentItem.deliveryDate || undefined} onSelect={date => handleCurrentItemChange('deliveryDate', date)} /></PopoverContent></Popover></div>
                                                     <div><Label>Status</Label><Select value={currentItem.status || "Pendente"} onValueChange={value => handleCurrentItemChange('status', value)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{itemStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>
                                                 </div>
                                                 <div><Label>Observações</Label><Input placeholder="Ex: Certificado de qualidade" value={currentItem.notes || ''} onChange={e => handleCurrentItemChange('notes', e.target.value)} /></div>
@@ -1344,7 +1527,29 @@ return (
                                                     <FormField control={cuttingPlanForm.control} name="materialDescription" render={({ field }) => ( <FormItem><FormLabel>Descrição do Material da Barra</FormLabel><FormControl><Input placeholder="Ex: Cantoneira 2 x 3/16" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                                                     <FormField control={cuttingPlanForm.control} name="stockLength" render={({ field }) => ( <FormItem><FormLabel>Comprimento da Barra (mm)</FormLabel><FormControl><Input type="number" placeholder="6000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
                                                     <FormField control={cuttingPlanForm.control} name="kerf" render={({ field }) => ( <FormItem><FormLabel>Espessura do Corte / Kerf (mm)</FormLabel><FormControl><Input type="number" placeholder="3" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                                                     <FormField control={cuttingPlanForm.control} name="deliveryDate" render={({ field }) => ( <FormItem><FormLabel>Entrega Prevista</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("w-full pl-3 text-left", !field.value && "text-muted-foreground")}>{field.value ? format(new Date(field.value), "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
+                                                     <FormField control={cuttingPlanForm.control} name="deliveryDate" render={({ field }) => ( <FormItem><FormLabel>Entrega Prevista</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("w-full pl-3 text-left", !field.value && "text-muted-foreground")}>{field.value ? (() => {
+                                                         try {
+                                                             // Se for um Timestamp do Firestore
+                                                             if (field.value && typeof field.value.toDate === 'function') {
+                                                                 return format(field.value.toDate(), "dd/MM/yyyy");
+                                                             }
+                                                             // Se for uma string ou número
+                                                             if (typeof field.value === 'string' || typeof field.value === 'number') {
+                                                                 const parsedDate = new Date(field.value);
+                                                                 if (!isNaN(parsedDate.getTime())) {
+                                                                     return format(parsedDate, "dd/MM/yyyy");
+                                                                 }
+                                                             }
+                                                             // Se já for um objeto Date
+                                                             if (field.value instanceof Date && !isNaN(field.value.getTime())) {
+                                                                 return format(field.value, "dd/MM/yyyy");
+                                                             }
+                                                             return 'Data inválida';
+                                                         } catch (error) {
+                                                             console.warn('Erro ao formatar data do campo:', error);
+                                                             return 'Data inválida';
+                                                         }
+                                                     })() : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
                                                 </CardContent>
                                             </Card>
                                             <Card><CardHeader><CardTitle>Item do Plano de Corte</CardTitle><CardDescription>{editCutIndex !== null ? 'Edite os dados.' : 'Preencha e adicione.'}</CardDescription></CardHeader>
