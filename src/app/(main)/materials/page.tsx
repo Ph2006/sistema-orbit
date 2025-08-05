@@ -64,10 +64,11 @@ const cleanFirestoreData = (obj: any): any => {
     return cleaned;
 };
 
-// 6. FUNÇÃO prepareRequisitionItem COMPLETAMENTE REESCRITA
+// 5. FUNÇÃO prepareRequisitionItem SUPER SIMPLES PARA TESTAR
 const prepareRequisitionItem = (item: RequisitionItem): any => {
-    console.log(`🔧 prepareRequisitionItem - entrada:`, item);
-    console.log(`🔧 item.deliveryDate:`, item.deliveryDate, typeof item.deliveryDate);
+    console.log(`🔧 ===== INICIANDO prepareRequisitionItem =====`);
+    debugDateFlow('PREPARE_INPUT', item, 'Item completo de entrada');
+    debugDateFlow('PREPARE_DELIVERY_DATE', item.deliveryDate, 'deliveryDate de entrada');
     
     const cleanItem: any = {
         id: item.id,
@@ -79,82 +80,59 @@ const prepareRequisitionItem = (item: RequisitionItem): any => {
         inspectionStatus: item.inspectionStatus || "Pendente"
     };
     
-    // Adicionar campos opcionais apenas se tiverem valores válidos
-    if (item.code && item.code.trim()) cleanItem.code = item.code.trim();
-    if (item.material && item.material.trim()) cleanItem.material = item.material.trim();
-    if (item.dimensao && item.dimensao.trim()) cleanItem.dimensao = item.dimensao.trim();
-    if (item.notes && item.notes.trim()) cleanItem.notes = item.notes.trim();
+    // Campos opcionais simples
+    if (item.code?.trim()) cleanItem.code = item.code.trim();
+    if (item.material?.trim()) cleanItem.material = item.material.trim();
+    if (item.dimensao?.trim()) cleanItem.dimensao = item.dimensao.trim();
+    if (item.notes?.trim()) cleanItem.notes = item.notes.trim();
     
     // Campos numéricos
-    if (item.pesoUnitario !== undefined && item.pesoUnitario !== null && !isNaN(Number(item.pesoUnitario))) {
+    if (item.pesoUnitario && !isNaN(Number(item.pesoUnitario))) {
         cleanItem.pesoUnitario = Number(item.pesoUnitario);
     }
-    if (item.invoiceItemValue !== undefined && item.invoiceItemValue !== null && !isNaN(Number(item.invoiceItemValue))) {
-        cleanItem.invoiceItemValue = Number(item.invoiceItemValue);
-    }
     
-    // ✅ CORREÇÃO CRÍTICA: Processamento robusto das datas
-    if (item.deliveryDate !== undefined && item.deliveryDate !== null) {
+    // ✅ PROCESSAMENTO DE DATA SUPER SIMPLES - APENAS CONVERTER Date PARA Timestamp
+    if (item.deliveryDate) {
+        debugDateFlow('PREPARE_PROCESSING_DATE', item.deliveryDate, 'Processando deliveryDate');
+        
         try {
-            console.log(`📅 Processando deliveryDate:`, item.deliveryDate);
-            
-            // Se já é um Timestamp do Firestore
-            if (item.deliveryDate && typeof item.deliveryDate.toDate === 'function') {
-                cleanItem.deliveryDate = item.deliveryDate;
-                console.log(`📅 Mantendo Timestamp existente`);
-            }
-            // Se é um objeto Date válido
-            else if (item.deliveryDate instanceof Date && !isNaN(item.deliveryDate.getTime())) {
+            // Se é uma Date válida, converter para Timestamp
+            if (item.deliveryDate instanceof Date && !isNaN(item.deliveryDate.getTime())) {
                 cleanItem.deliveryDate = Timestamp.fromDate(item.deliveryDate);
-                console.log(`📅 Convertendo Date para Timestamp:`, cleanItem.deliveryDate);
+                debugDateFlow('PREPARE_DATE_CONVERTED', cleanItem.deliveryDate, 'Date convertida para Timestamp');
             }
-            // Se é string, tentar converter
-            else if (typeof item.deliveryDate === 'string') {
-                const parsedDate = new Date(item.deliveryDate);
-                if (!isNaN(parsedDate.getTime())) {
-                    cleanItem.deliveryDate = Timestamp.fromDate(parsedDate);
-                    console.log(`📅 Convertendo string para Timestamp:`, cleanItem.deliveryDate);
-                }
+            // Se já é Timestamp, manter
+            else if (item.deliveryDate && typeof item.deliveryDate.toDate === 'function') {
+                cleanItem.deliveryDate = item.deliveryDate;
+                debugDateFlow('PREPARE_DATE_KEPT', cleanItem.deliveryDate, 'Timestamp mantido');
+            }
+            else {
+                console.warn('⚠️ deliveryDate não é Date nem Timestamp:', item.deliveryDate);
             }
         } catch (error) {
             console.error('❌ Erro ao processar deliveryDate:', error);
         }
+    } else {
+        console.log('ℹ️ deliveryDate está vazio/null/undefined');
     }
     
-    // Mesmo tratamento para deliveryReceiptDate
-    if (item.deliveryReceiptDate !== undefined && item.deliveryReceiptDate !== null) {
+    // Mesmo processo para deliveryReceiptDate
+    if (item.deliveryReceiptDate && item.deliveryReceiptDate instanceof Date) {
         try {
-            console.log(`📅 Processando deliveryReceiptDate:`, item.deliveryReceiptDate);
-            
-            if (item.deliveryReceiptDate && typeof item.deliveryReceiptDate.toDate === 'function') {
-                cleanItem.deliveryReceiptDate = item.deliveryReceiptDate;
-            }
-            else if (item.deliveryReceiptDate instanceof Date && !isNaN(item.deliveryReceiptDate.getTime())) {
-                cleanItem.deliveryReceiptDate = Timestamp.fromDate(item.deliveryReceiptDate);
-            }
-            else if (typeof item.deliveryReceiptDate === 'string') {
-                const parsedDate = new Date(item.deliveryReceiptDate);
-                if (!isNaN(parsedDate.getTime())) {
-                    cleanItem.deliveryReceiptDate = Timestamp.fromDate(parsedDate);
-                }
-            }
+            cleanItem.deliveryReceiptDate = Timestamp.fromDate(item.deliveryReceiptDate);
         } catch (error) {
             console.error('❌ Erro ao processar deliveryReceiptDate:', error);
         }
     }
     
-    // Outros campos...
-    if (item.supplierName && item.supplierName.trim()) cleanItem.supplierName = item.supplierName.trim();
-    if (item.invoiceNumber && item.invoiceNumber.trim()) cleanItem.invoiceNumber = item.invoiceNumber.trim();
-    if (item.certificateNumber && item.certificateNumber.trim()) cleanItem.certificateNumber = item.certificateNumber.trim();
-    if (item.storageLocation && item.storageLocation.trim()) cleanItem.storageLocation = item.storageLocation.trim();
+    // Outros campos opcionais
+    if (item.supplierName?.trim()) cleanItem.supplierName = item.supplierName.trim();
+    if (item.invoiceNumber?.trim()) cleanItem.invoiceNumber = item.invoiceNumber.trim();
     
-    if (item.weight !== undefined && item.weight !== null && !isNaN(Number(item.weight))) {
-        cleanItem.weight = Number(item.weight);
-    }
-    if (item.weightUnit && item.weightUnit.trim()) cleanItem.weightUnit = item.weightUnit.trim();
+    console.log(`🔧 prepareRequisitionItem - item final:`, cleanItem);
+    debugDateFlow('PREPARE_OUTPUT', cleanItem.deliveryDate, 'deliveryDate final');
+    console.log(`🔧 ===== FIM prepareRequisitionItem =====`);
     
-    console.log(`🔧 prepareRequisitionItem - saída:`, cleanItem);
     return cleanItem;
 };
 
@@ -162,6 +140,7 @@ const prepareRequisitionItem = (item: RequisitionItem): any => {
 const itemStatuses = ["Pendente", "Estoque", "Recebido (Aguardando Inspeção)", "Inspecionado e Aprovado", "Inspecionado e Rejeitado"] as const;
 const inspectionStatuses = ["Pendente", "Aprovado", "Aprovado com ressalvas", "Rejeitado"] as const;
 
+// 2. VERSÃO SIMPLIFICADA DO SCHEMA (sem union complexa)
 const requisitionItemSchema = z.object({
   id: z.string(),
   code: z.string().optional(),
@@ -173,8 +152,8 @@ const requisitionItemSchema = z.object({
   quantityFulfilled: z.coerce.number().min(0).optional().default(0),
   unit: z.string().min(1, "Unidade obrigatória (ex: m, kg, pç)."),
   
-  // ✅ CORREÇÃO CRÍTICA: Aceitar null, undefined ou Date
-  deliveryDate: z.union([z.date(), z.null(), z.undefined()]).optional(),
+  // ✅ SCHEMA MAIS SIMPLES - aceita qualquer coisa e vamos tratar depois
+  deliveryDate: z.any().optional(),
   
   notes: z.string().optional(),
   status: z.string().optional().default("Pendente"),
@@ -186,11 +165,22 @@ const requisitionItemSchema = z.object({
   certificateNumber: z.string().optional(),
   storageLocation: z.string().optional(),
   
-  // ✅ CORREÇÃO CRÍTICA: Aceitar null, undefined ou Date
-  deliveryReceiptDate: z.union([z.date(), z.null(), z.undefined()]).optional(),
+  // ✅ SCHEMA MAIS SIMPLES
+  deliveryReceiptDate: z.any().optional(),
   
   inspectionStatus: z.enum(inspectionStatuses).optional().default("Pendente"),
 });
+
+// 1. PRIMEIRO: Vamos criar uma função para debug completo
+const debugDateFlow = (step: string, data: any, context?: string) => {
+    console.log(`🐛 [${step}] ${context || ''}`, {
+        data: data,
+        type: typeof data,
+        isDate: data instanceof Date,
+        isTimestamp: data && typeof data.toDate === 'function',
+        value: data
+    });
+};
 
 // 2. FUNÇÃO PARA LIMPAR VALORES NULL/UNDEFINED DAS DATAS
 const cleanDateValue = (dateValue: any): Date | undefined => {
@@ -702,6 +692,48 @@ export default function MaterialsPage() {
         }
     }, [isRequisitionFormOpen, selectedRequisition, requisitionForm]);
 
+    // 7. TESTE MANUAL - Adicione esta função para testar manualmente
+    const testDateSaving = async () => {
+        console.log('🧪 ===== TESTE MANUAL DE DATA =====');
+        
+        const testDate = new Date('2025-08-15');
+        console.log('🧪 Data de teste criada:', testDate);
+        
+        const testItem = {
+            id: 'test-123',
+            description: 'Teste de data',
+            quantityRequested: 1,
+            unit: 'pç',
+            deliveryDate: testDate,
+            status: 'Pendente',
+            inspectionStatus: 'Pendente'
+        };
+        
+        console.log('🧪 Item de teste:', testItem);
+        
+        const prepared = prepareRequisitionItem(testItem);
+        console.log('🧪 Item preparado:', prepared);
+        
+        // Tentar salvar no Firestore
+        try {
+            const docRef = await addDoc(collection(db, "companies", "mecald", "testDates"), {
+                testData: prepared,
+                createdAt: new Date()
+            });
+            console.log('🧪 Teste salvo no Firestore com ID:', docRef.id);
+            
+            // Ler de volta
+            const savedDoc = await getDoc(docRef);
+            if (savedDoc.exists()) {
+                console.log('🧪 Dados lidos do Firestore:', savedDoc.data());
+            }
+        } catch (error) {
+            console.error('🧪 Erro no teste:', error);
+        }
+        
+        console.log('🧪 ===== FIM TESTE MANUAL =====');
+    };
+
     // Handlers
     const handleOpenRequisitionForm = (requisition: Requisition | null = null) => {
         console.log('🔧 handleOpenRequisitionForm chamada com:', requisition);
@@ -780,13 +812,23 @@ export default function MaterialsPage() {
     };
     
     const onRequisitionSubmit = async (data: Requisition) => {
-        // 8. ADICIONANDO LOGS NO onRequisitionSubmit para debug completo
-        console.log(`💾 onRequisitionSubmit - dados recebidos:`, data);
-        console.log(`💾 Items com datas:`, data.items.map(item => ({
-            id: item.id,
-            description: item.description,
-            deliveryDate: item.deliveryDate
-        })));
+        // 6. ADICIONAR DEBUG NO onRequisitionSubmit
+        console.log(`💾 ===== INICIANDO onRequisitionSubmit =====`);
+        console.log(`💾 Dados recebidos do formulário:`, data);
+        console.log(`💾 Items do formulário:`, data.items);
+
+        data.items.forEach((item, index) => {
+            debugDateFlow('SUBMIT_ITEM', item.deliveryDate, `Item ${index} - ${item.description}`);
+        });
+
+        // E ANTES de chamar prepareRequisitionItem, adicione:
+        console.log(`💾 Processando ${data.items.length} items...`);
+        const processedItems = data.items.map((item, index) => {
+            console.log(`💾 Processando item ${index}...`);
+            const prepared = prepareRequisitionItem(item);
+            console.log(`💾 Item ${index} processado:`, prepared);
+            return prepared;
+        });
         
         try {
             const newHistoryEntry = { 
@@ -838,7 +880,7 @@ export default function MaterialsPage() {
                     action: h.action || "Ação",
                     details: h.details || null
                 })),
-                items: mergedItems.map(item => prepareRequisitionItem(item))
+                items: processedItems // Usar os itens já processados com debug
             };
             
             // Adicionar campos opcionais apenas se tiverem valores
@@ -1290,53 +1332,75 @@ export default function MaterialsPage() {
     const handleUpdateCutItem = () => { if (editCutIndex === null) return; const result = cuttingPlanItemSchema.safeParse(currentCutItem); if (!result.success) { const firstError = result.error.errors[0]; toast({ variant: 'destructive', title: `Erro de validação: ${firstError.path[0]}`, description: firstError.message }); return; } updateCutItem(editCutIndex, result.data); setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); };
     const handleEditCutItem = (index: number) => { setEditCutIndex(index); setCurrentCutItem(cuttingPlanForm.getValues(`items.${index}`)); };
     const handleCancelEditCutItem = () => { setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); }
+    // 3. HANDLER SUPER SIMPLES PARA TESTAR
     const handleCurrentItemChange = (field: keyof RequisitionItem, value: any) => { 
-        console.log(`🔄 handleCurrentItemChange - ${field}:`, value, typeof value);
+        debugDateFlow('HANDLER_INPUT', value, `Campo: ${field}`);
         
         if (field === 'deliveryDate' || field === 'deliveryReceiptDate') { 
-            const cleanedValue = cleanDateValue(value);
-            console.log(`📅 Data limpa:`, cleanedValue);
+            // Converter diretamente para Date se for string de input
+            let processedValue = value;
             
-            setCurrentItem(prev => ({
-                ...prev, 
-                [field]: cleanedValue
-            })); 
+            if (typeof value === 'string' && value) {
+                processedValue = new Date(value);
+                debugDateFlow('HANDLER_CONVERTED', processedValue, 'String convertida para Date');
+            } else if (!value) {
+                processedValue = null; // Usar null explicitamente para campos vazios
+                debugDateFlow('HANDLER_NULL', processedValue, 'Campo vazio, definindo como null');
+            }
+            
+            setCurrentItem(prev => {
+                const updated = {...prev, [field]: processedValue};
+                debugDateFlow('HANDLER_STATE_UPDATE', updated[field], `Estado atualizado para ${field}`);
+                return updated;
+            }); 
         } else { 
             setCurrentItem(prev => ({...prev, [field]: value})); 
         } 
     };
+    // 4. VALIDAÇÃO SUPER SIMPLES
     const handleAddItem = () => { 
-        console.log(`🔍 handleAddItem - currentItem:`, currentItem);
+        console.log(`🔍 ===== INICIANDO handleAddItem =====`);
+        debugDateFlow('ADD_ITEM_CURRENT', currentItem, 'currentItem completo');
+        debugDateFlow('ADD_ITEM_DELIVERY_DATE', currentItem.deliveryDate, 'currentItem.deliveryDate');
         
+        // Não fazer nenhuma transformação complexa, passar direto
         const dataToValidate = { 
             ...currentItem, 
             id: currentItem.id || Date.now().toString(), 
             quantityRequested: Number(currentItem.quantityRequested) || 0, 
             pesoUnitario: Number(currentItem.pesoUnitario) || 0,
-            // ✅ CORREÇÃO CRÍTICA: Limpar a data antes da validação
-            deliveryDate: cleanDateValue(currentItem.deliveryDate),
-            deliveryReceiptDate: cleanDateValue(currentItem.deliveryReceiptDate),
+            // Manter as datas exatamente como estão
+            deliveryDate: currentItem.deliveryDate,
+            deliveryReceiptDate: currentItem.deliveryReceiptDate,
         }; 
         
-        console.log(`🔍 dataToValidate após limpeza:`, dataToValidate);
-        console.log(`🔍 deliveryDate limpa:`, dataToValidate.deliveryDate);
+        debugDateFlow('ADD_ITEM_TO_VALIDATE', dataToValidate.deliveryDate, 'dataToValidate.deliveryDate');
         
         const result = requisitionItemSchema.safeParse(dataToValidate); 
         if (!result.success) { 
-            const firstError = result.error.errors[0]; 
             console.error(`❌ Erro de validação:`, result.error.errors);
             toast({ 
                 variant: 'destructive', 
-                title: `Erro de validação: ${firstError.path[0]}`, 
-                description: firstError.message 
+                title: `Erro de validação`, 
+                description: result.error.errors[0]?.message || 'Erro desconhecido'
             }); 
             return; 
         } 
         
-        console.log(`✅ Item validado com sucesso:`, result.data);
+        debugDateFlow('ADD_ITEM_VALIDATED', result.data.deliveryDate, 'result.data.deliveryDate após validação');
         
+        console.log(`✅ Item validado, adicionando ao formulário...`);
         appendReqItem(result.data); 
+        
+        // Verificar se foi adicionado corretamente
+        setTimeout(() => {
+            const currentItems = requisitionForm.getValues('items');
+            const lastItem = currentItems[currentItems.length - 1];
+            debugDateFlow('ADD_ITEM_IN_FORM', lastItem?.deliveryDate, 'Item adicionado ao formulário');
+        }, 100);
+        
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); 
+        console.log(`🔍 ===== FIM handleAddItem =====`);
     };
     const handleUpdateItem = () => { 
         if (editItemIndex === null) return; 
@@ -1397,6 +1461,12 @@ return (
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight font-headline">Requisição e Planos de Corte</h1>
+                    
+                    {/* 8. BOTÃO DE TESTE (adicionar temporariamente no JSX) */}
+                    <Button onClick={testDateSaving} className="mb-4" variant="outline">
+                        🧪 Testar Salvamento de Data
+                    </Button>
+                    
                      <div className="flex items-center gap-2">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
