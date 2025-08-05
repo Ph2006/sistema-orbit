@@ -692,6 +692,14 @@ export default function MaterialsPage() {
         }
     }, [isRequisitionFormOpen, selectedRequisition, requisitionForm]);
 
+    // 4. TESTE ADICIONAL - Verificar se o Calendar está funcionando
+    // Adicione este useEffect para monitorar mudanças no currentItem:
+    useEffect(() => {
+        if (currentItem.deliveryDate) {
+            console.log(`👁️ currentItem.deliveryDate mudou:`, currentItem.deliveryDate, typeof currentItem.deliveryDate);
+        }
+    }, [currentItem.deliveryDate]);
+
     // 7. TESTE MANUAL - Adicione esta função para testar manualmente
     const testDateSaving = async () => {
         console.log('🧪 ===== TESTE MANUAL DE DATA =====');
@@ -812,22 +820,17 @@ export default function MaterialsPage() {
     };
     
     const onRequisitionSubmit = async (data: Requisition) => {
-        // 6. ADICIONAR DEBUG NO onRequisitionSubmit
-        console.log(`💾 ===== INICIANDO onRequisitionSubmit =====`);
+        // 3. ADICIONAR VERIFICAÇÃO FINAL NO onRequisitionSubmit
+        console.log(`💾 ===== onRequisitionSubmit INICIADO =====`);
         console.log(`💾 Dados recebidos do formulário:`, data);
-        console.log(`💾 Items do formulário:`, data.items);
-
+        
+        // VERIFICAÇÃO CRÍTICA: Ver se as datas estão chegando
+        console.log(`💾 Verificando datas nos items:`);
         data.items.forEach((item, index) => {
-            debugDateFlow('SUBMIT_ITEM', item.deliveryDate, `Item ${index} - ${item.description}`);
-        });
-
-        // E ANTES de chamar prepareRequisitionItem, adicione:
-        console.log(`💾 Processando ${data.items.length} items...`);
-        const processedItems = data.items.map((item, index) => {
-            console.log(`💾 Processando item ${index}...`);
-            const prepared = prepareRequisitionItem(item);
-            console.log(`💾 Item ${index} processado:`, prepared);
-            return prepared;
+            console.log(`💾 Item ${index} (${item.description}):`);
+            console.log(`  - deliveryDate:`, item.deliveryDate, typeof item.deliveryDate);
+            console.log(`  - é Date?:`, item.deliveryDate instanceof Date);
+            console.log(`  - é válida?:`, item.deliveryDate instanceof Date ? !isNaN(item.deliveryDate.getTime()) : 'N/A');
         });
         
         try {
@@ -869,6 +872,18 @@ export default function MaterialsPage() {
                 }
             }
             
+            // MAS adicione este log antes de salvar:
+            console.log(`💾 Items processados para salvamento:`);
+            const processedItems = mergedItems.map(item => {
+                const prepared = prepareRequisitionItem(item);
+                console.log(`💾 Item processado:`, {
+                    description: item.description,
+                    deliveryDate_original: item.deliveryDate,
+                    deliveryDate_processed: prepared.deliveryDate
+                });
+                return prepared;
+            });
+            
             // Preparar dados base
             const baseData: any = {
                 date: Timestamp.fromDate(data.date),
@@ -880,7 +895,7 @@ export default function MaterialsPage() {
                     action: h.action || "Ação",
                     details: h.details || null
                 })),
-                items: processedItems // Usar os itens já processados com debug
+                items: processedItems
             };
             
             // Adicionar campos opcionais apenas se tiverem valores
@@ -1332,25 +1347,38 @@ export default function MaterialsPage() {
     const handleUpdateCutItem = () => { if (editCutIndex === null) return; const result = cuttingPlanItemSchema.safeParse(currentCutItem); if (!result.success) { const firstError = result.error.errors[0]; toast({ variant: 'destructive', title: `Erro de validação: ${firstError.path[0]}`, description: firstError.message }); return; } updateCutItem(editCutIndex, result.data); setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); };
     const handleEditCutItem = (index: number) => { setEditCutIndex(index); setCurrentCutItem(cuttingPlanForm.getValues(`items.${index}`)); };
     const handleCancelEditCutItem = () => { setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); }
-    // 3. HANDLER SUPER SIMPLES PARA TESTAR
+    // 2. MELHORAR O handleCurrentItemChange com mais debug
     const handleCurrentItemChange = (field: keyof RequisitionItem, value: any) => { 
-        debugDateFlow('HANDLER_INPUT', value, `Campo: ${field}`);
+        console.log(`🔄 handleCurrentItemChange - Campo: ${field}, Valor:`, value, typeof value);
         
         if (field === 'deliveryDate' || field === 'deliveryReceiptDate') { 
-            // Converter diretamente para Date se for string de input
             let processedValue = value;
             
-            if (typeof value === 'string' && value) {
+            // Se é null/undefined/string vazia, definir como null
+            if (!value) {
+                processedValue = null;
+                console.log(`📅 Campo ${field} - valor vazio, definindo como null`);
+            }
+            // Se é Date válida, manter
+            else if (value instanceof Date && !isNaN(value.getTime())) {
+                processedValue = value;
+                console.log(`📅 Campo ${field} - Date válida:`, processedValue);
+            }
+            // Se é string, converter para Date
+            else if (typeof value === 'string') {
                 processedValue = new Date(value);
-                debugDateFlow('HANDLER_CONVERTED', processedValue, 'String convertida para Date');
-            } else if (!value) {
-                processedValue = null; // Usar null explicitamente para campos vazios
-                debugDateFlow('HANDLER_NULL', processedValue, 'Campo vazio, definindo como null');
+                if (isNaN(processedValue.getTime())) {
+                    processedValue = null;
+                    console.log(`📅 Campo ${field} - string inválida, definindo como null`);
+                } else {
+                    console.log(`📅 Campo ${field} - string convertida para Date:`, processedValue);
+                }
             }
             
             setCurrentItem(prev => {
                 const updated = {...prev, [field]: processedValue};
-                debugDateFlow('HANDLER_STATE_UPDATE', updated[field], `Estado atualizado para ${field}`);
+                console.log(`📅 Estado atualizado - ${field}:`, updated[field]);
+                console.log(`📅 currentItem completo após update:`, updated);
                 return updated;
             }); 
         } else { 
@@ -1868,47 +1896,165 @@ return (
                                   </Card>
                                 </TabsContent>
                                 <TabsContent value="items" className="space-y-4">
-                                    <Card><CardHeader><CardTitle>Item da Requisição</CardTitle><CardDescription>{editItemIndex !== null ? 'Edite os dados do item.' : 'Preencha e adicione um novo item.'}</CardDescription></CardHeader>
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Item da Requisição</CardTitle>
+                                            <CardDescription>
+                                                {editItemIndex !== null ? 'Edite os dados do item.' : 'Preencha e adicione um novo item.'}
+                                            </CardDescription>
+                                        </CardHeader>
                                         <CardContent className="space-y-4">
                                             <div className="space-y-4">
-                                                <div><Label>Descrição</Label><Input placeholder="Ex: Chapa de Aço 1/4" value={currentItem.description} onChange={e => handleCurrentItemChange('description', e.target.value)} /></div>
+                                                {/* Descrição */}
+                                                <div>
+                                                    <Label htmlFor="item-description">Descrição</Label>
+                                                    <Input 
+                                                        id="item-description"
+                                                        placeholder="Ex: Chapa de Aço 1/4" 
+                                                        value={currentItem.description} 
+                                                        onChange={e => handleCurrentItemChange('description', e.target.value)} 
+                                                    />
+                                                </div>
+
+                                                {/* Grid com código, material, dimensão */}
                                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                    <div><Label>Código</Label><Input placeholder="Opcional" value={currentItem.code || ''} onChange={e => handleCurrentItemChange('code', e.target.value)} /></div>
-                                                    <div><Label>Material</Label><Input placeholder="Ex: Aço 1020" value={currentItem.material || ''} onChange={e => handleCurrentItemChange('material', e.target.value)} /></div>
-                                                    <div><Label>Dimensão</Label><Input placeholder="Ex: 1/2'' x 1.2m" value={currentItem.dimensao || ''} onChange={e => handleCurrentItemChange('dimensao', e.target.value)} /></div>
+                                                    <div>
+                                                        <Label htmlFor="item-code">Código</Label>
+                                                        <Input 
+                                                            id="item-code"
+                                                            placeholder="Opcional" 
+                                                            value={currentItem.code || ''} 
+                                                            onChange={e => handleCurrentItemChange('code', e.target.value)} 
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="item-material">Material</Label>
+                                                        <Input 
+                                                            id="item-material"
+                                                            placeholder="Ex: Aço 1020" 
+                                                            value={currentItem.material || ''} 
+                                                            onChange={e => handleCurrentItemChange('material', e.target.value)} 
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="item-dimensao">Dimensão</Label>
+                                                        <Input 
+                                                            id="item-dimensao"
+                                                            placeholder="Ex: 1/2'' x 1.2m" 
+                                                            value={currentItem.dimensao || ''} 
+                                                            onChange={e => handleCurrentItemChange('dimensao', e.target.value)} 
+                                                        />
+                                                    </div>
                                                 </div>
+
+                                                {/* Grid com quantidade, unidade, peso, data, status */}
                                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                                                    <div><Label>Quantidade</Label><Input type="number" step="0.01" placeholder="1" value={currentItem.quantityRequested || ''} onChange={e => handleCurrentItemChange('quantityRequested', e.target.value)} /></div>
-                                                    <div><Label>Unidade</Label><Input placeholder="kg, m, pç" value={currentItem.unit} onChange={e => handleCurrentItemChange('unit', e.target.value)} /></div>
-                                                    <div><Label>Peso Unit. (kg)</Label><Input type="number" step="0.01" value={currentItem.pesoUnitario || ''} onChange={e => handleCurrentItemChange('pesoUnitario', e.target.value)} /></div>
-                                                    <div className="flex flex-col space-y-2"><Label>Entrega Prevista</Label><Popover><PopoverTrigger asChild><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !currentItem.deliveryDate && "text-muted-foreground")}>{currentItem.deliveryDate ? (() => {
-                                                        try {
-                                                            // Se for um Timestamp do Firestore
-                                                            if (currentItem.deliveryDate && typeof currentItem.deliveryDate.toDate === 'function') {
-                                                                return format(currentItem.deliveryDate.toDate(), "dd/MM/yyyy");
-                                                            }
-                                                            // Se for uma string ou número
-                                                            if (typeof currentItem.deliveryDate === 'string' || typeof currentItem.deliveryDate === 'number') {
-                                                                const parsedDate = new Date(currentItem.deliveryDate);
-                                                                if (!isNaN(parsedDate.getTime())) {
-                                                                    return format(parsedDate, "dd/MM/yyyy");
-                                                                }
-                                                            }
-                                                            // Se já for um objeto Date
-                                                            if (currentItem.deliveryDate instanceof Date && !isNaN(currentItem.deliveryDate.getTime())) {
-                                                                return format(currentItem.deliveryDate, "dd/MM/yyyy");
-                                                            }
-                                                            return 'Data inválida';
-                                                        } catch (error) {
-                                                            console.warn('Erro ao formatar data de entrega do item:', error);
-                                                            return 'Data inválida';
-                                                        }
-                                                    })() : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={currentItem.deliveryDate || undefined} onSelect={date => handleCurrentItemChange('deliveryDate', date)} /></PopoverContent></Popover></div>
-                                                    <div><Label>Status</Label><Select value={currentItem.status || "Pendente"} onValueChange={value => handleCurrentItemChange('status', value)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{itemStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>
+                                                    <div>
+                                                        <Label htmlFor="item-quantity">Quantidade</Label>
+                                                        <Input 
+                                                            id="item-quantity"
+                                                            type="number" 
+                                                            step="0.01" 
+                                                            placeholder="1" 
+                                                            value={currentItem.quantityRequested || ''} 
+                                                            onChange={e => handleCurrentItemChange('quantityRequested', e.target.value)} 
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="item-unit">Unidade</Label>
+                                                        <Input 
+                                                            id="item-unit"
+                                                            placeholder="kg, m, pç" 
+                                                            value={currentItem.unit} 
+                                                            onChange={e => handleCurrentItemChange('unit', e.target.value)} 
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="item-weight">Peso Unit. (kg)</Label>
+                                                        <Input 
+                                                            id="item-weight"
+                                                            type="number" 
+                                                            step="0.01" 
+                                                            value={currentItem.pesoUnitario || ''} 
+                                                            onChange={e => handleCurrentItemChange('pesoUnitario', e.target.value)} 
+                                                        />
+                                                    </div>
+                                                    
+                                                    {/* CORREÇÃO CRÍTICA: Campo de data com binding correto */}
+                                                    <div className="flex flex-col space-y-2">
+                                                        <Label htmlFor="item-delivery-date">Entrega Prevista</Label>
+                                                        <Popover>
+                                                            <PopoverTrigger asChild>
+                                                                <Button 
+                                                                    id="item-delivery-date"
+                                                                    variant="outline" 
+                                                                    className={cn(
+                                                                        "pl-3 text-left font-normal",
+                                                                        !currentItem.deliveryDate && "text-muted-foreground"
+                                                                    )}
+                                                                >
+                                                                    {currentItem.deliveryDate && currentItem.deliveryDate instanceof Date && !isNaN(currentItem.deliveryDate.getTime()) 
+                                                                        ? format(currentItem.deliveryDate, "dd/MM/yyyy")
+                                                                        : <span>Escolha a data</span>
+                                                                    }
+                                                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                                                </Button>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent className="w-auto p-0">
+                                                                <Calendar 
+                                                                    mode="single" 
+                                                                    selected={currentItem.deliveryDate instanceof Date ? currentItem.deliveryDate : undefined}
+                                                                    onSelect={date => {
+                                                                        console.log('📅 Calendar onSelect chamado com:', date);
+                                                                        handleCurrentItemChange('deliveryDate', date);
+                                                                    }}
+                                                                />
+                                                            </PopoverContent>
+                                                        </Popover>
+                                                    </div>
+
+                                                    <div>
+                                                        <Label htmlFor="item-status">Status</Label>
+                                                        <Select 
+                                                            value={currentItem.status || "Pendente"} 
+                                                            onValueChange={value => handleCurrentItemChange('status', value)}
+                                                        >
+                                                            <SelectTrigger id="item-status">
+                                                                <SelectValue/>
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {itemStatuses.map(status => (
+                                                                    <SelectItem key={status} value={status}>{status}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
                                                 </div>
-                                                <div><Label>Observações</Label><Input placeholder="Ex: Certificado de qualidade" value={currentItem.notes || ''} onChange={e => handleCurrentItemChange('notes', e.target.value)} /></div>
+
+                                                {/* Observações */}
+                                                <div>
+                                                    <Label htmlFor="item-notes">Observações</Label>
+                                                    <Input 
+                                                        id="item-notes"
+                                                        placeholder="Ex: Certificado de qualidade" 
+                                                        value={currentItem.notes || ''} 
+                                                        onChange={e => handleCurrentItemChange('notes', e.target.value)} 
+                                                    />
+                                                </div>
                                             </div>
-                                             <div className="flex justify-end gap-2">{editItemIndex !== null && ( <Button type="button" variant="outline" onClick={handleCancelEditItem}>Cancelar Edição</Button> )}<Button type="button" onClick={editItemIndex !== null ? handleUpdateItem : handleAddItem}><PlusCircle className="mr-2 h-4 w-4" />{editItemIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}</Button></div>
+                                            
+                                            {/* Botões */}
+                                            <div className="flex justify-end gap-2">
+                                                {editItemIndex !== null && (
+                                                    <Button type="button" variant="outline" onClick={handleCancelEditItem}>
+                                                        Cancelar Edição
+                                                    </Button>
+                                                )}
+                                                <Button type="button" onClick={editItemIndex !== null ? handleUpdateItem : handleAddItem}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" />
+                                                    {editItemIndex !== null ? 'Atualizar Item' : 'Adicionar Item'}
+                                                </Button>
+                                            </div>
                                         </CardContent>
                                     </Card>
                                     {reqItems.length > 0 && (
