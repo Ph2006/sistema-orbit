@@ -173,8 +173,8 @@ const requisitionItemSchema = z.object({
   quantityFulfilled: z.coerce.number().min(0).optional().default(0),
   unit: z.string().min(1, "Unidade obrigatória (ex: m, kg, pç)."),
   
-  // ✅ CORREÇÃO: Apenas .optional(), sem .nullable()
-  deliveryDate: z.date().optional(),
+  // ✅ CORREÇÃO CRÍTICA: Aceitar null, undefined ou Date
+  deliveryDate: z.union([z.date(), z.null(), z.undefined()]).optional(),
   
   notes: z.string().optional(),
   status: z.string().optional().default("Pendente"),
@@ -186,11 +186,51 @@ const requisitionItemSchema = z.object({
   certificateNumber: z.string().optional(),
   storageLocation: z.string().optional(),
   
-  // ✅ CORREÇÃO: Apenas .optional(), sem .nullable()
-  deliveryReceiptDate: z.date().optional(),
+  // ✅ CORREÇÃO CRÍTICA: Aceitar null, undefined ou Date
+  deliveryReceiptDate: z.union([z.date(), z.null(), z.undefined()]).optional(),
   
   inspectionStatus: z.enum(inspectionStatuses).optional().default("Pendente"),
 });
+
+// 2. FUNÇÃO PARA LIMPAR VALORES NULL/UNDEFINED DAS DATAS
+const cleanDateValue = (dateValue: any): Date | undefined => {
+    console.log(`🧹 cleanDateValue - entrada:`, dateValue, typeof dateValue);
+    
+    // Se é null, undefined ou string vazia, retornar undefined
+    if (dateValue === null || dateValue === undefined || dateValue === '') {
+        console.log(`🧹 Valor vazio, retornando undefined`);
+        return undefined;
+    }
+    
+    // Se já é uma Date válida
+    if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+        console.log(`🧹 Date válida, retornando:`, dateValue);
+        return dateValue;
+    }
+    
+    // Se é string, tentar converter
+    if (typeof dateValue === 'string') {
+        const parsed = new Date(dateValue);
+        if (!isNaN(parsed.getTime())) {
+            console.log(`🧹 String convertida para Date:`, parsed);
+            return parsed;
+        }
+    }
+    
+    // Se é Timestamp do Firestore
+    if (dateValue && typeof dateValue.toDate === 'function') {
+        try {
+            const converted = dateValue.toDate();
+            console.log(`🧹 Timestamp convertido para Date:`, converted);
+            return converted;
+        } catch (error) {
+            console.error(`❌ Erro ao converter Timestamp:`, error);
+        }
+    }
+    
+    console.log(`🧹 Valor inválido, retornando undefined`);
+    return undefined;
+};
 
 const requisitionSchema = z.object({
   id: z.string().optional(),
@@ -359,6 +399,25 @@ export default function MaterialsPage() {
         );
     }, [orders, searchOS]);
 
+    // 7. CORREÇÃO NO CARREGAMENTO DE DADOS (fetchRequisitions)
+    const processItemFromFirestore = (item: any, index: number, docId: string) => {
+        return {
+            id: item.id || `${docId}-${index}`,
+            ...item,
+            // ✅ CORREÇÃO: Converter Timestamps para Date ao carregar
+            deliveryDate: item.deliveryDate ? (
+                typeof item.deliveryDate.toDate === 'function' 
+                    ? item.deliveryDate.toDate() 
+                    : new Date(item.deliveryDate)
+            ) : undefined,
+            deliveryReceiptDate: item.deliveryReceiptDate ? (
+                typeof item.deliveryReceiptDate.toDate === 'function' 
+                    ? item.deliveryReceiptDate.toDate() 
+                    : new Date(item.deliveryReceiptDate)
+            ) : undefined,
+        };
+    };
+
     const fetchRequisitions = useCallback(async () => {
         if (!user) return;
         setIsLoading(true);
@@ -405,28 +464,28 @@ export default function MaterialsPage() {
             const reqsList = reqsSnapshot.docs.map(d => {
                 const data = d.data();
                 
-                // Função para conversão segura de timestamps
-                const safeToDate = (timestamp: any): Date | null => {
-                    if (!timestamp) return null;
+                // 8. ATUALIZAÇÃO DA FUNÇÃO safeToDate no fetchRequisitions
+                const safeToDate = (timestamp: any): Date | undefined => {
+                    if (!timestamp) return undefined;
                     if (timestamp instanceof Date) return timestamp;
                     if (typeof timestamp.toDate === 'function') {
                         try {
                             return timestamp.toDate();
                         } catch (error) {
                             console.warn("Erro ao converter timestamp:", error);
-                            return null;
+                            return undefined;
                         }
                     }
                     if (typeof timestamp === 'string' || typeof timestamp === 'number') {
                         try {
                             const date = new Date(timestamp);
-                            return isNaN(date.getTime()) ? null : date;
+                            return isNaN(date.getTime()) ? undefined : date;
                         } catch (error) {
                             console.warn("Erro ao converter data:", error);
-                            return null;
+                            return undefined;
                         }
                     }
-                    return null;
+                    return undefined;
                 };
                 
                 return { 
@@ -436,14 +495,11 @@ export default function MaterialsPage() {
                     customer: data.customer || undefined, 
                     approval: data.approval ? { 
                         ...data.approval, 
-                        approvalDate: safeToDate(data.approval.approvalDate) || null,
+                        approvalDate: safeToDate(data.approval.approvalDate) || undefined,
                     } : {}, 
-                    items: (data.items || []).map((item: any, index: number) => ({ 
-                        id: item.id || `${d.id}-${index}`, 
-                        ...item, 
-                        deliveryDate: safeToDate(item.deliveryDate) || null,
-                        deliveryReceiptDate: safeToDate(item.deliveryReceiptDate) || null
-                    })), 
+                    items: (data.items || []).map((item: any, index: number) => 
+                        processItemFromFirestore(item, index, d.id)
+                    ), 
                     history: (data.history || []).map((h: any) => ({
                         ...h, 
                         timestamp: safeToDate(h.timestamp) || new Date()
@@ -1102,48 +1158,35 @@ export default function MaterialsPage() {
     const handleEditCutItem = (index: number) => { setEditCutIndex(index); setCurrentCutItem(cuttingPlanForm.getValues(`items.${index}`)); };
     const handleCancelEditCutItem = () => { setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); }
     const handleCurrentItemChange = (field: keyof RequisitionItem, value: any) => { 
-        console.log(`🔄 handleCurrentItemChange - ${field}:`, value);
+        console.log(`🔄 handleCurrentItemChange - ${field}:`, value, typeof value);
         
-        if (field === 'deliveryDate') { 
-            let processedValue;
-            if (value) {
-                // Se value é uma string de data do input, converter para Date
-                if (typeof value === 'string') {
-                    processedValue = new Date(value);
-                    console.log(`📅 Convertendo string para Date:`, processedValue);
-                } else if (value instanceof Date) {
-                    processedValue = value;
-                    console.log(`📅 Já é Date:`, processedValue);
-                } else {
-                    processedValue = undefined;
-                    console.log(`❌ Valor inválido, definindo como undefined`);
-                }
-            } else {
-                processedValue = undefined;
-                console.log(`📅 Valor vazio, definindo como undefined`);
-            }
+        if (field === 'deliveryDate' || field === 'deliveryReceiptDate') { 
+            const cleanedValue = cleanDateValue(value);
+            console.log(`📅 Data limpa:`, cleanedValue);
             
             setCurrentItem(prev => ({
                 ...prev, 
-                [field]: processedValue
+                [field]: cleanedValue
             })); 
         } else { 
             setCurrentItem(prev => ({...prev, [field]: value})); 
         } 
     };
     const handleAddItem = () => { 
-        console.log(`🔍 handleAddItem - currentItem.deliveryDate:`, currentItem.deliveryDate);
+        console.log(`🔍 handleAddItem - currentItem:`, currentItem);
         
         const dataToValidate = { 
             ...currentItem, 
             id: currentItem.id || Date.now().toString(), 
             quantityRequested: Number(currentItem.quantityRequested) || 0, 
             pesoUnitario: Number(currentItem.pesoUnitario) || 0,
-            // ✅ CORREÇÃO: Garantir que a data seja preservada
-            deliveryDate: currentItem.deliveryDate || undefined,
+            // ✅ CORREÇÃO CRÍTICA: Limpar a data antes da validação
+            deliveryDate: cleanDateValue(currentItem.deliveryDate),
+            deliveryReceiptDate: cleanDateValue(currentItem.deliveryReceiptDate),
         }; 
         
-        console.log(`🔍 dataToValidate.deliveryDate:`, dataToValidate.deliveryDate);
+        console.log(`🔍 dataToValidate após limpeza:`, dataToValidate);
+        console.log(`🔍 deliveryDate limpa:`, dataToValidate.deliveryDate);
         
         const result = requisitionItemSchema.safeParse(dataToValidate); 
         if (!result.success) { 
@@ -1158,7 +1201,6 @@ export default function MaterialsPage() {
         } 
         
         console.log(`✅ Item validado com sucesso:`, result.data);
-        console.log(`✅ Data no item validado:`, result.data.deliveryDate);
         
         appendReqItem(result.data); 
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); 
@@ -1166,15 +1208,18 @@ export default function MaterialsPage() {
     const handleUpdateItem = () => { 
         if (editItemIndex === null) return; 
         
-        console.log(`🔄 handleUpdateItem - currentItem.deliveryDate:`, currentItem.deliveryDate);
+        console.log(`🔄 handleUpdateItem - currentItem:`, currentItem);
         
         const dataToValidate = { 
             ...currentItem, 
             quantityRequested: Number(currentItem.quantityRequested) || 0, 
             pesoUnitario: Number(currentItem.pesoUnitario) || 0,
-            // ✅ CORREÇÃO: Garantir que a data seja preservada
-            deliveryDate: currentItem.deliveryDate || undefined,
+            // ✅ CORREÇÃO CRÍTICA: Limpar a data antes da validação
+            deliveryDate: cleanDateValue(currentItem.deliveryDate),
+            deliveryReceiptDate: cleanDateValue(currentItem.deliveryReceiptDate),
         }; 
+        
+        console.log(`🔄 dataToValidate após limpeza:`, dataToValidate);
         
         const result = requisitionItemSchema.safeParse(dataToValidate); 
         if (!result.success) { 
@@ -1198,15 +1243,15 @@ export default function MaterialsPage() {
         console.log(`✏️ handleEditItem - editando item ${index}`);
         
         const itemToEdit = requisitionForm.getValues(`items.${index}`);
-        console.log(`✏️ Item original:`, itemToEdit);
-        console.log(`✏️ deliveryDate original:`, itemToEdit.deliveryDate);
+        console.log(`✏️ Item original do form:`, itemToEdit);
         
         setEditItemIndex(index); 
         
-        // ✅ CORREÇÃO: Garantir que a data seja preservada ao editar
+        // ✅ CORREÇÃO: Limpar as datas ao carregar para edição
         const processedItem = {
             ...itemToEdit,
-            deliveryDate: itemToEdit.deliveryDate || undefined
+            deliveryDate: cleanDateValue(itemToEdit.deliveryDate),
+            deliveryReceiptDate: cleanDateValue(itemToEdit.deliveryReceiptDate),
         };
         
         console.log(`✏️ Item processado para edição:`, processedItem);
