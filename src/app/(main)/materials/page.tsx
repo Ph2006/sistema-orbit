@@ -64,7 +64,7 @@ const cleanFirestoreData = (obj: any): any => {
     return cleaned;
 };
 
-// Função para preparar um item da requisição para o Firestore
+// Função corrigida para preparar um item da requisição para o Firestore
 const prepareRequisitionItem = (item: RequisitionItem): any => {
     const cleanItem: any = {
         id: item.id,
@@ -90,12 +90,61 @@ const prepareRequisitionItem = (item: RequisitionItem): any => {
         cleanItem.invoiceItemValue = Number(item.invoiceItemValue);
     }
     
-    // Campos de data
-    if (item.deliveryDate && item.deliveryDate instanceof Date) {
-        cleanItem.deliveryDate = Timestamp.fromDate(item.deliveryDate);
+    // CORREÇÃO: Campos de data - tratamento mais robusto
+    if (item.deliveryDate) {
+        try {
+            let dateToSave = null;
+            
+            // Se já é um Timestamp do Firestore, manter como está
+            if (item.deliveryDate && typeof item.deliveryDate.toDate === 'function') {
+                dateToSave = item.deliveryDate;
+            }
+            // Se é um objeto Date válido
+            else if (item.deliveryDate instanceof Date && !isNaN(item.deliveryDate.getTime())) {
+                dateToSave = Timestamp.fromDate(item.deliveryDate);
+            }
+            // Se é string ou número, tentar converter
+            else if (typeof item.deliveryDate === 'string' || typeof item.deliveryDate === 'number') {
+                const parsedDate = new Date(item.deliveryDate);
+                if (!isNaN(parsedDate.getTime())) {
+                    dateToSave = Timestamp.fromDate(parsedDate);
+                }
+            }
+            
+            if (dateToSave) {
+                cleanItem.deliveryDate = dateToSave;
+            }
+        } catch (error) {
+            console.warn('Erro ao processar deliveryDate:', error);
+        }
     }
-    if (item.deliveryReceiptDate && item.deliveryReceiptDate instanceof Date) {
-        cleanItem.deliveryReceiptDate = Timestamp.fromDate(item.deliveryReceiptDate);
+    
+    if (item.deliveryReceiptDate) {
+        try {
+            let dateToSave = null;
+            
+            // Se já é um Timestamp do Firestore, manter como está
+            if (item.deliveryReceiptDate && typeof item.deliveryReceiptDate.toDate === 'function') {
+                dateToSave = item.deliveryReceiptDate;
+            }
+            // Se é um objeto Date válido
+            else if (item.deliveryReceiptDate instanceof Date && !isNaN(item.deliveryReceiptDate.getTime())) {
+                dateToSave = Timestamp.fromDate(item.deliveryReceiptDate);
+            }
+            // Se é string ou número, tentar converter
+            else if (typeof item.deliveryReceiptDate === 'string' || typeof item.deliveryReceiptDate === 'number') {
+                const parsedDate = new Date(item.deliveryReceiptDate);
+                if (!isNaN(parsedDate.getTime())) {
+                    dateToSave = Timestamp.fromDate(parsedDate);
+                }
+            }
+            
+            if (dateToSave) {
+                cleanItem.deliveryReceiptDate = dateToSave;
+            }
+        } catch (error) {
+            console.warn('Erro ao processar deliveryReceiptDate:', error);
+        }
     }
     
     // Campos do centro de custos
@@ -127,7 +176,10 @@ const requisitionItemSchema = z.object({
   quantityRequested: z.coerce.number().min(0.1, "Qtd. deve ser maior que 0."),
   quantityFulfilled: z.coerce.number().min(0).optional().default(0),
   unit: z.string().min(1, "Unidade obrigatória (ex: m, kg, pç)."),
-  deliveryDate: z.date().optional().nullable(),
+  
+  // CORREÇÃO: Permitir null explicitamente para as datas
+  deliveryDate: z.union([z.date(), z.null()]).optional(),
+  
   notes: z.string().optional(),
   status: z.string().optional().default("Pendente"),
   
@@ -137,7 +189,10 @@ const requisitionItemSchema = z.object({
   invoiceItemValue: z.coerce.number().optional(),
   certificateNumber: z.string().optional(),
   storageLocation: z.string().optional(),
-  deliveryReceiptDate: z.date().optional().nullable(),
+  
+  // CORREÇÃO: Permitir null explicitamente para as datas
+  deliveryReceiptDate: z.union([z.date(), z.null()]).optional(),
+  
   inspectionStatus: z.enum(inspectionStatuses).optional().default("Pendente"),
 });
 
@@ -1029,7 +1084,16 @@ export default function MaterialsPage() {
     const handleUpdateCutItem = () => { if (editCutIndex === null) return; const result = cuttingPlanItemSchema.safeParse(currentCutItem); if (!result.success) { const firstError = result.error.errors[0]; toast({ variant: 'destructive', title: `Erro de validação: ${firstError.path[0]}`, description: firstError.message }); return; } updateCutItem(editCutIndex, result.data); setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); };
     const handleEditCutItem = (index: number) => { setEditCutIndex(index); setCurrentCutItem(cuttingPlanForm.getValues(`items.${index}`)); };
     const handleCancelEditCutItem = () => { setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); }
-    const handleCurrentItemChange = (field: keyof RequisitionItem, value: any) => { if (field === 'deliveryDate') { setCurrentItem(prev => ({...prev, [field]: value ? new Date(value) : null})); } else { setCurrentItem(prev => ({...prev, [field]: value})); } };
+    const handleCurrentItemChange = (field: keyof RequisitionItem, value: any) => { 
+        if (field === 'deliveryDate') { 
+            setCurrentItem(prev => ({
+                ...prev, 
+                [field]: value ? (value instanceof Date ? value : new Date(value)) : null
+            })); 
+        } else { 
+            setCurrentItem(prev => ({...prev, [field]: value})); 
+        } 
+    };
     const handleAddItem = () => { const dataToValidate = { ...currentItem, id: currentItem.id || Date.now().toString(), quantityRequested: Number(currentItem.quantityRequested) || 0, pesoUnitario: Number(currentItem.pesoUnitario) || 0, }; const result = requisitionItemSchema.safeParse(dataToValidate); if (!result.success) { const firstError = result.error.errors[0]; toast({ variant: 'destructive', title: `Erro de validação: ${firstError.path[0]}`, description: firstError.message }); return; } appendReqItem(result.data); setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); };
     const handleUpdateItem = () => { if (editItemIndex === null) return; const dataToValidate = { ...currentItem, quantityRequested: Number(currentItem.quantityRequested) || 0, pesoUnitario: Number(currentItem.pesoUnitario) || 0, }; const result = requisitionItemSchema.safeParse(dataToValidate); if (!result.success) { const firstError = result.error.errors[0]; toast({ variant: 'destructive', title: `Erro de validação: ${firstError.path[0]}`, description: firstError.message }); return; } updateReqItem(editItemIndex, result.data); setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); setEditItemIndex(null); };
     const handleEditItem = (index: number) => { setEditItemIndex(index); setCurrentItem(requisitionForm.getValues(`items.${index}`)); };
