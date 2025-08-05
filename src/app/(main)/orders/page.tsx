@@ -93,7 +93,7 @@ const orderSchema = z.object({
   projectName: z.string().optional(),
   status: orderStatusEnum,
   deliveryDate: z.date().nullable().optional(),
-  items: z.array(orderItemSchema),
+  items: z.array(orderItemSchema).min(1, "O pedido deve ter pelo menos um item"),
   driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
   documents: z.object({
     drawings: z.boolean().default(false),
@@ -505,6 +505,16 @@ export default function OrdersPage() {
     const [isItemDeleteDialogOpen, setIsItemDeleteDialogOpen] = useState(false);
     const [itemToDelete, setItemToDelete] = useState<{ index: number; item: OrderItem } | null>(null);
 
+    // Estados para adicionar novos itens
+    const [isAddingItem, setIsAddingItem] = useState(false);
+    const [newItemForm, setNewItemForm] = useState({
+      description: '',
+      itemNumber: '',
+      code: '',
+      quantity: 1,
+      unitWeight: 0,
+    });
+
     // Progress tracking state
     const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
     const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
@@ -532,7 +542,7 @@ export default function OrdersPage() {
         resolver: zodResolver(orderSchema),
     });
 
-    const { fields } = useFieldArray({
+    const { fields, append, remove } = useFieldArray({
         control: form.control,
         name: "items"
     });
@@ -1575,10 +1585,9 @@ export default function OrdersPage() {
     const handleConfirmDeleteItem = () => {
       if (!itemToDelete) return;
       
+      // Remove o item usando o useFieldArray
       const currentItems = form.getValues("items");
       const updatedItems = currentItems.filter((_, index) => index !== itemToDelete.index);
-      
-      // Atualizar o formulário
       form.setValue("items", updatedItems);
       
       // Fechar dialog
@@ -1589,6 +1598,62 @@ export default function OrdersPage() {
         title: "Item removido!",
         description: `O item "${itemToDelete.item.description}" foi removido do pedido.`,
       });
+    };
+
+    // Função para adicionar novo item
+    const handleAddNewItem = () => {
+      if (!newItemForm.description.trim()) {
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "A descrição do item é obrigatória.",
+        });
+        return;
+      }
+
+      const currentItems = form.getValues("items");
+      const newItem = {
+        id: `new-item-${Date.now()}`,
+        description: newItemForm.description.trim(),
+        itemNumber: newItemForm.itemNumber.trim(),
+        code: newItemForm.code.trim(),
+        quantity: Number(newItemForm.quantity) || 1,
+        unitWeight: Number(newItemForm.unitWeight) || 0,
+        itemDeliveryDate: null,
+        shippingDate: null,
+        shippingList: '',
+        invoiceNumber: '',
+        productionPlan: [],
+      };
+
+      form.setValue("items", [...currentItems, newItem]);
+      
+      // Limpar formulário
+      setNewItemForm({
+        description: '',
+        itemNumber: '',
+        code: '',
+        quantity: 1,
+        unitWeight: 0,
+      });
+      setIsAddingItem(false);
+
+      toast({
+        title: "Item adicionado!",
+        description: "O novo item foi adicionado ao pedido.",
+      });
+    };
+
+    // Função para cancelar adição de item
+    const handleCancelAddItem = () => {
+      setNewItemForm({
+        description: '',
+        itemNumber: '',
+        code: '',
+        quantity: 1,
+        unitWeight: 0,
+      });
+      setIsAddingItem(false);
     };
 
     // CORREÇÃO SIMPLES E DIRETA - handlePlanChange
@@ -4261,14 +4326,26 @@ export default function OrdersPage() {
                       </CardContent>
                     </Card>
 
-                    {/* Itens do Pedido - MODO DE EDIÇÃO COM BOTÕES DE EXCLUSÃO */}
+                    {/* Itens do Pedido - MODO DE EDIÇÃO COM ADICIONAR/REMOVER */}
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center justify-between">
                           <span>Itens do Pedido (Editável)</span>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Package className="h-4 w-4" />
-                            <span>{fields.length} {fields.length === 1 ? 'item' : 'itens'}</span>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Package className="h-4 w-4" />
+                              <span>{fields.length} {fields.length === 1 ? 'item' : 'itens'}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setIsAddingItem(true)}
+                              className="flex items-center gap-2"
+                            >
+                              <PlusCircle className="h-4 w-4" />
+                              Adicionar Item
+                            </Button>
                           </div>
                         </CardTitle>
                       </CardHeader>
@@ -4278,6 +4355,18 @@ export default function OrdersPage() {
                             <Package className="h-8 w-8 mx-auto mb-2" />
                             <p>Nenhum item no pedido</p>
                             <p className="text-xs">Este pedido não possui itens cadastrados.</p>
+                            <div className="mt-4">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setIsAddingItem(true)}
+                                className="flex items-center gap-2"
+                              >
+                                <PlusCircle className="h-4 w-4" />
+                                Adicionar Primeiro Item
+                              </Button>
+                            </div>
                           </div>
                         ) : (
                           fields.map((field, index) => {
@@ -4536,13 +4625,15 @@ export default function OrdersPage() {
               <div className="flex-shrink-0 pt-4 border-t bg-background">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div className="text-sm text-muted-foreground">
-                    Peso Total: <span className="font-semibold">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span>
+                    <span>Itens: {fields.length}</span>
+                    <span className="mx-2">•</span>
+                    <span>Peso Total: <span className="font-semibold">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span></span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>
                       Cancelar
                     </Button>
-                    <Button type="submit" disabled={form.formState.isSubmitting}>
+                    <Button type="submit" disabled={form.formState.isSubmitting || fields.length === 0}>
                       {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
                     </Button>
                   </div>
@@ -4819,8 +4910,107 @@ export default function OrdersPage() {
                           </Card>
                         );
                       })}
-                    </CardContent>
-                  </Card>
+
+                        {/* Formulário para adicionar novo item */}
+                        {isAddingItem && (
+                          <Card className="p-4 bg-blue-50 border-blue-200">
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-2 pb-2 border-b border-blue-300">
+                                <div className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+                                  +
+                                </div>
+                                <h4 className="font-medium text-sm text-blue-800">
+                                  Novo Item
+                                </h4>
+                              </div>
+
+                              <div className="space-y-4">
+                                <div>
+                                  <Label htmlFor="new-description" className="text-blue-800">Descrição do Item *</Label>
+                                  <Textarea
+                                    id="new-description"
+                                    placeholder="Descrição completa do item"
+                                    value={newItemForm.description}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
+                                    className="min-h-[80px] border-blue-300 focus:border-blue-500"
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                  <div>
+                                    <Label htmlFor="new-itemNumber" className="text-blue-800">Nº Item PC</Label>
+                                    <Input
+                                      id="new-itemNumber"
+                                      placeholder="Ex: 001"
+                                      value={newItemForm.itemNumber}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, itemNumber: e.target.value }))}
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <Label htmlFor="new-code" className="text-blue-800">Código</Label>
+                                    <Input
+                                      id="new-code"
+                                      placeholder="Cód. Produto"
+                                      value={newItemForm.code}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, code: e.target.value }))}
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <Label htmlFor="new-quantity" className="text-blue-800">Quantidade</Label>
+                                    <Input
+                                      id="new-quantity"
+                                      type="number"
+                                      placeholder="1"
+                                      value={newItemForm.quantity}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, quantity: Number(e.target.value) || 1 }))}
+                                      min="1"
+                                      step="1"
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <Label htmlFor="new-unitWeight" className="text-blue-800">Peso Unit. (kg)</Label>
+                                    <Input
+                                      id="new-unitWeight"
+                                      type="number"
+                                      step="0.01"
+                                      placeholder="0.00"
+                                      value={newItemForm.unitWeight}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, unitWeight: Number(e.target.value) || 0 }))}
+                                      min="0"
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 pt-2">
+                                  <Button
+                                    type="button"
+                                    onClick={handleAddNewItem}
+                                    className="bg-blue-600 hover:bg-blue-700"
+                                  >
+                                    <PlusCircle className="mr-2 h-4 w-4" />
+                                    Adicionar Item
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleCancelAddItem}
+                                  >
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </Card>
+                        )}
+                      </CardContent>
+                    </Card>
                 </div>
               </ScrollArea>
             </div>
