@@ -399,6 +399,77 @@ export default function MaterialsPage() {
         );
     }, [orders, searchOS]);
 
+    // 1. FUNÇÃO PARA CONVERTER DADOS DO FIRESTORE PARA O FORMULÁRIO
+    const convertFirestoreDataToForm = (data: any): Requisition => {
+        console.log('📥 convertFirestoreDataToForm - entrada:', data);
+        
+        // Função auxiliar para converter datas
+        const convertDate = (dateValue: any): Date | undefined => {
+            if (!dateValue) return undefined;
+            
+            try {
+                // Se é Timestamp do Firestore
+                if (dateValue && typeof dateValue.toDate === 'function') {
+                    const converted = dateValue.toDate();
+                    console.log('📅 Timestamp convertido:', converted);
+                    return converted;
+                }
+                
+                // Se já é Date
+                if (dateValue instanceof Date) {
+                    console.log('📅 Já é Date:', dateValue);
+                    return dateValue;
+                }
+                
+                // Se é string ou número
+                if (typeof dateValue === 'string' || typeof dateValue === 'number') {
+                    const parsed = new Date(dateValue);
+                    if (!isNaN(parsed.getTime())) {
+                        console.log('📅 String/Number convertido:', parsed);
+                        return parsed;
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Erro ao converter data:', error);
+            }
+            
+            return undefined;
+        };
+        
+        const converted = {
+            ...data,
+            // Converter data principal
+            date: convertDate(data.date) || new Date(),
+            
+            // Converter datas dos itens
+            items: (data.items || []).map((item: any) => ({
+                ...item,
+                deliveryDate: convertDate(item.deliveryDate),
+                deliveryReceiptDate: convertDate(item.deliveryReceiptDate),
+            })),
+            
+            // Converter datas de aprovação
+            approval: data.approval ? {
+                ...data.approval,
+                approvalDate: convertDate(data.approval.approvalDate),
+            } : undefined,
+            
+            // Converter histórico
+            history: (data.history || []).map((h: any) => ({
+                ...h,
+                timestamp: convertDate(h.timestamp) || new Date()
+            })),
+        };
+        
+        console.log('📥 convertFirestoreDataToForm - saída:', converted);
+        console.log('📥 Items com datas convertidas:', converted.items.map(item => ({
+            description: item.description,
+            deliveryDate: item.deliveryDate
+        })));
+        
+        return converted as Requisition;
+    };
+
     // 7. CORREÇÃO NO CARREGAMENTO DE DADOS (fetchRequisitions)
     const processItemFromFirestore = (item: any, index: number, docId: string) => {
         return {
@@ -416,6 +487,73 @@ export default function MaterialsPage() {
                     : new Date(item.deliveryReceiptDate)
             ) : undefined,
         };
+    };
+
+    // 3. CORRIGIR A FUNÇÃO fetchRequisitions - PARTE DOS ITENS
+    const processRequisitionFromFirestore = (docData: any, docId: string) => {
+        console.log('📦 processRequisitionFromFirestore - doc:', docId, docData);
+        
+        // Função para conversão segura de timestamps
+        const safeToDate = (timestamp: any): Date | undefined => {
+            if (!timestamp) return undefined;
+            if (timestamp instanceof Date) return timestamp;
+            if (typeof timestamp.toDate === 'function') {
+                try {
+                    return timestamp.toDate();
+                } catch (error) {
+                    console.warn("Erro ao converter timestamp:", error);
+                    return undefined;
+                }
+            }
+            if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+                try {
+                    const date = new Date(timestamp);
+                    return isNaN(date.getTime()) ? undefined : date;
+                } catch (error) {
+                    console.warn("Erro ao converter data:", error);
+                    return undefined;
+                }
+            }
+            return undefined;
+        };
+        
+        const processed = { 
+            ...docData, 
+            id: docId, 
+            date: safeToDate(docData.date) || new Date(),
+            customer: docData.customer || undefined, 
+            approval: docData.approval ? { 
+                ...docData.approval, 
+                approvalDate: safeToDate(docData.approval.approvalDate),
+            } : undefined, 
+            
+            // ✅ CORREÇÃO CRÍTICA: Processar itens preservando as datas
+            items: (docData.items || []).map((item: any, index: number) => {
+                const processedItem = {
+                    id: item.id || `${docId}-${index}`, 
+                    ...item,
+                    deliveryDate: safeToDate(item.deliveryDate),
+                    deliveryReceiptDate: safeToDate(item.deliveryReceiptDate)
+                };
+                
+                console.log(`📦 Item ${index} processado:`, {
+                    description: processedItem.description,
+                    deliveryDate: processedItem.deliveryDate,
+                    deliveryReceiptDate: processedItem.deliveryReceiptDate
+                });
+                
+                return processedItem;
+            }), 
+            
+            history: (docData.history || []).map((h: any) => ({
+                ...h, 
+                timestamp: safeToDate(h.timestamp) || new Date()
+            })), 
+        };
+        
+        console.log('📦 Requisição processada:', processed.id, 'Items:', processed.items.length);
+        
+        return processed as Requisition;
     };
 
     const fetchRequisitions = useCallback(async () => {
@@ -461,50 +599,10 @@ export default function MaterialsPage() {
                 }
             }
             
+            // 4. NO fetchRequisitions, substitua a criação da lista de requisições por:
             const reqsList = reqsSnapshot.docs.map(d => {
                 const data = d.data();
-                
-                // 8. ATUALIZAÇÃO DA FUNÇÃO safeToDate no fetchRequisitions
-                const safeToDate = (timestamp: any): Date | undefined => {
-                    if (!timestamp) return undefined;
-                    if (timestamp instanceof Date) return timestamp;
-                    if (typeof timestamp.toDate === 'function') {
-                        try {
-                            return timestamp.toDate();
-                        } catch (error) {
-                            console.warn("Erro ao converter timestamp:", error);
-                            return undefined;
-                        }
-                    }
-                    if (typeof timestamp === 'string' || typeof timestamp === 'number') {
-                        try {
-                            const date = new Date(timestamp);
-                            return isNaN(date.getTime()) ? undefined : date;
-                        } catch (error) {
-                            console.warn("Erro ao converter data:", error);
-                            return undefined;
-                        }
-                    }
-                    return undefined;
-                };
-                
-                return { 
-                    ...data, 
-                    id: d.id, 
-                    date: safeToDate(data.date) || new Date(), // Fallback para data atual se conversão falhar
-                    customer: data.customer || undefined, 
-                    approval: data.approval ? { 
-                        ...data.approval, 
-                        approvalDate: safeToDate(data.approval.approvalDate) || undefined,
-                    } : {}, 
-                    items: (data.items || []).map((item: any, index: number) => 
-                        processItemFromFirestore(item, index, d.id)
-                    ), 
-                    history: (data.history || []).map((h: any) => ({
-                        ...h, 
-                        timestamp: safeToDate(h.timestamp) || new Date()
-                    })), 
-                } as Requisition;
+                return processRequisitionFromFirestore(data, d.id);
             });
             setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
 
@@ -589,13 +687,48 @@ export default function MaterialsPage() {
         }
     }, [watchedCutPlanOrderId, orders, setCuttingPlanValue]);
 
+    // 6. VERIFICAÇÃO ADICIONAL - Adicione este useEffect para debug
+    useEffect(() => {
+        if (isRequisitionFormOpen && selectedRequisition) {
+            console.log('🔍 Form aberto para edição. Verificando dados atuais do form...');
+            
+            const currentFormValues = requisitionForm.getValues();
+            console.log('🔍 Valores atuais do formulário:', currentFormValues);
+            console.log('🔍 Items do formulário:', currentFormValues.items?.map(item => ({
+                description: item.description,
+                deliveryDate: item.deliveryDate,
+                typeOfDeliveryDate: typeof item.deliveryDate
+            })));
+        }
+    }, [isRequisitionFormOpen, selectedRequisition, requisitionForm]);
+
     // Handlers
     const handleOpenRequisitionForm = (requisition: Requisition | null = null) => {
+        console.log('🔧 handleOpenRequisitionForm chamada com:', requisition);
+        
         setSelectedRequisition(requisition);
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
         setEditItemIndex(null);
-        if (requisition) { requisitionForm.reset(requisition); } 
-        else { requisitionForm.reset({ date: new Date(), status: "Pendente", items: [], history: [], requestedBy: user?.displayName || user?.email || undefined, }); }
+        
+        if (requisition) { 
+            console.log('✏️ Editando requisição existente');
+            
+            // ✅ CORREÇÃO CRÍTICA: Converter dados do Firestore antes de passar para o form
+            const convertedData = convertFirestoreDataToForm(requisition);
+            console.log('✏️ Dados convertidos para o form:', convertedData);
+            
+            requisitionForm.reset(convertedData);
+        } else { 
+            console.log('➕ Criando nova requisição');
+            requisitionForm.reset({ 
+                date: new Date(), 
+                status: "Pendente", 
+                items: [], 
+                history: [], 
+                requestedBy: user?.displayName || user?.email || undefined, 
+            }); 
+        }
+        
         setIsRequisitionFormOpen(true);
     };
 
@@ -1243,15 +1376,16 @@ export default function MaterialsPage() {
         console.log(`✏️ handleEditItem - editando item ${index}`);
         
         const itemToEdit = requisitionForm.getValues(`items.${index}`);
-        console.log(`✏️ Item original do form:`, itemToEdit);
+        console.log(`✏️ Item do formulário:`, itemToEdit);
+        console.log(`✏️ deliveryDate do item:`, itemToEdit.deliveryDate, typeof itemToEdit.deliveryDate);
         
         setEditItemIndex(index); 
         
-        // ✅ CORREÇÃO: Limpar as datas ao carregar para edição
+        // Converter datas se necessário
         const processedItem = {
             ...itemToEdit,
-            deliveryDate: cleanDateValue(itemToEdit.deliveryDate),
-            deliveryReceiptDate: cleanDateValue(itemToEdit.deliveryReceiptDate),
+            deliveryDate: itemToEdit.deliveryDate || undefined,
+            deliveryReceiptDate: itemToEdit.deliveryReceiptDate || undefined,
         };
         
         console.log(`✏️ Item processado para edição:`, processedItem);
