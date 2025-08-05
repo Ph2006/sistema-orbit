@@ -698,6 +698,13 @@ export default function OrdersPage() {
                 }
 
                 const orderNum = (data.orderNumber || data.quotationNumber || 'N/A').toString();
+                
+                console.log('📊 [DEBUG] Processando pedido:', {
+                    docId: doc.id,
+                    orderNumber: data.orderNumber,
+                    quotationNumber: data.quotationNumber,
+                    orderNumFinal: orderNum
+                });
 
                 return {
                     id: doc.id,
@@ -856,11 +863,17 @@ export default function OrdersPage() {
             sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
         }
         
+        console.log('🔍 [DEBUG] Inicializando formulário com:', {
+            quotationNumber: order.quotationNumber,
+            orderId: order.id
+        });
+        
         setSelectedOrder(order);
         form.reset({
             ...order,
             status: order.status as any,
             documents: order.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+            quotationNumber: order.quotationNumber || '', // Garantir que não seja undefined
         });
         setIsEditing(false);
         setSelectedItems(new Set());
@@ -892,12 +905,37 @@ export default function OrdersPage() {
     };
 
     const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
-        if (!selectedOrder) return;
+        if (!selectedOrder) {
+            console.error('❌ [DEBUG] selectedOrder não encontrado');
+            return;
+        }
+
+        console.log('🚀 [DEBUG] Iniciando salvamento robusto:', {
+            orderId: selectedOrder.id,
+            quotationNumberAntigo: selectedOrder.quotationNumber,
+            quotationNumberNovo: values.quotationNumber
+        });
+
+        console.log('🔍 [DEBUG] Iniciando salvamento:', {
+            orderId: selectedOrder.id,
+            quotationNumber: values.quotationNumber,
+            originalQuotationNumber: selectedOrder.quotationNumber
+        });
 
         console.log('💾 [SUBMIT] Valores do formulário:', values);
 
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            
+            // Primeiro, verificar se o documento existe
+            const currentDoc = await getDoc(orderRef);
+            if (!currentDoc.exists()) {
+                throw new Error(`Documento ${selectedOrder.id} não encontrado no Firestore`);
+            }
+            
+            console.log('✅ [DEBUG] Documento encontrado, dados atuais:', {
+                quotationNumber: currentDoc.data().quotationNumber
+            });
             
             // CORREÇÃO: Processamento mais cuidadoso das datas dos itens
             const itemsToSave = values.items.map((formItem, itemIndex) => {
@@ -968,6 +1006,36 @@ export default function OrdersPage() {
 
             const totalWeight = calculateTotalWeight(itemsToSave);
             
+            // Preparar apenas os campos que realmente mudaram
+            const updateData: any = {};
+            
+            if (values.quotationNumber !== selectedOrder.quotationNumber) {
+                updateData.quotationNumber = values.quotationNumber || null;
+                console.log('📝 [DEBUG] Atualizando quotationNumber:', values.quotationNumber);
+            }
+            
+            if (values.customer?.id !== selectedOrder.customer?.id) {
+                updateData.customer = values.customer || null;
+                updateData.customerId = values.customer?.id || null;
+                updateData.customerName = values.customer?.name || null;
+            }
+            
+            if (values.status !== selectedOrder.status) {
+                updateData.status = values.status || null;
+            }
+            
+            // Outros campos que sempre devem ser atualizados
+            updateData.internalOS = values.internalOS || null;
+            updateData.projectName = values.projectName || null;
+            updateData.deliveryDate = values.deliveryDate ? Timestamp.fromDate(new Date(values.deliveryDate)) : null;
+            updateData.driveLink = values.driveLink || null;
+            updateData.documents = values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false };
+            updateData.items = itemsToSave || [];
+            updateData.totalWeight = totalWeight || 0;
+            updateData.lastUpdate = Timestamp.now();
+            
+            console.log('📦 [DEBUG] Dados que serão enviados para o Firestore:', updateData);
+            
             const dataToSave = {
                 customer: values.customer || null,
                 customerId: values.customer?.id || null,
@@ -988,55 +1056,81 @@ export default function OrdersPage() {
             // Remove campos undefined antes de enviar para o Firestore
             const cleanedData = removeUndefinedFields(dataToSave);
 
-            await updateDoc(orderRef, cleanedData);
+            // Salvar no Firestore usando updateData (mais eficiente)
+            await updateDoc(orderRef, updateData);
+            console.log('✅ [DEBUG] updateDoc executado com sucesso');
+
+            // Verificar se foi salvo corretamente
+            const verificationDoc = await getDoc(orderRef);
+            if (verificationDoc.exists()) {
+                const savedData = verificationDoc.data();
+                console.log('🔍 [DEBUG] Verificação - dados salvos:', {
+                    quotationNumber: savedData.quotationNumber,
+                    lastUpdate: savedData.lastUpdate
+                });
+                
+                if (savedData.quotationNumber === values.quotationNumber) {
+                    console.log('✅ [DEBUG] Confirmado: quotationNumber foi salvo corretamente');
+                } else {
+                    console.error('❌ [DEBUG] Erro: quotationNumber não foi salvo corretamente', {
+                        esperado: values.quotationNumber,
+                        salvo: savedData.quotationNumber
+                    });
+                }
+            }
     
             toast({
                 title: "Pedido atualizado!",
                 description: "Os dados do pedido foram salvos com sucesso.",
             });
 
-            // Manually update the state for immediate feedback
-            const updatedOrderForState: Order = {
-                ...selectedOrder,
-                quotationNumber: values.quotationNumber!,
-                deliveryDate: values.deliveryDate ? new Date(values.deliveryDate) : undefined,
-                customer: values.customer,
-                projectName: values.projectName,
-                internalOS: values.internalOS,
-                status: values.status,
-                driveLink: values.driveLink,
-                documents: values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
-                items: values.items.map(item => ({
-                    ...item,
-                    itemDeliveryDate: item.itemDeliveryDate ? new Date(item.itemDeliveryDate) : undefined,
-                    shippingDate: item.shippingDate ? new Date(item.shippingDate) : undefined,
-                    productionPlan: (item.productionPlan || []).map(p => ({
-                        ...p,
-                        startDate: p.startDate ? new Date(p.startDate) : undefined,
-                        completedDate: p.completedDate ? new Date(p.completedDate) : undefined,
-                    })) as any
-                })),
-                totalWeight: totalWeight,
-            };
+            console.log('🔄 [DEBUG] Recarregando dados do servidor...');
 
-            setOrders(prevOrders => 
-                prevOrders.map(o => (o.id === updatedOrderForState.id ? updatedOrderForState : o))
-            );
-            
-            setSelectedOrder(updatedOrderForState);
-            
-            form.reset({
-                ...updatedOrderForState,
-                status: updatedOrderForState.status as any,
-            });
-    
+            // Aguardar um pouco para garantir que o Firestore processou
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Buscar dados atualizados
+            const updatedOrderDoc = await getDoc(orderRef);
+            if (updatedOrderDoc.exists()) {
+                const updatedData = updatedOrderDoc.data();
+                console.log('✅ [DEBUG] Dados atualizados do servidor:', {
+                    quotationNumber: updatedData.quotationNumber,
+                    orderId: updatedOrderDoc.id
+                });
+                
+                // Recarregar lista completa
+                const allOrders = await fetchOrders();
+                const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
+                
+                if (updatedOrderInList) {
+                    console.log('✅ [DEBUG] Pedido encontrado na lista atualizada:', {
+                        quotationNumber: updatedOrderInList.quotationNumber
+                    });
+                    
+                    setSelectedOrder(updatedOrderInList);
+                    form.reset({
+                        ...updatedOrderInList,
+                        status: updatedOrderInList.status as any,
+                    });
+                } else {
+                    console.warn('⚠️ [DEBUG] Pedido não encontrado na lista após recarregamento');
+                }
+            } else {
+                console.error('❌ [DEBUG] Documento não encontrado após salvamento');
+            }
+
             setIsEditing(false);
         } catch (error) {
-            console.error("Error updating order:", error);
+            console.error("❌ [DEBUG] Erro detalhado no salvamento:", {
+                error: error.message,
+                stack: error.stack,
+                orderId: selectedOrder.id
+            });
+            
             toast({
                 variant: "destructive",
                 title: "Erro ao salvar",
-                description: "Não foi possível atualizar o pedido.",
+                description: `Não foi possível atualizar o pedido: ${error.message}`,
             });
         }
     };
@@ -4255,7 +4349,17 @@ export default function OrdersPage() {
                         <FormField control={form.control} name="quotationNumber" render={({ field }) => (
                           <FormItem>
                             <FormLabel>Nº Pedido (Compra)</FormLabel>
-                            <FormControl><Input placeholder="Nº do Pedido de Compra do Cliente" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormControl>
+                              <Input 
+                                placeholder="Nº do Pedido de Compra do Cliente" 
+                                {...field} 
+                                value={field.value ?? ''} 
+                                onChange={(e) => {
+                                  console.log('📝 [DEBUG] Número do pedido alterado:', e.target.value);
+                                  field.onChange(e.target.value);
+                                }}
+                              />
+                            </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}/>
