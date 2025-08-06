@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -64,83 +63,13 @@ const cleanFirestoreData = (obj: any): any => {
     return cleaned;
 };
 
-// 5. FUNÇÃO prepareRequisitionItem SUPER SIMPLES PARA TESTAR
-const prepareRequisitionItem = (item: RequisitionItem): any => {
-    console.log(`🔧 ===== INICIANDO prepareRequisitionItem =====`);
-    debugDateFlow('PREPARE_INPUT', item, 'Item completo de entrada');
-    debugDateFlow('PREPARE_DELIVERY_DATE', item.deliveryDate, 'deliveryDate de entrada');
-    
-    const cleanItem: any = {
-        id: item.id,
-        description: item.description,
-        quantityRequested: Number(item.quantityRequested) || 0,
-        unit: item.unit,
-        status: item.status || "Pendente",
-        quantityFulfilled: Number(item.quantityFulfilled) || 0,
-        inspectionStatus: item.inspectionStatus || "Pendente"
-    };
-    
-    // Campos opcionais simples
-    if (item.code?.trim()) cleanItem.code = item.code.trim();
-    if (item.material?.trim()) cleanItem.material = item.material.trim();
-    if (item.dimensao?.trim()) cleanItem.dimensao = item.dimensao.trim();
-    if (item.notes?.trim()) cleanItem.notes = item.notes.trim();
-    
-    // Campos numéricos
-    if (item.pesoUnitario && !isNaN(Number(item.pesoUnitario))) {
-        cleanItem.pesoUnitario = Number(item.pesoUnitario);
-    }
-    
-    // ✅ PROCESSAMENTO DE DATA SUPER SIMPLES - APENAS CONVERTER Date PARA Timestamp
-    if (item.deliveryDate) {
-        debugDateFlow('PREPARE_PROCESSING_DATE', item.deliveryDate, 'Processando deliveryDate');
-        
-        try {
-            // Se é uma Date válida, converter para Timestamp
-            if (item.deliveryDate instanceof Date && !isNaN(item.deliveryDate.getTime())) {
-                cleanItem.deliveryDate = Timestamp.fromDate(item.deliveryDate);
-                debugDateFlow('PREPARE_DATE_CONVERTED', cleanItem.deliveryDate, 'Date convertida para Timestamp');
-            }
-            // Se já é Timestamp, manter
-            else if (item.deliveryDate && typeof item.deliveryDate.toDate === 'function') {
-                cleanItem.deliveryDate = item.deliveryDate;
-                debugDateFlow('PREPARE_DATE_KEPT', cleanItem.deliveryDate, 'Timestamp mantido');
-            }
-            else {
-                console.warn('⚠️ deliveryDate não é Date nem Timestamp:', item.deliveryDate);
-            }
-        } catch (error) {
-            console.error('❌ Erro ao processar deliveryDate:', error);
-        }
-    } else {
-        console.log('ℹ️ deliveryDate está vazio/null/undefined');
-    }
-    
-    // Mesmo processo para deliveryReceiptDate
-    if (item.deliveryReceiptDate && item.deliveryReceiptDate instanceof Date) {
-        try {
-            cleanItem.deliveryReceiptDate = Timestamp.fromDate(item.deliveryReceiptDate);
-        } catch (error) {
-            console.error('❌ Erro ao processar deliveryReceiptDate:', error);
-        }
-    }
-    
-    // Outros campos opcionais
-    if (item.supplierName?.trim()) cleanItem.supplierName = item.supplierName.trim();
-    if (item.invoiceNumber?.trim()) cleanItem.invoiceNumber = item.invoiceNumber.trim();
-    
-    console.log(`🔧 prepareRequisitionItem - item final:`, cleanItem);
-    debugDateFlow('PREPARE_OUTPUT', cleanItem.deliveryDate, 'deliveryDate final');
-    console.log(`🔧 ===== FIM prepareRequisitionItem =====`);
-    
-    return cleanItem;
-};
+// Função prepareRequisitionItem removida - não é mais necessária com as correções aplicadas
 
 // Schemas & Constants
 const itemStatuses = ["Pendente", "Estoque", "Recebido (Aguardando Inspeção)", "Inspecionado e Aprovado", "Inspecionado e Rejeitado"] as const;
 const inspectionStatuses = ["Pendente", "Aprovado", "Aprovado com ressalvas", "Rejeitado"] as const;
 
-// 2. VERSÃO SIMPLIFICADA DO SCHEMA (sem union complexa)
+// 6. SCHEMA SIMPLIFICADO (sem validações complexas de data)
 const requisitionItemSchema = z.object({
   id: z.string(),
   code: z.string().optional(),
@@ -152,75 +81,37 @@ const requisitionItemSchema = z.object({
   quantityFulfilled: z.coerce.number().min(0).optional().default(0),
   unit: z.string().min(1, "Unidade obrigatória (ex: m, kg, pç)."),
   
-  // ✅ SCHEMA MAIS SIMPLES - aceita qualquer coisa e vamos tratar depois
+  // ACEITAR QUALQUER TIPO DE DATA - validação será feita no código
   deliveryDate: z.any().optional(),
+  deliveryReceiptDate: z.any().optional(),
   
   notes: z.string().optional(),
   status: z.string().optional().default("Pendente"),
-  
-  // New fields for cost center
   supplierName: z.string().optional(),
   invoiceNumber: z.string().optional(),
   invoiceItemValue: z.coerce.number().optional(),
   certificateNumber: z.string().optional(),
   storageLocation: z.string().optional(),
-  
-  // ✅ SCHEMA MAIS SIMPLES
-  deliveryReceiptDate: z.any().optional(),
-  
   inspectionStatus: z.enum(inspectionStatuses).optional().default("Pendente"),
 });
 
-// 1. PRIMEIRO: Vamos criar uma função para debug completo
-const debugDateFlow = (step: string, data: any, context?: string) => {
-    console.log(`🐛 [${step}] ${context || ''}`, {
-        data: data,
-        type: typeof data,
-        isDate: data instanceof Date,
-        isTimestamp: data && typeof data.toDate === 'function',
-        value: data
-    });
-};
-
-// 2. FUNÇÃO PARA LIMPAR VALORES NULL/UNDEFINED DAS DATAS
-const cleanDateValue = (dateValue: any): Date | undefined => {
-    console.log(`🧹 cleanDateValue - entrada:`, dateValue, typeof dateValue);
-    
-    // Se é null, undefined ou string vazia, retornar undefined
-    if (dateValue === null || dateValue === undefined || dateValue === '') {
-        console.log(`🧹 Valor vazio, retornando undefined`);
-        return undefined;
-    }
-    
-    // Se já é uma Date válida
-    if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
-        console.log(`🧹 Date válida, retornando:`, dateValue);
-        return dateValue;
-    }
-    
-    // Se é string, tentar converter
-    if (typeof dateValue === 'string') {
-        const parsed = new Date(dateValue);
-        if (!isNaN(parsed.getTime())) {
-            console.log(`🧹 String convertida para Date:`, parsed);
-            return parsed;
-        }
-    }
-    
-    // Se é Timestamp do Firestore
-    if (dateValue && typeof dateValue.toDate === 'function') {
-        try {
-            const converted = dateValue.toDate();
-            console.log(`🧹 Timestamp convertido para Date:`, converted);
-            return converted;
-        } catch (error) {
-            console.error(`❌ Erro ao converter Timestamp:`, error);
-        }
-    }
-    
-    console.log(`🧹 Valor inválido, retornando undefined`);
-    return undefined;
-};
+// ===== CORREÇÕES PRINCIPAIS APLICADAS =====
+// 
+// 1. ✅ convertFirestoreDataToForm CORRIGIDA - Conversão robusta de Timestamps para Date
+// 2. ✅ handleEditItem TOTALMENTE CORRIGIDA - Conversão segura de datas ao editar
+// 3. ✅ handleCurrentItemChange MELHORADA - Tratamento correto de valores undefined
+// 4. ✅ handleUpdateItem CORRIGIDA - Sem transformações complexas desnecessárias
+// 5. ✅ handleOpenRequisitionForm CORRIGIDA - Uso da função de conversão corrigida
+// 6. ✅ Schema SIMPLIFICADO - Aceita qualquer tipo de data, validação no código
+// 7. ✅ Calendar com logs MELHORADOS - Debug completo do fluxo de datas
+// 8. ✅ Função de teste COMPLETA - Testa todo o fluxo de datas
+//
+// PRINCIPAIS MUDANÇAS:
+// - Todas as datas agora são tratadas como Date | undefined (não null)
+// - Conversão robusta de Timestamps do Firestore para Date
+// - Logs detalhados em cada etapa do fluxo
+// - Schema simplificado para evitar validações complexas
+// - Funções de debug removidas (não mais necessárias)
 
 const requisitionSchema = z.object({
   id: z.string().optional(),
@@ -389,11 +280,11 @@ export default function MaterialsPage() {
         );
     }, [orders, searchOS]);
 
-    // 1. FUNÇÃO PARA CONVERTER DADOS DO FIRESTORE PARA O FORMULÁRIO
+    // 1. FUNÇÃO convertFirestoreDataToForm CORRIGIDA
     const convertFirestoreDataToForm = (data: any): Requisition => {
         console.log('📥 convertFirestoreDataToForm - entrada:', data);
         
-        // Função auxiliar para converter datas
+        // Função auxiliar MELHORADA para converter datas
         const convertDate = (dateValue: any): Date | undefined => {
             if (!dateValue) return undefined;
             
@@ -405,9 +296,9 @@ export default function MaterialsPage() {
                     return converted;
                 }
                 
-                // Se já é Date
-                if (dateValue instanceof Date) {
-                    console.log('📅 Já é Date:', dateValue);
+                // Se já é Date válida
+                if (dateValue instanceof Date && !isNaN(dateValue.getTime())) {
+                    console.log('📅 Já é Date válida:', dateValue);
                     return dateValue;
                 }
                 
@@ -428,15 +319,31 @@ export default function MaterialsPage() {
         
         const converted = {
             ...data,
-            // Converter data principal
             date: convertDate(data.date) || new Date(),
             
-            // Converter datas dos itens
-            items: (data.items || []).map((item: any) => ({
-                ...item,
-                deliveryDate: convertDate(item.deliveryDate),
-                deliveryReceiptDate: convertDate(item.deliveryReceiptDate),
-            })),
+            // CORREÇÃO CRÍTICA: Processar itens corretamente
+            items: (data.items || []).map((item: any) => {
+                const processedItem = {
+                    ...item,
+                    deliveryDate: convertDate(item.deliveryDate),
+                    deliveryReceiptDate: convertDate(item.deliveryReceiptDate),
+                    // Garantir que todos os campos obrigatórios existam
+                    quantityRequested: Number(item.quantityRequested) || 0,
+                    quantityFulfilled: Number(item.quantityFulfilled) || 0,
+                    pesoUnitario: item.pesoUnitario ? Number(item.pesoUnitario) : undefined,
+                    status: item.status || "Pendente",
+                    inspectionStatus: item.inspectionStatus || "Pendente"
+                };
+                
+                console.log(`📦 Item processado:`, {
+                    id: processedItem.id,
+                    description: processedItem.description,
+                    deliveryDate: processedItem.deliveryDate,
+                    typeOfDeliveryDate: typeof processedItem.deliveryDate
+                });
+                
+                return processedItem;
+            }),
             
             // Converter datas de aprovação
             approval: data.approval ? {
@@ -452,11 +359,6 @@ export default function MaterialsPage() {
         };
         
         console.log('📥 convertFirestoreDataToForm - saída:', converted);
-        console.log('📥 Items com datas convertidas:', converted.items.map(item => ({
-            description: item.description,
-            deliveryDate: item.deliveryDate
-        })));
-        
         return converted as Requisition;
     };
 
@@ -692,6 +594,19 @@ export default function MaterialsPage() {
         }
     }, [isRequisitionFormOpen, selectedRequisition, requisitionForm]);
 
+    // 7. ADICIONAR LOGS NO COMPONENTE CALENDAR
+    // No JSX do Calendar, substitua por:
+    // <Calendar 
+    //     mode="single" 
+    //     selected={currentItem.deliveryDate instanceof Date && !isNaN(currentItem.deliveryDate.getTime()) ? currentItem.deliveryDate : undefined}
+    //     onSelect={(date) => {
+    //         console.log('📅 ===== Calendar onSelect =====');
+    //         console.log('📅 Data selecionada:', date, typeof date);
+    //         handleCurrentItemChange('deliveryDate', date);
+    //         console.log('📅 ===== Calendar onSelect FIM =====');
+    //     }}
+    // />
+
     // 4. TESTE ADICIONAL - Verificar se o Calendar está funcionando
     // Adicione este useEffect para monitorar mudanças no currentItem:
     useEffect(() => {
@@ -700,51 +615,51 @@ export default function MaterialsPage() {
         }
     }, [currentItem.deliveryDate]);
 
-    // 7. TESTE MANUAL - Adicione esta função para testar manualmente
-    const testDateSaving = async () => {
-        console.log('🧪 ===== TESTE MANUAL DE DATA =====');
+    // 8. FUNÇÃO DE TESTE MELHORADA
+    const testDateFlow = async () => {
+        console.log('🧪 ===== TESTE COMPLETO DO FLUXO DE DATAS =====');
         
-        const testDate = new Date('2025-08-15');
-        console.log('🧪 Data de teste criada:', testDate);
-        
+        // 1. Criar um item com data
         const testItem = {
             id: 'test-123',
-            description: 'Teste de data',
+            description: 'Item de teste',
             quantityRequested: 1,
             unit: 'pç',
-            deliveryDate: testDate,
+            deliveryDate: new Date('2025-12-25'),
             status: 'Pendente',
             inspectionStatus: 'Pendente'
         };
         
-        console.log('🧪 Item de teste:', testItem);
+        console.log('🧪 1. Item criado:', testItem);
         
-        const prepared = prepareRequisitionItem(testItem);
-        console.log('🧪 Item preparado:', prepared);
+        // 2. Simular adição ao formulário
+        appendReqItem(testItem);
+        console.log('🧪 2. Item adicionado ao formulário');
         
-        // Tentar salvar no Firestore
-        try {
-            const docRef = await addDoc(collection(db, "companies", "mecald", "testDates"), {
-                testData: prepared,
-                createdAt: new Date()
-            });
-            console.log('🧪 Teste salvo no Firestore com ID:', docRef.id);
+        // 3. Simular edição
+        setTimeout(() => {
+            const items = requisitionForm.getValues('items');
+            const lastItem = items[items.length - 1];
+            console.log('🧪 3. Item no formulário:', lastItem);
+            console.log('🧪 3. deliveryDate no formulário:', lastItem.deliveryDate, typeof lastItem.deliveryDate);
             
-            // Ler de volta
-            const savedDoc = await getDoc(docRef);
-            if (savedDoc.exists()) {
-                console.log('🧪 Dados lidos do Firestore:', savedDoc.data());
-            }
-        } catch (error) {
-            console.error('🧪 Erro no teste:', error);
-        }
+            // 4. Simular edição
+            handleEditItem(items.length - 1);
+            
+            setTimeout(() => {
+                console.log('🧪 4. currentItem após edição:', currentItem);
+                console.log('🧪 4. deliveryDate em currentItem:', currentItem.deliveryDate, typeof currentItem.deliveryDate);
+            }, 100);
+        }, 100);
         
-        console.log('🧪 ===== FIM TESTE MANUAL =====');
+        console.log('🧪 ===== TESTE COMPLETO FINALIZADO =====');
     };
 
     // Handlers
+    // 5. FUNÇÃO handleOpenRequisitionForm CORRIGIDA
     const handleOpenRequisitionForm = (requisition: Requisition | null = null) => {
-        console.log('🔧 handleOpenRequisitionForm chamada com:', requisition);
+        console.log('🔧 ===== handleOpenRequisitionForm INICIADO =====');
+        console.log('🔧 Requisição recebida:', requisition);
         
         setSelectedRequisition(requisition);
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() });
@@ -753,11 +668,30 @@ export default function MaterialsPage() {
         if (requisition) { 
             console.log('✏️ Editando requisição existente');
             
-            // ✅ CORREÇÃO CRÍTICA: Converter dados do Firestore antes de passar para o form
+            // USAR A FUNÇÃO DE CONVERSÃO CORRIGIDA
             const convertedData = convertFirestoreDataToForm(requisition);
             console.log('✏️ Dados convertidos para o form:', convertedData);
+            console.log('✏️ Items convertidos:', convertedData.items?.map(item => ({
+                id: item.id,
+                description: item.description,
+                deliveryDate: item.deliveryDate,
+                typeOfDeliveryDate: typeof item.deliveryDate
+            })));
             
             requisitionForm.reset(convertedData);
+            
+            // Verificar se os dados foram aplicados corretamente
+            setTimeout(() => {
+                const formData = requisitionForm.getValues();
+                console.log('🔍 Dados no formulário após reset:', formData);
+                console.log('🔍 Items no formulário:', formData.items?.map(item => ({
+                    id: item.id,
+                    description: item.description,
+                    deliveryDate: item.deliveryDate,
+                    typeOfDeliveryDate: typeof item.deliveryDate
+                })));
+            }, 100);
+            
         } else { 
             console.log('➕ Criando nova requisição');
             requisitionForm.reset({ 
@@ -770,6 +704,7 @@ export default function MaterialsPage() {
         }
         
         setIsRequisitionFormOpen(true);
+        console.log('🔧 ===== handleOpenRequisitionForm FINALIZADO =====');
     };
 
     const handleOpenCuttingPlanForm = (plan: CuttingPlan | null = null) => {
@@ -872,16 +807,21 @@ export default function MaterialsPage() {
                 }
             }
             
-            // MAS adicione este log antes de salvar:
+            // Processar itens para salvamento com conversão de datas
             console.log(`💾 Items processados para salvamento:`);
             const processedItems = mergedItems.map(item => {
-                const prepared = prepareRequisitionItem(item);
+                const processedItem = {
+                    ...item,
+                    // Converter Date para Timestamp se necessário
+                    deliveryDate: item.deliveryDate instanceof Date ? Timestamp.fromDate(item.deliveryDate) : item.deliveryDate,
+                    deliveryReceiptDate: item.deliveryReceiptDate instanceof Date ? Timestamp.fromDate(item.deliveryReceiptDate) : item.deliveryReceiptDate,
+                };
                 console.log(`💾 Item processado:`, {
                     description: item.description,
                     deliveryDate_original: item.deliveryDate,
-                    deliveryDate_processed: prepared.deliveryDate
+                    deliveryDate_processed: processedItem.deliveryDate
                 });
-                return prepared;
+                return processedItem;
             });
             
             // Preparar dados base
@@ -1347,38 +1287,48 @@ export default function MaterialsPage() {
     const handleUpdateCutItem = () => { if (editCutIndex === null) return; const result = cuttingPlanItemSchema.safeParse(currentCutItem); if (!result.success) { const firstError = result.error.errors[0]; toast({ variant: 'destructive', title: `Erro de validação: ${firstError.path[0]}`, description: firstError.message }); return; } updateCutItem(editCutIndex, result.data); setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); };
     const handleEditCutItem = (index: number) => { setEditCutIndex(index); setCurrentCutItem(cuttingPlanForm.getValues(`items.${index}`)); };
     const handleCancelEditCutItem = () => { setCurrentCutItem({ ...emptyCutItem, id: Date.now().toString() }); setEditCutIndex(null); }
-    // 2. MELHORAR O handleCurrentItemChange com mais debug
+    // 3. FUNÇÃO handleCurrentItemChange MELHORADA
     const handleCurrentItemChange = (field: keyof RequisitionItem, value: any) => { 
         console.log(`🔄 handleCurrentItemChange - Campo: ${field}, Valor:`, value, typeof value);
         
         if (field === 'deliveryDate' || field === 'deliveryReceiptDate') { 
-            let processedValue = value;
+            let processedValue: Date | undefined = undefined;
             
-            // Se é null/undefined/string vazia, definir como null
-            if (!value) {
-                processedValue = null;
-                console.log(`📅 Campo ${field} - valor vazio, definindo como null`);
+            // Se é null/undefined/string vazia, definir como undefined
+            if (!value || value === '' || value === null) {
+                processedValue = undefined;
+                console.log(`📅 Campo ${field} - valor vazio, definindo como undefined`);
             }
             // Se é Date válida, manter
-            else if (value instanceof Date && !isNaN(value.getTime())) {
-                processedValue = value;
-                console.log(`📅 Campo ${field} - Date válida:`, processedValue);
+            else if (value instanceof Date) {
+                if (!isNaN(value.getTime())) {
+                    processedValue = value;
+                    console.log(`📅 Campo ${field} - Date válida mantida:`, processedValue);
+                } else {
+                    processedValue = undefined;
+                    console.log(`📅 Campo ${field} - Date inválida, definindo como undefined`);
+                }
             }
             // Se é string, converter para Date
             else if (typeof value === 'string') {
-                processedValue = new Date(value);
-                if (isNaN(processedValue.getTime())) {
-                    processedValue = null;
-                    console.log(`📅 Campo ${field} - string inválida, definindo como null`);
-                } else {
-                    console.log(`📅 Campo ${field} - string convertida para Date:`, processedValue);
+                try {
+                    const parsed = new Date(value);
+                    if (!isNaN(parsed.getTime())) {
+                        processedValue = parsed;
+                        console.log(`📅 Campo ${field} - string convertida para Date:`, processedValue);
+                    } else {
+                        processedValue = undefined;
+                        console.log(`📅 Campo ${field} - string inválida, definindo como undefined`);
+                    }
+                } catch (error) {
+                    processedValue = undefined;
+                    console.log(`📅 Campo ${field} - erro na conversão, definindo como undefined`);
                 }
             }
             
             setCurrentItem(prev => {
                 const updated = {...prev, [field]: processedValue};
                 console.log(`📅 Estado atualizado - ${field}:`, updated[field]);
-                console.log(`📅 currentItem completo após update:`, updated);
                 return updated;
             }); 
         } else { 
@@ -1388,21 +1338,23 @@ export default function MaterialsPage() {
     // 4. VALIDAÇÃO SUPER SIMPLES
     const handleAddItem = () => { 
         console.log(`🔍 ===== INICIANDO handleAddItem =====`);
-        debugDateFlow('ADD_ITEM_CURRENT', currentItem, 'currentItem completo');
-        debugDateFlow('ADD_ITEM_DELIVERY_DATE', currentItem.deliveryDate, 'currentItem.deliveryDate');
+        console.log(`🔍 currentItem completo:`, currentItem);
+        console.log(`🔍 deliveryDate:`, currentItem.deliveryDate, typeof currentItem.deliveryDate);
         
         // Não fazer nenhuma transformação complexa, passar direto
         const dataToValidate = { 
             ...currentItem, 
             id: currentItem.id || Date.now().toString(), 
             quantityRequested: Number(currentItem.quantityRequested) || 0, 
-            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
+            quantityFulfilled: Number(currentItem.quantityFulfilled) || 0,
+            pesoUnitario: currentItem.pesoUnitario ? Number(currentItem.pesoUnitario) : undefined,
             // Manter as datas exatamente como estão
             deliveryDate: currentItem.deliveryDate,
             deliveryReceiptDate: currentItem.deliveryReceiptDate,
         }; 
         
-        debugDateFlow('ADD_ITEM_TO_VALIDATE', dataToValidate.deliveryDate, 'dataToValidate.deliveryDate');
+        console.log(`🔍 dataToValidate:`, dataToValidate);
+        console.log(`🔍 dataToValidate.deliveryDate:`, dataToValidate.deliveryDate, typeof dataToValidate.deliveryDate);
         
         const result = requisitionItemSchema.safeParse(dataToValidate); 
         if (!result.success) { 
@@ -1415,73 +1367,174 @@ export default function MaterialsPage() {
             return; 
         } 
         
-        debugDateFlow('ADD_ITEM_VALIDATED', result.data.deliveryDate, 'result.data.deliveryDate após validação');
-        
         console.log(`✅ Item validado, adicionando ao formulário...`);
+        console.log(`✅ result.data:`, result.data);
+        console.log(`✅ result.data.deliveryDate:`, result.data.deliveryDate, typeof result.data.deliveryDate);
+        
         appendReqItem(result.data); 
         
         // Verificar se foi adicionado corretamente
         setTimeout(() => {
             const currentItems = requisitionForm.getValues('items');
             const lastItem = currentItems[currentItems.length - 1];
-            debugDateFlow('ADD_ITEM_IN_FORM', lastItem?.deliveryDate, 'Item adicionado ao formulário');
+            console.log(`🔍 Item adicionado ao formulário:`, lastItem);
+            console.log(`🔍 deliveryDate no formulário:`, lastItem?.deliveryDate, typeof lastItem?.deliveryDate);
         }, 100);
         
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); 
         console.log(`🔍 ===== FIM handleAddItem =====`);
     };
+    // 4. FUNÇÃO handleUpdateItem CORRIGIDA
     const handleUpdateItem = () => { 
         if (editItemIndex === null) return; 
         
-        console.log(`🔄 handleUpdateItem - currentItem:`, currentItem);
+        console.log(`🔄 ===== handleUpdateItem INICIADO =====`);
+        console.log(`🔄 currentItem completo:`, currentItem);
+        console.log(`🔄 deliveryDate:`, currentItem.deliveryDate, typeof currentItem.deliveryDate);
         
+        // NÃO FAZER NENHUMA TRANSFORMAÇÃO COMPLEXA
         const dataToValidate = { 
             ...currentItem, 
+            // Apenas converter números se necessário
             quantityRequested: Number(currentItem.quantityRequested) || 0, 
-            pesoUnitario: Number(currentItem.pesoUnitario) || 0,
-            // ✅ CORREÇÃO CRÍTICA: Limpar a data antes da validação
-            deliveryDate: cleanDateValue(currentItem.deliveryDate),
-            deliveryReceiptDate: cleanDateValue(currentItem.deliveryReceiptDate),
+            quantityFulfilled: Number(currentItem.quantityFulfilled) || 0,
+            pesoUnitario: currentItem.pesoUnitario ? Number(currentItem.pesoUnitario) : undefined,
+            // MANTER AS DATAS EXATAMENTE COMO ESTÃO
+            deliveryDate: currentItem.deliveryDate,
+            deliveryReceiptDate: currentItem.deliveryReceiptDate,
         }; 
         
-        console.log(`🔄 dataToValidate após limpeza:`, dataToValidate);
+        console.log(`🔄 dataToValidate:`, dataToValidate);
+        console.log(`🔄 dataToValidate.deliveryDate:`, dataToValidate.deliveryDate, typeof dataToValidate.deliveryDate);
         
         const result = requisitionItemSchema.safeParse(dataToValidate); 
         if (!result.success) { 
-            const firstError = result.error.errors[0]; 
             console.error(`❌ Erro de validação na atualização:`, result.error.errors);
             toast({ 
                 variant: 'destructive', 
-                title: `Erro de validação: ${firstError.path[0]}`, 
-                description: firstError.message 
+                title: `Erro de validação: ${result.error.errors[0]?.path[0]}`, 
+                description: result.error.errors[0]?.message || 'Erro desconhecido'
             }); 
             return; 
         } 
         
-        console.log(`✅ Item atualizado com sucesso:`, result.data);
+        console.log(`✅ Item validado, atualizando no formulário...`);
+        console.log(`✅ result.data:`, result.data);
+        console.log(`✅ result.data.deliveryDate:`, result.data.deliveryDate, typeof result.data.deliveryDate);
         
         updateReqItem(editItemIndex, result.data); 
+        
+        // Verificar se foi atualizado corretamente
+        setTimeout(() => {
+            const updatedItem = requisitionForm.getValues(`items.${editItemIndex}`);
+            console.log(`🔍 Item atualizado no formulário:`, updatedItem);
+            console.log(`🔍 deliveryDate no formulário:`, updatedItem.deliveryDate, typeof updatedItem.deliveryDate);
+        }, 100);
+        
         setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); 
-        setEditItemIndex(null); 
+        setEditItemIndex(null);
+        
+        console.log(`🔄 ===== handleUpdateItem FINALIZADO =====`);
     };
+    // 2. FUNÇÃO handleEditItem TOTALMENTE CORRIGIDA
     const handleEditItem = (index: number) => { 
-        console.log(`✏️ handleEditItem - editando item ${index}`);
+        console.log(`✏️ ===== INICIANDO handleEditItem - Item ${index} =====`);
         
         const itemToEdit = requisitionForm.getValues(`items.${index}`);
-        console.log(`✏️ Item do formulário:`, itemToEdit);
-        console.log(`✏️ deliveryDate do item:`, itemToEdit.deliveryDate, typeof itemToEdit.deliveryDate);
+        console.log(`✏️ Item original do formulário:`, itemToEdit);
+        console.log(`✏️ deliveryDate original:`, itemToEdit.deliveryDate, typeof itemToEdit.deliveryDate);
         
         setEditItemIndex(index); 
         
-        // Converter datas se necessário
+        // CONVERSÃO SEGURA E COMPLETA
         const processedItem = {
             ...itemToEdit,
-            deliveryDate: itemToEdit.deliveryDate || undefined,
-            deliveryReceiptDate: itemToEdit.deliveryReceiptDate || undefined,
+            // Garantir que a data seja uma Date válida ou undefined
+            deliveryDate: (() => {
+                if (!itemToEdit.deliveryDate) return undefined;
+                
+                // Se já é Date válida, manter
+                if (itemToEdit.deliveryDate instanceof Date && !isNaN(itemToEdit.deliveryDate.getTime())) {
+                    console.log(`✏️ deliveryDate já é Date válida:`, itemToEdit.deliveryDate);
+                    return itemToEdit.deliveryDate;
+                }
+                
+                // Se é Timestamp, converter
+                if (itemToEdit.deliveryDate && typeof itemToEdit.deliveryDate.toDate === 'function') {
+                    try {
+                        const converted = itemToEdit.deliveryDate.toDate();
+                        console.log(`✏️ Timestamp convertido para Date:`, converted);
+                        return converted;
+                    } catch (error) {
+                        console.error(`❌ Erro ao converter Timestamp:`, error);
+                        return undefined;
+                    }
+                }
+                
+                // Se é string ou número, tentar converter
+                if (typeof itemToEdit.deliveryDate === 'string' || typeof itemToEdit.deliveryDate === 'number') {
+                    try {
+                        const converted = new Date(itemToEdit.deliveryDate);
+                        if (!isNaN(converted.getTime())) {
+                            console.log(`✏️ String/Number convertido para Date:`, converted);
+                            return converted;
+                        }
+                    } catch (error) {
+                        console.error(`❌ Erro ao converter string/number:`, error);
+                    }
+                }
+                
+                console.log(`⚠️ deliveryDate inválida, retornando undefined`);
+                return undefined;
+            })(),
+            
+            // Mesmo processo para deliveryReceiptDate
+            deliveryReceiptDate: (() => {
+                if (!itemToEdit.deliveryReceiptDate) return undefined;
+                
+                if (itemToEdit.deliveryReceiptDate instanceof Date && !isNaN(itemToEdit.deliveryReceiptDate.getTime())) {
+                    return itemToEdit.deliveryReceiptDate;
+                }
+                
+                if (itemToEdit.deliveryReceiptDate && typeof itemToEdit.deliveryReceiptDate.toDate === 'function') {
+                    try {
+                        return itemToEdit.deliveryReceiptDate.toDate();
+                    } catch (error) {
+                        console.error(`❌ Erro ao converter Timestamp deliveryReceiptDate:`, error);
+                        return undefined;
+                    }
+                }
+                
+                if (typeof itemToEdit.deliveryReceiptDate === 'string' || typeof itemToEdit.deliveryReceiptDate === 'number') {
+                    try {
+                        const converted = new Date(itemToEdit.deliveryReceiptDate);
+                        if (!isNaN(converted.getTime())) {
+                            return converted;
+                        }
+                    } catch (error) {
+                        console.error(`❌ Erro ao converter deliveryReceiptDate:`, error);
+                    }
+                }
+                
+                return undefined;
+            })(),
+            
+            // Garantir que campos numéricos sejam números
+            quantityRequested: Number(itemToEdit.quantityRequested) || 0,
+            quantityFulfilled: Number(itemToEdit.quantityFulfilled) || 0,
+            pesoUnitario: itemToEdit.pesoUnitario ? Number(itemToEdit.pesoUnitario) : undefined,
+            
+            // Garantir valores padrão para campos obrigatórios
+            status: itemToEdit.status || "Pendente",
+            inspectionStatus: itemToEdit.inspectionStatus || "Pendente"
         };
         
         console.log(`✏️ Item processado para edição:`, processedItem);
+        console.log(`✏️ deliveryDate processada:`, processedItem.deliveryDate, typeof processedItem.deliveryDate);
+        
         setCurrentItem(processedItem); 
+        
+        console.log(`✏️ ===== FIM handleEditItem =====`);
     };
     const handleCancelEditItem = () => { setCurrentItem({ ...emptyRequisitionItem, id: Date.now().toString() }); setEditItemIndex(null); };
 return (
@@ -1491,8 +1544,8 @@ return (
                     <h1 className="text-3xl font-bold tracking-tight font-headline">Requisição e Planos de Corte</h1>
                     
                     {/* 8. BOTÃO DE TESTE (adicionar temporariamente no JSX) */}
-                    <Button onClick={testDateSaving} className="mb-4" variant="outline">
-                        🧪 Testar Salvamento de Data
+                    <Button onClick={testDateFlow} className="mb-4" variant="outline">
+                        🧪 Testar Fluxo de Datas
                     </Button>
                     
                      <div className="flex items-center gap-2">
@@ -2003,10 +2056,12 @@ return (
                                                             <PopoverContent className="w-auto p-0">
                                                                 <Calendar 
                                                                     mode="single" 
-                                                                    selected={currentItem.deliveryDate instanceof Date ? currentItem.deliveryDate : undefined}
-                                                                    onSelect={date => {
-                                                                        console.log('📅 Calendar onSelect chamado com:', date);
+                                                                    selected={currentItem.deliveryDate instanceof Date && !isNaN(currentItem.deliveryDate.getTime()) ? currentItem.deliveryDate : undefined}
+                                                                    onSelect={(date) => {
+                                                                        console.log('📅 ===== Calendar onSelect =====');
+                                                                        console.log('📅 Data selecionada:', date, typeof date);
                                                                         handleCurrentItemChange('deliveryDate', date);
+                                                                        console.log('📅 ===== Calendar onSelect FIM =====');
                                                                     }}
                                                                 />
                                                             </PopoverContent>
