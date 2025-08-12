@@ -8,7 +8,7 @@ import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebas
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import Image from "next/image";
-import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -282,6 +282,73 @@ export default function CompanyPage() {
     const idleRate = activeResources > 0 ? (available / activeResources) * 100 : 0;
     
     return { total, available, occupied, maintenance, inactive, absent, vacation, activeResources, idleRate };
+  };
+
+  // Função para exportar recursos com tarefas diárias
+  const exportResourcesWithTasks = () => {
+    // Criar cabeçalho da planilha
+    const headers = [
+      'Nome do Recurso',
+      'Tipo',
+      'Status',
+      'Capacidade',
+      'Localização',
+      'Número de Série',
+      'Tarefa Diária Planejada',
+      'Horário de Início',
+      'Horário de Término',
+      'Responsável',
+      'Observações'
+    ];
+
+    // Converter dados dos recursos
+    const csvData = resources.map(resource => [
+      resource.name,
+      resource.type === 'mao_de_obra' ? 'Mão de Obra' : 
+      resource.type.charAt(0).toUpperCase() + resource.type.slice(1),
+      resource.status === 'disponivel' ? 'Disponível' :
+      resource.status === 'ocupado' ? 'Ocupado' :
+      resource.status === 'manutencao' ? 'Manutenção' :
+      resource.status === 'ausente' ? 'Ausente' :
+      resource.status === 'ferias' ? 'Férias' :
+      resource.status === 'inativo' ? 'Inativo' : resource.status,
+      resource.capacity,
+      resource.location || '',
+      resource.serialNumber || '',
+      '', // Campo vazio para tarefa diária
+      '', // Campo vazio para horário início
+      '', // Campo vazio para horário término
+      '', // Campo vazio para responsável
+      ''  // Campo vazio para observações
+    ]);
+
+    // Combinar cabeçalho com dados
+    const allData = [headers, ...csvData];
+
+    // Converter para CSV
+    const csvContent = allData.map(row => 
+      row.map(cell => `"${cell}"`).join(',')
+    ).join('\n');
+
+    // Criar e fazer download do arquivo
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    
+    // Nome do arquivo com data atual
+    const today = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
+    link.setAttribute('download', `recursos-tarefas-diarias-${today}.csv`);
+    
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    toast({
+      title: "Exportação realizada!",
+      description: "Lista de recursos com campos para tarefas diárias foi baixada.",
+    });
   };
 
   // Funções de submit
@@ -852,10 +919,16 @@ export default function CompanyPage() {
                     <CardTitle>Recursos Produtivos</CardTitle>
                     <CardDescription>Gerencie os recursos produtivos da sua empresa.</CardDescription>
                   </div>
-                  <Button onClick={handleAddResourceClick}>
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Adicionar Recurso
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={exportResourcesWithTasks} disabled={resources.length === 0}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Exportar Lista de Tarefas
+                    </Button>
+                    <Button onClick={handleAddResourceClick}>
+                      <PlusCircle className="mr-2 h-4 w-4" />
+                      Adicionar Recurso
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {isResourcesLoading ? (
