@@ -1,971 +1,2300 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Metadata } from 'next';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Progress } from '@/components/ui/progress';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
+// ============================================================================
+// IMPORTS E DEPENDÊNCIAS
+// ============================================================================
+
+import React, { useState, useEffect, useMemo } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useAuth } from "../layout";
+import { format, isAfter, isBefore, addDays, isSameDay } from "date-fns";
+import { pt } from 'date-fns/locale';
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
+// Componentes UI
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+
+// Ícones e utilitários
 import { 
-  CheckSquare, 
-  Plus, 
+  CalendarDays, 
+  Clock, 
+  Users, 
+  Settings, 
+  CheckCircle2, 
+  AlertTriangle, 
   Calendar as CalendarIcon, 
-  User, 
+  FileDown, 
   Filter, 
   Search, 
-  Edit, 
-  Trash2, 
-  Clock, 
-  AlertTriangle,
+  Eye, 
+  PlayCircle, 
+  PauseCircle, 
+  RotateCcw,
+  User,
+  Package,
+  Building,
+  Hash,
+  Timer,
+  Target,
+  Activity,
   FileText,
-  Download,
-  BarChart3,
-  Settings,
-  Play,
-  Pause,
-  CheckCircle,
-  XCircle,
-  ChevronLeft,
-  ChevronRight
-} from 'lucide-react';
-import { format, addDays, isAfter, isBefore, startOfDay } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import { Task, Resource, TeamMember, TaskMetrics } from './types';
-import { 
-  calculateTaskMetrics, 
-  filterTasks, 
-  groupTasksByStatus, 
-  getStatusConfig, 
-  getPriorityConfig,
-  validateTaskDates,
-  checkResourceConflicts,
-  formatDate,
-  formatDateTime,
-  generateSampleTasks,
-  generateSampleResources,
-  generateSampleTeamMembers
-} from './utils';
-import { TaskNotifications, TaskAlertsWidget } from './components/TaskNotifications';
+  Download
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
-export const metadata: Metadata = {
-  title: 'Tarefas | Sistema de Gestão',
-  description: 'Gerencie suas tarefas e projetos com controle completo',
+// ============================================================================
+// TIPOS E INTERFACES
+// ============================================================================
+
+interface TeamMember {
+  id: string;
+  name: string;
+  position: string;
+  email: string;
+  phone: string;
+  permission: "admin" | "user";
+}
+
+interface Resource {
+  id: string;
+  name: string;
+  type: "maquina" | "equipamento" | "veiculo" | "ferramenta" | "espaco" | "mao_de_obra";
+  description?: string;
+  capacity: number;
+  status: "disponivel" | "ocupado" | "manutencao" | "inativo" | "ausente" | "ferias";
+  location?: string;
+  serialNumber?: string;
+}
+
+interface ProductionStage {
+  stageName: string;
+  status: "Pendente" | "Em Andamento" | "Concluído";
+  startDate: Date | null;
+  completedDate: Date | null;
+  durationDays: number;
+  useBusinessDays?: boolean;
+}
+
+interface OrderItem {
+  id: string;
+  description: string;
+  quantity: number;
+  unitWeight?: number;
+  code?: string;
+  itemNumber?: string;
+  productionPlan?: ProductionStage[];
+}
+
+interface Order {
+  id: string;
+  quotationNumber: string;
+  internalOS?: string;
+  projectName?: string;
+  customer: {
+    id: string;
+    name: string;
+  };
+  status: string;
+  deliveryDate?: Date;
+  items: OrderItem[];
+}
+
+interface Task {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  internalOS?: string;
+  projectName?: string;
+  customerName: string;
+  itemId: string;
+  itemDescription: string;
+  itemCode?: string;
+  itemNumber?: string;
+  stageName: string;
+  status: "Pendente" | "Em Andamento" | "Concluído" | "Reprogramada";
+  startDate: Date | null;
+  completedDate: Date | null;
+  durationDays: number;
+  useBusinessDays?: boolean;
+  assignedResourceId?: string;
+  assignedResourceName?: string;
+  responsibleMemberId?: string;
+  responsibleMemberName?: string;
+  priority: "Baixa" | "Normal" | "Alta" | "Urgente";
+  estimatedEffort?: number;
+  actualStartDate?: Date;
+  actualEndDate?: Date;
+  notes?: string;
+}
+
+interface CompanyData {
+  nomeFantasia?: string;
+  cnpj?: string;
+  inscricaoEstadual?: string;
+  email?: string;
+  celular?: string;
+  endereco?: string;
+  website?: string;
+  logo?: { preview?: string };
+}
+
+// ============================================================================
+// SCHEMAS DE VALIDAÇÃO
+// ============================================================================
+
+const taskAssignmentSchema = z.object({
+  assignedResourceId: z.string().min(1, "Selecione um recurso"),
+  responsibleMemberId: z.string().min(1, "Selecione um responsável"),
+  priority: z.enum(["Baixa", "Normal", "Alta", "Urgente"]),
+  notes: z.string().optional(),
+  scheduledStartDate: z.date().optional(),
+});
+
+const taskUpdateSchema = z.object({
+  status: z.enum(["Pendente", "Em Andamento", "Concluído", "Reprogramada"]),
+  actualStartDate: z.date().optional(),
+  actualEndDate: z.date().optional(),
+  newScheduledDate: z.date().optional(),
+  notes: z.string().optional(),
+});
+
+type TaskAssignment = z.infer<typeof taskAssignmentSchema>;
+type TaskUpdate = z.infer<typeof taskUpdateSchema>;
+
+// ============================================================================
+// FUNÇÕES AUXILIARES
+// ============================================================================
+
+const safeToDate = (timestamp: any): Date | null => {
+  if (!timestamp) return null;
+  
+  if (timestamp instanceof Date) {
+    return isNaN(timestamp.getTime()) ? null : timestamp;
+  }
+  
+  if (timestamp && typeof timestamp.toDate === 'function') {
+    try {
+      const date = timestamp.toDate();
+      return (date instanceof Date && !isNaN(date.getTime())) ? date : null;
+    } catch (error) {
+      console.warn("Erro ao converter timestamp do Firestore:", error);
+      return null;
+    }
+  }
+  
+  if (timestamp && typeof timestamp === 'object' && 'seconds' in timestamp) {
+    try {
+      const date = new Date(timestamp.seconds * 1000);
+      return isNaN(date.getTime()) ? null : date;
+    } catch (error) {
+      console.warn("Erro ao converter objeto timestamp:", error);
+      return null;
+    }
+  }
+  
+  if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+    try {
+      const date = new Date(timestamp);
+      return isNaN(date.getTime()) ? null : date;
+    } catch (error) {
+      console.warn("Erro ao converter string/number para data:", error);
+      return null;
+    }
+  }
+  
+  return null;
 };
 
-export default function TaskPage() {
-  // Estados principais
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [loading, setLoading] = useState(true);
+const getStatusColor = (status: string): string => {
+  switch (status) {
+    case "Pendente":
+      return "bg-yellow-100 text-yellow-800 hover:bg-yellow-100";
+    case "Em Andamento":
+      return "bg-blue-100 text-blue-800 hover:bg-blue-100";
+    case "Concluído":
+      return "bg-green-100 text-green-800 hover:bg-green-100";
+    case "Reprogramada":
+      return "bg-orange-100 text-orange-800 hover:bg-orange-100";
+    default:
+      return "bg-gray-100 text-gray-800 hover:bg-gray-100";
+  }
+};
+
+const getPriorityColor = (priority: string): string => {
+  switch (priority) {
+    case "Urgente":
+      return "bg-red-100 text-red-800 hover:bg-red-100";
+    case "Alta":
+      return "bg-orange-100 text-orange-800 hover:bg-orange-100";
+    case "Normal":
+      return "bg-blue-100 text-blue-800 hover:bg-blue-100";
+    case "Baixa":
+      return "bg-gray-100 text-gray-800 hover:bg-gray-100";
+    default:
+      return "bg-gray-100 text-gray-800 hover:bg-gray-100";
+  }
+};
+
+const calculateTaskPriority = (task: Task): "Baixa" | "Normal" | "Alta" | "Urgente" => {
+  if (!task.startDate) return "Normal";
   
-  // Estados de interface
-  const [view, setView] = useState<'list' | 'kanban' | 'calendar' | 'dashboard'>('list');
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const today = new Date();
+  const daysUntilStart = Math.ceil((task.startDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  
+  if (daysUntilStart < 0) return "Urgente"; // Atrasada
+  if (daysUntilStart <= 2) return "Alta";
+  if (daysUntilStart <= 7) return "Normal";
+  return "Baixa";
+};
+
+const isTaskOverdue = (task: Task): boolean => {
+  if (!task.startDate || task.status === "Concluído") return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const taskDate = new Date(task.startDate);
+  taskDate.setHours(0, 0, 0, 0);
+  return taskDate < today;
+};
+
+const formatDuration = (days: number): string => {
+  if (days < 1) {
+    const hours = Math.round(days * 8); // Assumindo 8h por dia
+    return `${hours}h`;
+  }
+  if (days === 1) return "1 dia";
+  return `${days} dias`;
+};
+
+// ============================================================================
+// HOOKS PERSONALIZADOS
+// ============================================================================
+
+const useTaskManagement = () => {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [companyData, setCompanyData] = useState<CompanyData>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   
   // Estados de filtros
-  const [filters, setFilters] = useState({
-    status: '',
-    priority: '',
-    resourceId: '',
-    responsibleId: '',
-    search: ''
-  });
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [resourceFilter, setResourceFilter] = useState<string>("all");
+  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+  const [searchQuery, setSearchQuery] = useState("");
+  
+  // Estados para visualização
+  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'resource'>('list');
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  
+  const { user, loading: authLoading } = useAuth();
+  const { toast } = useToast();
 
-  // Estados do formulário
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    resourceId: '',
-    responsibleId: '',
-    priority: 'media' as const,
-    plannedStartDate: new Date(),
-    plannedEndDate: addDays(new Date(), 1),
-    estimatedHours: 8,
-    orderId: '',
-    orderNumber: '',
-    itemId: '',
-    itemDescription: '',
-    stage: ''
-  });
+  return {
+    // Estados
+    tasks,
+    setTasks,
+    teamMembers,
+    setTeamMembers,
+    resources,
+    setResources,
+    companyData,
+    setCompanyData,
+    isLoading,
+    setIsLoading,
+    selectedTask,
+    setSelectedTask,
+    isAssignDialogOpen,
+    setIsAssignDialogOpen,
+    isUpdateDialogOpen,
+    setIsUpdateDialogOpen,
+    isDeleteDialogOpen,
+    setIsDeleteDialogOpen,
+    
+    // Filtros
+    statusFilter,
+    setStatusFilter,
+    resourceFilter,
+    setResourceFilter,
+    priorityFilter,
+    setPriorityFilter,
+    dateFilter,
+    setDateFilter,
+    searchQuery,
+    setSearchQuery,
+    
+    // Visualização
+    viewMode,
+    setViewMode,
+    selectedDate,
+    setSelectedDate,
+    
+    // Auth e toast
+    user,
+    authLoading,
+    toast
+  };
+};
 
-  // Carregar dados iniciais
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        // Simular carregamento de dados do Firestore
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Usar dados de exemplo para demonstração
-        const sampleTasks = generateSampleTasks();
-        const sampleResources = generateSampleResources();
-        const sampleTeamMembers = generateSampleTeamMembers();
-        
-        setTasks(sampleTasks);
-        setResources(sampleResources);
-        setTeamMembers(sampleTeamMembers);
-      } catch (error) {
-        console.error('Erro ao carregar dados:', error);
-      } finally {
-        setLoading(false);
+// ============================================================================
+// FUNÇÕES DO FIREBASE
+// ============================================================================
+
+const fetchCompanyData = async (
+  user: any,
+  setCompanyData: (data: CompanyData) => void,
+  toast: any
+) => {
+  if (!user) return;
+  
+  try {
+    const companyRef = doc(db, "companies", "mecald", "settings", "company");
+    const docSnap = await getDoc(companyRef);
+    
+    if (docSnap.exists()) {
+      setCompanyData(docSnap.data() as CompanyData);
+    }
+  } catch (error) {
+    console.error("Error fetching company data:", error);
+    toast({
+      variant: "destructive",
+      title: "Erro ao buscar dados da empresa",
+      description: "Não foi possível carregar as informações da empresa.",
+    });
+  }
+};
+
+const fetchTeamMembers = async (
+  user: any,
+  setTeamMembers: (members: TeamMember[]) => void,
+  toast: any
+) => {
+  if (!user) return;
+  
+  try {
+    const teamRef = doc(db, "companies", "mecald", "settings", "team");
+    const docSnap = await getDoc(teamRef);
+    
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      setTeamMembers(data.members || []);
+    }
+  } catch (error) {
+    console.error("Error fetching team members:", error);
+    toast({
+      variant: "destructive",
+      title: "Erro ao buscar equipe",
+      description: "Não foi possível carregar os membros da equipe.",
+    });
+  }
+};
+
+const fetchResources = async (
+  user: any,
+  setResources: (resources: Resource[]) => void,
+  toast: any
+) => {
+  if (!user) return;
+  
+  try {
+    const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
+    const docSnap = await getDoc(resourcesRef);
+    
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      setResources(data.resources || []);
+    }
+  } catch (error) {
+    console.error("Error fetching resources:", error);
+    toast({
+      variant: "destructive",
+      title: "Erro ao buscar recursos",
+      description: "Não foi possível carregar os recursos produtivos.",
+    });
+  }
+};
+
+const fetchOrdersAndGenerateTasks = async (
+  user: any,
+  setTasks: (tasks: Task[]) => void,
+  toast: any
+) => {
+  if (!user) return;
+  
+  try {
+    const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+    const allTasks: Task[] = [];
+    
+    ordersSnapshot.forEach(orderDoc => {
+      const orderData = orderDoc.data();
+      const orderId = orderDoc.id;
+      
+      // Converter dados do pedido
+      const order: Order = {
+        id: orderId,
+        quotationNumber: orderData.quotationNumber || 'N/A',
+        internalOS: orderData.internalOS,
+        projectName: orderData.projectName,
+        customer: orderData.customer || { id: '', name: 'Cliente não informado' },
+        status: orderData.status || 'Pendente',
+        deliveryDate: safeToDate(orderData.deliveryDate),
+        items: orderData.items || []
+      };
+      
+      // Processar itens do pedido para extrair tarefas
+      order.items.forEach((item: any) => {
+        if (item.productionPlan && Array.isArray(item.productionPlan)) {
+          item.productionPlan.forEach((stage: any, stageIndex: number) => {
+            // Apenas incluir tarefas que não estão concluídas
+            if (stage.status !== "Concluído") {
+              const task: Task = {
+                id: `${orderId}-${item.id}-${stageIndex}`,
+                orderId: orderId,
+                orderNumber: order.quotationNumber,
+                internalOS: order.internalOS,
+                projectName: order.projectName,
+                customerName: order.customer.name,
+                itemId: item.id,
+                itemDescription: item.description,
+                itemCode: item.code,
+                itemNumber: item.itemNumber,
+                stageName: stage.stageName,
+                status: stage.status || "Pendente",
+                startDate: safeToDate(stage.startDate),
+                completedDate: safeToDate(stage.completedDate),
+                durationDays: stage.durationDays || 1,
+                useBusinessDays: stage.useBusinessDays !== false,
+                priority: "Normal", // Será calculado dinamicamente
+                assignedResourceId: stage.assignedResourceId,
+                assignedResourceName: stage.assignedResourceName,
+                responsibleMemberId: stage.responsibleMemberId,
+                responsibleMemberName: stage.responsibleMemberName,
+                actualStartDate: safeToDate(stage.actualStartDate),
+                actualEndDate: safeToDate(stage.actualEndDate),
+                notes: stage.notes
+              };
+              
+              // Calcular prioridade baseada na data
+              task.priority = calculateTaskPriority(task);
+              
+              allTasks.push(task);
+            }
+          });
+        }
+      });
+    });
+    
+    // Ordenar tarefas por prioridade e data
+    allTasks.sort((a, b) => {
+      const priorityOrder = { "Urgente": 4, "Alta": 3, "Normal": 2, "Baixa": 1 };
+      const aPriority = priorityOrder[a.priority];
+      const bPriority = priorityOrder[b.priority];
+      
+      if (aPriority !== bPriority) {
+        return bPriority - aPriority; // Maior prioridade primeiro
       }
+      
+      // Se a prioridade é igual, ordenar por data
+      if (a.startDate && b.startDate) {
+        return a.startDate.getTime() - b.startDate.getTime();
+      }
+      
+      if (a.startDate && !b.startDate) return -1;
+      if (!a.startDate && b.startDate) return 1;
+      
+      return 0;
+    });
+    
+    setTasks(allTasks);
+    
+  } catch (error) {
+    console.error("Error fetching orders and generating tasks:", error);
+    toast({
+      variant: "destructive",
+      title: "Erro ao buscar tarefas",
+      description: "Não foi possível carregar as tarefas dos pedidos.",
+    });
+  }
+};
+
+// Função principal para carregar todos os dados
+const loadAllData = async (
+  user: any,
+  authLoading: boolean,
+  setIsLoading: (loading: boolean) => void,
+  setCompanyData: (data: CompanyData) => void,
+  setTeamMembers: (members: TeamMember[]) => void,
+  setResources: (resources: Resource[]) => void,
+  setTasks: (tasks: Task[]) => void,
+  toast: any
+) => {
+  if (authLoading || !user) return;
+  
+  setIsLoading(true);
+  
+  try {
+    await Promise.all([
+      fetchCompanyData(user, setCompanyData, toast),
+      fetchTeamMembers(user, setTeamMembers, toast),
+      fetchResources(user, setResources, toast),
+      fetchOrdersAndGenerateTasks(user, setTasks, toast)
+    ]);
+  } catch (error) {
+    console.error("Error loading data:", error);
+    toast({
+      variant: "destructive",
+      title: "Erro ao carregar dados",
+      description: "Ocorreu um erro ao carregar os dados do sistema.",
+    });
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+// ============================================================================
+// FUNÇÕES DE ATUALIZAÇÃO
+// ============================================================================
+
+const updateTaskInFirebase = async (
+  task: Task,
+  updateData: any,
+  toast: any
+) => {
+  try {
+    // Buscar o pedido
+    const orderRef = doc(db, "companies", "mecald", "orders", task.orderId);
+    const orderSnap = await getDoc(orderRef);
+    
+    if (!orderSnap.exists()) {
+      throw new Error("Pedido não encontrado");
+    }
+    
+    const orderData = orderSnap.data();
+    const updatedItems = orderData.items.map((item: any) => {
+      if (item.id === task.itemId) {
+        const updatedProductionPlan = item.productionPlan?.map((stage: any, index: number) => {
+          if (stage.stageName === task.stageName) {
+            return {
+              ...stage,
+              ...updateData,
+              // Converter datas para Timestamp se necessário
+              ...(updateData.startDate && { startDate: Timestamp.fromDate(updateData.startDate) }),
+              ...(updateData.completedDate && { completedDate: Timestamp.fromDate(updateData.completedDate) }),
+              ...(updateData.actualStartDate && { actualStartDate: Timestamp.fromDate(updateData.actualStartDate) }),
+              ...(updateData.actualEndDate && { actualEndDate: Timestamp.fromDate(updateData.actualEndDate) }),
+            };
+          }
+          return stage;
+        });
+        
+        return {
+          ...item,
+          productionPlan: updatedProductionPlan
+        };
+      }
+      return item;
+    });
+    
+    await updateDoc(orderRef, {
+      items: updatedItems,
+      lastUpdate: Timestamp.now()
+    });
+    
+    toast({
+      title: "Tarefa atualizada!",
+      description: "As alterações foram salvas com sucesso.",
+    });
+    
+    return true;
+    
+  } catch (error) {
+    console.error("Error updating task:", error);
+    toast({
+      variant: "destructive",
+      title: "Erro ao atualizar tarefa",
+      description: "Não foi possível salvar as alterações.",
+    });
+    return false;
+  }
+};
+
+const assignTaskToResource = async (
+  task: Task,
+  assignment: TaskAssignment,
+  resources: Resource[],
+  teamMembers: TeamMember[],
+  toast: any
+) => {
+  const selectedResource = resources.find(r => r.id === assignment.assignedResourceId);
+  const selectedMember = teamMembers.find(m => m.id === assignment.responsibleMemberId);
+  
+  const updateData = {
+    assignedResourceId: assignment.assignedResourceId,
+    assignedResourceName: selectedResource?.name,
+    responsibleMemberId: assignment.responsibleMemberId,
+    responsibleMemberName: selectedMember?.name,
+    priority: assignment.priority,
+    notes: assignment.notes,
+    status: "Em Andamento",
+    ...(assignment.scheduledStartDate && { 
+      startDate: assignment.scheduledStartDate,
+      actualStartDate: assignment.scheduledStartDate 
+    })
+  };
+  
+  return await updateTaskInFirebase(task, updateData, toast);
+};
+
+const updateTaskStatus = async (
+  task: Task,
+  update: TaskUpdate,
+  toast: any
+) => {
+  const updateData: any = {
+    status: update.status,
+    notes: update.notes,
+    ...(update.actualStartDate && { actualStartDate: update.actualStartDate }),
+    ...(update.actualEndDate && { actualEndDate: update.actualEndDate }),
+  };
+  
+  if (update.status === "Concluído") {
+    updateData.completedDate = update.actualEndDate || new Date();
+  }
+  
+  if (update.status === "Reprogramada" && update.newScheduledDate) {
+    updateData.startDate = update.newScheduledDate;
+    updateData.status = "Pendente"; // Volta para pendente após reprogramação
+  }
+  
+  return await updateTaskInFirebase(task, updateData, toast);
+};
+
+// ============================================================================
+// FUNÇÃO DE EXPORTAÇÃO PDF
+// ============================================================================
+
+const exportTasksToPDF = async (
+  tasks: Task[],
+  companyData: CompanyData,
+  teamMembers: TeamMember[],
+  resources: Resource[],
+  filters: {
+    statusFilter: string;
+    resourceFilter: string;
+    priorityFilter: string;
+    dateFilter?: Date;
+  }
+) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.width;
+  let yPos = 15;
+
+  // Cabeçalho da empresa
+  if (companyData.logo?.preview) {
+    try {
+      doc.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+    } catch (e) {
+      console.error("Error adding logo to PDF:", e);
+    }
+  }
+
+  let textX = 65;
+  let textY = yPos;
+  doc.setFontSize(18).setFont('helvetica', 'bold');
+  doc.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY);
+  textY += 6;
+  
+  doc.setFontSize(9).setFont('helvetica', 'normal');
+  if (companyData.endereco) {
+    const addressLines = doc.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+    doc.text(addressLines, textX, textY);
+    textY += (addressLines.length * 4);
+  }
+  if (companyData.cnpj) {
+    doc.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+    textY += 4;
+  }
+  if (companyData.email) {
+    doc.text(`Email: ${companyData.email}`, textX, textY);
+    textY += 4;
+  }
+  if (companyData.celular) {
+    doc.text(`Telefone: ${companyData.celular}`, textX, textY);
+  }
+
+  yPos = 55;
+
+  // Título do relatório
+  doc.setFontSize(16).setFont('helvetica', 'bold');
+  doc.text('RELATÓRIO DE TAREFAS DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 15;
+
+  // Informações do relatório
+  doc.setFontSize(10).setFont('helvetica', 'normal');
+  doc.text(`Data de Geração: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, 15, yPos);
+  doc.text(`Total de Tarefas: ${tasks.length}`, pageWidth - 15, yPos, { align: 'right' });
+  yPos += 7;
+
+  // Filtros aplicados
+  if (filters.statusFilter !== 'all' || filters.resourceFilter !== 'all' || filters.priorityFilter !== 'all' || filters.dateFilter) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Filtros Aplicados:', 15, yPos);
+    yPos += 5;
+    doc.setFont('helvetica', 'normal');
+    
+    if (filters.statusFilter !== 'all') {
+      doc.text(`• Status: ${filters.statusFilter}`, 15, yPos);
+      yPos += 4;
+    }
+    if (filters.resourceFilter !== 'all') {
+      const resourceName = resources.find(r => r.id === filters.resourceFilter)?.name || filters.resourceFilter;
+      doc.text(`• Recurso: ${resourceName}`, 15, yPos);
+      yPos += 4;
+    }
+    if (filters.priorityFilter !== 'all') {
+      doc.text(`• Prioridade: ${filters.priorityFilter}`, 15, yPos);
+      yPos += 4;
+    }
+    if (filters.dateFilter) {
+      doc.text(`• Data: ${format(filters.dateFilter, "dd/MM/yyyy")}`, 15, yPos);
+      yPos += 4;
+    }
+    yPos += 5;
+  }
+
+  // Tabela de tarefas
+  const tableBody = tasks.map(task => {
+    const resource = resources.find(r => r.id === task.assignedResourceId);
+    const member = teamMembers.find(m => m.id === task.responsibleMemberId);
+    
+    return [
+      task.orderNumber,
+      task.internalOS || 'N/A',
+      task.itemDescription.length > 30 ? task.itemDescription.substring(0, 30) + '...' : task.itemDescription,
+      task.stageName,
+      task.status,
+      task.priority,
+      task.startDate ? format(task.startDate, 'dd/MM/yy') : 'N/A',
+      formatDuration(task.durationDays),
+      resource?.name || 'Não atribuído',
+      member?.name || 'Não atribuído'
+    ];
+  });
+
+  autoTable(doc, {
+    startY: yPos,
+    head: [['Pedido', 'OS', 'Item', 'Etapa', 'Status', 'Prioridade', 'Início', 'Duração', 'Recurso', 'Responsável']],
+    body: tableBody,
+    styles: { fontSize: 7, cellPadding: 2 },
+    headStyles: { fillColor: [37, 99, 235], fontSize: 8, textColor: 255 },
+    columnStyles: {
+      0: { cellWidth: 18 }, // Pedido
+      1: { cellWidth: 15 }, // OS
+      2: { cellWidth: 35 }, // Item
+      3: { cellWidth: 25 }, // Etapa
+      4: { cellWidth: 20 }, // Status
+      5: { cellWidth: 18 }, // Prioridade
+      6: { cellWidth: 15 }, // Início
+      7: { cellWidth: 15 }, // Duração
+      8: { cellWidth: 25 }, // Recurso
+      9: { cellWidth: 25 }, // Responsável
+    },
+    didParseCell: (data) => {
+      // Colorir células baseado no status
+      if (data.column.index === 4 && data.section === 'body') {
+        const status = data.cell.raw as string;
+        switch (status) {
+          case 'Pendente':
+            data.cell.styles.fillColor = [254, 249, 195];
+            data.cell.styles.textColor = [146, 64, 14];
+            break;
+          case 'Em Andamento':
+            data.cell.styles.fillColor = [219, 234, 254];
+            data.cell.styles.textColor = [30, 64, 175];
+            break;
+          case 'Concluído':
+            data.cell.styles.fillColor = [220, 252, 231];
+            data.cell.styles.textColor = [21, 128, 61];
+            break;
+          case 'Reprogramada':
+            data.cell.styles.fillColor = [255, 237, 213];
+            data.cell.styles.textColor = [154, 52, 18];
+            break;
+        }
+      }
+      
+      // Colorir células baseado na prioridade
+      if (data.column.index === 5 && data.section === 'body') {
+        const priority = data.cell.raw as string;
+        switch (priority) {
+          case 'Urgente':
+            data.cell.styles.fillColor = [254, 226, 226];
+            data.cell.styles.textColor = [185, 28, 28];
+            break;
+          case 'Alta':
+            data.cell.styles.fillColor = [255, 237, 213];
+            data.cell.styles.textColor = [154, 52, 18];
+            break;
+          case 'Normal':
+            data.cell.styles.fillColor = [219, 234, 254];
+            data.cell.styles.textColor = [30, 64, 175];
+            break;
+          case 'Baixa':
+            data.cell.styles.fillColor = [243, 244, 246];
+            data.cell.styles.textColor = [55, 65, 81];
+            break;
+        }
+      }
+    }
+  });
+
+  // Estatísticas no rodapé
+  const finalY = (doc as any).lastAutoTable.finalY + 15;
+  const pageHeight = doc.internal.pageSize.height;
+  
+  if (finalY + 40 < pageHeight - 20) {
+    doc.setFontSize(10).setFont('helvetica', 'bold');
+    doc.text('ESTATÍSTICAS:', 15, finalY);
+    
+    const stats = {
+      pendentes: tasks.filter(t => t.status === 'Pendente').length,
+      emAndamento: tasks.filter(t => t.status === 'Em Andamento').length,
+      concluidas: tasks.filter(t => t.status === 'Concluído').length,
+      reprogramadas: tasks.filter(t => t.status === 'Reprogramada').length,
+      atrasadas: tasks.filter(t => isTaskOverdue(t)).length,
+      urgentes: tasks.filter(t => t.priority === 'Urgente').length
     };
+    
+    doc.setFontSize(9).setFont('helvetica', 'normal');
+    let statsY = finalY + 7;
+    doc.text(`Pendentes: ${stats.pendentes}`, 15, statsY);
+    doc.text(`Em Andamento: ${stats.emAndamento}`, 70, statsY);
+    doc.text(`Concluídas: ${stats.concluidas}`, 140, statsY);
+    statsY += 5;
+    doc.text(`Reprogramadas: ${stats.reprogramadas}`, 15, statsY);
+    doc.text(`Atrasadas: ${stats.atrasadas}`, 70, statsY);
+    doc.text(`Urgentes: ${stats.urgentes}`, 140, statsY);
+  }
 
-    loadData();
-  }, []);
+  // Salvar o PDF
+  const fileName = `Tarefas_Producao_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
+  doc.save(fileName);
+  
+  return fileName;
+};
 
-  // Calcular métricas
-  const metrics = useMemo(() => calculateTaskMetrics(tasks), [tasks]);
+// ============================================================================
+// COMPONENTES DA INTERFACE
+// ============================================================================
+
+const TaskStatistics = React.memo(({ tasks }: { tasks: Task[] }) => {
+  const stats = useMemo(() => {
+    return {
+      total: tasks.length,
+      pendentes: tasks.filter(t => t.status === 'Pendente').length,
+      emAndamento: tasks.filter(t => t.status === 'Em Andamento').length,
+      concluidas: tasks.filter(t => t.status === 'Concluído').length,
+      reprogramadas: tasks.filter(t => t.status === 'Reprogramada').length,
+      atrasadas: tasks.filter(t => isTaskOverdue(t)).length,
+      urgentes: tasks.filter(t => t.priority === 'Urgente').length,
+      semRecurso: tasks.filter(t => !t.assignedResourceId).length,
+      semResponsavel: tasks.filter(t => !t.responsibleMemberId).length
+    };
+  }, [tasks]);
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Total de Tarefas</CardTitle>
+          <Package className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">{stats.total}</div>
+          <p className="text-xs text-muted-foreground">
+            {stats.semRecurso} sem recurso • {stats.semResponsavel} sem responsável
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Em Andamento</CardTitle>
+          <PlayCircle className="h-4 w-4 text-blue-600" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold text-blue-600">{stats.emAndamento}</div>
+          <p className="text-xs text-muted-foreground">
+            {stats.total > 0 ? Math.round((stats.emAndamento / stats.total) * 100) : 0}% do total
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Atrasadas</CardTitle>
+          <AlertTriangle className="h-4 w-4 text-red-600" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold text-red-600">{stats.atrasadas}</div>
+          <p className="text-xs text-muted-foreground">
+            {stats.urgentes} tarefas urgentes
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Concluídas</CardTitle>
+          <CheckCircle2 className="h-4 w-4 text-green-600" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold text-green-600">{stats.concluidas}</div>
+          <p className="text-xs text-muted-foreground">
+            {stats.total > 0 ? Math.round((stats.concluidas / stats.total) * 100) : 0}% completude
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+});
+
+// Adicionar displayName para melhor debugging
+TaskStatistics.displayName = 'TaskStatistics';
+
+const TaskFilters = React.memo(({
+  statusFilter,
+  setStatusFilter,
+  resourceFilter,
+  setResourceFilter,
+  priorityFilter,
+  setPriorityFilter,
+  dateFilter,
+  setDateFilter,
+  searchQuery,
+  setSearchQuery,
+  resources,
+  onClearFilters
+}: {
+  statusFilter: string;
+  setStatusFilter: (value: string) => void;
+  resourceFilter: string;
+  setResourceFilter: (value: string) => void;
+  priorityFilter: string;
+  setPriorityFilter: (value: string) => void;
+  dateFilter?: Date;
+  setDateFilter: (date?: Date) => void;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
+  resources: Resource[];
+  onClearFilters: () => void;
+}) => {
+  const hasActiveFilters = statusFilter !== 'all' || resourceFilter !== 'all' || 
+                          priorityFilter !== 'all' || dateFilter || searchQuery;
+
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Filtros:</span>
+        </div>
+
+        {/* Busca por texto */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por pedido, item, etapa..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9 w-64"
+          />
+        </div>
+
+        {/* Filtro por Status */}
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os Status</SelectItem>
+            <SelectItem value="Pendente">Pendente</SelectItem>
+            <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+            <SelectItem value="Concluído">Concluído</SelectItem>
+            <SelectItem value="Reprogramada">Reprogramada</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Filtro por Recurso */}
+        <Select value={resourceFilter} onValueChange={setResourceFilter}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Recurso" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os Recursos</SelectItem>
+            <SelectItem value="unassigned">Não Atribuído</SelectItem>
+            {resources.filter(r => r.status === 'disponivel' || r.status === 'ocupado').map(resource => (
+              <SelectItem key={resource.id} value={resource.id}>
+                {resource.name} ({resource.type})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Filtro por Prioridade */}
+        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="Prioridade" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas</SelectItem>
+            <SelectItem value="Urgente">Urgente</SelectItem>
+            <SelectItem value="Alta">Alta</SelectItem>
+            <SelectItem value="Normal">Normal</SelectItem>
+            <SelectItem value="Baixa">Baixa</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Filtro por Data */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                "w-[180px] justify-start text-left font-normal",
+                !dateFilter && "text-muted-foreground"
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {dateFilter ? format(dateFilter, "dd/MM/yyyy") : "Selecionar data"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0">
+            <Calendar
+              mode="single"
+              selected={dateFilter}
+              onSelect={setDateFilter}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+
+        {/* Botão para limpar filtros */}
+        {hasActiveFilters && (
+          <Button variant="ghost" onClick={onClearFilters} className="text-muted-foreground">
+            Limpar Filtros
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+});
+
+// Adicionar displayName para melhor debugging
+TaskFilters.displayName = 'TaskFilters';
+// Componente da tabela de tarefas
+const TaskTable = React.memo(({
+  tasks,
+  resources,
+  teamMembers,
+  onViewTask,
+  onAssignTask,
+  onUpdateTask
+}: {
+  tasks: Task[];
+  resources: Resource[];
+  teamMembers: TeamMember[];
+  onViewTask: (task: Task) => void;
+  onAssignTask: (task: Task) => void;
+  onUpdateTask: (task: Task) => void;
+}) => {
+  if (tasks.length === 0) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Package className="h-12 w-12 text-muted-foreground mb-4" />
+          <h3 className="text-lg font-medium mb-2">Nenhuma tarefa encontrada</h3>
+          <p className="text-muted-foreground text-center">
+            Não há tarefas que correspondam aos filtros aplicados.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Lista de Tarefas</CardTitle>
+        <CardDescription>
+          Gerencie e acompanhe todas as tarefas de produção em andamento
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pedido/Item</TableHead>
+                <TableHead>Etapa</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Prioridade</TableHead>
+                <TableHead>Data Início</TableHead>
+                <TableHead>Duração</TableHead>
+                <TableHead>Recurso</TableHead>
+                <TableHead>Responsável</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tasks.map((task) => {
+                const resource = resources.find(r => r.id === task.assignedResourceId);
+                const member = teamMembers.find(m => m.id === task.responsibleMemberId);
+                const isOverdue = isTaskOverdue(task);
+
+                return (
+                  <TableRow 
+                    key={task.id}
+                    className={cn(
+                      "hover:bg-muted/50",
+                      isOverdue && "bg-red-50 hover:bg-red-100"
+                    )}
+                  >
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">
+                            {task.orderNumber}
+                          </Badge>
+                          {task.internalOS && (
+                            <Badge variant="secondary" className="text-xs">
+                              {task.internalOS}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="font-medium text-sm">
+                          {task.itemDescription.length > 40 
+                            ? `${task.itemDescription.substring(0, 40)}...`
+                            : task.itemDescription
+                          }
+                        </div>
+                        {task.itemCode && (
+                          <div className="text-xs text-muted-foreground">
+                            Código: {task.itemCode}
+                          </div>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          Cliente: {task.customerName}
+                        </div>
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="font-medium">{task.stageName}</div>
+                    </TableCell>
+
+                    <TableCell>
+                      <Badge className={getStatusColor(task.status)}>
+                        {task.status}
+                      </Badge>
+                      {isOverdue && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <AlertTriangle className="h-3 w-3 text-red-600" />
+                          <span className="text-xs text-red-600">Atrasada</span>
+                        </div>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
+                      <Badge className={getPriorityColor(task.priority)}>
+                        {task.priority}
+                      </Badge>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="text-sm">
+                        {task.startDate ? format(task.startDate, "dd/MM/yyyy") : "Não definida"}
+                      </div>
+                      {task.startDate && (
+                        <div className="text-xs text-muted-foreground">
+                          {format(task.startDate, "EEEE", { locale: pt })}
+                        </div>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="text-sm font-medium">
+                        {formatDuration(task.durationDays)}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {task.useBusinessDays ? "Dias úteis" : "Dias corridos"}
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="space-y-1">
+                        {resource ? (
+                          <>
+                            <div className="font-medium text-sm">{resource.name}</div>
+                            <div className="text-xs text-muted-foreground capitalize">
+                              {resource.type.replace('_', ' ')}
+                            </div>
+                            <Badge 
+                              variant="outline" 
+                              className={cn(
+                                "text-xs",
+                                resource.status === 'disponivel' && "border-green-500 text-green-700",
+                                resource.status === 'ocupado' && "border-yellow-500 text-yellow-700",
+                                resource.status === 'manutencao' && "border-red-500 text-red-700"
+                              )}
+                            >
+                              {resource.status}
+                            </Badge>
+                          </>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">Não atribuído</div>
+                        )}
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      {member ? (
+                        <div className="space-y-1">
+                          <div className="font-medium text-sm">{member.name}</div>
+                          <div className="text-xs text-muted-foreground">{member.position}</div>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">Não atribuído</div>
+                      )}
+                    </TableCell>
+
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => onViewTask(task)}
+                          title="Ver detalhes"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        
+                        {!task.assignedResourceId && (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => onAssignTask(task)}
+                            title="Atribuir recurso"
+                          >
+                            <User className="h-4 w-4" />
+                          </Button>
+                        )}
+                        
+                        {task.status !== "Concluído" && (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => onUpdateTask(task)}
+                            title="Atualizar status"
+                          >
+                            {task.status === "Pendente" ? (
+                              <PlayCircle className="h-4 w-4" />
+                            ) : (
+                              <Settings className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+});
+
+// Adicionar displayName para melhor debugging
+TaskTable.displayName = 'TaskTable';
+
+// ============================================================================
+// MODAIS
+// ============================================================================
+
+const TaskAssignmentModal = ({
+  isOpen,
+  onClose,
+  task,
+  resources,
+  teamMembers,
+  onAssign
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  task: Task | null;
+  resources: Resource[];
+  teamMembers: TeamMember[];
+  onAssign: (assignment: TaskAssignment) => void;
+}) => {
+  const assignmentForm = useForm<TaskAssignment>({
+    resolver: zodResolver(taskAssignmentSchema),
+    defaultValues: {
+      assignedResourceId: "",
+      responsibleMemberId: "",
+      priority: "Normal",
+      notes: "",
+    }
+  });
+
+  const availableResources = resources.filter(r => 
+    r.status === 'disponivel' || r.status === 'ocupado'
+  );
+
+  const handleSubmit = (data: TaskAssignment) => {
+    onAssign(data);
+    assignmentForm.reset();
+    onClose();
+  };
+
+  if (!task) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Atribuir Tarefa</DialogTitle>
+          <DialogDescription>
+            Atribua um recurso e responsável para a execução desta tarefa.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Informações da tarefa */}
+        <div className="space-y-3 p-4 bg-muted rounded-lg">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">{task.orderNumber}</Badge>
+            {task.internalOS && <Badge variant="secondary">{task.internalOS}</Badge>}
+          </div>
+          <div>
+            <div className="font-medium">{task.itemDescription}</div>
+            <div className="text-sm text-muted-foreground">Etapa: {task.stageName}</div>
+            <div className="text-sm text-muted-foreground">Cliente: {task.customerName}</div>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-1">
+              <CalendarIcon className="h-4 w-4" />
+              <span>{task.startDate ? format(task.startDate, "dd/MM/yyyy") : "Data a definir"}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Timer className="h-4 w-4" />
+              <span>{formatDuration(task.durationDays)}</span>
+            </div>
+          </div>
+        </div>
+
+        <Form {...assignmentForm}>
+          <form onSubmit={assignmentForm.handleSubmit(handleSubmit)} className="space-y-4">
+            <FormField
+              control={assignmentForm.control}
+              name="assignedResourceId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Recurso *</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione um recurso" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {availableResources.map(resource => (
+                        <SelectItem key={resource.id} value={resource.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{resource.name}</span>
+                            <Badge 
+                              variant="outline" 
+                              className={cn(
+                                "text-xs",
+                                resource.status === 'disponivel' && "border-green-500 text-green-700",
+                                resource.status === 'ocupado' && "border-yellow-500 text-yellow-700"
+                              )}
+                            >
+                              {resource.status}
+                            </Badge>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={assignmentForm.control}
+              name="responsibleMemberId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Responsável *</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione um responsável" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {teamMembers.map(member => (
+                        <SelectItem key={member.id} value={member.id}>
+                          <div className="flex flex-col">
+                            <span>{member.name}</span>
+                            <span className="text-xs text-muted-foreground">{member.position}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={assignmentForm.control}
+              name="priority"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Prioridade</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione a prioridade" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="Baixa">Baixa</SelectItem>
+                      <SelectItem value="Normal">Normal</SelectItem>
+                      <SelectItem value="Alta">Alta</SelectItem>
+                      <SelectItem value="Urgente">Urgente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={assignmentForm.control}
+              name="scheduledStartDate"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nova Data de Início (opcional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="date"
+                      value={field.value ? format(field.value, "yyyy-MM-dd") : ""}
+                      onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={assignmentForm.control}
+              name="notes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Observações</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Informações adicionais sobre a execução..."
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancelar
+              </Button>
+              <Button type="submit">
+                Atribuir Tarefa
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// Modal para atualizar status da tarefa
+const TaskUpdateModal = ({
+  isOpen,
+  onClose,
+  task,
+  onUpdate
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  task: Task | null;
+  onUpdate: (update: TaskUpdate) => void;
+}) => {
+  const updateForm = useForm<TaskUpdate>({
+    resolver: zodResolver(taskUpdateSchema),
+    defaultValues: {
+      status: "Pendente",
+      notes: "",
+    }
+  });
+
+  const watchedStatus = updateForm.watch("status");
+
+  const handleSubmit = (data: TaskUpdate) => {
+    onUpdate(data);
+    updateForm.reset();
+    onClose();
+  };
+
+  if (!task) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Atualizar Tarefa</DialogTitle>
+          <DialogDescription>
+            Atualize o status e informações da execução desta tarefa.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Informações da tarefa */}
+        <div className="space-y-3 p-4 bg-muted rounded-lg">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">{task.orderNumber}</Badge>
+            {task.internalOS && <Badge variant="secondary">{task.internalOS}</Badge>}
+          </div>
+          <div>
+            <div className="font-medium">{task.itemDescription}</div>
+            <div className="text-sm text-muted-foreground">Etapa: {task.stageName}</div>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-1">
+              <Badge className={getStatusColor(task.status)}>
+                {task.status}
+              </Badge>
+            </div>
+            {task.assignedResourceName && (
+              <div className="text-muted-foreground">
+                Recurso: {task.assignedResourceName}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Form {...updateForm}>
+          <form onSubmit={updateForm.handleSubmit(handleSubmit)} className="space-y-4">
+            <FormField
+              control={updateForm.control}
+              name="status"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Novo Status *</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione o novo status" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="Em Andamento">
+                        <div className="flex items-center gap-2">
+                          <PlayCircle className="h-4 w-4 text-blue-600" />
+                          Em Andamento
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="Concluído">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          Concluído
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="Reprogramada">
+                        <div className="flex items-center gap-2">
+                          <RotateCcw className="h-4 w-4 text-orange-600" />
+                          Reprogramar
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {watchedStatus === "Em Andamento" && (
+              <FormField
+                control={updateForm.control}
+                name="actualStartDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Data Real de Início</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="date"
+                        value={field.value ? format(field.value, "yyyy-MM-dd") : ""}
+                        onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
+            {watchedStatus === "Concluído" && (
+              <>
+                <FormField
+                  control={updateForm.control}
+                  name="actualStartDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Data Real de Início</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          value={field.value ? format(field.value, "yyyy-MM-dd") : ""}
+                          onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={updateForm.control}
+                  name="actualEndDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Data de Conclusão</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          value={field.value ? format(field.value, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd")}
+                          onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : new Date())}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </>
+            )}
+
+            {watchedStatus === "Reprogramada" && (
+              <FormField
+                control={updateForm.control}
+                name="newScheduledDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nova Data de Início *</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="date"
+                        value={field.value ? format(field.value, "yyyy-MM-dd") : ""}
+                        onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
+            <FormField
+              control={updateForm.control}
+              name="notes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Observações</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Informações sobre a execução, problemas encontrados, etc..."
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancelar
+              </Button>
+              <Button type="submit">
+                Atualizar Tarefa
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+// Modal para visualizar detalhes da tarefa
+const TaskViewModal = ({
+  isOpen,
+  onClose,
+  task,
+  resources,
+  teamMembers
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  task: Task | null;
+  resources: Resource[];
+  teamMembers: TeamMember[];
+}) => {
+  if (!task) return null;
+
+  const resource = resources.find(r => r.id === task.assignedResourceId);
+  const member = teamMembers.find(m => m.id === task.responsibleMemberId);
+  const isOverdue = isTaskOverdue(task);
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Detalhes da Tarefa</DialogTitle>
+          <DialogDescription>
+            Informações completas sobre a tarefa de produção
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6">
+          {/* Cabeçalho da tarefa */}
+          <div className="flex items-start justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{task.orderNumber}</Badge>
+                {task.internalOS && <Badge variant="secondary">{task.internalOS}</Badge>}
+                <Badge className={getStatusColor(task.status)}>{task.status}</Badge>
+                <Badge className={getPriorityColor(task.priority)}>{task.priority}</Badge>
+              </div>
+              {isOverdue && (
+                <div className="flex items-center gap-1 text-red-600">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="text-sm font-medium">Tarefa em atraso</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Informações do pedido */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Informações do Pedido</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-sm font-medium text-muted-foreground">Cliente:</span>
+                  <p className="font-medium">{task.customerName}</p>
+                </div>
+                {task.projectName && (
+                  <div>
+                    <span className="text-sm font-medium text-muted-foreground">Projeto:</span>
+                    <p className="font-medium">{task.projectName}</p>
+                  </div>
+                )}
+              </div>
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Item:</span>
+                <p className="font-medium">{task.itemDescription}</p>
+                {task.itemCode && (
+                  <p className="text-sm text-muted-foreground">Código: {task.itemCode}</p>
+                )}
+                {task.itemNumber && (
+                  <p className="text-sm text-muted-foreground">Nº Item: {task.itemNumber}</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Informações da tarefa */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Detalhes da Tarefa</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <span className="text-sm font-medium text-muted-foreground">Etapa:</span>
+                <p className="font-medium text-lg">{task.stageName}</p>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-sm font-medium text-muted-foreground">Data de Início:</span>
+                  <p className="font-medium">
+                    {task.startDate ? format(task.startDate, "dd/MM/yyyy") : "Não definida"}
+                  </p>
+                  {task.actualStartDate && task.actualStartDate !== task.startDate && (
+                    <p className="text-sm text-muted-foreground">
+                      Real: {format(task.actualStartDate, "dd/MM/yyyy")}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-muted-foreground">Duração:</span>
+                  <p className="font-medium">{formatDuration(task.durationDays)}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {task.useBusinessDays ? "Dias úteis" : "Dias corridos"}
+                  </p>
+                </div>
+              </div>
+
+              {task.completedDate && (
+                <div>
+                  <span className="text-sm font-medium text-muted-foreground">Data de Conclusão:</span>
+                  <p className="font-medium">{format(task.completedDate, "dd/MM/yyyy")}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Recursos atribuídos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Recurso Atribuído</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {resource ? (
+                  <div className="space-y-2">
+                    <p className="font-medium">{resource.name}</p>
+                    <p className="text-sm text-muted-foreground capitalize">
+                      {resource.type.replace('_', ' ')}
+                    </p>
+                    <Badge 
+                      variant="outline" 
+                      className={cn(
+                        resource.status === 'disponivel' && "border-green-500 text-green-700",
+                        resource.status === 'ocupado' && "border-yellow-500 text-yellow-700",
+                        resource.status === 'manutencao' && "border-red-500 text-red-700"
+                      )}
+                    >
+                      {resource.status}
+                    </Badge>
+                    {resource.location && (
+                      <p className="text-sm text-muted-foreground">
+                        Local: {resource.location}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">Recurso não atribuído</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Responsável</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {member ? (
+                  <div className="space-y-2">
+                    <p className="font-medium">{member.name}</p>
+                    <p className="text-sm text-muted-foreground">{member.position}</p>
+                    <p className="text-sm text-muted-foreground">{member.email}</p>
+                    {member.phone && (
+                      <p className="text-sm text-muted-foreground">{member.phone}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">Responsável não atribuído</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Observações */}
+          {task.notes && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Observações</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm whitespace-pre-wrap">{task.notes}</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button onClick={onClose}>Fechar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+// ============================================================================
+// COMPONENTE PRINCIPAL
+// ============================================================================
+
+export default function TasksPage() {
+  // Error Boundary para tratamento de erros
+  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  
+  // Estado de loading para exportação
+  const [isExporting, setIsExporting] = useState(false);
+
+  const {
+    tasks,
+    setTasks,
+    teamMembers,
+    setTeamMembers,
+    resources,
+    setResources,
+    companyData,
+    setCompanyData,
+    isLoading,
+    setIsLoading,
+    selectedTask,
+    setSelectedTask,
+    isAssignDialogOpen,
+    setIsAssignDialogOpen,
+    isUpdateDialogOpen,
+    setIsUpdateDialogOpen,
+    statusFilter,
+    setStatusFilter,
+    resourceFilter,
+    setResourceFilter,
+    priorityFilter,
+    setPriorityFilter,
+    dateFilter,
+    setDateFilter,
+    searchQuery,
+    setSearchQuery,
+    viewMode,
+    setViewMode,
+    user,
+    authLoading,
+    toast
+  } = useTaskManagement();
+
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+
+  // Carregar dados quando o usuário estiver autenticado
+  useEffect(() => {
+    try {
+      setHasError(false);
+      setErrorMessage("");
+      
+      loadAllData(
+        user,
+        authLoading,
+        setIsLoading,
+        setCompanyData,
+        setTeamMembers,
+        setResources,
+        setTasks,
+        toast
+      );
+    } catch (error) {
+      console.error("Erro ao carregar dados:", error);
+      setHasError(true);
+      setErrorMessage("Erro ao carregar dados do sistema. Tente recarregar a página.");
+    }
+  }, [user, authLoading]);
 
   // Filtrar tarefas
   const filteredTasks = useMemo(() => {
-    return filterTasks(tasks, filters);
-  }, [tasks, filters]);
+    return tasks.filter(task => {
+      const statusMatch = statusFilter === 'all' || task.status === statusFilter;
+      const resourceMatch = resourceFilter === 'all' || 
+                           (resourceFilter === 'unassigned' && !task.assignedResourceId) ||
+                           task.assignedResourceId === resourceFilter;
+      const priorityMatch = priorityFilter === 'all' || task.priority === priorityFilter;
+      const dateMatch = !dateFilter || (task.startDate && isSameDay(task.startDate, dateFilter));
+      const searchMatch = !searchQuery || 
+                         task.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         task.itemDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         task.stageName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         task.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         (task.internalOS && task.internalOS.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  // Agrupar tarefas para Kanban
-  const groupedTasks = useMemo(() => groupTasksByStatus(filteredTasks), [filteredTasks]);
-
-  // Tarefas do calendário
-  const calendarTasks = useMemo(() => {
-    if (!selectedDate) return [];
-    return filteredTasks.filter(task => {
-      const taskStart = startOfDay(task.plannedStartDate);
-      const taskEnd = startOfDay(task.plannedEndDate);
-      const selected = startOfDay(selectedDate);
-      return !isBefore(selected, taskStart) && !isAfter(selected, taskEnd);
+      return statusMatch && resourceMatch && priorityMatch && dateMatch && searchMatch;
     });
-  }, [filteredTasks, selectedDate]);
+  }, [tasks, statusFilter, resourceFilter, priorityFilter, dateFilter, searchQuery]);
 
   // Handlers
-  const handleCreateTask = () => {
-    const newTask: Task = {
-      id: Date.now().toString(),
-      ...formData,
-      status: 'pendente',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    setTasks(prev => [...prev, newTask]);
-    setIsCreateDialogOpen(false);
-    resetForm();
+  const handleViewTask = (task: Task) => {
+    setSelectedTask(task);
+    setIsViewDialogOpen(true);
   };
 
-  const handleEditTask = (task: Task) => {
-    setEditingTask(task);
-    setFormData({
-      title: task.title,
-      description: task.description || '',
-      resourceId: task.resourceId,
-      responsibleId: task.responsibleId,
-      priority: task.priority,
-      plannedStartDate: task.plannedStartDate,
-      plannedEndDate: task.plannedEndDate,
-      estimatedHours: task.estimatedHours || 8,
-      orderId: task.orderId || '',
-      orderNumber: task.orderNumber || '',
-      itemId: task.itemId || '',
-      itemDescription: task.itemDescription || '',
-      stage: task.stage || ''
-    });
-    setIsCreateDialogOpen(true);
+  const handleAssignTask = (task: Task) => {
+    setSelectedTask(task);
+    setIsAssignDialogOpen(true);
   };
 
-  const handleUpdateTask = () => {
-    if (!editingTask) return;
-
-    const updatedTask: Task = {
-      ...editingTask,
-      ...formData,
-      updatedAt: new Date()
-    };
-
-    setTasks(prev => prev.map(t => t.id === editingTask.id ? updatedTask : t));
-    setIsCreateDialogOpen(false);
-    setEditingTask(null);
-    resetForm();
+  const handleUpdateTask = (task: Task) => {
+    setSelectedTask(task);
+    setIsUpdateDialogOpen(true);
   };
 
-  const handleDeleteTask = (taskId: string) => {
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-  };
+  const handleTaskAssignment = async (assignment: TaskAssignment) => {
+    if (!selectedTask) return;
 
-  const handleStatusChange = (taskId: string, newStatus: Task['status']) => {
-    setTasks(prev => prev.map(task => 
-      task.id === taskId 
-        ? { ...task, status: newStatus, updatedAt: new Date() }
-        : task
-    ));
-  };
+    const success = await assignTaskToResource(
+      selectedTask,
+      assignment,
+      resources,
+      teamMembers,
+      toast
+    );
 
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      description: '',
-      resourceId: '',
-      responsibleId: '',
-      priority: 'media',
-      plannedStartDate: new Date(),
-      plannedEndDate: addDays(new Date(), 1),
-      estimatedHours: 8,
-      orderId: '',
-      orderNumber: '',
-      itemId: '',
-      itemDescription: '',
-      stage: ''
-    });
-    setEditingTask(null);
-  };
-
-  const handleTaskClick = (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (task) {
-      handleEditTask(task);
+    if (success) {
+      // Recarregar tarefas
+      await fetchOrdersAndGenerateTasks(user, setTasks, toast);
     }
   };
 
-  // Gerar relatório PDF
-  const generatePDFReport = () => {
-    // Implementação do relatório PDF seria feita aqui
-    console.log('Gerando relatório PDF...');
+  const handleTaskUpdate = async (update: TaskUpdate) => {
+    if (!selectedTask) return;
+
+    const success = await updateTaskStatus(selectedTask, update, toast);
+
+    if (success) {
+      // Recarregar tarefas
+      await fetchOrdersAndGenerateTasks(user, setTasks, toast);
+    }
   };
 
-  // Exportar CSV
-  const exportCSV = () => {
-    const csvContent = [
-      ['Título', 'Status', 'Prioridade', 'Recurso', 'Responsável', 'Início', 'Fim', 'Horas Estimadas'],
-      ...filteredTasks.map(task => [
-        task.title,
-        getStatusConfig(task.status).label,
-        getPriorityConfig(task.priority).label,
-        resources.find(r => r.id === task.resourceId)?.name || '',
-        teamMembers.find(t => t.id === task.responsibleId)?.name || '',
-        formatDate(task.plannedStartDate),
-        formatDate(task.plannedEndDate),
-        task.estimatedHours?.toString() || ''
-      ])
-    ].map(row => row.join(',')).join('\n');
+  const handleExportTasks = async () => {
+    setIsExporting(true);
+    try {
+      const fileName = await exportTasksToPDF(
+        filteredTasks,
+        companyData,
+        teamMembers,
+        resources,
+        {
+          statusFilter,
+          resourceFilter,
+          priorityFilter,
+          dateFilter
+        }
+      );
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tarefas-${format(new Date(), 'yyyy-MM-dd')}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+      toast({
+        title: "Relatório exportado!",
+        description: `O arquivo ${fileName} foi baixado com sucesso.`,
+      });
+    } catch (error) {
+      console.error("Error exporting tasks:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro na exportação",
+        description: "Não foi possível gerar o relatório em PDF.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
-  if (loading) {
+  const handleClearFilters = () => {
+    setStatusFilter('all');
+    setResourceFilter('all');
+    setPriorityFilter('all');
+    setDateFilter(undefined);
+    setSearchQuery('');
+  };
+
+  // Verificação de erro
+  if (hasError) {
     return (
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
-            <p className="mt-2 text-muted-foreground">Carregando tarefas...</p>
-          </div>
+        <div className="flex flex-col items-center justify-center py-12">
+          <AlertTriangle className="h-12 w-12 text-red-600 mb-4" />
+          <h3 className="text-lg font-medium mb-2">Erro ao carregar dados</h3>
+          <p className="text-muted-foreground text-center mb-4">
+            {errorMessage}
+          </p>
+          <Button 
+            onClick={() => window.location.reload()} 
+            variant="outline"
+          >
+            Recarregar Página
+          </Button>
         </div>
+      </div>
+    );
+  }
+
+  if (authLoading || isLoading) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
       </div>
     );
   }
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      {/* Header */}
-      <div className="flex items-center justify-between space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Tarefas</h1>
-        <div className="flex items-center space-x-2">
-          <TaskNotifications 
-            tasks={tasks}
-            resources={resources}
-            teamMembers={teamMembers}
-            onTaskClick={handleTaskClick}
-          />
-          <Button variant="outline" size="sm">
-            <Filter className="mr-2 h-4 w-4" />
-            Filtros
-          </Button>
-          <Button onClick={() => setIsCreateDialogOpen(true)} size="sm">
-            <Plus className="mr-2 h-4 w-4" />
-            Nova Tarefa
+      {/* Cabeçalho */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight font-headline">
+            Gestão de Tarefas
+          </h1>
+          <p className="text-muted-foreground">
+            Monitore e gerencie todas as tarefas de produção da empresa
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleExportTasks}
+            variant="outline"
+            disabled={filteredTasks.length === 0 || isExporting}
+          >
+            {isExporting ? (
+              <>
+                <Clock className="mr-2 h-4 w-4 animate-spin" />
+                Gerando...
+              </>
+            ) : (
+              <>
+                <Download className="mr-2 h-4 w-4" />
+                Exportar PDF
+              </>
+            )}
           </Button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Tarefas</CardTitle>
-            <CheckSquare className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.totalTasks}</div>
-            <p className="text-xs text-muted-foreground">
-              {metrics.pendingTasks} pendentes, {metrics.inProgressTasks} em andamento
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Em Andamento</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.inProgressTasks}</div>
-            <p className="text-xs text-muted-foreground">Tarefas ativas</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Concluídas</CardTitle>
-            <CheckCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics.completedTasks}</div>
-            <p className="text-xs text-muted-foreground">
-              {metrics.onTimeRate.toFixed(1)}% no prazo
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Em Atraso</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{metrics.overdueTasks}</div>
-            <p className="text-xs text-muted-foreground">Tarefas atrasadas</p>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Estatísticas */}
+      <TaskStatistics tasks={filteredTasks} />
 
-      {/* Alertas */}
-      <TaskAlertsWidget 
-        tasks={tasks}
+      {/* Filtros */}
+      <TaskFilters
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        resourceFilter={resourceFilter}
+        setResourceFilter={setResourceFilter}
+        priorityFilter={priorityFilter}
+        setPriorityFilter={setPriorityFilter}
+        dateFilter={dateFilter}
+        setDateFilter={setDateFilter}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        resources={resources}
+        onClearFilters={handleClearFilters}
+      />
+
+      {/* Tabela de tarefas */}
+      {filteredTasks.length === 0 && !isLoading ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Package className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium mb-2">Nenhuma tarefa encontrada</h3>
+            <p className="text-muted-foreground text-center mb-4">
+              {tasks.length === 0 
+                ? "Não há tarefas cadastradas no sistema."
+                : "Não há tarefas que correspondam aos filtros aplicados."
+              }
+            </p>
+            {tasks.length === 0 && (
+              <Button 
+                onClick={() => window.location.reload()} 
+                variant="outline"
+              >
+                Recarregar Dados
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <TaskTable
+          tasks={filteredTasks}
+          resources={resources}
+          teamMembers={teamMembers}
+          onViewTask={handleViewTask}
+          onAssignTask={handleAssignTask}
+          onUpdateTask={handleUpdateTask}
+        />
+      )}
+
+      {/* Modais */}
+      <TaskViewModal
+        isOpen={isViewDialogOpen}
+        onClose={() => setIsViewDialogOpen(false)}
+        task={selectedTask}
         resources={resources}
         teamMembers={teamMembers}
       />
 
-      {/* Filtros */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Filtros</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Buscar</label>
-              <Input
-                placeholder="Buscar tarefas..."
-                value={filters.search}
-                onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Status</label>
-              <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todos os status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Todos</SelectItem>
-                  <SelectItem value="pendente">Pendente</SelectItem>
-                  <SelectItem value="em_andamento">Em Andamento</SelectItem>
-                  <SelectItem value="concluida">Concluída</SelectItem>
-                  <SelectItem value="cancelada">Cancelada</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Prioridade</label>
-              <Select value={filters.priority} onValueChange={(value) => setFilters(prev => ({ ...prev, priority: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todas as prioridades" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Todas</SelectItem>
-                  <SelectItem value="alta">Alta</SelectItem>
-                  <SelectItem value="media">Média</SelectItem>
-                  <SelectItem value="baixa">Baixa</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Recurso</label>
-              <Select value={filters.resourceId} onValueChange={(value) => setFilters(prev => ({ ...prev, resourceId: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todos os recursos" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Todos</SelectItem>
-                  {resources.map(resource => (
-                    <SelectItem key={resource.id} value={resource.id}>
-                      {resource.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Responsável</label>
-              <Select value={filters.responsibleId} onValueChange={(value) => setFilters(prev => ({ ...prev, responsibleId: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Todos os responsáveis" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Todos</SelectItem>
-                  {teamMembers.map(member => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <TaskAssignmentModal
+        isOpen={isAssignDialogOpen}
+        onClose={() => setIsAssignDialogOpen(false)}
+        task={selectedTask}
+        resources={resources}
+        teamMembers={teamMembers}
+        onAssign={handleTaskAssignment}
+      />
 
-      {/* Visualizações */}
-      <Tabs value={view} onValueChange={(value) => setView(value as any)} className="space-y-4">
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="list">Lista</TabsTrigger>
-            <TabsTrigger value="kanban">Kanban</TabsTrigger>
-            <TabsTrigger value="calendar">Calendário</TabsTrigger>
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          </TabsList>
-          
-          <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm" onClick={exportCSV}>
-              <Download className="mr-2 h-4 w-4" />
-              Exportar CSV
-            </Button>
-            <Button variant="outline" size="sm" onClick={generatePDFReport}>
-              <FileText className="mr-2 h-4 w-4" />
-              Relatório PDF
-            </Button>
-          </div>
-        </div>
-
-        {/* Visualização em Lista */}
-        <TabsContent value="list" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Lista de Tarefas</CardTitle>
-              <CardDescription>
-                {filteredTasks.length} tarefa(s) encontrada(s)
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {filteredTasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-center">
-                  <CheckSquare className="h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">Nenhuma tarefa encontrada</h3>
-                  <p className="text-muted-foreground mb-4 max-w-sm">
-                    Tente ajustar os filtros ou criar uma nova tarefa.
-                  </p>
-                  <Button onClick={() => setIsCreateDialogOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Criar Tarefa
-                  </Button>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Título</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Prioridade</TableHead>
-                      <TableHead>Recurso</TableHead>
-                      <TableHead>Responsável</TableHead>
-                      <TableHead>Início</TableHead>
-                      <TableHead>Fim</TableHead>
-                      <TableHead>Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredTasks.map(task => {
-                      const resource = resources.find(r => r.id === task.resourceId);
-                      const responsible = teamMembers.find(t => t.id === task.responsibleId);
-                      const statusConfig = getStatusConfig(task.status);
-                      const priorityConfig = getPriorityConfig(task.priority);
-                      const isOverdue = task.status !== 'concluida' && task.status !== 'cancelada' && isAfter(new Date(), task.plannedEndDate);
-
-                      return (
-                        <TableRow key={task.id} className={isOverdue ? 'bg-red-50' : ''}>
-                          <TableCell>
-                            <div>
-                              <div className="font-medium">{task.title}</div>
-                              {task.description && (
-                                <div className="text-sm text-muted-foreground">{task.description}</div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={`${statusConfig.color} ${statusConfig.textColor}`}>
-                              {statusConfig.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={`${priorityConfig.color} ${priorityConfig.textColor}`}>
-                              {priorityConfig.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              <div className="font-medium">{resource?.name}</div>
-                              <div className="text-muted-foreground">{resource?.location}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              <div className="font-medium">{responsible?.name}</div>
-                              <div className="text-muted-foreground">{responsible?.position}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              {formatDate(task.plannedStartDate)}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              {formatDate(task.plannedEndDate)}
-                              {isOverdue && (
-                                <div className="text-red-600 text-xs">Atrasado</div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center space-x-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEditTask(task)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteTask(task.id!)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Visualização Kanban */}
-        <TabsContent value="kanban" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {Object.entries(groupedTasks).map(([status, statusTasks]) => {
-              const statusConfig = getStatusConfig(status);
-              return (
-                <Card key={status}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <span className="flex items-center">
-                        <div className={`w-3 h-3 rounded-full ${statusConfig.color} mr-2`}></div>
-                        {statusConfig.label}
-                      </span>
-                      <Badge variant="secondary">{statusTasks.length}</Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ScrollArea className="h-96">
-                      <div className="space-y-2">
-                        {statusTasks.map(task => {
-                          const resource = resources.find(r => r.id === task.resourceId);
-                          const responsible = teamMembers.find(t => t.id === task.responsibleId);
-                          const priorityConfig = getPriorityConfig(task.priority);
-                          const isOverdue = task.status !== 'concluida' && task.status !== 'cancelada' && isAfter(new Date(), task.plannedEndDate);
-
-                          return (
-                            <Card key={task.id} className={`cursor-pointer hover:shadow-md transition-shadow ${isOverdue ? 'border-red-200 bg-red-50' : ''}`}>
-                              <CardContent className="p-3">
-                                <div className="space-y-2">
-                                  <div className="flex items-start justify-between">
-                                    <h4 className="font-medium text-sm">{task.title}</h4>
-                                    <Badge className={`${priorityConfig.color} ${priorityConfig.textColor} text-xs`}>
-                                      {priorityConfig.label}
-                                    </Badge>
-                                  </div>
-                                  
-                                  {task.description && (
-                                    <p className="text-xs text-muted-foreground">{task.description}</p>
-                                  )}
-                                  
-                                  <div className="text-xs text-muted-foreground">
-                                    <div>Recurso: {resource?.name}</div>
-                                    <div>Responsável: {responsible?.name}</div>
-                                    <div>Prazo: {formatDate(task.plannedEndDate)}</div>
-                                    {isOverdue && (
-                                      <div className="text-red-600 font-medium">ATRASADO</div>
-                                    )}
-                                  </div>
-                                  
-                                  <div className="flex items-center space-x-1">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleEditTask(task)}
-                                      className="h-6 w-6 p-0"
-                                    >
-                                      <Edit className="h-3 w-3" />
-                                    </Button>
-                                    {task.status === 'pendente' && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleStatusChange(task.id!, 'em_andamento')}
-                                        className="h-6 w-6 p-0"
-                                      >
-                                        <Play className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                    {task.status === 'em_andamento' && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => handleStatusChange(task.id!, 'concluida')}
-                                        className="h-6 w-6 p-0"
-                                      >
-                                        <CheckCircle className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </TabsContent>
-
-        {/* Visualização Calendário */}
-        <TabsContent value="calendar" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Calendário de Tarefas</CardTitle>
-              <CardDescription>
-                Visualize as tarefas em formato de calendário
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-2">
-                  <Calendar
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={setSelectedDate}
-                    className="rounded-md border"
-                  />
-                </div>
-                <div>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">
-                        Tarefas do Dia
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {selectedDate ? (
-                        <div className="space-y-2">
-                          {calendarTasks.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">
-                              Nenhuma tarefa para {format(selectedDate, 'dd/MM/yyyy')}
-                            </p>
-                          ) : (
-                            calendarTasks.map(task => {
-                              const statusConfig = getStatusConfig(task.status);
-                              const priorityConfig = getPriorityConfig(task.priority);
-                              const resource = resources.find(r => r.id === task.resourceId);
-
-                              return (
-                                <Card key={task.id} className="p-3">
-                                  <div className="space-y-2">
-                                    <div className="flex items-center justify-between">
-                                      <h4 className="font-medium text-sm">{task.title}</h4>
-                                      <Badge className={`${statusConfig.color} ${statusConfig.textColor} text-xs`}>
-                                        {statusConfig.label}
-                                      </Badge>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      <div>Recurso: {resource?.name}</div>
-                                      <div>Prioridade: {priorityConfig.label}</div>
-                                      <div>Horas: {task.estimatedHours}h</div>
-                                    </div>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleEditTask(task)}
-                                      className="w-full"
-                                    >
-                                      Ver Detalhes
-                                    </Button>
-                                  </div>
-                                </Card>
-                              );
-                            })
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          Selecione uma data para ver as tarefas
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Dashboard */}
-        <TabsContent value="dashboard" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {/* Performance Geral */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Performance Geral</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Taxa de Pontualidade</span>
-                    <span className="font-medium">{metrics.onTimeRate.toFixed(1)}%</span>
-                  </div>
-                  <Progress value={metrics.onTimeRate} className="mt-2" />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Tempo Médio de Conclusão</span>
-                    <span className="font-medium">{metrics.averageCompletionTime.toFixed(1)}h</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Performance por Recurso */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Performance por Recurso</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {Object.entries(metrics.resourceEfficiency).map(([resourceId, efficiency]) => {
-                    const resource = resources.find(r => r.id === resourceId);
-                    return (
-                      <div key={resourceId}>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>{resource?.name || resourceId}</span>
-                          <span className="font-medium">{efficiency.toFixed(1)}%</span>
-                        </div>
-                        <Progress value={Math.abs(efficiency)} className="mt-1" />
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Performance por Responsável */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Tarefas Concluídas por Responsável</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {Object.entries(metrics.responsiblePerformance).map(([responsibleId, count]) => {
-                    const responsible = teamMembers.find(t => t.id === responsibleId);
-                    return (
-                      <div key={responsibleId}>
-                        <div className="flex items-center justify-between text-sm">
-                          <span>{responsible?.name || responsibleId}</span>
-                          <span className="font-medium">{count}</span>
-                        </div>
-                        <Progress value={(count / metrics.completedTasks) * 100} className="mt-1" />
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      {/* Dialog de Criação/Edição de Tarefa */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}
-            </DialogTitle>
-            <DialogDescription>
-              {editingTask ? 'Modifique os dados da tarefa' : 'Crie uma nova tarefa para o sistema'}
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Título *</label>
-              <Input
-                value={formData.title}
-                onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                placeholder="Digite o título da tarefa"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Prioridade</label>
-              <Select value={formData.priority} onValueChange={(value: any) => setFormData(prev => ({ ...prev, priority: value }))}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="baixa">Baixa</SelectItem>
-                  <SelectItem value="media">Média</SelectItem>
-                  <SelectItem value="alta">Alta</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium">Descrição</label>
-              <Textarea
-                value={formData.description}
-                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="Descreva a tarefa..."
-                rows={3}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Recurso *</label>
-              <Select value={formData.resourceId} onValueChange={(value) => setFormData(prev => ({ ...prev, resourceId: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um recurso" />
-                </SelectTrigger>
-                <SelectContent>
-                  {resources.filter(r => r.status === 'disponível').map(resource => (
-                    <SelectItem key={resource.id} value={resource.id}>
-                      {resource.name} - {resource.location}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Responsável *</label>
-              <Select value={formData.responsibleId} onValueChange={(value) => setFormData(prev => ({ ...prev, responsibleId: value }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um responsável" />
-                </SelectTrigger>
-                <SelectContent>
-                  {teamMembers.map(member => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.name} - {member.position}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Data de Início *</label>
-              <Input
-                type="date"
-                value={format(formData.plannedStartDate, 'yyyy-MM-dd')}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  plannedStartDate: new Date(e.target.value) 
-                }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Data de Fim *</label>
-              <Input
-                type="date"
-                value={format(formData.plannedEndDate, 'yyyy-MM-dd')}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  plannedEndDate: new Date(e.target.value) 
-                }))}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Horas Estimadas</label>
-              <Input
-                type="number"
-                value={formData.estimatedHours}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  estimatedHours: parseInt(e.target.value) || 0 
-                }))}
-                placeholder="8"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Número do Pedido</label>
-              <Input
-                value={formData.orderNumber}
-                onChange={(e) => setFormData(prev => ({ ...prev, orderNumber: e.target.value }))}
-                placeholder="PC-2024-001"
-              />
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              onClick={editingTask ? handleUpdateTask : handleCreateTask}
-              disabled={!formData.title || !formData.resourceId || !formData.responsibleId}
-            >
-              {editingTask ? 'Atualizar' : 'Criar'} Tarefa
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TaskUpdateModal
+        isOpen={isUpdateDialogOpen}
+        onClose={() => setIsUpdateDialogOpen(false)}
+        task={selectedTask}
+        onUpdate={handleTaskUpdate}
+      />
     </div>
   );
 }
