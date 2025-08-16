@@ -9,7 +9,7 @@ import * as z from "zod";
 // Firebase
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { useAuth } from "../layout";
+import { useAuth } from "./hooks/useAuth";
 
 // Date handling
 import { format, isAfter, isBefore, addDays, isSameDay } from "date-fns";
@@ -1569,6 +1569,7 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
+  const [authTimeout, setAuthTimeout] = useState(false);
   
   // Estados de filtros
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -1579,6 +1580,12 @@ export default function TasksPage() {
   
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
+
+  // ADICIONE ESTES LOGS PARA DEBUG
+  console.log("TasksPage - authLoading:", authLoading);
+  console.log("TasksPage - user:", user);
+  console.log("TasksPage - user exists:", !!user);
+  console.log("TasksPage - authTimeout:", authTimeout);
 
   // ============================================================================
   // FUNÇÕES DE BUSCA DE DADOS
@@ -1647,10 +1654,16 @@ export default function TasksPage() {
   };
 
   const fetchOrdersAndGenerateTasks = async () => {
-    if (!user) return;
+    if (!user) {
+      console.log("fetchOrdersAndGenerateTasks: Sem usuário para buscar dados");
+      return;
+    }
+    
+    console.log("fetchOrdersAndGenerateTasks: Usuário logado:", user.email);
     
     try {
       const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+      console.log("fetchOrdersAndGenerateTasks: Dados encontrados:", ordersSnapshot.size);
       const allTasks: Task[] = [];
       
       ordersSnapshot.forEach(orderDoc => {
@@ -1734,13 +1747,24 @@ export default function TasksPage() {
       
       setTasks(allTasks);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching orders and generating tasks:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao buscar tarefas",
-        description: "Não foi possível carregar as tarefas dos pedidos.",
-      });
+      
+      // Se erro de permissão, pode estar causando logout
+      if (error.code === 'permission-denied') {
+        console.error("Erro de permissão detectado");
+        toast({
+          variant: "destructive",
+          title: "Erro de permissão",
+          description: "Você não tem permissão para acessar estes dados.",
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Erro ao buscar tarefas",
+          description: "Não foi possível carregar as tarefas dos pedidos.",
+        });
+      }
     }
   };
 
@@ -1748,8 +1772,21 @@ export default function TasksPage() {
   // EFEITO PRINCIPAL
   // ============================================================================
 
+  // Timeout para autenticação
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (authLoading) {
+        console.log("Auth timeout - forçando estado");
+        setAuthTimeout(true);
+      }
+    }, 10000);
+
+    return () => clearTimeout(timer);
+  }, [authLoading]);
+
   useEffect(() => {
     if (!authLoading && user) {
+      console.log("Carregando dados do usuário:", user.email);
       const loadData = async () => {
         setIsLoading(true);
         
@@ -1912,7 +1949,8 @@ export default function TasksPage() {
   // ============================================================================
 
   // Loading de autenticação
-  if (authLoading) {
+  if (authLoading && !authTimeout) {
+    console.log("Renderizando loading de autenticação");
     return (
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between">
@@ -1929,9 +1967,26 @@ export default function TasksPage() {
     );
   }
 
-  // Sem usuário
-  if (!user) {
-    return null;
+  // Timeout de autenticação ou sem usuário
+  if (authTimeout || (!authLoading && !user)) {
+    console.log("Renderizando erro de autenticação - authTimeout:", authTimeout, "user:", !!user);
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <div className="text-center py-12">
+          <h3 className="text-lg font-medium mb-2">Acesso não autorizado</h3>
+          <p className="text-muted-foreground">
+            Você precisa estar logado para acessar esta página.
+          </p>
+          <div className="mt-4">
+            <p className="text-sm text-muted-foreground">
+              Debug: authLoading={authLoading.toString()}, 
+              authTimeout={authTimeout.toString()}, 
+              userExists={!!user}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Loading dos dados
