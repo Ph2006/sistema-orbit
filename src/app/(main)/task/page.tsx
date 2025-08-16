@@ -1,36 +1,41 @@
 "use client";
 
+// React e Hooks
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+
+// Firebase
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
+
+// Date handling
 import { format, isAfter, isBefore, addDays, isSameDay } from "date-fns";
 import { pt } from 'date-fns/locale';
+
+// PDF Generation
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-// Componentes UI
+// UI Components
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+
+// Hooks e Utils
+import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 // Ícones
 import { 
@@ -41,24 +46,16 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   Calendar as CalendarIcon, 
-  FileDown, 
   Filter, 
   Search, 
   Eye, 
   PlayCircle, 
-  PauseCircle, 
   RotateCcw,
   User,
   Package,
-  Building,
-  Hash,
   Timer,
-  Target,
-  Activity,
-  FileText,
   Download
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 // ============================================================================
 // TIPOS E INTERFACES
@@ -155,6 +152,47 @@ interface CompanyData {
   website?: string;
   logo?: { preview?: string };
 }
+
+// ============================================================================
+// SCHEMAS DE VALIDAÇÃO
+// ============================================================================
+
+const taskAssignmentSchema = z.object({
+  assignedResourceId: z.string().min(1, "Selecione um recurso"),
+  responsibleMemberId: z.string().min(1, "Selecione um responsável"),
+  priority: z.enum(["Baixa", "Normal", "Alta", "Urgente"]),
+  notes: z.string().optional(),
+  scheduledStartDate: z.date().optional(),
+});
+
+const taskUpdateSchema = z.object({
+  status: z.enum(["Pendente", "Em Andamento", "Concluído", "Reprogramada"]),
+  actualStartDate: z.date().optional(),
+  actualEndDate: z.date().optional(),
+  newScheduledDate: z.date().optional(),
+  notes: z.string().optional(),
+}).refine((data) => {
+  if (data.actualStartDate && data.actualEndDate) {
+    return data.actualEndDate >= data.actualStartDate;
+  }
+  return true;
+}, {
+  message: "Data de conclusão não pode ser anterior à data de início",
+  path: ["actualEndDate"],
+}).refine((data) => {
+  if (data.newScheduledDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return data.newScheduledDate >= today;
+  }
+  return true;
+}, {
+  message: "Nova data programada não pode ser no passado",
+  path: ["newScheduledDate"],
+});
+
+type TaskAssignment = z.infer<typeof taskAssignmentSchema>;
+type TaskUpdate = z.infer<typeof taskUpdateSchema>;
 
 // ============================================================================
 // FUNÇÕES AUXILIARES
@@ -261,500 +299,288 @@ const formatDuration = (days: number): string => {
 };
 
 // ============================================================================
-// COMPONENTE PRINCIPAL - PARTE 1
+// FUNÇÕES FIREBASE
 // ============================================================================
 
-export default function TasksPage() {
-  // Estados principais
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [companyData, setCompanyData] = useState<CompanyData>({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
-  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
-  
-  // Estados de filtros
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [resourceFilter, setResourceFilter] = useState<string>("all");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
-  const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
-  const [searchQuery, setSearchQuery] = useState("");
-  
-  // Estados para visualização
-  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'resource'>('list');
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  
-  const { user, loading: authLoading } = useAuth();
-  const { toast } = useToast();
-
-  // ============================================================================
-  // FUNÇÕES DE BUSCA DE DADOS
-  // ============================================================================
-
-  const fetchCompanyData = async () => {
-    if (!user) return;
+const updateTaskInFirebase = async (
+  task: Task,
+  updateData: any,
+  toast: any
+) => {
+  try {
+    // Buscar o pedido
+    const orderRef = doc(db, "companies", "mecald", "orders", task.orderId);
+    const orderSnap = await getDoc(orderRef);
     
-    try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      
-      if (docSnap.exists()) {
-        setCompanyData(docSnap.data() as CompanyData);
-      }
-    } catch (error) {
-      console.error("Error fetching company data:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao buscar dados da empresa",
-        description: "Não foi possível carregar as informações da empresa.",
-      });
+    if (!orderSnap.exists()) {
+      throw new Error("Pedido não encontrado");
     }
-  };
-
-  const fetchTeamMembers = async () => {
-    if (!user) return;
     
-    try {
-      const teamRef = doc(db, "companies", "mecald", "settings", "team");
-      const docSnap = await getDoc(teamRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setTeamMembers(data.members || []);
-      }
-    } catch (error) {
-      console.error("Error fetching team members:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao buscar equipe",
-        description: "Não foi possível carregar os membros da equipe.",
-      });
-    }
-  };
-
-  const fetchResources = async () => {
-    if (!user) return;
-    
-    try {
-      const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-      const docSnap = await getDoc(resourcesRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setResources(data.resources || []);
-      }
-    } catch (error) {
-      console.error("Error fetching resources:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao buscar recursos",
-        description: "Não foi possível carregar os recursos produtivos.",
-      });
-    }
-  };
-
-  const fetchOrdersAndGenerateTasks = async () => {
-    if (!user) return;
-    
-    try {
-      const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
-      const allTasks: Task[] = [];
-      
-      ordersSnapshot.forEach(orderDoc => {
-        const orderData = orderDoc.data();
-        const orderId = orderDoc.id;
-        
-        // Converter dados do pedido
-        const order: Order = {
-          id: orderId,
-          quotationNumber: orderData.quotationNumber || 'N/A',
-          internalOS: orderData.internalOS,
-          projectName: orderData.projectName,
-          customer: orderData.customer || { id: '', name: 'Cliente não informado' },
-          status: orderData.status || 'Pendente',
-          deliveryDate: safeToDate(orderData.deliveryDate),
-          items: orderData.items || []
-        };
-        
-        // Processar itens do pedido para extrair tarefas
-        order.items.forEach((item: any) => {
-          if (item.productionPlan && Array.isArray(item.productionPlan)) {
-            item.productionPlan.forEach((stage: any, stageIndex: number) => {
-              // Apenas incluir tarefas que não estão concluídas
-              if (stage.status !== "Concluído") {
-                const task: Task = {
-                  id: `${orderId}-${item.id}-${stageIndex}`,
-                  orderId: orderId,
-                  orderNumber: order.quotationNumber,
-                  internalOS: order.internalOS,
-                  projectName: order.projectName,
-                  customerName: order.customer.name,
-                  itemId: item.id,
-                  itemDescription: item.description,
-                  itemCode: item.code,
-                  itemNumber: item.itemNumber,
-                  stageName: stage.stageName,
-                  status: stage.status || "Pendente",
-                  startDate: safeToDate(stage.startDate),
-                  completedDate: safeToDate(stage.completedDate),
-                  durationDays: stage.durationDays || 1,
-                  useBusinessDays: stage.useBusinessDays !== false,
-                  priority: "Normal", // Será calculado dinamicamente
-                  assignedResourceId: stage.assignedResourceId,
-                  assignedResourceName: stage.assignedResourceName,
-                  responsibleMemberId: stage.responsibleMemberId,
-                  responsibleMemberName: stage.responsibleMemberName,
-                  actualStartDate: safeToDate(stage.actualStartDate),
-                  actualEndDate: safeToDate(stage.actualEndDate),
-                  notes: stage.notes
-                };
-                
-                // Calcular prioridade baseada na data
-                task.priority = calculateTaskPriority(task);
-                
-                allTasks.push(task);
-              }
-            });
+    const orderData = orderSnap.data();
+    const updatedItems = orderData.items.map((item: any) => {
+      if (item.id === task.itemId) {
+        const updatedProductionPlan = item.productionPlan?.map((stage: any, index: number) => {
+          if (stage.stageName === task.stageName) {
+            return {
+              ...stage,
+              ...updateData,
+              // Converter datas para Timestamp se necessário
+              ...(updateData.startDate && { startDate: Timestamp.fromDate(updateData.startDate) }),
+              ...(updateData.completedDate && { completedDate: Timestamp.fromDate(updateData.completedDate) }),
+              ...(updateData.actualStartDate && { actualStartDate: Timestamp.fromDate(updateData.actualStartDate) }),
+              ...(updateData.actualEndDate && { actualEndDate: Timestamp.fromDate(updateData.actualEndDate) }),
+            };
           }
+          return stage;
         });
-      });
-      
-      // Ordenar tarefas por prioridade e data
-      allTasks.sort((a, b) => {
-        const priorityOrder = { "Urgente": 4, "Alta": 3, "Normal": 2, "Baixa": 1 };
-        const aPriority = priorityOrder[a.priority];
-        const bPriority = priorityOrder[b.priority];
         
-        if (aPriority !== bPriority) {
-          return bPriority - aPriority;
-        }
-        
-        if (a.startDate && b.startDate) {
-          return a.startDate.getTime() - b.startDate.getTime();
-        }
-        
-        if (a.startDate && !b.startDate) return -1;
-        if (!a.startDate && b.startDate) return 1;
-        
-        return 0;
-      });
-      
-      setTasks(allTasks);
-      
-    } catch (error) {
-      console.error("Error fetching orders and generating tasks:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao buscar tarefas",
-        description: "Não foi possível carregar as tarefas dos pedidos.",
-      });
-    }
-  };
-
-  // ============================================================================
-  // EFEITO PRINCIPAL - CORREÇÃO DO PROBLEMA DE AUTENTICAÇÃO
-  // ============================================================================
-
-  useEffect(() => {
-    // IMPORTANTE: Só executar quando auth estiver carregado E usuário estiver presente
-    if (!authLoading && user) {
-      const loadData = async () => {
-        setIsLoading(true);
-        
-        try {
-          // Carregar dados em paralelo
-          await Promise.all([
-            fetchCompanyData(),
-            fetchTeamMembers(),
-            fetchResources(),
-            fetchOrdersAndGenerateTasks()
-          ]);
-        } catch (error) {
-          console.error("Error loading data:", error);
-          toast({
-            variant: "destructive",
-            title: "Erro ao carregar dados",
-            description: "Ocorreu um erro ao carregar os dados do sistema.",
-          });
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      
-      loadData();
-    }
-  }, [user, authLoading]); // Dependências corretas
-
-  // ============================================================================
-  // FILTROS E PROCESSAMENTO
-  // ============================================================================
-
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(task => {
-      const statusMatch = statusFilter === 'all' || task.status === statusFilter;
-      const resourceMatch = resourceFilter === 'all' || 
-                           (resourceFilter === 'unassigned' && !task.assignedResourceId) ||
-                           task.assignedResourceId === resourceFilter;
-      const priorityMatch = priorityFilter === 'all' || task.priority === priorityFilter;
-      const dateMatch = !dateFilter || (task.startDate && isSameDay(task.startDate, dateFilter));
-      const searchMatch = !searchQuery || 
-                         task.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         task.itemDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         task.stageName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         task.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         (task.internalOS && task.internalOS.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      return statusMatch && resourceMatch && priorityMatch && dateMatch && searchMatch;
+        return {
+          ...item,
+          productionPlan: updatedProductionPlan
+        };
+      }
+      return item;
     });
-  }, [tasks, statusFilter, resourceFilter, priorityFilter, dateFilter, searchQuery]);
-
-  // ============================================================================
-  // RENDERIZAÇÃO - LOADING E SKELETON
-  // ============================================================================
-
-  // IMPORTANTE: Verificar estado de autenticação primeiro
-  if (authLoading) {
-    return (
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between">
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-10 w-32" />
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
+    
+    await updateDoc(orderRef, {
+      items: updatedItems,
+      lastUpdate: Timestamp.now()
+    });
+    
+    toast({
+      title: "Tarefa atualizada!",
+      description: "As alterações foram salvas com sucesso.",
+    });
+    
+    return true;
+    
+  } catch (error) {
+    console.error("Error updating task:", error);
+    toast({
+      variant: "destructive",
+      title: "Erro ao atualizar tarefa",
+      description: "Não foi possível salvar as alterações.",
+    });
+    return false;
   }
+};
 
-  // Se não há usuário após o carregamento, não renderizar nada (deixar o layout lidar com redirecionamento)
-  if (!user) {
-    return null;
+const exportTasksToPDF = async (
+  tasks: Task[],
+  companyData: CompanyData,
+  teamMembers: TeamMember[],
+  resources: Resource[],
+  filters: {
+    statusFilter: string;
+    resourceFilter: string;
+    priorityFilter: string;
+    dateFilter?: Date;
   }
+) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.width;
+  let yPos = 15;
 
-  // Loading dos dados
-  if (isLoading) {
-    return (
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between">
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-10 w-32" />
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // HANDLERS PARA OS MODAIS
-  // ============================================================================
-
-  const handleViewTask = (task: Task) => {
-    setSelectedTask(task);
-    // Abrir modal de visualização (opcional)
-  };
-
-  const handleAssignTask = (task: Task) => {
-    setSelectedTask(task);
-    setIsAssignDialogOpen(true);
-  };
-
-  const handleUpdateTask = (task: Task) => {
-    setSelectedTask(task);
-    setIsUpdateDialogOpen(true);
-  };
-
-  const handleClearFilters = () => {
-    setStatusFilter('all');
-    setResourceFilter('all');
-    setPriorityFilter('all');
-    setDateFilter(undefined);
-    setSearchQuery('');
-  };
-
-  // Handler para atribuição de tarefa
-  const handleTaskAssignment = async (assignment: any) => {
-    if (!selectedTask) return;
-
-    const selectedResource = resources.find(r => r.id === assignment.assignedResourceId);
-    const selectedMember = teamMembers.find(m => m.id === assignment.responsibleMemberId);
-    
-    const updateData = {
-      assignedResourceId: assignment.assignedResourceId,
-      assignedResourceName: selectedResource?.name,
-      responsibleMemberId: assignment.responsibleMemberId,
-      responsibleMemberName: selectedMember?.name,
-      priority: assignment.priority,
-      notes: assignment.notes,
-      status: "Em Andamento",
-      ...(assignment.scheduledStartDate && { 
-        startDate: assignment.scheduledStartDate,
-        actualStartDate: assignment.scheduledStartDate 
-      })
-    };
-    
-    const success = await updateTaskInFirebase(selectedTask, updateData, toast);
-    
-    if (success) {
-      // Recarregar tarefas
-      await fetchOrdersAndGenerateTasks();
-    }
-  };
-
-  // Handler para atualização de status
-  const handleTaskUpdate = async (update: any) => {
-    if (!selectedTask) return;
-
-    const updateData: any = {
-      status: update.status,
-      notes: update.notes,
-      ...(update.actualStartDate && { actualStartDate: update.actualStartDate }),
-      ...(update.actualEndDate && { actualEndDate: update.actualEndDate }),
-    };
-    
-    if (update.status === "Concluído") {
-      updateData.completedDate = update.actualEndDate || new Date();
-    }
-    
-    if (update.status === "Reprogramada" && update.newScheduledDate) {
-      updateData.startDate = update.newScheduledDate;
-      updateData.status = "Pendente"; // Volta para pendente após reprogramação
-    }
-    
-    const success = await updateTaskInFirebase(selectedTask, updateData, toast);
-    
-    if (success) {
-      // Recarregar tarefas
-      await fetchOrdersAndGenerateTasks();
-    }
-  };
-
-  // Handler para exportação PDF
-  const handleExportTasks = async () => {
+  // Cabeçalho da empresa
+  if (companyData.logo?.preview) {
     try {
-      const fileName = await exportTasksToPDF(
-        filteredTasks,
-        companyData,
-        teamMembers,
-        resources,
-        {
-          statusFilter,
-          resourceFilter,
-          priorityFilter,
-          dateFilter
-        }
-      );
-
-      toast({
-        title: "Relatório exportado!",
-        description: `O arquivo ${fileName} foi baixado com sucesso.`,
-      });
-    } catch (error) {
-      console.error("Error exporting tasks:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro na exportação",
-        description: "Não foi possível gerar o relatório em PDF.",
-      });
+      doc.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+    } catch (e) {
+      console.warn("Não foi possível adicionar o logo ao PDF:", e);
     }
-  };
+  }
 
-  // ============================================================================
-  // RENDERIZAÇÃO PRINCIPAL
-  // ============================================================================
+  let textX = 65;
+  let textY = yPos;
+  doc.setFontSize(18).setFont('helvetica', 'bold');
+  doc.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY);
+  textY += 6;
+  
+  doc.setFontSize(9).setFont('helvetica', 'normal');
+  if (companyData.endereco) {
+    const addressLines = doc.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+    doc.text(addressLines, textX, textY);
+    textY += (addressLines.length * 4);
+  }
+  if (companyData.cnpj) {
+    doc.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+    textY += 4;
+  }
+  if (companyData.email) {
+    doc.text(`Email: ${companyData.email}`, textX, textY);
+    textY += 4;
+  }
+  if (companyData.celular) {
+    doc.text(`Telefone: ${companyData.celular}`, textX, textY);
+  }
 
-  return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      {/* Cabeçalho */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight font-headline">
-            Gestão de Tarefas
-          </h1>
-          <p className="text-muted-foreground">
-            Monitore e gerencie todas as tarefas de produção da empresa
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button 
-            onClick={handleExportTasks}
-            variant="outline"
-            disabled={filteredTasks.length === 0}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Exportar PDF
-          </Button>
-        </div>
-      </div>
+  yPos = 55;
 
-      {/* Estatísticas */}
-      <TaskStatistics tasks={filteredTasks} />
+  // Título do relatório
+  doc.setFontSize(16).setFont('helvetica', 'bold');
+  doc.text('RELATÓRIO DE TAREFAS DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+  yPos += 15;
 
-      {/* Filtros */}
-      <TaskFilters
-        statusFilter={statusFilter}
-        setStatusFilter={setStatusFilter}
-        resourceFilter={resourceFilter}
-        setResourceFilter={setResourceFilter}
-        priorityFilter={priorityFilter}
-        setPriorityFilter={setPriorityFilter}
-        dateFilter={dateFilter}
-        setDateFilter={setDateFilter}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        resources={resources}
-        onClearFilters={handleClearFilters}
-      />
+  // Informações do relatório
+  doc.setFontSize(10).setFont('helvetica', 'normal');
+  doc.text(`Data de Geração: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, 15, yPos);
+  doc.text(`Total de Tarefas: ${tasks.length}`, pageWidth - 15, yPos, { align: 'right' });
+  yPos += 7;
 
-      {/* Tabela de tarefas */}
-      <TaskTable
-        tasks={filteredTasks}
-        resources={resources}
-        teamMembers={teamMembers}
-        onViewTask={handleViewTask}
-        onAssignTask={handleAssignTask}
-        onUpdateTask={handleUpdateTask}
-      />
+  // Filtros aplicados
+  if (filters.statusFilter !== 'all' || filters.resourceFilter !== 'all' || filters.priorityFilter !== 'all' || filters.dateFilter) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Filtros Aplicados:', 15, yPos);
+    yPos += 5;
+    doc.setFont('helvetica', 'normal');
+    
+    if (filters.statusFilter !== 'all') {
+      doc.text(`• Status: ${filters.statusFilter}`, 15, yPos);
+      yPos += 4;
+    }
+    if (filters.resourceFilter !== 'all') {
+      const resourceName = resources.find(r => r.id === filters.resourceFilter)?.name || filters.resourceFilter;
+      doc.text(`• Recurso: ${resourceName}`, 15, yPos);
+      yPos += 4;
+    }
+    if (filters.priorityFilter !== 'all') {
+      doc.text(`• Prioridade: ${filters.priorityFilter}`, 15, yPos);
+      yPos += 4;
+    }
+    if (filters.dateFilter) {
+      doc.text(`• Data: ${format(filters.dateFilter, "dd/MM/yyyy")}`, 15, yPos);
+      yPos += 4;
+    }
+    yPos += 5;
+  }
 
-      {/* Modal de Atribuição */}
-      <TaskAssignmentModal
-        isOpen={isAssignDialogOpen}
-        onClose={() => setIsAssignDialogOpen(false)}
-        task={selectedTask}
-        resources={resources}
-        teamMembers={teamMembers}
-        onAssign={handleTaskAssignment}
-      />
+  // Tabela de tarefas
+  const tableBody = tasks.map(task => {
+    const resource = resources.find(r => r.id === task.assignedResourceId);
+    const member = teamMembers.find(m => m.id === task.responsibleMemberId);
+    
+    return [
+      task.orderNumber,
+      task.internalOS || 'N/A',
+      task.itemDescription.length > 30 ? task.itemDescription.substring(0, 30) + '...' : task.itemDescription,
+      task.stageName,
+      task.status,
+      task.priority,
+      task.startDate ? format(task.startDate, 'dd/MM/yy') : 'N/A',
+      formatDuration(task.durationDays),
+      resource?.name || 'Não atribuído',
+      member?.name || 'Não atribuído'
+    ];
+  });
 
-      {/* Modal de Atualização */}
-      <TaskUpdateModal
-        isOpen={isUpdateDialogOpen}
-        onClose={() => setIsUpdateDialogOpen(false)}
-        task={selectedTask}
-        onUpdate={handleTaskUpdate}
-      />
-    </div>
-  );
-}
+  autoTable(doc, {
+    startY: yPos,
+    head: [['Pedido', 'OS', 'Item', 'Etapa', 'Status', 'Prioridade', 'Início', 'Duração', 'Recurso', 'Responsável']],
+    body: tableBody,
+    styles: { fontSize: 7, cellPadding: 2 },
+    headStyles: { fillColor: [37, 99, 235], fontSize: 8, textColor: 255 },
+    columnStyles: {
+      0: { cellWidth: 18 }, // Pedido
+      1: { cellWidth: 15 }, // OS
+      2: { cellWidth: 35 }, // Item
+      3: { cellWidth: 25 }, // Etapa
+      4: { cellWidth: 20 }, // Status
+      5: { cellWidth: 18 }, // Prioridade
+      6: { cellWidth: 15 }, // Início
+      7: { cellWidth: 15 }, // Duração
+      8: { cellWidth: 25 }, // Recurso
+      9: { cellWidth: 25 }, // Responsável
+    },
+    didParseCell: (data) => {
+      // Colorir células baseado no status
+      if (data.column.index === 4 && data.section === 'body') {
+        const status = data.cell.raw as string;
+        switch (status) {
+          case 'Pendente':
+            data.cell.styles.fillColor = [254, 249, 195];
+            data.cell.styles.textColor = [146, 64, 14];
+            break;
+          case 'Em Andamento':
+            data.cell.styles.fillColor = [219, 234, 254];
+            data.cell.styles.textColor = [30, 64, 175];
+            break;
+          case 'Concluído':
+            data.cell.styles.fillColor = [220, 252, 231];
+            data.cell.styles.textColor = [21, 128, 61];
+            break;
+          case 'Reprogramada':
+            data.cell.styles.fillColor = [255, 237, 213];
+            data.cell.styles.textColor = [154, 52, 18];
+            break;
+        }
+      }
+      
+      // Colorir células baseado na prioridade
+      if (data.column.index === 5 && data.section === 'body') {
+        const priority = data.cell.raw as string;
+        switch (priority) {
+          case 'Urgente':
+            data.cell.styles.fillColor = [254, 226, 226];
+            data.cell.styles.textColor = [185, 28, 28];
+            break;
+          case 'Alta':
+            data.cell.styles.fillColor = [255, 237, 213];
+            data.cell.styles.textColor = [154, 52, 18];
+            break;
+          case 'Normal':
+            data.cell.styles.fillColor = [219, 234, 254];
+            data.cell.styles.textColor = [30, 64, 175];
+            break;
+          case 'Baixa':
+            data.cell.styles.fillColor = [243, 244, 246];
+            data.cell.styles.textColor = [55, 65, 81];
+            break;
+        }
+      }
+    }
+  });
+
+  // Estatísticas no rodapé
+  const finalY = (doc as any).lastAutoTable.finalY + 15;
+  const pageHeight = doc.internal.pageSize.height;
+  
+  if (finalY + 40 < pageHeight - 20) {
+    doc.setFontSize(10).setFont('helvetica', 'bold');
+    doc.text('ESTATÍSTICAS:', 15, finalY);
+    
+    const stats = {
+      pendentes: tasks.filter(t => t.status === 'Pendente').length,
+      emAndamento: tasks.filter(t => t.status === 'Em Andamento').length,
+      concluidas: tasks.filter(t => t.status === 'Concluído').length,
+      reprogramadas: tasks.filter(t => t.status === 'Reprogramada').length,
+      atrasadas: tasks.filter(t => isTaskOverdue(t)).length,
+      urgentes: tasks.filter(t => t.priority === 'Urgente').length
+    };
+    
+    doc.setFontSize(9).setFont('helvetica', 'normal');
+    let statsY = finalY + 7;
+    doc.text(`Pendentes: ${stats.pendentes}`, 15, statsY);
+    doc.text(`Em Andamento: ${stats.emAndamento}`, 70, statsY);
+    doc.text(`Concluídas: ${stats.concluidas}`, 140, statsY);
+    statsY += 5;
+    doc.text(`Reprogramadas: ${stats.reprogramadas}`, 15, statsY);
+    doc.text(`Atrasadas: ${stats.atrasadas}`, 70, statsY);
+    doc.text(`Urgentes: ${stats.urgentes}`, 140, statsY);
+  }
+
+  // Salvar o PDF
+  const fileName = `Tarefas_Producao_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
+  doc.save(fileName);
+  
+  return fileName;
+};
+
 // ============================================================================
-// COMPONENTES DA INTERFACE - PARTE 2
-// Adicione estes componentes ao arquivo tasks/page.tsx
+// COMPONENTES DA INTERFACE
 // ============================================================================
-
-import React from 'react';
 
 // Componente de Estatísticas
-export const TaskStatistics = React.memo(({ tasks }: { tasks: Task[] }) => {
+const TaskStatistics = React.memo(({ tasks }: { tasks: Task[] }) => {
   const stats = useMemo(() => {
     return {
       total: tasks.length,
@@ -829,7 +655,7 @@ export const TaskStatistics = React.memo(({ tasks }: { tasks: Task[] }) => {
 TaskStatistics.displayName = 'TaskStatistics';
 
 // Componente de Filtros
-export const TaskFilters = React.memo(({
+const TaskFilters = React.memo(({
   statusFilter,
   setStatusFilter,
   resourceFilter,
@@ -856,7 +682,7 @@ export const TaskFilters = React.memo(({
   resources: Resource[];
   onClearFilters: () => void;
 }) => {
-    const hasActiveFilters = statusFilter !== 'all' || resourceFilter !== 'all' || priorityFilter !== 'all' || dateFilter || searchQuery;
+  const hasActiveFilters = statusFilter !== 'all' || resourceFilter !== 'all' || priorityFilter !== 'all' || dateFilter || searchQuery;
 
   return (
     <Card>
@@ -982,12 +808,8 @@ export const TaskFilters = React.memo(({
 
 TaskFilters.displayName = 'TaskFilters';
 
-// ============================================================================
-// COMPONENTE DE TABELA DE TAREFAS - PARTE 3
-// Adicione este componente ao arquivo tasks/page.tsx
-// ============================================================================
-
-export const TaskTable = React.memo(({
+// Componente de Tabela
+const TaskTable = React.memo(({
   tasks,
   resources,
   teamMembers,
@@ -1214,316 +1036,11 @@ export const TaskTable = React.memo(({
 TaskTable.displayName = 'TaskTable';
 
 // ============================================================================
-// FUNÇÕES DE ATUALIZAÇÃO NO FIREBASE
+// MODAIS
 // ============================================================================
-
-export const updateTaskInFirebase = async (
-  task: Task,
-  updateData: any,
-  toast: any
-) => {
-  try {
-    // Buscar o pedido
-    const orderRef = doc(db, "companies", "mecald", "orders", task.orderId);
-    const orderSnap = await getDoc(orderRef);
-    
-    if (!orderSnap.exists()) {
-      throw new Error("Pedido não encontrado");
-    }
-    
-    const orderData = orderSnap.data();
-    const updatedItems = orderData.items.map((item: any) => {
-      if (item.id === task.itemId) {
-        const updatedProductionPlan = item.productionPlan?.map((stage: any, index: number) => {
-          if (stage.stageName === task.stageName) {
-            return {
-              ...stage,
-              ...updateData,
-              // Converter datas para Timestamp se necessário
-              ...(updateData.startDate && { startDate: Timestamp.fromDate(updateData.startDate) }),
-              ...(updateData.completedDate && { completedDate: Timestamp.fromDate(updateData.completedDate) }),
-              ...(updateData.actualStartDate && { actualStartDate: Timestamp.fromDate(updateData.actualStartDate) }),
-              ...(updateData.actualEndDate && { actualEndDate: Timestamp.fromDate(updateData.actualEndDate) }),
-            };
-          }
-          return stage;
-        });
-        
-        return {
-          ...item,
-          productionPlan: updatedProductionPlan
-        };
-      }
-      return item;
-    });
-    
-    await updateDoc(orderRef, {
-      items: updatedItems,
-      lastUpdate: Timestamp.now()
-    });
-    
-    toast({
-      title: "Tarefa atualizada!",
-      description: "As alterações foram salvas com sucesso.",
-    });
-    
-    return true;
-    
-  } catch (error) {
-    console.error("Error updating task:", error);
-    toast({
-      variant: "destructive",
-      title: "Erro ao atualizar tarefa",
-      description: "Não foi possível salvar as alterações.",
-    });
-    return false;
-  }
-};
-// ============================================================================
-// FUNÇÃO DE EXPORTAÇÃO PDF - PARTE 4
-// Adicione esta função ao arquivo tasks/page.tsx
-// ============================================================================
-
-export const exportTasksToPDF = async (
-  tasks: Task[],
-  companyData: CompanyData,
-  teamMembers: TeamMember[],
-  resources: Resource[],
-  filters: {
-    statusFilter: string;
-    resourceFilter: string;
-    priorityFilter: string;
-    dateFilter?: Date;
-  }
-) => {
-  const doc = new jsPDF();
-  const pageWidth = doc.internal.pageSize.width;
-  let yPos = 15;
-
-  // Cabeçalho da empresa
-  if (companyData.logo?.preview) {
-    try {
-      doc.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
-    } catch (e) {
-      console.error("Error adding logo to PDF:", e);
-    }
-  }
-
-  let textX = 65;
-  let textY = yPos;
-  doc.setFontSize(18).setFont('helvetica', 'bold');
-  doc.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY);
-  textY += 6;
-  
-  doc.setFontSize(9).setFont('helvetica', 'normal');
-  if (companyData.endereco) {
-    const addressLines = doc.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
-    doc.text(addressLines, textX, textY);
-    textY += (addressLines.length * 4);
-  }
-  if (companyData.cnpj) {
-    doc.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
-    textY += 4;
-  }
-  if (companyData.email) {
-    doc.text(`Email: ${companyData.email}`, textX, textY);
-    textY += 4;
-  }
-  if (companyData.celular) {
-    doc.text(`Telefone: ${companyData.celular}`, textX, textY);
-  }
-
-  yPos = 55;
-
-  // Título do relatório
-  doc.setFontSize(16).setFont('helvetica', 'bold');
-  doc.text('RELATÓRIO DE TAREFAS DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
-  yPos += 15;
-
-  // Informações do relatório
-  doc.setFontSize(10).setFont('helvetica', 'normal');
-  doc.text(`Data de Geração: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, 15, yPos);
-  doc.text(`Total de Tarefas: ${tasks.length}`, pageWidth - 15, yPos, { align: 'right' });
-  yPos += 7;
-
-  // Filtros aplicados
-  if (filters.statusFilter !== 'all' || filters.resourceFilter !== 'all' || filters.priorityFilter !== 'all' || filters.dateFilter) {
-    doc.setFont('helvetica', 'bold');
-    doc.text('Filtros Aplicados:', 15, yPos);
-    yPos += 5;
-    doc.setFont('helvetica', 'normal');
-    
-    if (filters.statusFilter !== 'all') {
-      doc.text(`• Status: ${filters.statusFilter}`, 15, yPos);
-      yPos += 4;
-    }
-    if (filters.resourceFilter !== 'all') {
-      const resourceName = resources.find(r => r.id === filters.resourceFilter)?.name || filters.resourceFilter;
-      doc.text(`• Recurso: ${resourceName}`, 15, yPos);
-      yPos += 4;
-    }
-    if (filters.priorityFilter !== 'all') {
-      doc.text(`• Prioridade: ${filters.priorityFilter}`, 15, yPos);
-      yPos += 4;
-    }
-    if (filters.dateFilter) {
-      doc.text(`• Data: ${format(filters.dateFilter, "dd/MM/yyyy")}`, 15, yPos);
-      yPos += 4;
-    }
-    yPos += 5;
-  }
-
-  // Tabela de tarefas
-  const tableBody = tasks.map(task => {
-    const resource = resources.find(r => r.id === task.assignedResourceId);
-    const member = teamMembers.find(m => m.id === task.responsibleMemberId);
-    
-    return [
-      task.orderNumber,
-      task.internalOS || 'N/A',
-      task.itemDescription.length > 30 ? task.itemDescription.substring(0, 30) + '...' : task.itemDescription,
-      task.stageName,
-      task.status,
-      task.priority,
-      task.startDate ? format(task.startDate, 'dd/MM/yy') : 'N/A',
-      formatDuration(task.durationDays),
-      resource?.name || 'Não atribuído',
-      member?.name || 'Não atribuído'
-    ];
-  });
-
-  autoTable(doc, {
-    startY: yPos,
-    head: [['Pedido', 'OS', 'Item', 'Etapa', 'Status', 'Prioridade', 'Início', 'Duração', 'Recurso', 'Responsável']],
-    body: tableBody,
-    styles: { fontSize: 7, cellPadding: 2 },
-    headStyles: { fillColor: [37, 99, 235], fontSize: 8, textColor: 255 },
-    columnStyles: {
-      0: { cellWidth: 18 }, // Pedido
-      1: { cellWidth: 15 }, // OS
-      2: { cellWidth: 35 }, // Item
-      3: { cellWidth: 25 }, // Etapa
-      4: { cellWidth: 20 }, // Status
-      5: { cellWidth: 18 }, // Prioridade
-      6: { cellWidth: 15 }, // Início
-      7: { cellWidth: 15 }, // Duração
-      8: { cellWidth: 25 }, // Recurso
-      9: { cellWidth: 25 }, // Responsável
-    },
-    didParseCell: (data) => {
-      // Colorir células baseado no status
-      if (data.column.index === 4 && data.section === 'body') {
-        const status = data.cell.raw as string;
-        switch (status) {
-          case 'Pendente':
-            data.cell.styles.fillColor = [254, 249, 195];
-            data.cell.styles.textColor = [146, 64, 14];
-            break;
-          case 'Em Andamento':
-            data.cell.styles.fillColor = [219, 234, 254];
-            data.cell.styles.textColor = [30, 64, 175];
-            break;
-          case 'Concluído':
-            data.cell.styles.fillColor = [220, 252, 231];
-            data.cell.styles.textColor = [21, 128, 61];
-            break;
-          case 'Reprogramada':
-            data.cell.styles.fillColor = [255, 237, 213];
-            data.cell.styles.textColor = [154, 52, 18];
-            break;
-        }
-      }
-      
-      // Colorir células baseado na prioridade
-      if (data.column.index === 5 && data.section === 'body') {
-        const priority = data.cell.raw as string;
-        switch (priority) {
-          case 'Urgente':
-            data.cell.styles.fillColor = [254, 226, 226];
-            data.cell.styles.textColor = [185, 28, 28];
-            break;
-          case 'Alta':
-            data.cell.styles.fillColor = [255, 237, 213];
-            data.cell.styles.textColor = [154, 52, 18];
-            break;
-          case 'Normal':
-            data.cell.styles.fillColor = [219, 234, 254];
-            data.cell.styles.textColor = [30, 64, 175];
-            break;
-          case 'Baixa':
-            data.cell.styles.fillColor = [243, 244, 246];
-            data.cell.styles.textColor = [55, 65, 81];
-            break;
-        }
-      }
-    }
-  });
-
-  // Estatísticas no rodapé
-  const finalY = (doc as any).lastAutoTable.finalY + 15;
-  const pageHeight = doc.internal.pageSize.height;
-  
-  if (finalY + 40 < pageHeight - 20) {
-    doc.setFontSize(10).setFont('helvetica', 'bold');
-    doc.text('ESTATÍSTICAS:', 15, finalY);
-    
-    const stats = {
-      pendentes: tasks.filter(t => t.status === 'Pendente').length,
-      emAndamento: tasks.filter(t => t.status === 'Em Andamento').length,
-      concluidas: tasks.filter(t => t.status === 'Concluído').length,
-      reprogramadas: tasks.filter(t => t.status === 'Reprogramada').length,
-      atrasadas: tasks.filter(t => isTaskOverdue(t)).length,
-      urgentes: tasks.filter(t => t.priority === 'Urgente').length
-    };
-    
-    doc.setFontSize(9).setFont('helvetica', 'normal');
-    let statsY = finalY + 7;
-    doc.text(`Pendentes: ${stats.pendentes}`, 15, statsY);
-    doc.text(`Em Andamento: ${stats.emAndamento}`, 70, statsY);
-    doc.text(`Concluídas: ${stats.concluidas}`, 140, statsY);
-    statsY += 5;
-    doc.text(`Reprogramadas: ${stats.reprogramadas}`, 15, statsY);
-    doc.text(`Atrasadas: ${stats.atrasadas}`, 70, statsY);
-    doc.text(`Urgentes: ${stats.urgentes}`, 140, statsY);
-  }
-
-  // Salvar o PDF
-  const fileName = `Tarefas_Producao_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
-  doc.save(fileName);
-  
-  return fileName;
-};
-// ============================================================================
-// MODAIS DE ATRIBUIÇÃO E ATUALIZAÇÃO - PARTE 5
-// Adicione estes componentes ao arquivo tasks/page.tsx
-// ============================================================================
-
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-
-// Schemas de validação
-const taskAssignmentSchema = z.object({
-  assignedResourceId: z.string().min(1, "Selecione um recurso"),
-  responsibleMemberId: z.string().min(1, "Selecione um responsável"),
-  priority: z.enum(["Baixa", "Normal", "Alta", "Urgente"]),
-  notes: z.string().optional(),
-  scheduledStartDate: z.date().optional(),
-});
-
-const taskUpdateSchema = z.object({
-  status: z.enum(["Pendente", "Em Andamento", "Concluído", "Reprogramada"]),
-  actualStartDate: z.date().optional(),
-  actualEndDate: z.date().optional(),
-  newScheduledDate: z.date().optional(),
-  notes: z.string().optional(),
-});
-
-type TaskAssignment = z.infer<typeof taskAssignmentSchema>;
-type TaskUpdate = z.infer<typeof taskUpdateSchema>;
 
 // Modal para atribuir tarefa a recurso
-export const TaskAssignmentModal = ({
+const TaskAssignmentModal = ({
   isOpen,
   onClose,
   task,
@@ -1548,12 +1065,30 @@ export const TaskAssignmentModal = ({
     }
   });
 
+  // Reset form when task changes
+  useEffect(() => {
+    if (task) {
+      assignmentForm.reset({
+        assignedResourceId: task.assignedResourceId || "",
+        responsibleMemberId: task.responsibleMemberId || "",
+        priority: task.priority || "Normal",
+        notes: task.notes || "",
+        scheduledStartDate: task.startDate || undefined,
+      });
+    }
+  }, [task, assignmentForm]);
+
   const availableResources = resources.filter(r => 
     r.status === 'disponivel' || r.status === 'ocupado'
   );
 
   const handleSubmit = (data: TaskAssignment) => {
     onAssign(data);
+    assignmentForm.reset();
+    onClose();
+  };
+
+  const handleClose = () => {
     assignmentForm.reset();
     onClose();
   };
@@ -1738,7 +1273,7 @@ export const TaskAssignmentModal = ({
             />
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button type="button" variant="outline" onClick={handleClose}>
                 Cancelar
               </Button>
               <Button type="submit">
@@ -1755,7 +1290,7 @@ export const TaskAssignmentModal = ({
 TaskAssignmentModal.displayName = 'TaskAssignmentModal';
 
 // Modal para atualizar status da tarefa
-export const TaskUpdateModal = ({
+const TaskUpdateModal = ({
   isOpen,
   onClose,
   task,
@@ -1774,8 +1309,26 @@ export const TaskUpdateModal = ({
     }
   });
 
+  // Reset form when task changes
+  useEffect(() => {
+    if (task) {
+      updateForm.reset({
+        status: task.status || "Pendente",
+        notes: task.notes || "",
+        actualStartDate: task.actualStartDate || undefined,
+        actualEndDate: task.actualEndDate || undefined,
+        newScheduledDate: undefined,
+      });
+    }
+  }, [task, updateForm]);
+
   const handleSubmit = (data: TaskUpdate) => {
     onUpdate(data);
+    updateForm.reset();
+    onClose();
+  };
+
+  const handleClose = () => {
     updateForm.reset();
     onClose();
   };
@@ -1986,7 +1539,7 @@ export const TaskUpdateModal = ({
             />
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button type="button" variant="outline" onClick={handleClose}>
                 Cancelar
               </Button>
               <Button type="submit">
@@ -2003,197 +1556,473 @@ export const TaskUpdateModal = ({
 TaskUpdateModal.displayName = 'TaskUpdateModal';
 
 // ============================================================================
-// INTEGRAÇÃO FINAL NO COMPONENTE PRINCIPAL
-// Este código mostra como integrar todas as partes no componente TasksPage
+// COMPONENTE PRINCIPAL
 // ============================================================================
 
-// Adicione estas funções handlers no componente TasksPage:
-
-// Handlers para os modais
-const handleViewTask = (task: Task) => {
-  setSelectedTask(task);
-  // Abrir modal de visualização (opcional)
-};
-
-const handleAssignTask = (task: Task) => {
-  setSelectedTask(task);
-  setIsAssignDialogOpen(true);
-};
-
-const handleUpdateTask = (task: Task) => {
-  setSelectedTask(task);
-  setIsUpdateDialogOpen(true);
-};
-
-const handleClearFilters = () => {
-  setStatusFilter('all');
-  setResourceFilter('all');
-  setPriorityFilter('all');
-  setDateFilter(undefined);
-  setSearchQuery('');
-};
-
-// Handler para atribuição de tarefa
-const handleTaskAssignment = async (assignment: TaskAssignment) => {
-  if (!selectedTask) return;
-
-  const selectedResource = resources.find(r => r.id === assignment.assignedResourceId);
-  const selectedMember = teamMembers.find(m => m.id === assignment.responsibleMemberId);
+export default function TasksPage() {
+  // Estados principais
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [companyData, setCompanyData] = useState<CompanyData>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   
-  const updateData = {
-    assignedResourceId: assignment.assignedResourceId,
-    assignedResourceName: selectedResource?.name,
-    responsibleMemberId: assignment.responsibleMemberId,
-    responsibleMemberName: selectedMember?.name,
-    priority: assignment.priority,
-    notes: assignment.notes,
-    status: "Em Andamento",
-    ...(assignment.scheduledStartDate && { 
-      startDate: assignment.scheduledStartDate,
-      actualStartDate: assignment.scheduledStartDate 
-    })
-  };
+  // Estados de filtros
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [resourceFilter, setResourceFilter] = useState<string>("all");
+  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+  const [searchQuery, setSearchQuery] = useState("");
   
-  const success = await updateTaskInFirebase(selectedTask, updateData, toast);
-  
-  if (success) {
-    // Recarregar tarefas
-    await fetchOrdersAndGenerateTasks();
-  }
-};
+  const { user, loading: authLoading } = useAuth();
+  const { toast } = useToast();
 
-// Handler para atualização de status
-const handleTaskUpdate = async (update: TaskUpdate) => {
-  if (!selectedTask) return;
+  // ============================================================================
+  // FUNÇÕES DE BUSCA DE DADOS
+  // ============================================================================
 
-  const updateData: any = {
-    status: update.status,
-    notes: update.notes,
-    ...(update.actualStartDate && { actualStartDate: update.actualStartDate }),
-    ...(update.actualEndDate && { actualEndDate: update.actualEndDate }),
-  };
-  
-  if (update.status === "Concluído") {
-    updateData.completedDate = update.actualEndDate || new Date();
-  }
-  
-  if (update.status === "Reprogramada" && update.newScheduledDate) {
-    updateData.startDate = update.newScheduledDate;
-    updateData.status = "Pendente"; // Volta para pendente após reprogramação
-  }
-  
-  const success = await updateTaskInFirebase(selectedTask, updateData, toast);
-  
-  if (success) {
-    // Recarregar tarefas
-    await fetchOrdersAndGenerateTasks();
-  }
-};
-
-// Handler para exportação PDF
-const handleExportTasks = async () => {
-  try {
-    const fileName = await exportTasksToPDF(
-      filteredTasks,
-      companyData,
-      teamMembers,
-      resources,
-      {
-        statusFilter,
-        resourceFilter,
-        priorityFilter,
-        dateFilter
+  const fetchCompanyData = async () => {
+    if (!user) return;
+    
+    try {
+      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      const docSnap = await getDoc(companyRef);
+      
+      if (docSnap.exists()) {
+        setCompanyData(docSnap.data() as CompanyData);
       }
+    } catch (error) {
+      console.error("Error fetching company data:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar dados da empresa",
+        description: "Não foi possível carregar as informações da empresa.",
+      });
+    }
+  };
+
+  const fetchTeamMembers = async () => {
+    if (!user) return;
+    
+    try {
+      const teamRef = doc(db, "companies", "mecald", "settings", "team");
+      const docSnap = await getDoc(teamRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setTeamMembers(data.members || []);
+      }
+    } catch (error) {
+      console.error("Error fetching team members:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar equipe",
+        description: "Não foi possível carregar os membros da equipe.",
+      });
+    }
+  };
+
+  const fetchResources = async () => {
+    if (!user) return;
+    
+    try {
+      const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
+      const docSnap = await getDoc(resourcesRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setResources(data.resources || []);
+      }
+    } catch (error) {
+      console.error("Error fetching resources:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar recursos",
+        description: "Não foi possível carregar os recursos produtivos.",
+      });
+    }
+  };
+
+  const fetchOrdersAndGenerateTasks = async () => {
+    if (!user) return;
+    
+    try {
+      const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+      const allTasks: Task[] = [];
+      
+      ordersSnapshot.forEach(orderDoc => {
+        const orderData = orderDoc.data();
+        const orderId = orderDoc.id;
+        
+        // Converter dados do pedido
+        const order: Order = {
+          id: orderId,
+          quotationNumber: orderData.quotationNumber || 'N/A',
+          internalOS: orderData.internalOS,
+          projectName: orderData.projectName,
+          customer: orderData.customer || { id: '', name: 'Cliente não informado' },
+          status: orderData.status || 'Pendente',
+          deliveryDate: safeToDate(orderData.deliveryDate),
+          items: orderData.items || []
+        };
+        
+        // Processar itens do pedido para extrair tarefas
+        order.items.forEach((item: any) => {
+          if (item.productionPlan && Array.isArray(item.productionPlan)) {
+            item.productionPlan.forEach((stage: any, stageIndex: number) => {
+              // Apenas incluir tarefas que não estão concluídas
+              if (stage.status !== "Concluído") {
+                const task: Task = {
+                  id: `${orderId}-${item.id}-${stageIndex}`,
+                  orderId: orderId,
+                  orderNumber: order.quotationNumber,
+                  internalOS: order.internalOS,
+                  projectName: order.projectName,
+                  customerName: order.customer.name,
+                  itemId: item.id,
+                  itemDescription: item.description,
+                  itemCode: item.code,
+                  itemNumber: item.itemNumber,
+                  stageName: stage.stageName,
+                  status: stage.status || "Pendente",
+                  startDate: safeToDate(stage.startDate),
+                  completedDate: safeToDate(stage.completedDate),
+                  durationDays: stage.durationDays || 1,
+                  useBusinessDays: stage.useBusinessDays !== false,
+                  priority: "Normal", // Será calculado dinamicamente
+                  assignedResourceId: stage.assignedResourceId,
+                  assignedResourceName: stage.assignedResourceName,
+                  responsibleMemberId: stage.responsibleMemberId,
+                  responsibleMemberName: stage.responsibleMemberName,
+                  actualStartDate: safeToDate(stage.actualStartDate),
+                  actualEndDate: safeToDate(stage.actualEndDate),
+                  notes: stage.notes
+                };
+                
+                // Calcular prioridade baseada na data
+                task.priority = calculateTaskPriority(task);
+                
+                allTasks.push(task);
+              }
+            });
+          }
+        });
+      });
+      
+      // Ordenar tarefas por prioridade e data
+      allTasks.sort((a, b) => {
+        const priorityOrder = { "Urgente": 4, "Alta": 3, "Normal": 2, "Baixa": 1 };
+        const aPriority = priorityOrder[a.priority];
+        const bPriority = priorityOrder[b.priority];
+        
+        if (aPriority !== bPriority) {
+          return bPriority - aPriority;
+        }
+        
+        if (a.startDate && b.startDate) {
+          return a.startDate.getTime() - b.startDate.getTime();
+        }
+        
+        if (a.startDate && !b.startDate) return -1;
+        if (!a.startDate && b.startDate) return 1;
+        
+        return 0;
+      });
+      
+      setTasks(allTasks);
+      
+    } catch (error) {
+      console.error("Error fetching orders and generating tasks:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar tarefas",
+        description: "Não foi possível carregar as tarefas dos pedidos.",
+      });
+    }
+  };
+
+  // ============================================================================
+  // EFEITO PRINCIPAL
+  // ============================================================================
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      const loadData = async () => {
+        setIsLoading(true);
+        
+        try {
+          await Promise.all([
+            fetchCompanyData(),
+            fetchTeamMembers(),
+            fetchResources(),
+            fetchOrdersAndGenerateTasks()
+          ]);
+        } catch (error) {
+          console.error("Error loading data:", error);
+          toast({
+            variant: "destructive",
+            title: "Erro ao carregar dados",
+            description: "Ocorreu um erro ao carregar os dados do sistema.",
+          });
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      
+      loadData();
+    }
+  }, [user, authLoading]);
+
+  // ============================================================================
+  // FILTROS E PROCESSAMENTO
+  // ============================================================================
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(task => {
+      const statusMatch = statusFilter === 'all' || task.status === statusFilter;
+      const resourceMatch = resourceFilter === 'all' || 
+                           (resourceFilter === 'unassigned' && !task.assignedResourceId) ||
+                           task.assignedResourceId === resourceFilter;
+      const priorityMatch = priorityFilter === 'all' || task.priority === priorityFilter;
+      const dateMatch = !dateFilter || (task.startDate && isSameDay(task.startDate, dateFilter));
+      const searchMatch = !searchQuery || 
+                         task.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         task.itemDescription.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         task.stageName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         task.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         (task.internalOS && task.internalOS.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      return statusMatch && resourceMatch && priorityMatch && dateMatch && searchMatch;
+    });
+  }, [tasks, statusFilter, resourceFilter, priorityFilter, dateFilter, searchQuery]);
+
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
+
+  const handleViewTask = useCallback((task: Task) => {
+    setSelectedTask(task);
+  }, []);
+
+  const handleAssignTask = useCallback((task: Task) => {
+    setSelectedTask(task);
+    setIsAssignDialogOpen(true);
+  }, []);
+
+  const handleUpdateTask = useCallback((task: Task) => {
+    setSelectedTask(task);
+    setIsUpdateDialogOpen(true);
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setStatusFilter('all');
+    setResourceFilter('all');
+    setPriorityFilter('all');
+    setDateFilter(undefined);
+    setSearchQuery('');
+  }, []);
+
+  const handleTaskAssignment = useCallback(async (assignment: TaskAssignment) => {
+    if (!selectedTask) return;
+
+    const selectedResource = resources.find(r => r.id === assignment.assignedResourceId);
+    const selectedMember = teamMembers.find(m => m.id === assignment.responsibleMemberId);
+    
+    const updateData = {
+      assignedResourceId: assignment.assignedResourceId,
+      assignedResourceName: selectedResource?.name,
+      responsibleMemberId: assignment.responsibleMemberId,
+      responsibleMemberName: selectedMember?.name,
+      priority: assignment.priority,
+      notes: assignment.notes,
+      status: "Em Andamento",
+      ...(assignment.scheduledStartDate && { 
+        startDate: assignment.scheduledStartDate,
+        actualStartDate: assignment.scheduledStartDate 
+      })
+    };
+    
+    const success = await updateTaskInFirebase(selectedTask, updateData, toast);
+    
+    if (success) {
+      await fetchOrdersAndGenerateTasks();
+    }
+  }, [selectedTask, resources, teamMembers, toast]);
+
+  const handleTaskUpdate = useCallback(async (update: TaskUpdate) => {
+    if (!selectedTask) return;
+
+    const updateData: any = {
+      status: update.status,
+      notes: update.notes,
+      ...(update.actualStartDate && { actualStartDate: update.actualStartDate }),
+      ...(update.actualEndDate && { actualEndDate: update.actualEndDate }),
+    };
+    
+    if (update.status === "Concluído") {
+      updateData.completedDate = update.actualEndDate || new Date();
+    }
+    
+    if (update.status === "Reprogramada" && update.newScheduledDate) {
+      updateData.startDate = update.newScheduledDate;
+      updateData.status = "Pendente";
+    }
+    
+    const success = await updateTaskInFirebase(selectedTask, updateData, toast);
+    
+    if (success) {
+      await fetchOrdersAndGenerateTasks();
+    }
+  }, [selectedTask, toast]);
+
+  const handleExportTasks = useCallback(async () => {
+    try {
+      const fileName = await exportTasksToPDF(
+        filteredTasks,
+        companyData,
+        teamMembers,
+        resources,
+        {
+          statusFilter,
+          resourceFilter,
+          priorityFilter,
+          dateFilter
+        }
+      );
+
+      toast({
+        title: "Relatório exportado!",
+        description: `O arquivo ${fileName} foi baixado com sucesso.`,
+      });
+    } catch (error) {
+      console.error("Error exporting tasks:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro na exportação",
+        description: "Não foi possível gerar o relatório em PDF.",
+      });
+    }
+  }, [filteredTasks, companyData, teamMembers, resources, statusFilter, resourceFilter, priorityFilter, dateFilter, toast]);
+
+  // ============================================================================
+  // RENDERIZAÇÃO
+  // ============================================================================
+
+  // Loading de autenticação
+  if (authLoading) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
+      </div>
     );
-
-    toast({
-      title: "Relatório exportado!",
-      description: `O arquivo ${fileName} foi baixado com sucesso.`,
-    });
-  } catch (error) {
-    console.error("Error exporting tasks:", error);
-    toast({
-      variant: "destructive",
-      title: "Erro na exportação",
-      description: "Não foi possível gerar o relatório em PDF.",
-    });
   }
-};
 
-// ============================================================================
-// RENDERIZAÇÃO COMPLETA DO COMPONENTE
-// Substitua o return temporário pelo código abaixo:
-// ============================================================================
+  // Sem usuário
+  if (!user) {
+    return null;
+  }
 
-return (
-  <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-    {/* Cabeçalho */}
-    <div className="flex items-center justify-between">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight font-headline">
-          Gestão de Tarefas
-        </h1>
-        <p className="text-muted-foreground">
-          Monitore e gerencie todas as tarefas de produção da empresa
-        </p>
+  // Loading dos dados
+  if (isLoading) {
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+        <Skeleton className="h-96" />
       </div>
-      <div className="flex items-center gap-2">
-        <Button 
-          onClick={handleExportTasks}
-          variant="outline"
-          disabled={filteredTasks.length === 0}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Exportar PDF
-        </Button>
+    );
+  }
+
+  // Renderização principal
+  return (
+    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+      {/* Cabeçalho */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Gestão de Tarefas
+          </h1>
+          <p className="text-muted-foreground">
+            Monitore e gerencie todas as tarefas de produção da empresa
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleExportTasks}
+            variant="outline"
+            disabled={filteredTasks.length === 0}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Exportar PDF
+          </Button>
+        </div>
       </div>
+
+      {/* Estatísticas */}
+      <TaskStatistics tasks={filteredTasks} />
+
+      {/* Filtros */}
+      <TaskFilters
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        resourceFilter={resourceFilter}
+        setResourceFilter={setResourceFilter}
+        priorityFilter={priorityFilter}
+        setPriorityFilter={setPriorityFilter}
+        dateFilter={dateFilter}
+        setDateFilter={setDateFilter}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        resources={resources}
+        onClearFilters={handleClearFilters}
+      />
+
+      {/* Tabela de tarefas */}
+      <TaskTable
+        tasks={filteredTasks}
+        resources={resources}
+        teamMembers={teamMembers}
+        onViewTask={handleViewTask}
+        onAssignTask={handleAssignTask}
+        onUpdateTask={handleUpdateTask}
+      />
+
+      {/* Modal de Atribuição */}
+      <TaskAssignmentModal
+        isOpen={isAssignDialogOpen}
+        onClose={() => setIsAssignDialogOpen(false)}
+        task={selectedTask}
+        resources={resources}
+        teamMembers={teamMembers}
+        onAssign={handleTaskAssignment}
+      />
+
+      {/* Modal de Atualização */}
+      <TaskUpdateModal
+        isOpen={isUpdateDialogOpen}
+        onClose={() => setIsUpdateDialogOpen(false)}
+        task={selectedTask}
+        onUpdate={handleTaskUpdate}
+      />
     </div>
-
-    {/* Estatísticas */}
-    <TaskStatistics tasks={filteredTasks} />
-
-    {/* Filtros */}
-    <TaskFilters
-      statusFilter={statusFilter}
-      setStatusFilter={setStatusFilter}
-      resourceFilter={resourceFilter}
-      setResourceFilter={setResourceFilter}
-      priorityFilter={priorityFilter}
-      setPriorityFilter={setPriorityFilter}
-      dateFilter={dateFilter}
-      setDateFilter={setDateFilter}
-      searchQuery={searchQuery}
-      setSearchQuery={setSearchQuery}
-      resources={resources}
-      onClearFilters={handleClearFilters}
-    />
-
-    {/* Tabela de tarefas */}
-    <TaskTable
-      tasks={filteredTasks}
-      resources={resources}
-      teamMembers={teamMembers}
-      onViewTask={handleViewTask}
-      onAssignTask={handleAssignTask}
-      onUpdateTask={handleUpdateTask}
-    />
-
-    {/* Modal de Atribuição */}
-    <TaskAssignmentModal
-      isOpen={isAssignDialogOpen}
-      onClose={() => setIsAssignDialogOpen(false)}
-      task={selectedTask}
-      resources={resources}
-      teamMembers={teamMembers}
-      onAssign={handleTaskAssignment}
-    />
-
-    {/* Modal de Atualização */}
-    <TaskUpdateModal
-      isOpen={isUpdateDialogOpen}
-      onClose={() => setIsUpdateDialogOpen(false)}
-      task={selectedTask}
-      onUpdate={handleTaskUpdate}
-    />
-  </div>
-);
+  );
+}
