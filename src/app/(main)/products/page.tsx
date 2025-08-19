@@ -9,7 +9,6 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import Image from "next/image";
 import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText, RefreshCw } from "lucide-react";
-import ProductListGenerator from './ProductListGenerator';
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
