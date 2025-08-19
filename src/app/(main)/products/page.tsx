@@ -8,7 +8,7 @@ import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebas
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import Image from "next/image";
-import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText, RefreshCw } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -91,10 +91,6 @@ export default function CompanyPage() {
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [resourceToDelete, setResourceToDelete] = useState<Resource | null>(null);
 
-  // Estados do catálogo de produtos
-  const [products, setProducts] = useState([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-
   // Forms
   const companyForm = useForm<z.infer<typeof companySchema>>({
     resolver: zodResolver(companySchema),
@@ -139,21 +135,6 @@ export default function CompanyPage() {
         absenceReason: "",
     }
   });
-
-  // Função para buscar dados da empresa para PDF
-  const fetchCompanyDataForPDF = async () => {
-    try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      if (docSnap.exists()) {
-        return docSnap.data();
-      }
-      return null;
-    } catch (error) {
-      console.error("Error fetching company data for PDF:", error);
-      return null;
-    }
-  };
 
   // Funções de busca de dados
   const fetchCompanyData = async () => {
@@ -230,72 +211,12 @@ export default function CompanyPage() {
     }
   };
 
-  // Funções do catálogo de produtos
-  const syncCatalog = async () => {
-    setIsSyncing(true);
-    try {
-      // Simular sincronização - você pode implementar a lógica real aqui
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      toast({
-        title: "Catálogo sincronizado!",
-        description: "Os produtos foram atualizados com sucesso.",
-      });
-    } catch (error) {
-      console.error("Error syncing catalog:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro na sincronização",
-        description: "Ocorreu um erro ao sincronizar o catálogo.",
-      });
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleAddClick = () => {
-    toast({
-      title: "Funcionalidade em desenvolvimento",
-      description: "A funcionalidade de adicionar produtos será implementada em breve.",
-    });
-  };
-
   // useEffect
   useEffect(() => {
     if (!authLoading && user) {
       fetchCompanyData();
       fetchTeamData();
       fetchResourcesData();
-      
-      // Dados de exemplo para o catálogo
-      setProducts([
-        {
-          id: '1',
-          name: 'Produto A',
-          code: 'PROD001',
-          price: 150.00,
-          stock: 25,
-          minStock: 10,
-          leadTime: 5
-        },
-        {
-          id: '2',
-          name: 'Produto B',
-          code: 'PROD002',
-          price: 89.90,
-          stock: 5,
-          minStock: 15,
-          leadTime: 20
-        },
-        {
-          id: '3',
-          name: 'Produto C',
-          code: 'PROD003',
-          price: 299.99,
-          stock: 0,
-          minStock: 5,
-          leadTime: 45
-        }
-      ]);
     }
   }, [user, authLoading]);
 
@@ -980,7 +901,6 @@ export default function CompanyPage() {
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
             <TabsTrigger value="team">Equipe</TabsTrigger>
             <TabsTrigger value="resources">Recursos Produtivos</TabsTrigger>
-            <TabsTrigger value="catalog">Catálogo</TabsTrigger>
           </TabsList>
 
           {/* ABA EMPRESA */}
@@ -1437,64 +1357,6 @@ export default function CompanyPage() {
                         )}
                       </TableBody>
                     </Table>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* ABA CATÁLOGO */}
-          <TabsContent value="catalog">
-            <div className="space-y-6">
-              {/* Header com botões */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Catálogo de Produtos</CardTitle>
-                  <CardDescription>
-                    Gerencie seu catálogo de produtos e gere relatórios personalizados com análise inteligente.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <Button onClick={syncCatalog} variant="outline" disabled={isSyncing}>
-                      <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                      {isSyncing ? "Sincronizando..." : "Sincronizar Catálogo"}
-                    </Button>
-                    <ProductListGenerator products={products} />
-                    <Button onClick={handleAddClick}>
-                      <PlusCircle className="mr-2 h-4 w-4" />
-                      Adicionar Produto
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Lista de produtos */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Produtos do Catálogo</CardTitle>
-                  <CardDescription>
-                    Visualize e gerencie todos os produtos do seu catálogo.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {products.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {products.map((product) => (
-                        <div key={product.id} className="p-4 border rounded-lg">
-                          <h3 className="font-medium">{product.name}</h3>
-                          <p className="text-sm text-gray-500">Código: {product.code}</p>
-                          <p className="text-sm">Preço: R$ {product.price?.toFixed(2) || '0.00'}</p>
-                          <p className="text-sm">Estoque: {product.stock || 0}</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <FileText className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                      <p>Nenhum produto no catálogo</p>
-                      <p className="text-sm">Use o botão "Adicionar Produto" para começar</p>
-                    </div>
                   )}
                 </CardContent>
               </Card>
