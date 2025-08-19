@@ -1,1662 +1,1896 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical } from "lucide-react";
 import { useAuth } from "../layout";
-import Image from "next/image";
-import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
-// Schemas
-const companySchema = z.object({
-  nomeFantasia: z.string().min(3, "O nome fantasia é obrigatório."),
-  cnpj: z.string().min(14, "O CNPJ deve ser válido."),
-  inscricaoEstadual: z.string().optional(),
-  email: z.string().email("O e-mail é inválido."),
-  celular: z.string().min(10, "O celular deve ser válido."),
-  endereco: z.string().min(10, "O endereço é obrigatório."),
-  website: z.string().url("O site deve ser uma URL válida.").optional(),
+const planStageSchema = z.object({
+  stageName: z.string(),
+  durationDays: z.coerce.number().min(0).optional(),
 });
 
-const teamMemberSchema = z.object({
-    id: z.string(),
-    name: z.string().min(3, { message: "O nome é obrigatório." }),
-    position: z.string().min(2, { message: "O cargo é obrigatório." }),
-    email: z.string().email({ message: "O e-mail é inválido." }),
-    phone: z.string().min(10, { message: "O telefone deve ser válido." }),
-    permission: z.enum(["admin", "user"], { required_error: "Selecione uma permissão." }),
-    updatedAt: z.any().optional(),
+const productSchema = z.object({
+  code: z.string().min(1, { message: "O código do produto é obrigatório." }),
+  description: z.string().min(3, { message: "A descrição é obrigatória." }),
+  unitPrice: z.coerce.number().min(0, { message: "O preço unitário deve ser um número positivo." }),
+  unitWeight: z.coerce.number().min(0).optional(),
+  productionPlanTemplate: z.array(planStageSchema).optional(),
 });
 
-const resourceSchema = z.object({
-    id: z.string(),
-    name: z.string().min(3, { message: "O nome do recurso é obrigatório." }),
-    type: z.enum(["maquina", "equipamento", "veiculo", "ferramenta", "espaco", "mao_de_obra"], { required_error: "Selecione um tipo." }),
-    description: z.string().optional(),
-    capacity: z.number().min(1, { message: "A capacidade deve ser maior que 0." }),
-    status: z.enum(["disponivel", "ocupado", "manutencao", "inativo", "ausente", "ferias"], { required_error: "Selecione um status." }),
-    location: z.string().optional(),
-    serialNumber: z.string().optional(),
-    acquisitionDate: z.string().optional(),
-    maintenanceDate: z.string().optional(),
-    absenceStartDate: z.string().optional(),
-    absenceEndDate: z.string().optional(),
-    absenceReason: z.string().optional(),
-    updatedAt: z.any().optional(),
-});
+type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
 
-// Types
-type CompanyData = z.infer<typeof companySchema> & { logo?: { preview?: string } };
-type TeamMember = z.infer<typeof teamMemberSchema>;
-type Resource = z.infer<typeof resourceSchema>;
+// Função para calcular o lead time total de um produto
+const calculateLeadTime = (product: Product): number => {
+  if (!product.productionPlanTemplate || product.productionPlanTemplate.length === 0) {
+    return 0;
+  }
+  
+  const totalDays = product.productionPlanTemplate.reduce((total, stage) => {
+    return total + (stage.durationDays || 0);
+  }, 0);
+  
+  return Math.round(totalDays); // Arredonda para número inteiro
+};
 
-export default function CompanyPage() {
-  // Estados gerais
+// Função para obter badge de lead time com cor baseada na duração
+const getLeadTimeBadge = (leadTime: number) => {
+  if (leadTime === 0) {
+    return { variant: "outline" as const, text: "Não definido", color: "text-muted-foreground" };
+  } else if (leadTime <= 7) {
+    return { variant: "default" as const, text: `${leadTime} dias`, color: "bg-green-600 hover:bg-green-700" };
+  } else if (leadTime <= 21) {
+    return { variant: "secondary" as const, text: `${leadTime} dias`, color: "bg-yellow-600 hover:bg-yellow-700" };
+  } else {
+    return { variant: "destructive" as const, text: `${leadTime} dias`, color: "bg-red-600 hover:bg-red-700" };
+  }
+};
+
+// Função para exportar relatório em PDF usando canvas e jsPDF
+const exportCalculatorReportPDF = (
+  calculatorItems: Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productDescription: string;
+    quantity: number;
+    leadTime: number;
+    stages: Array<{ stageName: string; durationDays: number }>;
+  }>,
+  calculatorResults: {
+    isViable: boolean;
+    suggestedDate: Date;
+    analysis: Array<{
+      stageName: string;
+      originalDuration: number;
+      adjustedDuration: number;
+      workload: number;
+      bottleneck: boolean;
+    }>;
+    totalAdjustedLeadTime: number;
+    confidence: number;
+  } | null,
+  requestedDeliveryDate: Date
+) => {
+  if (calculatorItems.length === 0) {
+    return;
+  }
+
+  // Criar um elemento canvas para gerar o PDF
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // Configurações do PDF
+  const pageWidth = 595; // A4 width em pontos
+  const pageHeight = 842; // A4 height em pontos
+  const margin = 40;
+  const lineHeight = 20;
+  
+  canvas.width = pageWidth;
+  canvas.height = pageHeight;
+  
+  // Configurar fonte
+  ctx.fillStyle = '#000000';
+  ctx.font = '12px Arial';
+  
+  let currentY = margin;
+  
+  // Função auxiliar para adicionar texto
+  const addText = (text: string, x: number = margin, fontSize: number = 12, isBold: boolean = false) => {
+    ctx.font = `${isBold ? 'bold ' : ''}${fontSize}px Arial`;
+    ctx.fillText(text, x, currentY);
+    currentY += lineHeight * (fontSize / 12);
+  };
+  
+  // Função auxiliar para quebrar linha
+  const addLine = () => {
+    currentY += lineHeight / 2;
+  };
+
+  // Cabeçalho
+  addText('MECALD - RELATÓRIO DE ANÁLISE DE PRAZOS', margin, 16, true);
+  addText(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, margin, 10);
+  addLine();
+  
+  // Linha horizontal
+  ctx.beginPath();
+  ctx.moveTo(margin, currentY);
+  ctx.lineTo(pageWidth - margin, currentY);
+  ctx.stroke();
+  currentY += lineHeight;
+  
+  // Dados da solicitação
+  addText('DADOS DA SOLICITAÇÃO', margin, 14, true);
+  addText(`Data de entrega solicitada: ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}`);
+  addText(`Quantidade de itens: ${calculatorItems.length}`);
+  addLine();
+  
+  // Lista de produtos
+  addText('PRODUTOS ANALISADOS', margin, 14, true);
+  calculatorItems.forEach((item, index) => {
+    addText(`${index + 1}. ${item.productCode} - ${item.productDescription}`);
+    addText(`   Quantidade: ${item.quantity} | Lead time base: ${item.leadTime} dias`, margin + 20, 10);
+    if (item.stages.length > 0) {
+      addText('   Etapas:', margin + 20, 10);
+      item.stages.forEach(stage => {
+        addText(`     • ${stage.stageName}: ${stage.durationDays || 0} dias`, margin + 40, 9);
+      });
+    }
+  });
+  addLine();
+  
+  // Resultados da análise
+  if (calculatorResults) {
+    addText('RESULTADO DA ANÁLISE', margin, 14, true);
+    addText(`Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}`, margin, 12, true);
+    addText(`Confiança: ${calculatorResults.confidence}%`);
+    addText(`Data sugerida: ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`);
+    addText(`Lead time ajustado: ${calculatorResults.totalAdjustedLeadTime} dias`);
+    addLine();
+    
+    addText('ANÁLISE POR SETOR', margin, 14, true);
+    calculatorResults.analysis.forEach(analysis => {
+      addText(`• ${analysis.stageName}${analysis.bottleneck ? ' (GARGALO)' : ''}`, margin, 11, true);
+      addText(`  Tempo original: ${analysis.originalDuration} dias`, margin + 20, 10);
+      addText(`  Tempo ajustado: ${analysis.adjustedDuration} dias`, margin + 20, 10);
+      addText(`  Carga atual: ${Math.round(analysis.workload * 100)}%`, margin + 20, 10);
+    });
+    addLine();
+    
+    // Recomendações
+    addText('RECOMENDAÇÕES', margin, 14, true);
+    if (!calculatorResults.isViable) {
+      addText('• Prazo inviável para a data solicitada', margin, 11);
+      addText(`• Considere reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`, margin, 11);
+    }
+    if (calculatorResults.confidence < 70) {
+      addText('• Baixa confiança devido à alta carga dos setores', margin, 11);
+      addText('• Monitore de perto a execução', margin, 11);
+    }
+    if (calculatorResults.analysis.some(a => a.bottleneck)) {
+      addText('• Gargalos identificados - considere realocação de recursos', margin, 11);
+    }
+  }
+  
+  // Converter canvas para blob e fazer download
+  canvas.toBlob((blob) => {
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `relatorio-prazos-mecald-${format(new Date(), "yyyyMMdd-HHmm")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+  }, 'application/pdf');
+};
+
+export default function ProductsPage() {
+  const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const { user, loading: authLoading } = useAuth();
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
+  
+  const [manufacturingStages, setManufacturingStages] = useState<string[]>([]);
+  const [isLoadingStages, setIsLoadingStages] = useState(true);
+  const [newStageName, setNewStageName] = useState("");
+  const [activeTab, setActiveTab] = useState("catalog");
+
+  // Estados da calculadora de prazos
+  const [calculatorItems, setCalculatorItems] = useState<Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productDescription: string;
+    quantity: number;
+    leadTime: number;
+    stages: Array<{ stageName: string; durationDays: number }>;
+  }>>([]);
+  const [selectedProductForCalculator, setSelectedProductForCalculator] = useState<string>("");
+  const [calculatorQuantity, setCalculatorQuantity] = useState<number>(1);
+  const [requestedDeliveryDate, setRequestedDeliveryDate] = useState<Date>(
+    new Date(new Date().setDate(new Date().getDate() + 30))
+  );
+  const [calculatorResults, setCalculatorResults] = useState<{
+    isViable: boolean;
+    suggestedDate: Date;
+    analysis: Array<{
+      stageName: string;
+      originalDuration: number;
+      adjustedDuration: number;
+      workload: number;
+      bottleneck: boolean;
+    }>;
+    totalAdjustedLeadTime: number;
+    confidence: number;
+  } | null>(null);
+  
+  // Simulação de carga de trabalho por setor (em uma implementação real, isso viria do banco de dados)
+  const [sectorWorkload, setSectorWorkload] = useState<Record<string, number>>({});
+
+  // Função para simular carga de trabalho dos setores
+  const simulateSectorWorkload = useCallback(() => {
+    const workload: Record<string, number> = {};
+    manufacturingStages.forEach(stage => {
+      // Simula uma carga entre 0% e 95% para cada setor
+      workload[stage] = Math.random() * 0.95;
+    });
+    setSectorWorkload(workload);
+  }, [manufacturingStages]);
+
+  // Gera carga de trabalho inicial
+  useEffect(() => {
+    if (manufacturingStages.length > 0) {
+      simulateSectorWorkload();
+    }
+  }, [manufacturingStages, simulateSectorWorkload]);
+
+  const [isCopyPopoverOpen, setIsCopyPopoverOpen] = useState(false);
+  const [copyFromSearch, setCopyFromSearch] = useState("");
+
+  const [isEditStageDialogOpen, setIsEditStageDialogOpen] = useState(false);
+  const [stageToEdit, setStageToEdit] = useState<{ oldName: string; index: number } | null>(null);
+  const [newStageNameForEdit, setNewStageNameForEdit] = useState("");
+  
+  const [isDeleteStageDialogOpen, setIsDeleteStageDialogOpen] = useState(false);
+  const [stageToDeleteConfirmation, setStageToDeleteConfirmation] = useState<string | null>(null);
+
+  // Estados para drag and drop
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null);
+
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
 
-  // Estados da equipe
-  const [isTeamLoading, setIsTeamLoading] = useState(true);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [isTeamFormOpen, setIsTeamFormOpen] = useState(false);
-  const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
-  const [memberToDelete, setMemberToDelete] = useState<TeamMember | null>(null);
-
-  // Estados dos recursos
-  const [isResourcesLoading, setIsResourcesLoading] = useState(true);
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [isResourceFormOpen, setIsResourceFormOpen] = useState(false);
-  const [isResourceDeleteAlertOpen, setIsResourceDeleteAlertOpen] = useState(false);
-  const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
-  const [resourceToDelete, setResourceToDelete] = useState<Resource | null>(null);
-
-  // Forms
-  const companyForm = useForm<z.infer<typeof companySchema>>({
-    resolver: zodResolver(companySchema),
+  const form = useForm<z.infer<typeof productSchema>>({
+    resolver: zodResolver(productSchema),
     defaultValues: {
-      nomeFantasia: "",
-      cnpj: "",
-      inscricaoEstadual: "",
-      email: "",
-      celular: "",
-      endereco: "",
-      website: "",
+      code: "",
+      description: "",
+      unitPrice: 0,
+      unitWeight: 0,
+      productionPlanTemplate: [],
     },
   });
 
-  const teamForm = useForm<TeamMember>({
-    resolver: zodResolver(teamMemberSchema),
-    defaultValues: {
-        id: "",
-        name: "",
-        position: "",
-        email: "",
-        phone: "",
-        permission: "user",
-    }
-  });
+  const stagesDocRef = useMemo(() => doc(db, "companies", "mecald", "settings", "manufacturingStages"), []);
 
-  const resourceForm = useForm<Resource>({
-    resolver: zodResolver(resourceSchema),
-    defaultValues: {
-        id: "",
-        name: "",
-        type: "maquina",
-        description: "",
-        capacity: 1,
-        status: "disponivel",
-        location: "",
-        serialNumber: "",
-        acquisitionDate: "",
-        maintenanceDate: "",
-        absenceStartDate: "",
-        absenceEndDate: "",
-        absenceReason: "",
-    }
-  });
-
-  // Funções de busca de dados
-  const fetchCompanyData = async () => {
-    if (!user) return;
-    setIsLoading(true);
+  const fetchStages = useCallback(async () => {
+    setIsLoadingStages(true);
     try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-
-      if (docSnap.exists()) {
-        const data = docSnap.data() as CompanyData;
-        companyForm.reset(data);
-        if (data.logo?.preview) {
-          setLogoPreview(data.logo.preview);
-        }
-      } else {
-        toast({
-          variant: "destructive",
-          title: "Documento não encontrado",
-          description: "Não foi possível encontrar os dados da empresa no Firestore.",
-        });
-      }
-    } catch (error) {
-      console.error("Error fetching company data:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao buscar dados",
-        description: "Ocorreu um erro ao carregar as informações da empresa.",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const fetchTeamData = async () => {
-    if (!user) return;
-    setIsTeamLoading(true);
-    try {
-        const teamRef = doc(db, "companies", "mecald", "settings", "team");
-        const docSnap = await getDoc(teamRef);
-        if (docSnap.exists()) {
-            setTeamMembers(docSnap.data().members || []);
+        const docSnap = await getDoc(stagesDocRef);
+        if (docSnap.exists() && Array.isArray(docSnap.data().stages)) {
+            setManufacturingStages(docSnap.data().stages);
+        } else {
+            setManufacturingStages([]);
         }
     } catch (error) {
-        console.error("Error fetching team data:", error);
-        toast({
-            variant: "destructive",
-            title: "Erro ao buscar equipe",
-            description: "Ocorreu um erro ao carregar os membros da equipe.",
-        });
+        console.error("Error fetching manufacturing stages:", error);
+        toast({ variant: "destructive", title: "Erro ao buscar etapas" });
+        setManufacturingStages([]);
     } finally {
-        setIsTeamLoading(false);
+        setIsLoadingStages(false);
     }
-  };
+  }, [stagesDocRef, toast]);
 
-  const fetchResourcesData = async () => {
-    if (!user) return;
-    setIsResourcesLoading(true);
-    try {
-        const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-        const docSnap = await getDoc(resourcesRef);
-        if (docSnap.exists()) {
-            setResources(docSnap.data().resources || []);
-        }
-    } catch (error) {
-        console.error("Error fetching resources data:", error);
+  const handleAddStage = useCallback(async () => {
+    const stageToAdd = newStageName.trim();
+    if (!stageToAdd) {
         toast({
             variant: "destructive",
-            title: "Erro ao buscar recursos",
-            description: "Ocorreu um erro ao carregar os recursos produtivos.",
-        });
-    } finally {
-        setIsResourcesLoading(false);
-    }
-  };
-
-  // useEffect
-  useEffect(() => {
-    if (!authLoading && user) {
-      fetchCompanyData();
-      fetchTeamData();
-      fetchResourcesData();
-    }
-  }, [user, authLoading]);
-
-  // Funções auxiliares
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    const variants = {
-      disponivel: "bg-green-100 text-green-800 hover:bg-green-100",
-      ocupado: "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
-      manutencao: "bg-red-100 text-red-800 hover:bg-red-100",
-      inativo: "bg-gray-100 text-gray-800 hover:bg-gray-100",
-      ausente: "bg-orange-100 text-orange-800 hover:bg-orange-100",
-      ferias: "bg-blue-100 text-blue-800 hover:bg-blue-100"
-    };
-    
-    const labels = {
-      disponivel: "Disponível",
-      ocupado: "Ocupado",
-      manutencao: "Manutenção",
-      inativo: "Inativo",
-      ausente: "Ausente",
-      ferias: "Férias"
-    };
-
-    const icons = {
-      disponivel: <CheckCircle className="h-3 w-3 mr-1" />,
-      ocupado: <Activity className="h-3 w-3 mr-1" />,
-      manutencao: <Settings className="h-3 w-3 mr-1" />,
-      inativo: <AlertCircle className="h-3 w-3 mr-1" />,
-      ausente: <UserX className="h-3 w-3 mr-1" />,
-      ferias: <Calendar className="h-3 w-3 mr-1" />
-    };
-
-    return (
-      <Badge className={variants[status as keyof typeof variants]}>
-        {icons[status as keyof typeof icons]}
-        {labels[status as keyof typeof labels]}
-      </Badge>
-    );
-  };
-
-  const getResourceStats = () => {
-    const total = resources.length;
-    const available = resources.filter(r => r.status === 'disponivel').length;
-    const occupied = resources.filter(r => r.status === 'ocupado').length;
-    const maintenance = resources.filter(r => r.status === 'manutencao').length;
-    const inactive = resources.filter(r => r.status === 'inativo').length;
-    const absent = resources.filter(r => r.status === 'ausente').length;
-    const vacation = resources.filter(r => r.status === 'ferias').length;
-    
-    // Recursos efetivamente disponíveis (não incluindo ausentes e férias no cálculo de ociosidade)
-    const activeResources = resources.filter(r => !['ausente', 'ferias', 'inativo'].includes(r.status)).length;
-    const idleRate = activeResources > 0 ? (available / activeResources) * 100 : 0;
-    
-    return { total, available, occupied, maintenance, inactive, absent, vacation, activeResources, idleRate };
-  };
-
-  // Função para exportar recursos com tarefas diárias
-  const exportResourcesWithTasks = () => {
-    // Criar cabeçalho da planilha
-    const headers = [
-      'Nome do Recurso',
-      'Tipo',
-      'Status',
-      'Capacidade',
-      'Localização',
-      'Número de Série',
-      'Tarefa Diária Planejada',
-      'Horário de Início',
-      'Horário de Término',
-      'Responsável',
-      'Observações'
-    ];
-
-    // Converter dados dos recursos
-    const csvData = resources.map(resource => [
-      resource.name,
-      resource.type === 'mao_de_obra' ? 'Mão de Obra' : 
-      resource.type.charAt(0).toUpperCase() + resource.type.slice(1),
-      resource.status === 'disponivel' ? 'Disponível' :
-      resource.status === 'ocupado' ? 'Ocupado' :
-      resource.status === 'manutencao' ? 'Manutenção' :
-      resource.status === 'ausente' ? 'Ausente' :
-      resource.status === 'ferias' ? 'Férias' :
-      resource.status === 'inativo' ? 'Inativo' : resource.status,
-      resource.capacity,
-      resource.location || '',
-      resource.serialNumber || '',
-      '', // Campo vazio para tarefa diária
-      '', // Campo vazio para horário início
-      '', // Campo vazio para horário término
-      '', // Campo vazio para responsável
-      ''  // Campo vazio para observações
-    ]);
-
-    // Combinar cabeçalho com dados
-    const allData = [headers, ...csvData];
-
-    // Converter para CSV
-    const csvContent = allData.map(row => 
-      row.map(cell => `"${cell}"`).join(',')
-    ).join('\n');
-
-    // Criar e fazer download do arquivo
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    
-    // Nome do arquivo com data atual
-    const today = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
-    link.setAttribute('download', `recursos-tarefas-diarias-${today}.csv`);
-    
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    toast({
-      title: "Exportação realizada!",
-      description: "Lista de recursos com campos para tarefas diárias foi baixada.",
-    });
-  };
-
-  // Função para exportar recursos em PDF com cabeçalho da empresa
-  const exportResourcesToPDF = async () => {
-    // Buscar dados da empresa
-    let companyData = null;
-    try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      if (docSnap.exists()) {
-        companyData = docSnap.data();
-      }
-    } catch (error) {
-      console.error("Error fetching company data for PDF:", error);
-    }
-
-    // Criar conteúdo HTML para o PDF
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Lista de Recursos Produtivos - Tarefas Diárias</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            font-size: 12px;
-            color: #333;
-          }
-          
-          .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #e5e7eb;
-          }
-          
-          .company-info {
-            flex: 1;
-          }
-          
-          .company-name {
-            font-size: 24px;
-            font-weight: bold;
-            color: #1f2937;
-            margin-bottom: 5px;
-          }
-          
-          .company-details {
-            font-size: 11px;
-            color: #6b7280;
-            line-height: 1.4;
-          }
-          
-          .logo-section {
-            width: 80px;
-            height: 80px;
-            background: #f3f4f6;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            color: #9ca3af;
-          }
-          
-          .report-title {
-            text-align: center;
-            margin: 30px 0;
-          }
-          
-          .report-title h1 {
-            font-size: 20px;
-            font-weight: bold;
-            color: #1f2937;
-            margin: 0 0 5px 0;
-          }
-          
-          .report-date {
-            font-size: 11px;
-            color: #6b7280;
-          }
-          
-          .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 15px;
-            margin: 20px 0;
-          }
-          
-          .stat-card {
-            background: #f9fafb;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            border-left: 4px solid #e5e7eb;
-          }
-          
-          .stat-card.available { border-left-color: #10b981; }
-          .stat-card.occupied { border-left-color: #f59e0b; }
-          .stat-card.maintenance { border-left-color: #ef4444; }
-          .stat-card.absent { border-left-color: #f97316; }
-          .stat-card.idle { border-left-color: #3b82f6; }
-          
-          .stat-number {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 5px;
-          }
-          
-          .stat-label {
-            font-size: 10px;
-            color: #6b7280;
-            text-transform: uppercase;
-          }
-          
-          .table-container {
-            margin-top: 20px;
-          }
-          
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-          }
-          
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: left;
-            font-size: 10px;
-          }
-          
-          th {
-            background-color: #f9fafb;
-            font-weight: bold;
-            color: #374151;
-          }
-          
-          .task-column {
-            width: 150px;
-            background-color: #fef9e7;
-          }
-          
-          .time-column {
-            width: 80px;
-            background-color: #fef9e7;
-          }
-          
-          .responsible-column {
-            width: 100px;
-            background-color: #fef9e7;
-          }
-          
-          .observations-column {
-            width: 120px;
-            background-color: #fef9e7;
-          }
-          
-          .status-badge {
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 9px;
-            font-weight: bold;
-          }
-          
-          .status-disponivel { background-color: #d1fae5; color: #065f46; }
-          .status-ocupado { background-color: #fef3c7; color: #92400e; }
-          .status-manutencao { background-color: #fee2e2; color: #991b1b; }
-          .status-ausente { background-color: #fed7aa; color: #9a3412; }
-          .status-ferias { background-color: #dbeafe; color: #1e40af; }
-          .status-inativo { background-color: #f3f4f6; color: #374151; }
-          
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            font-size: 10px;
-            color: #9ca3af;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 20px;
-          }
-          
-          .instructions {
-            background-color: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-          }
-          
-          .instructions h3 {
-            margin: 0 0 10px 0;
-            font-size: 12px;
-            color: #1e40af;
-          }
-          
-          .instructions ul {
-            margin: 0;
-            padding-left: 20px;
-            font-size: 10px;
-            color: #1e40af;
-          }
-          
-          .instructions li {
-            margin-bottom: 5px;
-          }
-          
-          @media print {
-            body { margin: 0; }
-            .header { margin-bottom: 20px; }
-          }
-        </style>
-      </head>
-      <body>
-        <!-- Cabeçalho da Empresa -->
-        <div class="header">
-          <div class="company-info">
-            <div class="company-name">${companyData?.nomeFantasia || 'Nome da Empresa'}</div>
-            <div class="company-details">
-              ${companyData?.cnpj ? `CNPJ: ${companyData.cnpj}<br>` : ''}
-              ${companyData?.inscricaoEstadual ? `I.E.: ${companyData.inscricaoEstadual}<br>` : ''}
-              ${companyData?.email ? `E-mail: ${companyData.email}<br>` : ''}
-              ${companyData?.celular ? `Telefone: ${companyData.celular}<br>` : ''}
-              ${companyData?.endereco ? `${companyData.endereco}` : ''}
-            </div>
-          </div>
-          <div class="logo-section">
-            ${companyData?.logo?.preview ? 
-              `<img src="${companyData.logo.preview}" alt="Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">` : 
-              'LOGO'
-            }
-          </div>
-        </div>
-        
-        <!-- Título do Relatório -->
-        <div class="report-title">
-          <h1>Lista de Recursos Produtivos - Tarefas Diárias</h1>
-          <div class="report-date">Gerado em: ${new Date().toLocaleDateString('pt-BR', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          })}</div>
-        </div>
-        
-        <!-- Dashboard de Estatísticas -->
-        <div class="stats-grid">
-          <div class="stat-card available">
-            <div class="stat-number" style="color: #10b981;">${stats.available}</div>
-            <div class="stat-label">Disponíveis</div>
-          </div>
-          <div class="stat-card occupied">
-            <div class="stat-number" style="color: #f59e0b;">${stats.occupied}</div>
-            <div class="stat-label">Ocupados</div>
-          </div>
-          <div class="stat-card maintenance">
-            <div class="stat-number" style="color: #ef4444;">${stats.maintenance}</div>
-            <div class="stat-label">Manutenção</div>
-          </div>
-          <div class="stat-card absent">
-            <div class="stat-number" style="color: #f97316;">${stats.absent + stats.vacation}</div>
-            <div class="stat-label">Ausentes/Férias</div>
-          </div>
-          <div class="stat-card idle">
-            <div class="stat-number" style="color: #3b82f6;">${Math.round(stats.idleRate)}%</div>
-            <div class="stat-label">Taxa Ociosidade</div>
-          </div>
-        </div>
-        
-        <!-- Instruções -->
-        <div class="instructions">
-          <h3>📋 Instruções para Preenchimento</h3>
-          <ul>
-            <li><strong>Tarefa Diária:</strong> Descreva a atividade específica planejada para cada recurso</li>
-            <li><strong>Horários:</strong> Defina início e término das atividades</li>
-            <li><strong>Responsável:</strong> Indique quem será responsável pela execução</li>
-            <li><strong>Observações:</strong> Anote informações relevantes, impedimentos ou observações</li>
-          </ul>
-        </div>
-        
-        <!-- Tabela de Recursos -->
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 120px;">Recurso</th>
-                <th style="width: 80px;">Tipo</th>
-                <th style="width: 60px;">Status</th>
-                <th style="width: 40px;">Cap.</th>
-                <th style="width: 80px;">Localização</th>
-                <th class="task-column">Tarefa Diária Planejada</th>
-                <th class="time-column">Início</th>
-                <th class="time-column">Término</th>
-                <th class="responsible-column">Responsável</th>
-                <th class="observations-column">Observações</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${resources.map(resource => `
-                <tr>
-                  <td style="font-weight: bold;">${resource.name}</td>
-                  <td>${resource.type === 'mao_de_obra' ? 'Mão de Obra' : 
-                       resource.type.charAt(0).toUpperCase() + resource.type.slice(1)}</td>
-                  <td>
-                    <span class="status-badge status-${resource.status}">
-                      ${resource.status === 'disponivel' ? 'Disponível' :
-                        resource.status === 'ocupado' ? 'Ocupado' :
-                        resource.status === 'manutencao' ? 'Manutenção' :
-                        resource.status === 'ausente' ? 'Ausente' :
-                        resource.status === 'ferias' ? 'Férias' :
-                        resource.status === 'inativo' ? 'Inativo' : resource.status}
-                    </span>
-                  </td>
-                  <td style="text-align: center;">${resource.capacity}</td>
-                  <td>${resource.location || '-'}</td>
-                  <td class="task-column" style="border-right: 2px solid #fbbf24;"></td>
-                  <td class="time-column"></td>
-                  <td class="time-column"></td>
-                  <td class="responsible-column"></td>
-                  <td class="observations-column"></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        
-        <!-- Rodapé -->
-        <div class="footer">
-          <p>Este documento foi gerado automaticamente pelo sistema de gestão de recursos produtivos.</p>
-          <p>Para dúvidas ou sugestões, entre em contato: ${companyData?.email || 'contato@empresa.com'}</p>
-        </div>
-      </body>
-      </html>
-    `;
-
-    // Criar e abrir nova janela para impressão/PDF
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      
-      // Aguardar carregamento e imprimir
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-        }, 500);
-      };
-      
-      toast({
-        title: "PDF sendo gerado!",
-        description: "Uma nova janela foi aberta para geração do PDF. Use Ctrl+P ou Cmd+P para salvar.",
-      });
-    } else {
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar PDF",
-        description: "Não foi possível abrir a janela de impressão. Verifique se pop-ups estão habilitados.",
-      });
-    }
-  };
-
-  // Funções de submit
-  const onCompanySubmit = async (values: z.infer<typeof companySchema>) => {
-    if (!user) {
-        toast({
-            variant: "destructive",
-            title: "Erro de Autenticação",
-            description: "Você precisa estar logado para salvar as alterações.",
+            title: "Campo vazio",
+            description: "Por favor, digite o nome da etapa para adicionar.",
         });
         return;
     }
     try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const dataToSave = {
-        ...values,
-        logo: {
-          preview: logoPreview,
-        },
-      };
-      await setDoc(companyRef, dataToSave, { merge: true });
-      toast({
-        title: "Dados atualizados!",
-        description: "As informações da empresa foram salvas com sucesso.",
-      });
+      await setDoc(stagesDocRef, {
+        stages: arrayUnion(stageToAdd)
+      }, { merge: true });
+      
+      setNewStageName("");
+      toast({ title: "Etapa adicionada!" });
+      await fetchStages();
     } catch (error) {
-      console.error("Error saving company data: ", error);
+      console.error("Error adding stage:", error);
+      toast({ variant: "destructive", title: "Erro ao adicionar etapa" });
+    }
+  }, [newStageName, stagesDocRef, fetchStages, toast]);
+
+  const fetchProducts = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const querySnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
+      const productsList = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        const planTemplate = data.productionPlanTemplate || (data.manufacturingStages && Array.isArray(data.manufacturingStages)
+            ? data.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+            : []);
+
+        return {
+          id: doc.id,
+          ...(data as Omit<Product, 'id'>),
+          productionPlanTemplate: planTemplate,
+        };
+      });
+      setProducts(productsList);
+    } catch (error) {
+      console.error("Error fetching products: ", error);
       toast({
         variant: "destructive",
-        title: "Erro ao salvar",
+        title: "Erro ao buscar produtos",
+        description: "Ocorreu um erro ao carregar o catálogo de produtos.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      fetchProducts();
+      fetchStages();
+    }
+  }, [user, authLoading, fetchProducts, fetchStages]);
+  
+  const syncCatalog = useCallback(async () => {
+    setIsSyncing(true);
+    toast({ title: "Sincronizando...", description: "Buscando produtos em orçamentos e pedidos existentes." });
+    
+    try {
+        const [quotationsSnapshot, ordersSnapshot] = await Promise.all([
+            getDocs(collection(db, "companies", "mecald", "quotations")),
+            getDocs(collection(db, "companies", "mecald", "orders"))
+        ]);
+        
+        const productsToSync = new Map<string, any>();
+        const skippedCodes: string[] = [];
+
+        const processDocumentItems = (doc: any) => {
+            const data = doc.data();
+            if (Array.isArray(data.items)) {
+                data.items.forEach((item: any) => {
+                    const productCodeRaw = item.code || item.product_code;
+                    if (productCodeRaw && typeof productCodeRaw === 'string' && productCodeRaw.trim() !== "") {
+                        const productCode = productCodeRaw.trim();
+
+                        if (productCode.includes('/') || productCode === '.' || productCode === '..') {
+                            if (!skippedCodes.includes(productCode)) {
+                                skippedCodes.push(productCode);
+                            }
+                            return; 
+                        }
+                        
+                        const existingData = productsToSync.get(productCode) || {};
+
+                        const productData = {
+                            code: productCode,
+                            description: item.description || existingData.description || "Sem descrição",
+                            unitPrice: Number(item.unitPrice) || existingData.unitPrice || 0,
+                            unitWeight: Number(item.unitWeight) || existingData.unitWeight || 0,
+                        };
+                        productsToSync.set(productCode, productData);
+                    }
+                });
+            }
+        };
+
+        quotationsSnapshot.forEach(processDocumentItems);
+        ordersSnapshot.forEach(processDocumentItems);
+        
+        if (productsToSync.size === 0 && skippedCodes.length === 0) {
+            toast({ title: "Nenhum produto novo encontrado", description: "Seu catálogo já parece estar atualizado." });
+            setIsSyncing(false);
+            return;
+        }
+
+        if (productsToSync.size > 0) {
+            const batch = writeBatch(db);
+            const productsCollectionRef = collection(db, "companies", "mecald", "products");
+    
+            productsToSync.forEach((productData, productCode) => {
+                const productRef = doc(productsCollectionRef, productCode);
+                batch.set(productRef, { ...productData, updatedAt: Timestamp.now() }, { merge: true });
+            });
+    
+            await batch.commit();
+        }
+
+        let description = `${productsToSync.size} produtos foram adicionados ou atualizados.`;
+        if (skippedCodes.length > 0) {
+            description += ` ${skippedCodes.length} código(s) foram ignorados por conterem caracteres inválidos (ex: /).`
+        }
+
+        toast({ 
+            title: "Sincronização Concluída!", 
+            description: description,
+            duration: skippedCodes.length > 0 ? 8000 : 5000,
+        });
+        await fetchProducts();
+
+    } catch (error: any) {
+        console.error("Error syncing catalog: ", error);
+        let description = "Não foi possível sincronizar os produtos. Tente novamente.";
+        if (error.code === 'permission-denied') {
+            description = "Erro de permissão. Verifique as regras de segurança do seu Firestore.";
+        } else if (error.message && (error.message.includes('Document path') || error.message.includes('invalid'))) {
+            description = "Um ou mais produtos nos orçamentos ou pedidos possuem um código inválido. Corrija-os e tente novamente.";
+        }
+        toast({
+            variant: "destructive",
+            title: "Erro na Sincronização",
+            description: description,
+        });
+    } finally {
+        setIsSyncing(false);
+    }
+  }, [toast, fetchProducts]);
+
+  const onSubmit = async (values: z.infer<typeof productSchema>) => {
+    try {
+        if (values.code.includes('/')) {
+            toast({
+                variant: "destructive",
+                title: "Código Inválido",
+                description: "O código do produto não pode conter o caractere '/'."
+            });
+            return;
+        }
+
+      const productRef = doc(db, "companies", "mecald", "products", values.code);
+      
+      if (selectedProduct && selectedProduct.id !== values.code) {
+        await deleteDoc(doc(db, "companies", "mecald", "products", selectedProduct.id));
+      }
+      
+      await setDoc(productRef, values, { merge: true });
+
+      toast({
+        title: selectedProduct ? "Produto atualizado!" : "Produto adicionado!",
+        description: `O produto "${values.description}" foi salvo com sucesso.`,
+      });
+
+      form.reset();
+      setIsFormOpen(false);
+      setSelectedProduct(null);
+      await fetchProducts();
+    } catch (error) {
+      console.error("Error saving product: ", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar produto",
         description: "Ocorreu um erro ao salvar os dados. Tente novamente.",
       });
     }
   };
-
-  const onTeamSubmit = async (values: TeamMember) => {
-    const teamRef = doc(db, "companies", "mecald", "settings", "team");
-    const memberData = { ...values, updatedAt: new Date() };
-
-    try {
-        if (selectedMember) {
-            const updatedMembers = teamMembers.map(m => m.id === selectedMember.id ? memberData : m);
-            await updateDoc(teamRef, { members: updatedMembers });
-            toast({ title: "Membro atualizado!", description: "Os dados do membro da equipe foram atualizados." });
-        } else {
-            const newMember = { ...memberData, id: Date.now().toString() };
-            await updateDoc(teamRef, { members: arrayUnion(newMember) });
-            toast({ title: "Membro adicionado!", description: "Novo membro adicionado à equipe." });
-        }
-        teamForm.reset();
-        setIsTeamFormOpen(false);
-        setSelectedMember(null);
-        await fetchTeamData();
-    } catch (error) {
-        console.error("Error saving team member:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar os dados do membro." });
-    }
+  
+  const handleAddClick = () => {
+    setSelectedProduct(null);
+    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0, productionPlanTemplate: [] });
+    setIsFormOpen(true);
   };
-
-  const onResourceSubmit = async (values: Resource) => {
-    const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-    const resourceData = { ...values, updatedAt: new Date() };
-
-    try {
-        if (selectedResource) {
-            const updatedResources = resources.map(r => r.id === selectedResource.id ? resourceData : r);
-            await updateDoc(resourcesRef, { resources: updatedResources });
-            toast({ title: "Recurso atualizado!", description: "Os dados do recurso foram atualizados." });
-        } else {
-            const newResource = { ...resourceData, id: Date.now().toString() };
-            await updateDoc(resourcesRef, { resources: arrayUnion(newResource) });
-            toast({ title: "Recurso adicionado!", description: "Novo recurso produtivo adicionado." });
-        }
-        resourceForm.reset();
-        setIsResourceFormOpen(false);
-        setSelectedResource(null);
-        await fetchResourcesData();
-    } catch (error) {
-        console.error("Error saving resource:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar os dados do recurso." });
-    }
-  };
-
-  // Handlers de ações
-  const handleAddMemberClick = () => {
-    setSelectedMember(null);
-    teamForm.reset({ id: "", name: "", position: "", email: "", phone: "", permission: "user" });
-    setIsTeamFormOpen(true);
-  };
-
-  const handleEditMemberClick = (member: TeamMember) => {
-    setSelectedMember(member);
-    teamForm.reset(member);
-    setIsTeamFormOpen(true);
-  };
-
-  const handleDeleteMemberClick = (member: TeamMember) => {
-    setMemberToDelete(member);
-    setIsDeleteAlertOpen(true);
-  };
-
-  const handleAddResourceClick = () => {
-    setSelectedResource(null);
-    resourceForm.reset({ 
-        id: "", 
-        name: "", 
-        type: "maquina", 
-        description: "", 
-        capacity: 1, 
-        status: "disponivel", 
-        location: "", 
-        serialNumber: "", 
-        acquisitionDate: "", 
-        maintenanceDate: "",
-        absenceStartDate: "",
-        absenceEndDate: "",
-        absenceReason: ""
+  
+  const handleEditClick = (product: Product) => {
+    setSelectedProduct(product);
+    const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        : []);
+    form.reset({
+      ...product,
+      productionPlanTemplate: planTemplate
     });
-    setIsResourceFormOpen(true);
+    setIsFormOpen(true);
+  };
+  
+  const handleDuplicateClick = (product: Product) => {
+    // Gera um novo código baseado no original
+    const originalCode = product.code;
+    const duplicatedCode = `${originalCode}_COPIA`;
+    
+    // Verifica se já existe um produto com esse código
+    let finalCode = duplicatedCode;
+    let counter = 1;
+    while (products.some(p => p.code === finalCode)) {
+      finalCode = `${originalCode}_COPIA_${counter}`;
+      counter++;
+    }
+    
+    setSelectedProduct(null); // Limpa a seleção para criar um novo produto
+    const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        : []);
+    
+    form.reset({
+      code: finalCode,
+      description: `${product.description} (Cópia)`,
+      unitPrice: product.unitPrice,
+      unitWeight: product.unitWeight || 0,
+      productionPlanTemplate: planTemplate
+    });
+    setIsFormOpen(true);
+    
+    toast({
+      title: "Produto duplicado!",
+      description: `Os dados de "${product.description}" foram copiados. Ajuste o código e descrição conforme necessário.`,
+    });
+  };
+  
+  const handleDeleteClick = (product: Product) => {
+    setProductToDelete(product);
+    setIsDeleteDialogOpen(true);
   };
 
-  const handleEditResourceClick = (resource: Resource) => {
-    setSelectedResource(resource);
-    resourceForm.reset(resource);
-    setIsResourceFormOpen(true);
-  };
-
-  const handleDeleteResourceClick = (resource: Resource) => {
-    setResourceToDelete(resource);
-    setIsResourceDeleteAlertOpen(true);
-  };
-
-  const handleConfirmDeleteMember = async () => {
-    if (!memberToDelete) return;
-    const teamRef = doc(db, "companies", "mecald", "settings", "team");
+  const handleConfirmDelete = async () => {
+    if (!productToDelete) return;
     try {
-        const memberToRemove = teamMembers.find(m => m.id === memberToDelete.id);
-        if (memberToRemove) {
-            await updateDoc(teamRef, { members: arrayRemove(memberToRemove) });
-            toast({ title: "Membro removido!", description: "O membro foi removido da equipe." });
-        }
-        setMemberToDelete(null);
-        setIsDeleteAlertOpen(false);
-        await fetchTeamData();
+      await deleteDoc(doc(db, "companies", "mecald", "products", productToDelete.id));
+      toast({ title: "Produto excluído!", description: "O produto foi removido do catálogo." });
+      setProductToDelete(null);
+      setIsDeleteDialogOpen(false);
+      await fetchProducts();
     } catch (error) {
-        console.error("Error deleting team member:", error);
-        toast({ variant: "destructive", title: "Erro ao remover", description: "Não foi possível remover o membro da equipe." });
+      console.error("Error deleting product: ", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao excluir",
+        description: "Não foi possível remover o produto. Tente novamente.",
+      });
+    }
+  };
+  
+  const filteredProducts = products.filter((product) => {
+    const query = searchQuery.toLowerCase();
+    return (
+      product.code.toLowerCase().includes(query) ||
+      product.description.toLowerCase().includes(query)
+    );
+  });
+
+  const filteredProductsForCopy = useMemo(() => {
+    const query = copyFromSearch.toLowerCase();
+    return products.filter(p => 
+        (p.description.toLowerCase().includes(query) || p.code.toLowerCase().includes(query)) &&
+        p.id !== selectedProduct?.id
+    );
+  }, [products, copyFromSearch, selectedProduct]);
+
+  const handleCopySteps = (productToCopyFrom: Product) => {
+    const stepsToCopy = productToCopyFrom.productionPlanTemplate || [];
+    form.setValue('productionPlanTemplate', stepsToCopy, {
+        shouldValidate: true,
+        shouldDirty: true,
+    });
+    toast({
+        title: "Etapas copiadas!",
+        description: `As etapas de "${productToCopyFrom.description}" foram aplicadas.`,
+    });
+    setIsCopyPopoverOpen(false);
+  };
+
+  // Funções de drag and drop para reordenar etapas
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.currentTarget.outerHTML);
+    
+    // Efeito visual sutil
+    setTimeout(() => {
+      if (e.currentTarget) {
+        e.currentTarget.style.opacity = '0.5';
+      }
+    }, 0);
+  }, []);
+
+  const handleDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget) {
+      e.currentTarget.style.opacity = '';
+    }
+    setDraggedIndex(null);
+    setDraggedOverIndex(null);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    
+    if (draggedIndex === null || draggedIndex === dropIndex) return;
+
+    const newStages = [...manufacturingStages];
+    const draggedItem = newStages[draggedIndex];
+    
+    // Remove o item da posição original
+    newStages.splice(draggedIndex, 1);
+    
+    // Insere na nova posição
+    const insertIndex = draggedIndex < dropIndex ? dropIndex - 1 : dropIndex;
+    newStages.splice(insertIndex, 0, draggedItem);
+    
+    try {
+      // Atualiza no Firebase
+      await updateDoc(stagesDocRef, { stages: newStages });
+      toast({ title: "Ordem das etapas atualizada!" });
+      await fetchStages(); 
+    } catch (error) {
+      console.error("Error reordering stages:", error);
+      toast({ variant: "destructive", title: "Erro ao reordenar etapas" });
+    }
+  }, [draggedIndex, manufacturingStages, stagesDocRef, fetchStages, toast]);
+
+  // Componente de item de etapa arrastável
+  const DraggableStageItem = ({ stage, index, onEdit, onDelete, isDragging }: {
+    stage: string;
+    index: number;
+    onEdit: (stage: string, index: number) => void;
+    onDelete: (stage: string) => void;
+    isDragging: boolean;
+  }) => {
+    return (
+      <div
+        draggable
+        onDragStart={(e) => handleDragStart(e, index)}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDrop={(e) => handleDrop(e, index)}
+        className={`flex items-center justify-between rounded-md border p-3 cursor-move transition-all duration-200 ${
+          isDragging 
+            ? 'opacity-50 scale-95 border-primary bg-primary/5' 
+            : 'hover:border-primary/50 hover:shadow-sm'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing" />
+          <span className="font-medium">{stage}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" onClick={() => onEdit(stage, index)}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-destructive hover:text-destructive" 
+            onClick={() => onDelete(stage)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const handleEditStageClick = (stageName: string, index: number) => {
+    setStageToEdit({ oldName: stageName, index });
+    setNewStageNameForEdit(stageName);
+    setIsEditStageDialogOpen(true);
+  };
+
+  const handleConfirmEditStage = async () => {
+    if (!stageToEdit || !newStageNameForEdit.trim()) return;
+
+    const oldName = stageToEdit.oldName;
+    const newName = newStageNameForEdit.trim();
+
+    if (oldName === newName) {
+        setIsEditStageDialogOpen(false);
+        return;
+    }
+    if (manufacturingStages.some((stage, index) => stage.toLowerCase() === newName.toLowerCase() && index !== stageToEdit.index)) {
+        toast({ variant: "destructive", title: "Nome duplicado", description: "Esta etapa já existe." });
+        return;
+    }
+
+    try {
+        const batch = writeBatch(db);
+        const updatedStages = [...manufacturingStages];
+        updatedStages[stageToEdit.index] = newName;
+        batch.update(stagesDocRef, { stages: updatedStages });
+
+        const productsToUpdate = products.filter(p =>
+            p.productionPlanTemplate?.some(stage => stage.stageName === oldName)
+        );
+
+        for (const product of productsToUpdate) {
+            const productRef = doc(db, "companies", "mecald", "products", product.id);
+            const updatedPlan = product.productionPlanTemplate!.map(stage =>
+                stage.stageName === oldName ? { ...stage, stageName: newName } : stage
+            );
+            batch.update(productRef, { productionPlanTemplate: updatedPlan });
+        }
+
+        await batch.commit();
+
+        toast({ title: "Etapa atualizada com sucesso!" });
+        setIsEditStageDialogOpen(false);
+        setStageToEdit(null);
+        setNewStageNameForEdit("");
+        await fetchStages();
+        await fetchProducts();
+
+    } catch (error) {
+        console.error("Error editing stage:", error);
+        toast({ variant: "destructive", title: "Erro ao editar etapa" });
+    }
+  };
+  
+  const handleDeleteStageClick = (stageName: string) => {
+      setStageToDeleteConfirmation(stageName);
+      setIsDeleteStageDialogOpen(true);
+  };
+
+  const handleConfirmDeleteStage = async () => {
+    if (!stageToDeleteConfirmation) return;
+    
+    try {
+        const batch = writeBatch(db);
+        batch.update(stagesDocRef, { stages: arrayRemove(stageToDeleteConfirmation) });
+
+        const productsToUpdate = products.filter(p =>
+            p.productionPlanTemplate?.some(stage => stage.stageName === stageToDeleteConfirmation)
+        );
+
+        for (const product of productsToUpdate) {
+            const productRef = doc(db, "companies", "mecald", "products", product.id);
+            const updatedPlan = product.productionPlanTemplate!.filter(
+                stage => stage.stageName !== stageToDeleteConfirmation
+            );
+            batch.update(productRef, { productionPlanTemplate: updatedPlan });
+        }
+
+        await batch.commit();
+        toast({ title: "Etapa removida com sucesso!" });
+        setIsDeleteStageDialogOpen(false);
+        setStageToDeleteConfirmation(null);
+        await fetchStages();
+        await fetchProducts();
+    } catch (error) {
+        console.error("Error deleting stage:", error);
+        toast({ variant: "destructive", title: "Erro ao remover etapa" });
     }
   };
 
-  const handleConfirmDeleteResource = async () => {
-    if (!resourceToDelete) return;
-    const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-    try {
-        const resourceToRemove = resources.find(r => r.id === resourceToDelete.id);
-        if (resourceToRemove) {
-            await updateDoc(resourcesRef, { resources: arrayRemove(resourceToRemove) });
-            toast({ title: "Recurso removido!", description: "O recurso foi removido." });
-        }
-        setResourceToDelete(null);
-        setIsResourceDeleteAlertOpen(false);
-        await fetchResourcesData();
-    } catch (error) {
-        console.error("Error deleting resource:", error);
-        toast({ variant: "destructive", title: "Erro ao remover", description: "Não foi possível remover o recurso." });
+  // Estatísticas do lead time para o dashboard
+  const leadTimeStats = useMemo(() => {
+    if (products.length === 0) return { avgLeadTime: 0, maxLeadTime: 0, productsWithLeadTime: 0 };
+    
+    const productsWithValidLeadTime = products.filter(p => calculateLeadTime(p) > 0);
+    const leadTimes = productsWithValidLeadTime.map(p => calculateLeadTime(p));
+    
+    const avgLeadTime = leadTimes.length > 0 ? leadTimes.reduce((sum, lt) => sum + lt, 0) / leadTimes.length : 0;
+    const maxLeadTime = leadTimes.length > 0 ? Math.max(...leadTimes) : 0;
+    
+    return {
+      avgLeadTime: Math.round(avgLeadTime * 10) / 10,
+      maxLeadTime: Math.round(maxLeadTime),
+      productsWithLeadTime: productsWithValidLeadTime.length
+    };
+  }, [products]);
+
+  // Função para adicionar item à calculadora
+  const addItemToCalculator = () => {
+    if (!selectedProductForCalculator || calculatorQuantity <= 0) {
+      toast({
+        variant: "destructive",
+        title: "Dados inválidos",
+        description: "Selecione um produto e informe uma quantidade válida."
+      });
+      return;
     }
+
+    const product = products.find(p => p.id === selectedProductForCalculator);
+    if (!product) return;
+
+    const newItem = {
+      id: Date.now().toString(),
+      productId: product.id,
+      productCode: product.code,
+      productDescription: product.description,
+      quantity: calculatorQuantity,
+      leadTime: calculateLeadTime(product),
+      stages: product.productionPlanTemplate || []
+    };
+
+    setCalculatorItems(prev => [...prev, newItem]);
+    setSelectedProductForCalculator("");
+    setCalculatorQuantity(1);
   };
 
-  // Variáveis calculadas
-  const stats = getResourceStats();
-  const isLoadingPage = isLoading || authLoading;
+  // Função para remover item da calculadora
+  const removeItemFromCalculator = (id: string) => {
+    setCalculatorItems(prev => prev.filter(item => item.id !== id));
+  };
 
-  // Watch do status do recurso para mostrar/ocultar campos de ausência
-  const watchedStatus = resourceForm.watch("status");
+  // Algoritmo MELHORADO de cálculo de viabilidade - mais realista
+  const calculateFeasibility = () => {
+    if (calculatorItems.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Lista vazia",
+        description: "Adicione pelo menos um item para calcular."
+      });
+      return;
+    }
+
+    // Consolida todas as etapas de todos os itens (corrigido para considerar paralelismo)
+    const stageMaxDuration: Record<string, number> = {};
+    
+    calculatorItems.forEach(item => {
+      item.stages.forEach(stage => {
+        const stageDuration = (stage.durationDays || 0) * item.quantity;
+        stageMaxDuration[stage.stageName] = Math.max(
+          stageMaxDuration[stage.stageName] || 0,
+          stageDuration
+        );
+      });
+    });
+
+    // NOVA LÓGICA: identifica o produto crítico (maior lead time individual)
+    const baseLeadTime = Math.max(...calculatorItems.map(item => {
+      return item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+    }));
+    const longestProductItem = calculatorItems.find(item => {
+      const itemLeadTime = item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+      return itemLeadTime === baseLeadTime;
+    });
+
+    // Se não houver produto, aborta
+    if (!longestProductItem) {
+      toast({
+        variant: "destructive",
+        title: "Erro de cálculo",
+        description: "Não foi possível identificar o produto crítico."
+      });
+      return;
+    }
+
+    // Analisa apenas as etapas do produto crítico
+    const analysis = longestProductItem.stages.map((stage) => {
+      const currentWorkload = sectorWorkload[stage.stageName] || 0;
+      let adjustmentFactor = 1;
+      let isBottleneck = false;
+      if (currentWorkload >= 0.9) {
+        adjustmentFactor = 2.5 + (currentWorkload - 0.9) * 10;
+        isBottleneck = true;
+      } else if (currentWorkload >= 0.8) {
+        adjustmentFactor = 1.8 + (currentWorkload - 0.8) * 7;
+        isBottleneck = true;
+      } else if (currentWorkload >= 0.7) {
+        adjustmentFactor = 1.3 + (currentWorkload - 0.7) * 5;
+        isBottleneck = currentWorkload >= 0.75;
+      } else if (currentWorkload >= 0.5) {
+        adjustmentFactor = 1.0 + (currentWorkload - 0.5) * 1.5;
+      } else {
+        adjustmentFactor = 0.8 + currentWorkload * 0.4;
+      }
+      const adjustedDuration = Math.ceil((stage.durationDays || 0) * adjustmentFactor);
+      return {
+        stageName: stage.stageName,
+        originalDuration: stage.durationDays || 0,
+        adjustedDuration,
+        workload: currentWorkload,
+        bottleneck: isBottleneck
+      };
+    });
+
+    // Lead time ajustado = soma das etapas do produto crítico com ajustes
+    let totalAdjustedLeadTime = analysis.reduce((sum, stage) => sum + stage.adjustedDuration, 0);
+
+    // Data sugerida baseada no lead time ajustado
+    const suggestedDate = new Date();
+    suggestedDate.setDate(suggestedDate.getDate() + totalAdjustedLeadTime);
+
+    // Verifica se é viável para a data solicitada
+    const daysUntilRequested = Math.ceil((requestedDeliveryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+    const isViable = daysUntilRequested >= totalAdjustedLeadTime;
+
+    // Calcula confiança de forma mais criteriosa
+    let confidence = 90;
+    const avgWorkload = analysis.reduce((sum, a) => sum + a.workload, 0) / analysis.length;
+    confidence -= avgWorkload * 60;
+    const bottleneckCount = analysis.filter(a => a.bottleneck).length;
+    confidence -= bottleneckCount * 25;
+    const timeMargin = (daysUntilRequested - totalAdjustedLeadTime) / totalAdjustedLeadTime;
+    if (timeMargin < 0) {
+      confidence -= 30;
+    } else if (timeMargin < 0.2) {
+      confidence -= 20;
+    } else if (timeMargin > 0.5) {
+      confidence += 10;
+    }
+    confidence = Math.min(95, Math.max(5, Math.round(confidence)));
+
+    setCalculatorResults({
+      isViable,
+      suggestedDate,
+      analysis,
+      totalAdjustedLeadTime,
+      confidence
+    });
+  };
+
+  // Função para limpar a calculadora
+  const clearCalculator = () => {
+    setCalculatorItems([]);
+    setCalculatorResults(null);
+    setSelectedProductForCalculator("");
+    setCalculatorQuantity(1);
+  };
+
+  // Função para exportar relatório em PDF melhorado
+  const handleExportReport = () => {
+    if (calculatorItems.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Lista vazia",
+        description: "Adicione produtos à análise antes de exportar o relatório."
+      });
+      return;
+    }
+
+    // Usar biblioteca HTML para PDF ao invés de canvas
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Relatório de Análise de Prazos - MECALD</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+            .company-logo { font-size: 24px; font-weight: bold; color: #2563eb; }
+            .report-title { font-size: 18px; margin: 10px 0; }
+            .report-date { font-size: 12px; color: #666; }
+            .section { margin: 20px 0; }
+            .section-title { font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; }
+            .item { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+            .result-box { padding: 20px; border: 2px solid #ddd; border-radius: 10px; text-align: center; margin: 20px 0; }
+            .viable { border-color: #16a34a; background-color: #f0fdf4; }
+            .not-viable { border-color: #dc2626; background-color: #fef2f2; }
+            .stage-analysis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+            .bottleneck { color: #dc2626; font-weight: bold; }
+            .recommendation { padding: 15px; margin: 10px 0; border-radius: 5px; }
+            .rec-danger { background-color: #fef2f2; border-left: 4px solid #dc2626; }
+            .rec-warning { background-color: #fffbeb; border-left: 4px solid #f59e0b; }
+            .rec-info { background-color: #eff6ff; border-left: 4px solid #3b82f6; }
+            table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f5f5f5; }
+            @media print { 
+              .no-print { display: none; } 
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-logo">MECALD</div>
+            <div class="report-title">RELATÓRIO DE ANÁLISE DE VIABILIDADE DE PRAZOS</div>
+            <div class="report-date">Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">DADOS DA SOLICITAÇÃO</div>
+            <p><strong>Data de entrega solicitada:</strong> ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}</p>
+            <p><strong>Quantidade de itens analisados:</strong> ${calculatorItems.length}</p>
+            <p><strong>Lead time total estimado:</strong> ${calculatorResults?.totalAdjustedLeadTime || 0} dias</p>
+          </div>
+
+          <div class="section">
+            <div class="section-title">PRODUTOS ANALISADOS</div>
+            ${calculatorItems.map((item, index) => `
+              <div class="item">
+                <h4>${index + 1}. ${item.productCode} - ${item.productDescription}</h4>
+                <p><strong>Quantidade:</strong> ${item.quantity} | <strong>Lead time base:</strong> ${item.leadTime} dias</p>
+                ${item.stages.length > 0 ? `
+                  <p><strong>Etapas de produção:</strong></p>
+                  <ul>
+                    ${item.stages.map(stage => `<li>${stage.stageName}: ${stage.durationDays || 0} dias</li>`).join('')}
+                  </ul>
+                ` : '<p>Nenhuma etapa definida</p>'}
+              </div>
+            `).join('')}
+          </div>
+
+          ${calculatorResults ? `
+            <div class="section">
+              <div class="section-title">RESULTADO DA ANÁLISE</div>
+              <div class="result-box ${calculatorResults.isViable ? 'viable' : 'not-viable'}">
+                <h2>${calculatorResults.isViable ? '✓ PRAZO VIÁVEL' : '✗ PRAZO INVIÁVEL'}</h2>
+                <p><strong>Nível de confiança:</strong> ${calculatorResults.confidence}%</p>
+                <p><strong>Data sugerida para entrega:</strong> ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}</p>
+                <p><strong>Lead time ajustado:</strong> ${calculatorResults.totalAdjustedLeadTime} dias</p>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">ANÁLISE DETALHADA POR SETOR</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Setor/Etapa</th>
+                    <th>Tempo Original</th>
+                    <th>Tempo Ajustado</th>
+                    <th>Carga Atual</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${calculatorResults.analysis.map(analysis => `
+                    <tr>
+                      <td><strong>${analysis.stageName}</strong></td>
+                      <td>${analysis.originalDuration} dias</td>
+                      <td>${analysis.adjustedDuration} dias</td>
+                      <td>${Math.round(analysis.workload * 100)}%</td>
+                      <td class="${analysis.bottleneck ? 'bottleneck' : ''}">${analysis.bottleneck ? 'GARGALO' : 'Normal'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="section">
+              <div class="section-title">RECOMENDAÇÕES</div>
+              ${!calculatorResults.isViable ? `
+                <div class="recommendation rec-danger">
+                  <strong>⚠️ Prazo Inviável</strong><br>
+                  O prazo solicitado não pode ser cumprido com a capacidade atual. 
+                  Recomenda-se reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })} ou posterior.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.confidence < 70 ? `
+                <div class="recommendation rec-warning">
+                  <strong>⚠️ Baixa Confiança (${calculatorResults.confidence}%)</strong><br>
+                  A alta carga dos setores produtivos pode causar atrasos. 
+                  Recomenda-se monitoramento constante e planos de contingência.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.analysis.some(a => a.bottleneck) ? `
+                <div class="recommendation rec-warning">
+                  <strong>🚨 Gargalos Identificados</strong><br>
+                  Os seguintes setores estão operando próximo ao limite: 
+                  ${calculatorResults.analysis.filter(a => a.bottleneck).map(a => a.stageName).join(', ')}.<br>
+                  Considere: realocação de recursos, horas extras, terceirização ou renegociação de prazos.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.isViable && calculatorResults.confidence >= 70 ? `
+                <div class="recommendation rec-info">
+                  <strong>✅ Análise Positiva</strong><br>
+                  O prazo é viável com boa margem de segurança. 
+                  Mantenha o monitoramento regular do progresso.
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+
+          <div class="section" style="margin-top: 40px; font-size: 10px; color: #666; text-align: center;">
+            <p>Este relatório foi gerado automaticamente pelo sistema MECALD em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
+            <p>Para mais informações, entre em contato com o setor de planejamento.</p>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 1000);
+            }
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+
+    toast({
+      title: "Relatório gerado!",
+      description: "O relatório será aberto em uma nova janela para impressão/salvamento em PDF."
+    });
+  };
 
   return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight font-headline">Empresa e Equipe</h1>
+          <h1 className="text-3xl font-bold tracking-tight font-headline">Produtos e Etapas</h1>
+            <div className="flex items-center gap-2">
+                 <Button onClick={syncCatalog} variant="outline" disabled={isSyncing}>
+                    <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    {isSyncing ? "Sincronizando..." : "Sincronizar Catálogo"}
+                 </Button>
+                 <Button onClick={handleAddClick}>
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Adicionar Produto
+                 </Button>
+            </div>
         </div>
-        
-        <Tabs defaultValue="company" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
-            <TabsTrigger value="team">Equipe</TabsTrigger>
-            <TabsTrigger value="resources">Recursos Produtivos</TabsTrigger>
-          </TabsList>
 
-          {/* ABA EMPRESA */}
-          <TabsContent value="company">
-            {isLoadingPage ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-4">
-                <div className="md:col-span-1 space-y-4">
-                  <Skeleton className="h-8 w-1/4" />
-                  <Skeleton className="aspect-square w-full rounded-md" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-                <div className="md:col-span-2">
-                  <Skeleton className="h-96 w-full" />
-                </div>
-              </div>
-            ) : (
-              <Form {...companyForm}>
-                <form onSubmit={companyForm.handleSubmit(onCompanySubmit)} className="space-y-8">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-1 flex flex-col items-center text-center">
-                      <h3 className="text-lg font-medium mb-4">Logotipo da Empresa</h3>
-                      <Card className="w-full max-w-xs aspect-square flex items-center justify-center overflow-hidden mb-4">
-                        <Image
-                          src={logoPreview || "https://placehold.co/300x300.png"}
-                          alt="Logotipo da empresa"
-                          width={300}
-                          height={300}
-                          className="object-contain"
-                          data-ai-hint="logo"
-                        />
-                      </Card>
-                      <FormControl>
-                        <Input 
-                          type="file" 
-                          accept="image/*" 
-                          onChange={handleFileChange} 
-                          className="cursor-pointer"
-                        />
-                      </FormControl>
-                    </div>
-
-                    <div className="lg:col-span-2">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Informações de Contato e Fiscais</CardTitle>
-                          <CardDescription>
-                            Mantenha os dados da sua empresa sempre atualizados.
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="grid gap-6">
-                          <FormField
-                            control={companyForm.control}
-                            name="nomeFantasia"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Nome Fantasia</FormLabel>
-                                <FormControl>
-                                  <Input placeholder="Nome comercial da empresa" {...field} value={field.value ?? ''} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <div className="grid md:grid-cols-2 gap-6">
-                            <FormField
-                              control={companyForm.control}
-                              name="cnpj"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>CNPJ</FormLabel>
-                                  <FormControl>
-                                    <Input placeholder="00.000.000/0000-00" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                            <FormField
-                              control={companyForm.control}
-                              name="inscricaoEstadual"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Inscrição Estadual</FormLabel>
-                                  <FormControl>
-                                    <Input placeholder="Opcional" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                          <div className="grid md:grid-cols-2 gap-6">
-                            <FormField
-                              control={companyForm.control}
-                              name="email"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>E-mail</FormLabel>
-                                  <FormControl>
-                                    <Input type="email" placeholder="contato@suaempresa.com" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                            <FormField
-                              control={companyForm.control}
-                              name="celular"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Celular / WhatsApp</FormLabel>
-                                  <FormControl>
-                                    <Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                          <FormField
-                            control={companyForm.control}
-                            name="website"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Website</FormLabel>
-                                <FormControl>
-                                  <Input type="url" placeholder="https://suaempresa.com" {...field} value={field.value ?? ''}/>
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={companyForm.control}
-                            name="endereco"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Endereço Completo</FormLabel>
-                                <FormControl>
-                                  <Textarea
-                                    placeholder="Rua, Número, Bairro, Cidade - Estado, CEP"
-                                    className="min-h-[100px]"
-                                    {...field}
-                                    value={field.value ?? ''}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
-                  <div className="flex justify-end pt-4">
-                    <Button type="submit" size="lg" disabled={companyForm.formState.isSubmitting}>
-                      {companyForm.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
-                    </Button>
-                  </div>
-                </form>
-              </Form>
-            )}
-          </TabsContent>
-
-          {/* ABA EQUIPE */}
-          <TabsContent value="team">
+        {/* Dashboard de Lead Time */}
+        {products.length > 0 && (
+          <div className="grid gap-4 md:grid-cols-3 mb-6">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Membros da Equipe</CardTitle>
-                  <CardDescription>Gerencie os membros da sua equipe e suas permissões de acesso.</CardDescription>
-                </div>
-                <Button onClick={handleAddMemberClick}>
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Adicionar Membro
-                </Button>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Lead Time Médio</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                {isTeamLoading ? (
-                  <div className="space-y-4">
-                    <Skeleton className="h-10 w-full" />
-                    <Skeleton className="h-10 w-full" />
-                    <Skeleton className="h-10 w-full" />
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nome</TableHead>
-                        <TableHead>Cargo</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Telefone</TableHead>
-                        <TableHead>Permissão</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {teamMembers.length > 0 ? (
-                        teamMembers.map((member) => (
-                          <TableRow key={member.id}>
-                            <TableCell className="font-medium">{member.name}</TableCell>
-                            <TableCell>{member.position}</TableCell>
-                            <TableCell>{member.email}</TableCell>
-                            <TableCell>{member.phone}</TableCell>
-                            <TableCell className="capitalize">{member.permission}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <Button variant="ghost" size="icon" onClick={() => handleEditMemberClick(member)}>
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteMemberClick(member)}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={6} className="text-center h-24">Nenhum membro na equipe.</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                )}
+                <div className="text-2xl font-bold">{leadTimeStats.avgLeadTime} dias</div>
+                <p className="text-xs text-muted-foreground">
+                  Baseado em {leadTimeStats.productsWithLeadTime} produtos
+                </p>
               </CardContent>
             </Card>
-          </TabsContent>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Maior Lead Time</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{leadTimeStats.maxLeadTime} dias</div>
+                <p className="text-xs text-muted-foreground">
+                  Produto com maior tempo de produção
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Produtos com Lead Time</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{leadTimeStats.productsWithLeadTime}</div>
+                <p className="text-xs text-muted-foreground">
+                  De {products.length} produtos cadastrados
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
-          {/* ABA RECURSOS PRODUTIVOS */}
-          <TabsContent value="resources">
-            <div className="space-y-6">
-              {/* Dashboard de Ocupação Atualizado */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList>
+                <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
+                <TabsTrigger value="stages">Etapas de Produção</TabsTrigger>
+                <TabsTrigger value="calculator">Calculadora de Prazos</TabsTrigger>
+            </TabsList>
+            <TabsContent value="catalog" className="mt-4">
                 <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total de Recursos</CardTitle>
-                    <Settings className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{stats.total}</div>
-                    <p className="text-xs text-muted-foreground">recursos cadastrados</p>
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Disponíveis</CardTitle>
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-green-600">{stats.available}</div>
-                    <p className="text-xs text-muted-foreground">
-                      {stats.activeResources > 0 ? Math.round((stats.available / stats.activeResources) * 100) : 0}% dos ativos
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Em Manutenção</CardTitle>
-                    <Settings className="h-4 w-4 text-red-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-red-600">{stats.maintenance}</div>
-                    <p className="text-xs text-muted-foreground">
-                      {stats.total > 0 ? Math.round((stats.maintenance / stats.total) * 100) : 0}% do total
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Ausentes/Férias</CardTitle>
-                    <UserX className="h-4 w-4 text-orange-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-orange-600">{stats.absent + stats.vacation}</div>
-                    <p className="text-xs text-muted-foreground">
-                      não computados na ociosidade
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Taxa de Ociosidade</CardTitle>
-                    <Activity className="h-4 w-4 text-blue-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-blue-600">{Math.round(stats.idleRate)}%</div>
-                    <p className="text-xs text-muted-foreground">recursos ativos ociosos</p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Gráfico de Ocupação Atualizado */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Distribuição dos Recursos</CardTitle>
-                  <CardDescription>Status atual dos recursos produtivos (ausentes/férias não afetam ociosidade)</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
-                        Disponíveis
-                      </span>
-                      <span>{stats.available} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.available / stats.total) * 100 : 0} className="h-2" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <Activity className="h-3 w-3 mr-1 text-yellow-600" />
-                        Ocupados
-                      </span>
-                      <span>{stats.occupied} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.occupied / stats.total) * 100 : 0} className="h-2 [&>div]:bg-yellow-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <Settings className="h-3 w-3 mr-1 text-red-600" />
-                        Em Manutenção
-                      </span>
-                      <span>{stats.maintenance} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.maintenance / stats.total) * 100 : 0} className="h-2 [&>div]:bg-red-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <UserX className="h-3 w-3 mr-1 text-orange-600" />
-                        Ausentes
-                      </span>
-                      <span>{stats.absent} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.absent / stats.total) * 100 : 0} className="h-2 [&>div]:bg-orange-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <Calendar className="h-3 w-3 mr-1 text-blue-600" />
-                        Férias
-                      </span>
-                      <span>{stats.vacation} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.vacation / stats.total) * 100 : 0} className="h-2 [&>div]:bg-blue-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <AlertCircle className="h-3 w-3 mr-1 text-gray-600" />
-                        Inativos
-                      </span>
-                      <span>{stats.inactive} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.inactive / stats.total) * 100 : 0} className="h-2 [&>div]:bg-gray-500" />
-                  </div>
-                  {stats.activeResources > 0 && (
-                    <div className="pt-4 border-t">
-                      <div className="text-sm text-muted-foreground mb-2">
-                        <strong>Recursos Ativos:</strong> {stats.activeResources} (excluindo ausentes, férias e inativos)
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        <strong>Taxa de Ociosidade Real:</strong> {Math.round(stats.idleRate)}% dos recursos ativos estão disponíveis
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Tabela de Recursos */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Recursos Produtivos</CardTitle>
-                    <CardDescription>Gerencie os recursos produtivos da sua empresa.</CardDescription>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={exportResourcesWithTasks} disabled={resources.length === 0}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Exportar CSV
-                    </Button>
-                    <Button variant="outline" onClick={exportResourcesToPDF} disabled={resources.length === 0}>
-                      <FileText className="mr-2 h-4 w-4" />
-                      Exportar PDF
-                    </Button>
-                    <Button onClick={handleAddResourceClick}>
-                      <PlusCircle className="mr-2 h-4 w-4" />
-                      Adicionar Recurso
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {isResourcesLoading ? (
-                    <div className="space-y-4">
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                    </div>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Nome</TableHead>
-                          <TableHead>Tipo</TableHead>
-                          <TableHead>Capacidade</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Localização</TableHead>
-                          <TableHead>Período</TableHead>
-                          <TableHead className="text-right">Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {resources.length > 0 ? (
-                          resources.map((resource) => (
-                            <TableRow key={resource.id}>
-                              <TableCell className="font-medium">{resource.name}</TableCell>
-                              <TableCell className="capitalize">
-                                {resource.type === 'mao_de_obra' ? 'Mão de Obra' : resource.type}
-                              </TableCell>
-                              <TableCell>{resource.capacity}</TableCell>
-                              <TableCell>{getStatusBadge(resource.status)}</TableCell>
-                              <TableCell>{resource.location || "-"}</TableCell>
-                              <TableCell>
-                                {(resource.status === 'ausente' || resource.status === 'ferias') && resource.absenceStartDate && resource.absenceEndDate ? (
-                                  <div className="text-xs">
-                                    <div>{new Date(resource.absenceStartDate).toLocaleDateString('pt-BR')} até</div>
-                                    <div>{new Date(resource.absenceEndDate).toLocaleDateString('pt-BR')}</div>
-                                  </div>
-                                ) : "-"}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => handleEditResourceClick(resource)}>
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteResourceClick(resource)}>
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                    <CardHeader>
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <CardTitle>Produtos Cadastrados</CardTitle>
+                                <CardDescription>
+                                Gerencie os produtos e serviços que sua empresa oferece. O lead time é calculado automaticamente com base nas etapas de fabricação configuradas.
+                                </CardDescription>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Buscar por código ou descrição..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="pl-9 w-64"
+                                    />
                                 </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoading ? (
+                        <div className="space-y-4 p-4">
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
+                        </div>
                         ) : (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center h-24">Nenhum recurso cadastrado.</TableCell>
-                          </TableRow>
+                            <Table>
+                            <TableHeader>
+                                <TableRow>
+                                <TableHead className="w-[150px]">Código</TableHead>
+                                <TableHead>Descrição</TableHead>
+                                <TableHead className="w-[140px] text-right">Preço Unitário (R$)</TableHead>
+                                <TableHead className="w-[120px] text-center">Lead Time</TableHead>
+                                <TableHead className="w-[140px] text-center">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredProducts.length > 0 ? (
+                                filteredProducts.map((product) => {
+                                    const leadTime = calculateLeadTime(product);
+                                    const leadTimeBadge = getLeadTimeBadge(leadTime);
+                                    
+                                    return (
+                                        <TableRow key={product.id}>
+                                        <TableCell className="font-mono">{product.code}</TableCell>
+                                        <TableCell className="font-medium">{product.description}</TableCell>
+                                        <TableCell className="text-right">{product.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                        <TableCell className="text-center">
+                                            <Badge 
+                                                variant={leadTimeBadge.variant}
+                                                className={leadTime > 0 && leadTime <= 7 ? leadTimeBadge.color : ''}
+                                            >
+                                                {leadTimeBadge.text}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-center">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
+                                                    <Pencil className="h-4 w-4" />
+                                                    <span className="sr-only">Editar</span>
+                                                </Button>
+                                                <Button variant="ghost" size="icon" onClick={() => handleDuplicateClick(product)}>
+                                                    <Copy className="h-4 w-4" />
+                                                    <span className="sr-only">Duplicar</span>
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteClick(product)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                    <span className="sr-only">Excluir</span>
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                        </TableRow>
+                                    )
+                                })
+                                ) : (
+                                <TableRow>
+                                    <TableCell colSpan={5} className="text-center h-24">
+                                    {searchQuery ? `Nenhum produto encontrado para "${searchQuery}".` : "Nenhum produto encontrado."}
+                                    </TableCell>
+                                </TableRow>
+                                )}
+                            </TableBody>
+                            </Table>
                         )}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
+                    </CardContent>
+                </Card>
+            </TabsContent>
+            <TabsContent value="stages" className="mt-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Etapas de Fabricação</CardTitle>
+                        <CardDescription>
+                            Cadastre e gerencie as etapas do seu processo produtivo. 
+                            <strong> Arraste e solte para reordenar rapidamente.</strong>
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="flex items-center gap-2">
+                            <Input 
+                                placeholder="Nome da nova etapa (ex: Solda, Pintura)"
+                                value={newStageName}
+                                onChange={(e) => setNewStageName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddStage()}
+                            />
+                            <Button onClick={handleAddStage}>
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Adicionar Etapa
+                            </Button>
+                        </div>
+                        
+                        <Separator />
+                        
+                        {isLoadingStages ? (
+                            <Skeleton className="h-24 w-full" />
+                        ) : (
+                            <div>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-sm font-medium text-muted-foreground">
+                                        ETAPAS CADASTRADAS ({manufacturingStages.length})
+                                    </h3>
+                                    {manufacturingStages.length > 1 && (
+                                        <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                            <GripVertical className="h-3 w-3" />
+                                            Arraste para reordenar
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                {manufacturingStages.length > 0 ? (
+                                    <div className="space-y-2">
+                                        {manufacturingStages.map((stage, index) => (
+                                            <DraggableStageItem
+                                                key={`${stage}-${index}`}
+                                                stage={stage}
+                                                index={index}
+                                                onEdit={handleEditStageClick}
+                                                onDelete={handleDeleteStageClick}
+                                                isDragging={draggedIndex === index}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-8 text-muted-foreground">
+                                        <div className="mb-2 text-2xl">📋</div>
+                                        <p className="font-medium">Nenhuma etapa cadastrada</p>
+                                        <p className="text-sm">Adicione a primeira etapa acima</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        
+                        {/* Dicas de uso */}
+                        {manufacturingStages.length > 1 && (
+                            <div className="bg-muted/30 rounded-lg p-4 text-sm border">
+                                <div className="font-medium mb-2 flex items-center gap-2">
+                                    💡 Dicas de uso
+                                </div>
+                                <ul className="space-y-1 text-muted-foreground text-xs">
+                                    <li>• <strong>Arrastar:</strong> Clique e arraste usando o ícone ⋮⋮ para reordenar</li>
+                                    <li>• <strong>Lead time:</strong> A ordem das etapas afeta o cálculo do tempo total</li>
+                                    <li>• <strong>Salvamento:</strong> Mudanças são salvas automaticamente no Firebase</li>
+                                </ul>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            </TabsContent>
+            <TabsContent value="calculator" className="mt-4">
+                <div className="grid gap-6 lg:grid-cols-2">
+                    {/* Painel de Entrada */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Calculadora de Viabilidade de Prazos</CardTitle>
+                            <CardDescription>
+                                Analise se é possível cumprir prazos considerando a carga atual dos setores de produção.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            {/* Carga Atual dos Setores */}
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Carga Atual dos Setores</h4>
+                                <div className="grid gap-2">
+                                    {manufacturingStages.map(stage => {
+                                        const workload = sectorWorkload[stage] || 0;
+                                        const percentage = Math.round(workload * 100);
+                                        let colorClass = "bg-green-500";
+                                        if (percentage > 80) colorClass = "bg-red-500";
+                                        else if (percentage > 60) colorClass = "bg-yellow-500";
+                                        
+                                        return (
+                                            <div key={stage} className="flex items-center gap-3">
+                                                <span className="text-sm font-medium w-24 truncate">{stage}</span>
+                                                <div className="flex-1 bg-muted rounded-full h-2">
+                                                    <div 
+                                                        className={`h-2 rounded-full transition-all ${colorClass}`}
+                                                        style={{ width: `${percentage}%` }}
+                                                    />
+                                                </div>
+                                                <span className="text-xs text-muted-foreground w-12 text-right">
+                                                    {percentage}%
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    onClick={simulateSectorWorkload}
+                                    className="mt-3"
+                                >
+                                    <RefreshCw className="mr-2 h-3 w-3" />
+                                    Atualizar Carga
+                                </Button>
+                            </div>
+
+                            <Separator />
+
+                            {/* Adicionar Produtos */}
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Adicionar Produtos à Análise</h4>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <Select value={selectedProductForCalculator} onValueChange={setSelectedProductForCalculator}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Selecione um produto" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {products.filter(p => calculateLeadTime(p) > 0).map(product => (
+                                                    <SelectItem key={product.id} value={product.id}>
+                                                        {product.code} - {product.description}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Input
+                                            type="number"
+                                            placeholder="Quantidade"
+                                            value={calculatorQuantity}
+                                            onChange={(e) => setCalculatorQuantity(Number(e.target.value))}
+                                            min="1"
+                                        />
+                                        <Button onClick={addItemToCalculator} className="w-full">
+                                            <PlusCircle className="mr-2 h-4 w-4" />
+                                            Adicionar
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Lista de Itens */}
+                            {calculatorItems.length > 0 && (
+                                <div>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="text-sm font-medium">Itens para Análise</h4>
+                                        <Button variant="outline" size="sm" onClick={clearCalculator}>
+                                            Limpar Lista
+                                        </Button>
+                                    </div>
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {calculatorItems.map(item => (
+                                            <div key={item.id} className="flex items-center justify-between p-3 border rounded-md">
+                                                <div className="flex-1">
+                                                    <div className="font-medium text-sm">{item.productCode}</div>
+                                                    <div className="text-xs text-muted-foreground">{item.productDescription}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        Qtd: {item.quantity} | Lead time: {item.leadTime} dias
+                                                    </div>
+                                                </div>
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon"
+                                                    onClick={() => removeItemFromCalculator(item.id)}
+                                                    className="text-destructive hover:text-destructive"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Data Solicitada */}
+                            <div>
+                                <Label className="text-sm font-medium">Data de Entrega Solicitada</Label>
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" className="w-full justify-start text-left mt-2">
+                                            {format(requestedDeliveryDate, "PPP", { locale: ptBR })}
+                                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0" align="start">
+                                        <Calendar 
+                                            mode="single" 
+                                            selected={requestedDeliveryDate} 
+                                            onSelect={(date) => date && setRequestedDeliveryDate(date)}
+                                            initialFocus 
+                                        />
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+
+                            {/* Botão de Calcular */}
+                            <Button 
+                                onClick={calculateFeasibility} 
+                                className="w-full"
+                                disabled={calculatorItems.length === 0}
+                            >
+                                <Clock className="mr-2 h-4 w-4" />
+                                Analisar Viabilidade
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    {/* Painel de Resultados */}
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Análise de Viabilidade</CardTitle>
+                                    <CardDescription>
+                                        Resultado da análise considerando capacidade de produção atual.
+                                    </CardDescription>
+                                </div>
+                                {calculatorItems.length > 0 && (
+                                    <Button onClick={handleExportReport} variant="outline" size="sm">
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        Exportar PDF
+                                    </Button>
+                                )}
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {calculatorResults ? (
+                                <div className="space-y-6">
+                                    {/* Resultado Principal */}
+                                    <div className="text-center p-6 border rounded-lg">
+                                        <div className={`text-3xl font-bold mb-2 ${calculatorResults.isViable ? 'text-green-600' : 'text-red-600'}`}>
+                                            {calculatorResults.isViable ? '✓ VIÁVEL' : '✗ INVIÁVEL'}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground mb-4">
+                                            Confiança: {calculatorResults.confidence}%
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="text-sm">
+                                                <span className="font-medium">Data solicitada:</span> {format(requestedDeliveryDate, "dd/MM/yyyy")}
+                                            </div>
+                                            <div className="text-sm">
+                                                <span className="font-medium">Data sugerida:</span> {format(calculatorResults.suggestedDate, "dd/MM/yyyy")}
+                                            </div>
+                                            <div className="text-sm">
+                                                <span className="font-medium">Lead time ajustado:</span> {calculatorResults.totalAdjustedLeadTime} dias
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Análise por Setor */}
+                                    <div>
+                                        <h4 className="text-sm font-medium mb-3">Análise por Setor</h4>
+                                        <div className="space-y-3">
+                                            {calculatorResults.analysis.map(analysis => (
+                                                <div key={analysis.stageName} className="p-3 border rounded-md">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-sm">{analysis.stageName}</span>
+                                                        {analysis.bottleneck && (
+                                                            <Badge variant="destructive">Gargalo</Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+                                                        <div>
+                                                            <div>Tempo original: {analysis.originalDuration} dias</div>
+                                                            <div>Tempo ajustado: {analysis.adjustedDuration} dias</div>
+                                                        </div>
+                                                        <div>
+                                                            <div>Carga atual: {Math.round(analysis.workload * 100)}%</div>
+                                                            <div>
+                                                                Impacto: {analysis.adjustedDuration > analysis.originalDuration ? '+' : ''}
+                                                                {analysis.adjustedDuration - analysis.originalDuration} dias
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Recomendações */}
+                                    <div>
+                                        <h4 className="text-sm font-medium mb-3">Recomendações</h4>
+                                        <div className="space-y-2 text-sm text-muted-foreground">
+                                            {!calculatorResults.isViable && (
+                                                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                                                    <div className="font-medium text-red-800 mb-1">Prazo Inviável</div>
+                                                    <div className="text-red-700">
+                                                        Considere reagendar para {format(calculatorResults.suggestedDate, "dd/MM/yyyy")} 
+                                                        ou redistribuir a carga de trabalho.
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {calculatorResults.confidence < 70 && (
+                                                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                                                    <div className="font-medium text-yellow-800 mb-1">Baixa Confiança</div>
+                                                    <div className="text-yellow-700">
+                                                        Setores com alta carga podem causar atrasos. Monitore de perto.
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {calculatorResults.analysis.some(a => a.bottleneck) && (
+                                                <div className="p-3 bg-orange-50 border border-orange-200 rounded-md">
+                                                    <div className="font-medium text-orange-800 mb-1">Gargalos Identificados</div>
+                                                    <div className="text-orange-700">
+                                                        Considere realocar recursos ou terceirizar algumas etapas.
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <Clock className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                                    <p>Adicione produtos e clique em "Analisar Viabilidade" para ver os resultados.</p>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
+            </TabsContent>
         </Tabs>
       </div>
 
-      {/* DIALOGS E MODAIS */}
-
-      {/* Dialog para Membros da Equipe */}
-      <Dialog open={isTeamFormOpen} onOpenChange={setIsTeamFormOpen}>
-        <DialogContent>
+      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selectedMember ? "Editar Membro" : "Adicionar Membro"}</DialogTitle>
+            <DialogTitle>{selectedProduct ? "Editar Produto" : "Adicionar Novo Produto"}</DialogTitle>
             <DialogDescription>
-              {selectedMember ? "Atualize os dados do membro da equipe." : "Preencha as informações do novo membro."}
+              {selectedProduct ? "Altere os dados do produto." : "Preencha os campos para cadastrar um novo produto."}
             </DialogDescription>
           </DialogHeader>
-          <Form {...teamForm}>
-            <form onSubmit={teamForm.handleSubmit(onTeamSubmit)} className="space-y-4">
-              <FormField control={teamForm.control} name="name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Nome Completo</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Nome do membro" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="position" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Cargo</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ex: Vendedor, Gerente" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="email" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>E-mail</FormLabel>
-                  <FormControl>
-                    <Input type="email" placeholder="email@dominio.com" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="phone" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Telefone</FormLabel>
-                  <FormControl>
-                    <Input placeholder="(XX) XXXXX-XXXX" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="permission" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Permissão</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione o nível de acesso" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="admin">Administrador</SelectItem>
-                      <SelectItem value="user">Usuário</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <DialogFooter>
-                <Button type="submit" disabled={teamForm.formState.isSubmitting}>
-                  {teamForm.formState.isSubmitting ? "Salvando..." : "Salvar"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog para Recursos */}
-      <Dialog open={isResourceFormOpen} onOpenChange={setIsResourceFormOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{selectedResource ? "Editar Recurso" : "Adicionar Recurso"}</DialogTitle>
-            <DialogDescription>
-              {selectedResource ? "Atualize os dados do recurso produtivo." : "Preencha as informações do novo recurso."}
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...resourceForm}>
-            <form onSubmit={resourceForm.handleSubmit(onResourceSubmit)} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="name" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nome do Recurso</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ex: Soldador Especializado, Máquina CNC" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="type" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tipo</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione o tipo" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="maquina">Máquina</SelectItem>
-                        <SelectItem value="equipamento">Equipamento</SelectItem>
-                        <SelectItem value="veiculo">Veículo</SelectItem>
-                        <SelectItem value="ferramenta">Ferramenta</SelectItem>
-                        <SelectItem value="espaco">Espaço</SelectItem>
-                        <SelectItem value="mao_de_obra">Mão de Obra</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <FormField control={resourceForm.control} name="description" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Descrição</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="Ex: Soldador com 10 anos de experiência, certificado em solda TIG" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="capacity" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Capacidade</FormLabel>
-                    <FormControl>
-                      <Input type="number" min="1" placeholder="1" {...field} onChange={e => field.onChange(parseInt(e.target.value) || 1)} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="status" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione o status" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="disponivel">Disponível</SelectItem>
-                        <SelectItem value="ocupado">Ocupado</SelectItem>
-                        <SelectItem value="manutencao">Manutenção</SelectItem>
-                        <SelectItem value="ausente">Ausente</SelectItem>
-                        <SelectItem value="ferias">Férias</SelectItem>
-                        <SelectItem value="inativo">Inativo</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              
-              {/* Campos condicionais para ausência/férias */}
-              {(watchedStatus === 'ausente' || watchedStatus === 'ferias') && (
-                <div className="space-y-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                  <h4 className="font-medium text-orange-800 flex items-center">
-                    {watchedStatus === 'ferias' ? <Calendar className="h-4 w-4 mr-2" /> : <UserX className="h-4 w-4 mr-2" />}
-                    Informações de {watchedStatus === 'ferias' ? 'Férias' : 'Ausência'}
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={resourceForm.control} name="absenceStartDate" render={({ field }) => (
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)}>
+              <ScrollArea className="h-[70vh] pr-6">
+                <div className="space-y-4 pt-4">
+                  <FormField control={form.control} name="code" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Data de Início</FormLabel>
-                        <FormControl>
-                          <Input type="date" {...field} />
-                        </FormControl>
-                        <FormMessage />
+                          <FormLabel>Código do Produto</FormLabel>
+                          <FormControl><Input placeholder="Ex: PROD-001" {...field} value={field.value ?? ''} /></FormControl>
+                          <FormDescription>Alterar o código criará um novo registro para o produto.</FormDescription>
+                          <FormMessage />
                       </FormItem>
-                    )} />
-                    <FormField control={resourceForm.control} name="absenceEndDate" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Data de Retorno</FormLabel>
-                        <FormControl>
-                          <Input type="date" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  </div>
-                  <FormField control={resourceForm.control} name="absenceReason" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Motivo {watchedStatus === 'ferias' ? '(Opcional)' : ''}</FormLabel>
-                      <FormControl>
-                        <Textarea 
-                          placeholder={watchedStatus === 'ferias' 
-                            ? "Ex: Férias anuais, descanso..." 
-                            : "Ex: Licença médica, treinamento, viagem de trabalho..."
-                          } 
-                          {...field} 
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
                   )} />
-                  <div className="text-sm text-orange-700 bg-orange-100 p-3 rounded">
-                    <strong>Importante:</strong> Recursos em {watchedStatus === 'ferias' ? 'férias' : 'ausência'} não são contabilizados no cálculo de ociosidade da empresa.
+                  <FormField control={form.control} name="description" render={({ field }) => (
+                      <FormItem>
+                          <FormLabel>Descrição</FormLabel>
+                          <FormControl><Textarea placeholder="Descrição detalhada do produto ou serviço" {...field} value={field.value ?? ''} /></FormControl>
+                          <FormMessage />
+                      </FormItem>
+                  )} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField control={form.control} name="unitPrice" render={({ field }) => (
+                          <FormItem>
+                              <FormLabel>Preço Unitário (R$)</FormLabel>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                      )} />
+                      <FormField control={form.control} name="unitWeight" render={({ field }) => (
+                          <FormItem>
+                              <FormLabel>Peso Unit. (kg)</FormLabel>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? 0} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                      )} />
                   </div>
+                  
+                  <Separator />
+
+                  <FormField
+                    control={form.control}
+                    name="productionPlanTemplate"
+                    render={({ field }) => (
+                        <FormItem>
+                            <div className="mb-4">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
+                                        <FormDescription>
+                                            Selecione as etapas e defina a duração em dias para cada uma. O lead time total será calculado automaticamente.
+                                        </FormDescription>
+                                    </div>
+                                    <Popover open={isCopyPopoverOpen} onOpenChange={setIsCopyPopoverOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button type="button" variant="outline" size="sm">
+                                                <Copy className="mr-2 h-3.5 w-3.5" />
+                                                Copiar de outro produto
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[350px] p-0" align="end">
+                                            <div className="p-2">
+                                                <Input
+                                                    placeholder="Buscar por nome ou código..."
+                                                    value={copyFromSearch}
+                                                    onChange={(e) => setCopyFromSearch(e.target.value)}
+                                                    className="h-9"
+                                                />
+                                            </div>
+                                            <Separator />
+                                            <ScrollArea className="h-64">
+                                                <div className="p-1">
+                                                    {filteredProductsForCopy.length > 0 ? (
+                                                        filteredProductsForCopy.map((product) => (
+                                                            <Button
+                                                                key={product.id}
+                                                                type="button"
+                                                                variant="ghost"
+                                                                className="w-full justify-start h-auto py-2 px-2 text-left"
+                                                                onClick={() => handleCopySteps(product)}
+                                                            >
+                                                                <div className="flex flex-col items-start">
+                                                                    <span className="font-medium">{product.description}</span>
+                                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                                        <span>({product.code})</span>
+                                                                        <span>•</span>
+                                                                        <span>{calculateLeadTime(product)} dias</span>
+                                                                    </div>
+                                                                </div>
+                                                            </Button>
+                                                        ))
+                                                    ) : (
+                                                        <p className="p-4 text-center text-sm text-muted-foreground">Nenhum outro produto encontrado.</p>
+                                                    )}
+                                                </div>
+                                            </ScrollArea>
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                            </div>
+                            
+                            {/* Preview do lead time atual */}
+                            {field.value && field.value.length > 0 && (
+                                <div className="mb-4 p-3 bg-muted rounded-md">
+                                    <div className="flex items-center gap-2 text-sm">
+                                        <Clock className="h-4 w-4" />
+                                        <span className="font-medium">Lead Time Total:</span>
+                                        <Badge variant="secondary">
+                                            {field.value.reduce((total, stage) => total + (stage.durationDays || 0), 0)} dias
+                                        </Badge>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            <div className="space-y-3">
+                                {manufacturingStages.map((stageName) => {
+                                    const currentStage = field.value?.find(p => p.stageName === stageName);
+                                    const isChecked = !!currentStage;
+
+                                    return (
+                                        <div key={stageName} className="flex items-center gap-4 rounded-md border p-3">
+                                            <Checkbox
+                                                id={`stage-checkbox-${stageName}`}
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => {
+                                                    const newValue = checked
+                                                        ? [...(field.value || []), { stageName: stageName, durationDays: 0 }]
+                                                        : (field.value || []).filter(p => p.stageName !== stageName);
+                                                    field.onChange(newValue.sort((a,b) => manufacturingStages.indexOf(a.stageName) - manufacturingStages.indexOf(b.stageName)));
+                                                }}
+                                            />
+                                            <Label htmlFor={`stage-checkbox-${stageName}`} className="flex-1 font-normal cursor-pointer">
+                                                {stageName}
+                                            </Label>
+                                            {isChecked && (
+                                             <div className="flex items-center gap-2">
+                                                    <Input
+                                                        type="number"
+                                                        step="any"
+                                                        className="h-8 w-20"
+                                                        placeholder="Dias"
+                                                        value={currentStage?.durationDays ?? 0}
+                                                        onChange={(e) => {
+                                                            const value = e.target.value;
+                                                            const sanitizedValue = value.replace(',', '.');
+                                                            const newPlan = (field.value || []).map(p => 
+                                                                p.stageName === stageName 
+                                                                ? { ...p, durationDays: value === '' ? undefined : Number(sanitizedValue) } 
+                                                                : p
+                                                            );
+                                                            field.onChange(newPlan);
+                                                        }}
+                                                    />
+                                                    <span className="text-sm text-muted-foreground">dias</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <FormMessage />
+                        </FormItem>
+                    )}
+                />
                 </div>
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="location" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Localização</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ex: Galpão A, Setor 2" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="serialNumber" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Número de Série</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Número de série ou patrimônio" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="acquisitionDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Data de Aquisição</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="maintenanceDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Última Manutenção</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={resourceForm.formState.isSubmitting}>
-                  {resourceForm.formState.isSubmitting ? "Salvando..." : "Salvar"}
-                </Button>
+              </ScrollArea>
+              <DialogFooter className="pt-6 border-t mt-4">
+                 <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting ? "Salvando..." : "Salvar Produto"}
+
+                 </Button>
               </DialogFooter>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
       
-      {/* Alert Dialog para Exclusão de Membros */}
-      <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
+            <AlertDialogHeader>
             <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente o membro <span className="font-bold">{memberToDelete?.name}</span> da equipe.
+                Esta ação não pode ser desfeita. Isso excluirá permanentemente o produto <span className="font-bold">{productToDelete?.description}</span> do catálogo.
             </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDeleteMember} className="bg-destructive hover:bg-destructive/90">
-              Sim, excluir
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
+                Sim, excluir produto
             </AlertDialogAction>
-          </AlertDialogFooter>
+            </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Alert Dialog para Exclusão de Recursos */}
-      <AlertDialog open={isResourceDeleteAlertOpen} onOpenChange={setIsResourceDeleteAlertOpen}>
+      <Dialog open={isEditStageDialogOpen} onOpenChange={setIsEditStageDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>Editar Etapa de Fabricação</DialogTitle>
+                <DialogDescription>
+                    Alterar o nome aqui atualizará a etapa em todos os produtos que a utilizam.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+                <Label htmlFor="edit-stage-name">Novo Nome da Etapa</Label>
+                <Input 
+                    id="edit-stage-name"
+                    value={newStageNameForEdit}
+                    onChange={(e) => setNewStageNameForEdit(e.target.value)}
+                    className="mt-2"
+                />
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEditStageDialogOpen(false)}>Cancelar</Button>
+                <Button onClick={handleConfirmEditStage}>Salvar Alterações</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      <AlertDialog open={isDeleteStageDialogOpen} onOpenChange={setIsDeleteStageDialogOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente o recurso <span className="font-bold">{resourceToDelete?.name}</span>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDeleteResource} className="bg-destructive hover:bg-destructive/90">
-              Sim, excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
+            <AlertDialogHeader>
+                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                <AlertDialogDescription>
+                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation}</span> da lista e de todos os produtos que a utilizam. Esta ação não pode ser desfeita.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfirmDeleteStage} className="bg-destructive hover:bg-destructive/90">
+                    Sim, excluir etapa
+                </AlertDialogAction>
+            </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
