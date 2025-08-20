@@ -35,7 +35,7 @@ const navItems = [
   { href: "/products", label: "Produtos", icon: ShoppingCart },
   { href: "/quotations", label: "Orçamentos", icon: FileText },
   { href: "/orders", label: "Pedidos", icon: Package },
-  { href: "/tasks", label: "Tarefas", icon: ListChecks },
+  { href: "/task", label: "Tarefas", icon: ListChecks },
   { href: "/materials", label: "Materiais", icon: Wrench },
   { href: "/costs", label: "Custos", icon: DollarSign },
   { href: "/quality", label: "Qualidade", icon: ClipboardCheck },
