@@ -186,10 +186,18 @@ export default function TasksPage() {
 
   // Função de sincronização manual melhorada
   const handleManualSync = async () => {
+    if (!user || !resources.length || !teamMembers.length) {
+      toast({
+        variant: "destructive",
+        title: "Dados não carregados",
+        description: "Aguarde o carregamento dos dados antes de sincronizar.",
+      });
+      return;
+    }
+
     setIsSyncing(true);
     try {
       await syncTasksFromOrders();
-      setLastSyncTime(new Date());
       toast({
         title: "Sincronização concluída!",
         description: "As tarefas foram sincronizadas com os pedidos.",
@@ -304,210 +312,178 @@ export default function TasksPage() {
     }
   };
 
-  // FUNÇÃO CORRIGIDA DE SINCRONIZAÇÃO COM PEDIDOS
+  // FUNÇÃO OTIMIZADA DE SINCRONIZAÇÃO COM PEDIDOS
   const syncTasksFromOrders = async () => {
+    if (!user || !resources.length || !teamMembers.length) {
+      console.log('⏭️ Pulando sincronização - dados não carregados ainda');
+      return;
+    }
+
     try {
-      console.log('🔄 Iniciando sincronização de tarefas dos pedidos...');
+      console.log('🔄 Iniciando sincronização otimizada...');
+      const startTime = Date.now();
       
+      // 1. BUSCAR APENAS PEDIDOS COM STATUS RELEVANTES EM UMA QUERY
       const ordersRef = collection(db, "companies", "mecald", "orders");
-      const ordersSnapshot = await getDocs(ordersRef);
+      const ordersQuery = query(
+        ordersRef, 
+        where("status", "in", ["Em Produção", "Aguardando Produção", "Pronto para Entrega"])
+      );
+      const ordersSnapshot = await getDocs(ordersQuery);
       
-      const newTasksToCreate: Partial<Task>[] = [];
-      const tasksToUpdate: { taskId: string; updates: any }[] = [];
+      if (ordersSnapshot.empty) {
+        console.log('📋 Nenhum pedido ativo encontrado');
+        return;
+      }
+
+      // 2. MAPEAR TAREFAS EXISTENTES POR CHAVE ÚNICA
+      const existingTasksMap = new Map<string, Task>();
+      tasks.forEach(task => {
+        if (task.isFromOrder && task.relatedOrderId && task.relatedItemId && task.relatedStageIndex !== undefined) {
+          const key = `${task.relatedOrderId}-${task.relatedItemId}-${task.relatedStageIndex}`;
+          existingTasksMap.set(key, task);
+        }
+      });
+
+      // 3. PROCESSAR EM LOTE
+      const batchOperations: Array<{ type: 'create' | 'update', data: any }> = [];
+      let processedCount = 0;
+
+      // Cache de recursos para evitar busca repetida
+      const defaultResource = resources.find(r => r.status === 'disponivel') || resources[0];
+      const defaultSupervisor = teamMembers.find(m => m.permission === 'admin') || teamMembers[0];
+
+      if (!defaultResource || !defaultSupervisor) {
+        console.warn('⚠️ Recursos básicos não encontrados');
+        return;
+      }
 
       ordersSnapshot.docs.forEach(orderDoc => {
         const orderData = orderDoc.data();
         const orderId = orderDoc.id;
         
-        console.log(`📋 Processando pedido: ${orderData.quotationNumber || orderData.orderNumber}`);
-        
-        if (orderData.items && Array.isArray(orderData.items)) {
-          orderData.items.forEach((item: any, itemIndex: number) => {
-            if (item.productionPlan && Array.isArray(item.productionPlan)) {
-              item.productionPlan.forEach((stage: any, stageIndex: number) => {
-                
-                // Criar identificador único para a tarefa
-                const taskUniqueId = `${orderId}-${item.id}-${stageIndex}`;
-                
-                // Verificar se já existe uma tarefa para esta etapa
-                const existingTask = tasks.find(task => 
-                  task.relatedOrderId === orderId && 
-                  task.relatedItemId === item.id && 
-                  task.relatedStageIndex === stageIndex
-                );
+        if (!orderData.items || !Array.isArray(orderData.items)) return;
 
-                if (existingTask) {
-                  // VERIFICAR SE PRECISA DE ATUALIZAÇÃO (com comparação segura de datas)
-                  const needsUpdate = 
-                    existingTask.status !== mapOrderStatusToTaskStatus(stage.status) ||
-                    (stage.startDate && (!existingTask.actualStartDate || 
-                      !areDatesEqual(safeToDate(stage.startDate), existingTask.actualStartDate))) ||
-                    (stage.completedDate && (!existingTask.actualEndDate || 
-                      !areDatesEqual(safeToDate(stage.completedDate), existingTask.actualEndDate)));
+        orderData.items.forEach((item: any) => {
+          if (!item.productionPlan || !Array.isArray(item.productionPlan)) return;
 
-                  if (needsUpdate) {
-                    console.log(`🔄 Tarefa existente precisa de atualização: ${stage.stageName}`);
-                    
-                    const updates: any = {};
-                    
-                    // Mapear status do pedido para status da tarefa
-                    const taskStatus = mapOrderStatusToTaskStatus(stage.status);
-                    if (taskStatus) {
-                      updates.status = taskStatus;
-                    }
-                    
-                    // Atualizar datas se fornecidas (com conversão segura)
-                    if (stage.startDate) {
-                      updates.actualStartDate = safeToDate(stage.startDate);
-                    }
-                    if (stage.completedDate) {
-                      updates.actualEndDate = safeToDate(stage.completedDate);
-                    }
-                    
-                    tasksToUpdate.push({
-                      taskId: existingTask.id!,
-                      updates
-                    });
+          item.productionPlan.forEach((stage: any, stageIndex: number) => {
+            // Processar apenas etapas relevantes
+            if (!stage.stageName || stage.status === 'Concluído') return;
+
+            const taskKey = `${orderId}-${item.id}-${stageIndex}`;
+            const existingTask = existingTasksMap.get(taskKey);
+            processedCount++;
+
+            if (existingTask) {
+              // VERIFICAÇÃO RÁPIDA DE ATUALIZAÇÃO
+              const targetStatus = mapOrderStatusToTaskStatus(stage.status);
+              if (existingTask.status !== targetStatus) {
+                batchOperations.push({
+                  type: 'update',
+                  data: {
+                    taskId: existingTask.id,
+                    updates: { status: targetStatus }
                   }
-                } else {
-                  // TAREFA NÃO EXISTE - CRIAR NOVA
-                  if (stage.status === 'Pendente' || stage.status === 'Em Andamento') {
-                    console.log(`➕ Criando nova tarefa: ${stage.stageName} para item ${item.description}`);
-                    
-                    // Encontrar recurso e supervisor adequados
-                    const defaultResource = resources.find(r => r.status === 'disponivel');
-                    const defaultSupervisor = teamMembers.find(m => m.permission === 'admin') || teamMembers[0];
-                    
-                    if (!defaultResource || !defaultSupervisor) {
-                      console.warn('⚠️ Recursos ou supervisores não encontrados para criar tarefa');
-                      return;
-                    }
+                });
+              }
+            } else {
+              // CRIAR NOVA TAREFA (apenas para Pendente/Em Andamento)
+              if (stage.status === 'Pendente' || stage.status === 'Em Andamento') {
+                const startDate = safeToDate(stage.startDate) || new Date();
+                const endDate = safeToDate(stage.completedDate) || addDays(startDate, stage.durationDays || 1);
 
-                    // Calcular datas baseadas na etapa (com conversão segura)
-                    let startDate = new Date();
-                    let endDate = new Date();
-                    
-                    if (stage.startDate) {
-                      startDate = safeToDate(stage.startDate) || new Date();
-                    }
-                    
-                    if (stage.completedDate) {
-                      endDate = safeToDate(stage.completedDate) || new Date();
-                    } else {
-                      // Se não tem data de conclusão, calcular baseado na duração
-                      const duration = stage.durationDays || 1;
-                      endDate = addDays(startDate, duration);
-                    }
-
-                    const newTask: Partial<Task> = {
-                      title: `${stage.stageName} - ${item.description.substring(0, 50)}${item.description.length > 50 ? '...' : ''}`,
-                      description: `Pedido ${orderData.quotationNumber || orderData.orderNumber}\nItem: ${item.description}\nCódigo: ${item.code || 'N/A'}\nQuantidade: ${item.quantity}`,
-                      assignedTo: {
-                        resourceId: defaultResource.id,
-                        resourceName: defaultResource.name,
-                      },
-                      supervisor: {
-                        memberId: defaultSupervisor.id,
-                        memberName: defaultSupervisor.name,
-                      },
-                      priority: determinePriority(orderData, item),
-                      status: stage.status === 'Em Andamento' ? 'em_andamento' : 'pendente',
-                      estimatedHours: (stage.durationDays || 1) * 8,
-                      startDate: startDate,
-                      endDate: endDate,
-                      actualStartDate: stage.startDate ? safeToDate(stage.startDate) : null,
-                      actualEndDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
-                      relatedOrderId: orderId,
-                      relatedItemId: item.id,
-                      relatedStageIndex: stageIndex,
-                      isFromOrder: true,
-                      notes: `Gerada automaticamente do pedido ${orderData.quotationNumber || orderData.orderNumber}`,
-                    };
-
-                    newTasksToCreate.push(newTask);
+                batchOperations.push({
+                  type: 'create',
+                  data: {
+                    title: `${stage.stageName} - ${item.description.substring(0, 40)}...`,
+                    description: `Pedido ${orderData.quotationNumber || orderData.orderNumber} - ${item.description}`,
+                    assignedTo: {
+                      resourceId: defaultResource.id,
+                      resourceName: defaultResource.name,
+                    },
+                    supervisor: {
+                      memberId: defaultSupervisor.id,
+                      memberName: defaultSupervisor.name,
+                    },
+                    priority: determinePriority(orderData, item),
+                    status: stage.status === 'Em Andamento' ? 'em_andamento' : 'pendente',
+                    estimatedHours: (stage.durationDays || 1) * 8,
+                    startDate: startDate,
+                    endDate: endDate,
+                    relatedOrderId: orderId,
+                    relatedItemId: item.id,
+                    relatedStageIndex: stageIndex,
+                    isFromOrder: true,
                   }
-                }
-              });
+                });
+              }
             }
           });
-        }
+        });
       });
 
-      // CRIAR NOVAS TAREFAS
-      if (newTasksToCreate.length > 0) {
-        console.log(`➕ Criando ${newTasksToCreate.length} novas tarefas...`);
+      // 4. EXECUTAR OPERAÇÕES EM LOTE COM LIMITE
+      const maxBatchSize = 10;
+      let createdCount = 0;
+      let updatedCount = 0;
+
+      for (let i = 0; i < batchOperations.length; i += maxBatchSize) {
+        const batch = batchOperations.slice(i, i + maxBatchSize);
         
-        for (const taskData of newTasksToCreate) {
+        await Promise.all(batch.map(async (operation) => {
           try {
-            const newTaskRef = doc(collection(db, "companies", "mecald", "tasks"));
-            await setDoc(newTaskRef, {
-              ...taskData,
-              startDate: Timestamp.fromDate(taskData.startDate!),
-              endDate: Timestamp.fromDate(taskData.endDate!),
-              actualStartDate: taskData.actualStartDate ? Timestamp.fromDate(taskData.actualStartDate) : null,
-              actualEndDate: taskData.actualEndDate ? Timestamp.fromDate(taskData.actualEndDate) : null,
-              createdAt: Timestamp.now(),
-              updatedAt: Timestamp.now(),
-            });
+            if (operation.type === 'create') {
+              const newTaskRef = doc(collection(db, "companies", "mecald", "tasks"));
+              await setDoc(newTaskRef, {
+                ...operation.data,
+                startDate: Timestamp.fromDate(operation.data.startDate),
+                endDate: Timestamp.fromDate(operation.data.endDate),
+                createdAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+              });
+              createdCount++;
+            } else if (operation.type === 'update') {
+              const taskRef = doc(db, "companies", "mecald", "tasks", operation.data.taskId);
+              await updateDoc(taskRef, {
+                ...operation.data.updates,
+                updatedAt: Timestamp.now(),
+              });
+              updatedCount++;
+            }
           } catch (error) {
-            console.error('❌ Erro ao criar tarefa:', error);
+            console.error(`❌ Erro na operação ${operation.type}:`, error);
           }
-        }
-        
-        toast({
-          title: "Tarefas sincronizadas",
-          description: `${newTasksToCreate.length} novas tarefas foram criadas a partir dos pedidos.`,
-        });
+        }));
       }
 
-      // ATUALIZAR TAREFAS EXISTENTES
-      if (tasksToUpdate.length > 0) {
-        console.log(`🔄 Atualizando ${tasksToUpdate.length} tarefas existentes...`);
-        
-        for (const { taskId, updates } of tasksToUpdate) {
-          try {
-            const taskRef = doc(db, "companies", "mecald", "tasks", taskId);
-            const updateData: any = {
-              ...updates,
-              updatedAt: Timestamp.now(),
-            };
-            
-            // Converter datas para Timestamp
-            if (updates.actualStartDate) {
-              updateData.actualStartDate = Timestamp.fromDate(updates.actualStartDate);
-            }
-            if (updates.actualEndDate) {
-              updateData.actualEndDate = Timestamp.fromDate(updates.actualEndDate);
-            }
-            
-            await updateDoc(taskRef, updateData);
-          } catch (error) {
-            console.error('❌ Erro ao atualizar tarefa:', error);
-          }
-        }
-        
-        toast({
-          title: "Tarefas atualizadas",
-          description: `${tasksToUpdate.length} tarefas foram atualizadas com base no progresso dos pedidos.`,
-        });
-      }
+      const endTime = Date.now();
+      const duration = endTime - startTime;
 
-      // RECARREGAR TAREFAS SE HOUVE MUDANÇAS
-      if (newTasksToCreate.length > 0 || tasksToUpdate.length > 0) {
+      console.log(`✅ Sincronização concluída em ${duration}ms:`);
+      console.log(`📊 Processados: ${processedCount} | Criados: ${createdCount} | Atualizados: ${updatedCount}`);
+
+      // 5. RECARREGAR APENAS SE HOUVE MUDANÇAS
+      if (createdCount > 0 || updatedCount > 0) {
         await fetchTasks();
+        
+        if (createdCount > 0) {
+          toast({
+            title: "Tarefas sincronizadas",
+            description: `${createdCount} novas tarefas criadas dos pedidos.`,
+          });
+        }
       }
 
       // Atualizar tempo da última sincronização
       setLastSyncTime(new Date());
 
-      console.log('✅ Sincronização concluída');
-
     } catch (error) {
-      console.error("❌ Erro ao sincronizar tarefas dos pedidos:", error);
+      console.error("❌ Erro na sincronização:", error);
       toast({
         variant: "destructive",
         title: "Erro na sincronização",
-        description: "Não foi possível sincronizar as tarefas com os pedidos.",
+        description: "Falha ao sincronizar tarefas.",
       });
     }
   };
@@ -644,16 +620,26 @@ export default function TasksPage() {
     }
   }, [user, authLoading]);
 
-  // MODIFICAR O useEffect PARA SINCRONIZAÇÃO MAIS FREQUENTE
+  // MODIFICAR O useEffect PARA SINCRONIZAÇÃO MAIS INTELIGENTE
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (user) {
+    let syncInterval: NodeJS.Timeout;
+    
+    if (user && resources.length > 0 && teamMembers.length > 0) {
+      // Sincronização inicial após carregar dados
+      syncTasksFromOrders();
+      
+      // Sincronização periódica a cada 60 segundos (mais conservadora)
+      syncInterval = setInterval(() => {
         syncTasksFromOrders();
-      }
-    }, 15000); // A cada 15 segundos para sincronização mais rápida
+      }, 60000);
+    }
 
-    return () => clearInterval(interval);
-  }, [tasks, user, resources, teamMembers]);
+    return () => {
+      if (syncInterval) {
+        clearInterval(syncInterval);
+      }
+    };
+  }, [user, resources.length, teamMembers.length]); // Dependências otimizadas
 
   // MODIFICAR A FUNÇÃO onSubmit PARA INCLUIR SINCRONIZAÇÃO BIDIRECIONAL
   const onSubmit = async (values: Task) => {
