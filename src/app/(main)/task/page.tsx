@@ -337,13 +337,13 @@ export default function TasksPage() {
                 );
 
                 if (existingTask) {
-                  // TAREFA EXISTE - VERIFICAR SE PRECISA DE ATUALIZAÇÃO
+                  // VERIFICAR SE PRECISA DE ATUALIZAÇÃO (com comparação segura de datas)
                   const needsUpdate = 
-                    existingTask.status !== stage.status ||
+                    existingTask.status !== mapOrderStatusToTaskStatus(stage.status) ||
                     (stage.startDate && (!existingTask.actualStartDate || 
-                      new Date(stage.startDate.toDate()).getTime() !== existingTask.actualStartDate.getTime())) ||
+                      !areDatesEqual(safeToDate(stage.startDate), existingTask.actualStartDate))) ||
                     (stage.completedDate && (!existingTask.actualEndDate || 
-                      new Date(stage.completedDate.toDate()).getTime() !== existingTask.actualEndDate.getTime()));
+                      !areDatesEqual(safeToDate(stage.completedDate), existingTask.actualEndDate)));
 
                   if (needsUpdate) {
                     console.log(`🔄 Tarefa existente precisa de atualização: ${stage.stageName}`);
@@ -351,16 +351,17 @@ export default function TasksPage() {
                     const updates: any = {};
                     
                     // Mapear status do pedido para status da tarefa
-                    if (stage.status === 'Pendente') updates.status = 'pendente';
-                    else if (stage.status === 'Em Andamento') updates.status = 'em_andamento';
-                    else if (stage.status === 'Concluído') updates.status = 'concluida';
+                    const taskStatus = mapOrderStatusToTaskStatus(stage.status);
+                    if (taskStatus) {
+                      updates.status = taskStatus;
+                    }
                     
-                    // Atualizar datas se fornecidas
+                    // Atualizar datas se fornecidas (com conversão segura)
                     if (stage.startDate) {
-                      updates.actualStartDate = stage.startDate.toDate();
+                      updates.actualStartDate = safeToDate(stage.startDate);
                     }
                     if (stage.completedDate) {
-                      updates.actualEndDate = stage.completedDate.toDate();
+                      updates.actualEndDate = safeToDate(stage.completedDate);
                     }
                     
                     tasksToUpdate.push({
@@ -382,16 +383,16 @@ export default function TasksPage() {
                       return;
                     }
 
-                    // Calcular datas baseadas na etapa
+                    // Calcular datas baseadas na etapa (com conversão segura)
                     let startDate = new Date();
                     let endDate = new Date();
                     
                     if (stage.startDate) {
-                      startDate = stage.startDate.toDate();
+                      startDate = safeToDate(stage.startDate) || new Date();
                     }
                     
                     if (stage.completedDate) {
-                      endDate = stage.completedDate.toDate();
+                      endDate = safeToDate(stage.completedDate) || new Date();
                     } else {
                       // Se não tem data de conclusão, calcular baseado na duração
                       const duration = stage.durationDays || 1;
@@ -414,8 +415,8 @@ export default function TasksPage() {
                       estimatedHours: (stage.durationDays || 1) * 8,
                       startDate: startDate,
                       endDate: endDate,
-                      actualStartDate: stage.startDate ? stage.startDate.toDate() : null,
-                      actualEndDate: stage.completedDate ? stage.completedDate.toDate() : null,
+                      actualStartDate: stage.startDate ? safeToDate(stage.startDate) : null,
+                      actualEndDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
                       relatedOrderId: orderId,
                       relatedItemId: item.id,
                       relatedStageIndex: stageIndex,
@@ -511,17 +512,51 @@ export default function TasksPage() {
     }
   };
 
+  // FUNÇÃO AUXILIAR PARA MAPEAR STATUS DE PEDIDO PARA STATUS DE TAREFA
+  const mapOrderStatusToTaskStatus = (orderStatus: string): "pendente" | "em_andamento" | "concluida" | null => {
+    switch (orderStatus) {
+      case 'Pendente': return 'pendente';
+      case 'Em Andamento': return 'em_andamento';
+      case 'Concluído': return 'concluida';
+      default: return null;
+    }
+  };
+
+  // FUNÇÃO AUXILIAR PARA COMPARAR DATAS DE FORMA SEGURA
+  const areDatesEqual = (date1: Date | null, date2: Date | null): boolean => {
+    if (!date1 || !date2) return false;
+    return Math.abs(date1.getTime() - date2.getTime()) < 1000; // Tolerância de 1 segundo
+  };
+
+  // FUNÇÃO AUXILIAR PARA CONVERSÃO SEGURA DE DATAS
+  const safeToDate = (dateValue: any): Date | null => {
+    try {
+      if (!dateValue) return null;
+      if (dateValue.toDate) return dateValue.toDate();
+      if (dateValue instanceof Date) return dateValue;
+      if (typeof dateValue === 'string' || typeof dateValue === 'number') {
+        return new Date(dateValue);
+      }
+      return null;
+    } catch (error) {
+      console.warn('Erro ao converter data:', error);
+      return null;
+    }
+  };
+
   // FUNÇÃO AUXILIAR PARA DETERMINAR PRIORIDADE
   const determinePriority = (orderData: any, item: any): "baixa" | "media" | "alta" | "urgente" => {
-    // Verificar se o pedido está atrasado
+    // Verificar se o pedido está atrasado (com conversão segura de data)
     if (orderData.deliveryDate) {
-      const deliveryDate = orderData.deliveryDate.toDate ? orderData.deliveryDate.toDate() : new Date(orderData.deliveryDate);
-      const today = new Date();
-      const daysUntilDelivery = Math.ceil((deliveryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      
-      if (daysUntilDelivery < 0) return "urgente"; // Já passou do prazo
-      if (daysUntilDelivery <= 3) return "alta";   // Menos de 3 dias
-      if (daysUntilDelivery <= 7) return "media";  // Menos de 7 dias
+      const deliveryDate = safeToDate(orderData.deliveryDate);
+      if (deliveryDate) {
+        const today = new Date();
+        const daysUntilDelivery = Math.ceil((deliveryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysUntilDelivery < 0) return "urgente"; // Já passou do prazo
+        if (daysUntilDelivery <= 3) return "alta";   // Menos de 3 dias
+        if (daysUntilDelivery <= 7) return "media";  // Menos de 7 dias
+      }
     }
     
     // Verificar se é um item de alta prioridade baseado na descrição
@@ -918,7 +953,7 @@ export default function TasksPage() {
       yPos += 8;
 
       docPdf.setFontSize(10).setFont('helvetica', 'normal');
-      const summaryText = `Total: ${tasksSummary.totalTasks} | Concluídas: ${tasksSummary.completedTasks} | Em Andamento: ${tasksSummary.inProgressTasks} | Pendentes: ${tasksSummary.pendingTasks} | Atrasadas: ${tasksSummary.overdueTasks}`;
+      const summaryText = `Total: ${enhancedTasksSummary.totalTasks} | Concluídas: ${enhancedTasksSummary.completedTasks} | Em Andamento: ${enhancedTasksSummary.inProgressTasks} | Pendentes: ${enhancedTasksSummary.pendingTasks} | Atrasadas: ${enhancedTasksSummary.overdueTasks}`;
       docPdf.text(summaryText, 15, yPos);
       yPos += 15;
 
