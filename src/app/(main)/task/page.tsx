@@ -58,13 +58,17 @@ import {
   Edit,
   Trash2,
   BarChart3,
-  CalendarDays
+  CalendarDays,
+  RefreshCw,
+  Package
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 // Schemas
 const taskSchema = z.object({
@@ -153,6 +157,54 @@ export default function TasksPage() {
   const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
 
+  // Estados para sincronização
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+
+  // Componente visual para mostrar status da sincronização
+  const SyncIndicator = () => {
+    if (isSyncing) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          <span>Sincronizando com pedidos...</span>
+        </div>
+      );
+    }
+
+    if (lastSyncTime) {
+      return (
+        <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+          <CheckCircle className="h-4 w-4" />
+          <span>Última sincronização: {format(lastSyncTime, "HH:mm:ss")}</span>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // Função de sincronização manual melhorada
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      await syncTasksFromOrders();
+      setLastSyncTime(new Date());
+      toast({
+        title: "Sincronização concluída!",
+        description: "As tarefas foram sincronizadas com os pedidos.",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro na sincronização",
+        description: "Não foi possível sincronizar as tarefas.",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // Estados do modal
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -168,6 +220,7 @@ export default function TasksPage() {
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterResource, setFilterResource] = useState<string>('all');
   const [filterSupervisor, setFilterSupervisor] = useState<string>('all');
+  const [showOnlyFromOrders, setShowOnlyFromOrders] = useState(false);
 
   // Form
   const form = useForm<Task>({
@@ -251,44 +304,126 @@ export default function TasksPage() {
     }
   };
 
-  // Buscar tarefas pendentes dos pedidos
+  // FUNÇÃO CORRIGIDA DE SINCRONIZAÇÃO COM PEDIDOS
   const syncTasksFromOrders = async () => {
     try {
+      console.log('🔄 Iniciando sincronização de tarefas dos pedidos...');
+      
       const ordersRef = collection(db, "companies", "mecald", "orders");
       const ordersSnapshot = await getDocs(ordersRef);
       
-      const pendingTasks: Partial<Task>[] = [];
+      const newTasksToCreate: Partial<Task>[] = [];
+      const tasksToUpdate: { taskId: string; updates: any }[] = [];
 
       ordersSnapshot.docs.forEach(orderDoc => {
         const orderData = orderDoc.data();
         const orderId = orderDoc.id;
         
+        console.log(`📋 Processando pedido: ${orderData.quotationNumber || orderData.orderNumber}`);
+        
         if (orderData.items && Array.isArray(orderData.items)) {
           orderData.items.forEach((item: any, itemIndex: number) => {
             if (item.productionPlan && Array.isArray(item.productionPlan)) {
               item.productionPlan.forEach((stage: any, stageIndex: number) => {
-                if (stage.status === 'Pendente' || stage.status === 'Em Andamento') {
-                  // Verificar se já existe uma tarefa para esta etapa
-                  const existingTask = tasks.find(task => 
-                    task.relatedOrderId === orderId && 
-                    task.relatedItemId === item.id && 
-                    task.relatedStageIndex === stageIndex
-                  );
+                
+                // Criar identificador único para a tarefa
+                const taskUniqueId = `${orderId}-${item.id}-${stageIndex}`;
+                
+                // Verificar se já existe uma tarefa para esta etapa
+                const existingTask = tasks.find(task => 
+                  task.relatedOrderId === orderId && 
+                  task.relatedItemId === item.id && 
+                  task.relatedStageIndex === stageIndex
+                );
 
-                  if (!existingTask) {
-                    pendingTasks.push({
-                      title: `${stage.stageName} - ${item.description.substring(0, 50)}...`,
-                      description: `Pedido ${orderData.quotationNumber || orderData.orderNumber} - Item: ${item.description}`,
-                      priority: "media",
+                if (existingTask) {
+                  // TAREFA EXISTE - VERIFICAR SE PRECISA DE ATUALIZAÇÃO
+                  const needsUpdate = 
+                    existingTask.status !== stage.status ||
+                    (stage.startDate && (!existingTask.actualStartDate || 
+                      new Date(stage.startDate.toDate()).getTime() !== existingTask.actualStartDate.getTime())) ||
+                    (stage.completedDate && (!existingTask.actualEndDate || 
+                      new Date(stage.completedDate.toDate()).getTime() !== existingTask.actualEndDate.getTime()));
+
+                  if (needsUpdate) {
+                    console.log(`🔄 Tarefa existente precisa de atualização: ${stage.stageName}`);
+                    
+                    const updates: any = {};
+                    
+                    // Mapear status do pedido para status da tarefa
+                    if (stage.status === 'Pendente') updates.status = 'pendente';
+                    else if (stage.status === 'Em Andamento') updates.status = 'em_andamento';
+                    else if (stage.status === 'Concluído') updates.status = 'concluida';
+                    
+                    // Atualizar datas se fornecidas
+                    if (stage.startDate) {
+                      updates.actualStartDate = stage.startDate.toDate();
+                    }
+                    if (stage.completedDate) {
+                      updates.actualEndDate = stage.completedDate.toDate();
+                    }
+                    
+                    tasksToUpdate.push({
+                      taskId: existingTask.id!,
+                      updates
+                    });
+                  }
+                } else {
+                  // TAREFA NÃO EXISTE - CRIAR NOVA
+                  if (stage.status === 'Pendente' || stage.status === 'Em Andamento') {
+                    console.log(`➕ Criando nova tarefa: ${stage.stageName} para item ${item.description}`);
+                    
+                    // Encontrar recurso e supervisor adequados
+                    const defaultResource = resources.find(r => r.status === 'disponivel');
+                    const defaultSupervisor = teamMembers.find(m => m.permission === 'admin') || teamMembers[0];
+                    
+                    if (!defaultResource || !defaultSupervisor) {
+                      console.warn('⚠️ Recursos ou supervisores não encontrados para criar tarefa');
+                      return;
+                    }
+
+                    // Calcular datas baseadas na etapa
+                    let startDate = new Date();
+                    let endDate = new Date();
+                    
+                    if (stage.startDate) {
+                      startDate = stage.startDate.toDate();
+                    }
+                    
+                    if (stage.completedDate) {
+                      endDate = stage.completedDate.toDate();
+                    } else {
+                      // Se não tem data de conclusão, calcular baseado na duração
+                      const duration = stage.durationDays || 1;
+                      endDate = addDays(startDate, duration);
+                    }
+
+                    const newTask: Partial<Task> = {
+                      title: `${stage.stageName} - ${item.description.substring(0, 50)}${item.description.length > 50 ? '...' : ''}`,
+                      description: `Pedido ${orderData.quotationNumber || orderData.orderNumber}\nItem: ${item.description}\nCódigo: ${item.code || 'N/A'}\nQuantidade: ${item.quantity}`,
+                      assignedTo: {
+                        resourceId: defaultResource.id,
+                        resourceName: defaultResource.name,
+                      },
+                      supervisor: {
+                        memberId: defaultSupervisor.id,
+                        memberName: defaultSupervisor.name,
+                      },
+                      priority: determinePriority(orderData, item),
                       status: stage.status === 'Em Andamento' ? 'em_andamento' : 'pendente',
-                      estimatedHours: (stage.durationDays || 1) * 8, // Converter dias para horas
-                      startDate: stage.startDate?.toDate() || new Date(),
-                      endDate: stage.completedDate?.toDate() || addDays(stage.startDate?.toDate() || new Date(), stage.durationDays || 1),
+                      estimatedHours: (stage.durationDays || 1) * 8,
+                      startDate: startDate,
+                      endDate: endDate,
+                      actualStartDate: stage.startDate ? stage.startDate.toDate() : null,
+                      actualEndDate: stage.completedDate ? stage.completedDate.toDate() : null,
                       relatedOrderId: orderId,
                       relatedItemId: item.id,
                       relatedStageIndex: stageIndex,
                       isFromOrder: true,
-                    });
+                      notes: `Gerada automaticamente do pedido ${orderData.quotationNumber || orderData.orderNumber}`,
+                    };
+
+                    newTasksToCreate.push(newTask);
                   }
                 }
               });
@@ -297,16 +432,173 @@ export default function TasksPage() {
         }
       });
 
-      // Criar tarefas automaticamente se houver pendências
-      if (pendingTasks.length > 0) {
+      // CRIAR NOVAS TAREFAS
+      if (newTasksToCreate.length > 0) {
+        console.log(`➕ Criando ${newTasksToCreate.length} novas tarefas...`);
+        
+        for (const taskData of newTasksToCreate) {
+          try {
+            const newTaskRef = doc(collection(db, "companies", "mecald", "tasks"));
+            await setDoc(newTaskRef, {
+              ...taskData,
+              startDate: Timestamp.fromDate(taskData.startDate!),
+              endDate: Timestamp.fromDate(taskData.endDate!),
+              actualStartDate: taskData.actualStartDate ? Timestamp.fromDate(taskData.actualStartDate) : null,
+              actualEndDate: taskData.actualEndDate ? Timestamp.fromDate(taskData.actualEndDate) : null,
+              createdAt: Timestamp.now(),
+              updatedAt: Timestamp.now(),
+            });
+          } catch (error) {
+            console.error('❌ Erro ao criar tarefa:', error);
+          }
+        }
+        
         toast({
           title: "Tarefas sincronizadas",
-          description: `${pendingTasks.length} novas tarefas foram encontradas nos pedidos.`,
+          description: `${newTasksToCreate.length} novas tarefas foram criadas a partir dos pedidos.`,
         });
       }
 
+      // ATUALIZAR TAREFAS EXISTENTES
+      if (tasksToUpdate.length > 0) {
+        console.log(`🔄 Atualizando ${tasksToUpdate.length} tarefas existentes...`);
+        
+        for (const { taskId, updates } of tasksToUpdate) {
+          try {
+            const taskRef = doc(db, "companies", "mecald", "tasks", taskId);
+            const updateData: any = {
+              ...updates,
+              updatedAt: Timestamp.now(),
+            };
+            
+            // Converter datas para Timestamp
+            if (updates.actualStartDate) {
+              updateData.actualStartDate = Timestamp.fromDate(updates.actualStartDate);
+            }
+            if (updates.actualEndDate) {
+              updateData.actualEndDate = Timestamp.fromDate(updates.actualEndDate);
+            }
+            
+            await updateDoc(taskRef, updateData);
+          } catch (error) {
+            console.error('❌ Erro ao atualizar tarefa:', error);
+          }
+        }
+        
+        toast({
+          title: "Tarefas atualizadas",
+          description: `${tasksToUpdate.length} tarefas foram atualizadas com base no progresso dos pedidos.`,
+        });
+      }
+
+      // RECARREGAR TAREFAS SE HOUVE MUDANÇAS
+      if (newTasksToCreate.length > 0 || tasksToUpdate.length > 0) {
+        await fetchTasks();
+      }
+
+      // Atualizar tempo da última sincronização
+      setLastSyncTime(new Date());
+
+      console.log('✅ Sincronização concluída');
+
     } catch (error) {
-      console.error("Erro ao sincronizar tarefas dos pedidos:", error);
+      console.error("❌ Erro ao sincronizar tarefas dos pedidos:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro na sincronização",
+        description: "Não foi possível sincronizar as tarefas com os pedidos.",
+      });
+    }
+  };
+
+  // FUNÇÃO AUXILIAR PARA DETERMINAR PRIORIDADE
+  const determinePriority = (orderData: any, item: any): "baixa" | "media" | "alta" | "urgente" => {
+    // Verificar se o pedido está atrasado
+    if (orderData.deliveryDate) {
+      const deliveryDate = orderData.deliveryDate.toDate ? orderData.deliveryDate.toDate() : new Date(orderData.deliveryDate);
+      const today = new Date();
+      const daysUntilDelivery = Math.ceil((deliveryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysUntilDelivery < 0) return "urgente"; // Já passou do prazo
+      if (daysUntilDelivery <= 3) return "alta";   // Menos de 3 dias
+      if (daysUntilDelivery <= 7) return "media";  // Menos de 7 dias
+    }
+    
+    // Verificar se é um item de alta prioridade baseado na descrição
+    const description = item.description?.toLowerCase() || '';
+    if (description.includes('urgente') || description.includes('prioritário')) {
+      return "alta";
+    }
+    
+    return "media"; // Padrão
+  };
+
+  // FUNÇÃO PARA SINCRONIZAÇÃO BIDIRECIONAL
+  const updateOrderProgressFromTask = async (task: Task) => {
+    if (!task.relatedOrderId || !task.relatedItemId || task.relatedStageIndex === undefined) {
+      return;
+    }
+
+    try {
+      console.log('🔄 Atualizando progresso do pedido baseado na tarefa:', task.title);
+      
+      const orderRef = doc(db, "companies", "mecald", "orders", task.relatedOrderId);
+      const orderSnap = await getDoc(orderRef);
+      
+      if (!orderSnap.exists()) {
+        console.warn('⚠️ Pedido não encontrado:', task.relatedOrderId);
+        return;
+      }
+      
+      const orderData = orderSnap.data();
+      const updatedItems = [...orderData.items];
+      
+      // Encontrar o item correto
+      const itemIndex = updatedItems.findIndex(item => item.id === task.relatedItemId);
+      if (itemIndex === -1) {
+        console.warn('⚠️ Item não encontrado:', task.relatedItemId);
+        return;
+      }
+      
+      const item = updatedItems[itemIndex];
+      if (!item.productionPlan || !item.productionPlan[task.relatedStageIndex]) {
+        console.warn('⚠️ Etapa de produção não encontrada:', task.relatedStageIndex);
+        return;
+      }
+      
+      // Atualizar a etapa baseada no status da tarefa
+      const stage = item.productionPlan[task.relatedStageIndex];
+      
+      if (task.status === 'pendente') {
+        stage.status = 'Pendente';
+      } else if (task.status === 'em_andamento') {
+        stage.status = 'Em Andamento';
+        if (task.actualStartDate && !stage.startDate) {
+          stage.startDate = Timestamp.fromDate(task.actualStartDate);
+        }
+      } else if (task.status === 'concluida') {
+        stage.status = 'Concluído';
+        if (task.actualStartDate) {
+          stage.startDate = Timestamp.fromDate(task.actualStartDate);
+        }
+        if (task.actualEndDate) {
+          stage.completedDate = Timestamp.fromDate(task.actualEndDate);
+        } else {
+          stage.completedDate = Timestamp.now();
+        }
+      }
+      
+      updatedItems[itemIndex] = item;
+      
+      await updateDoc(orderRef, { 
+        items: updatedItems,
+        lastUpdate: Timestamp.now(),
+      });
+      
+      console.log('✅ Progresso do pedido atualizado com sucesso');
+      
+    } catch (error) {
+      console.error('❌ Erro ao atualizar progresso do pedido:', error);
     }
   };
 
@@ -317,18 +609,18 @@ export default function TasksPage() {
     }
   }, [user, authLoading]);
 
-  // Periodicamente sincronizar com pedidos
+  // MODIFICAR O useEffect PARA SINCRONIZAÇÃO MAIS FREQUENTE
   useEffect(() => {
     const interval = setInterval(() => {
       if (user) {
         syncTasksFromOrders();
       }
-    }, 30000); // A cada 30 segundos
+    }, 15000); // A cada 15 segundos para sincronização mais rápida
 
     return () => clearInterval(interval);
-  }, [tasks, user]);
+  }, [tasks, user, resources, teamMembers]);
 
-  // Salvar tarefa
+  // MODIFICAR A FUNÇÃO onSubmit PARA INCLUIR SINCRONIZAÇÃO BIDIRECIONAL
   const onSubmit = async (values: Task) => {
     try {
       const taskData = {
@@ -345,9 +637,9 @@ export default function TasksPage() {
         const taskRef = doc(db, "companies", "mecald", "tasks", selectedTask.id);
         await updateDoc(taskRef, taskData);
         
-        // Se a tarefa está relacionada a um pedido, atualizar o progresso do pedido
-        if (selectedTask.relatedOrderId && selectedTask.relatedItemId !== undefined && selectedTask.relatedStageIndex !== undefined) {
-          await updateOrderProgress(selectedTask.relatedOrderId, selectedTask.relatedItemId, selectedTask.relatedStageIndex, values.status);
+        // SINCRONIZAÇÃO BIDIRECIONAL - Atualizar progresso do pedido
+        if (selectedTask.isFromOrder) {
+          await updateOrderProgressFromTask({ ...values, id: selectedTask.id });
         }
         
         toast({
@@ -381,36 +673,7 @@ export default function TasksPage() {
     }
   };
 
-  // Atualizar progresso do pedido quando tarefa for concluída
-  const updateOrderProgress = async (orderId: string, itemId: string, stageIndex: number, taskStatus: string) => {
-    try {
-      const orderRef = doc(db, "companies", "mecald", "orders", orderId);
-      const orderSnap = await getDoc(orderRef);
-      
-      if (orderSnap.exists()) {
-        const orderData = orderSnap.data();
-        const items = [...orderData.items];
-        
-        if (items[stageIndex] && items[stageIndex].productionPlan && items[stageIndex].productionPlan[stageIndex]) {
-          const stage = items[stageIndex].productionPlan[stageIndex];
-          
-          if (taskStatus === 'concluida') {
-            stage.status = 'Concluído';
-            stage.completedDate = Timestamp.now();
-          } else if (taskStatus === 'em_andamento') {
-            stage.status = 'Em Andamento';
-            if (!stage.startDate) {
-              stage.startDate = Timestamp.now();
-            }
-          }
-          
-          await updateDoc(orderRef, { items });
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao atualizar progresso do pedido:", error);
-    }
-  };
+
 
   // Deletar tarefa
   const handleDeleteTask = async () => {
@@ -470,27 +733,27 @@ export default function TasksPage() {
       const priorityMatch = filterPriority === 'all' || task.priority === filterPriority;
       const resourceMatch = filterResource === 'all' || task.assignedTo?.resourceId === filterResource;
       const supervisorMatch = filterSupervisor === 'all' || task.supervisor?.memberId === filterSupervisor;
+      const orderFilter = !showOnlyFromOrders || task.isFromOrder;
 
-      return isInPeriod && statusMatch && priorityMatch && resourceMatch && supervisorMatch;
+      return isInPeriod && statusMatch && priorityMatch && resourceMatch && supervisorMatch && orderFilter;
     });
-  }, [tasks, currentDate, viewMode, filterStatus, filterPriority, filterResource, filterSupervisor]);
+  }, [tasks, currentDate, viewMode, filterStatus, filterPriority, filterResource, filterSupervisor, showOnlyFromOrders]);
 
-  // Calcular estatísticas
-  const tasksSummary = useMemo((): TaskSummary => {
+  // Estatísticas melhoradas incluindo tarefas dos pedidos
+  const enhancedTasksSummary = useMemo((): TaskSummary & { fromOrdersCount: number } => {
     const filteredTasks = getFilteredTasks;
     const total = filteredTasks.length;
+    const fromOrders = filteredTasks.filter(t => t.isFromOrder).length;
     const completed = filteredTasks.filter(t => t.status === 'concluida').length;
     const pending = filteredTasks.filter(t => t.status === 'pendente').length;
     const inProgress = filteredTasks.filter(t => t.status === 'em_andamento').length;
     
-    // Tarefas atrasadas (passaram da data de fim e não estão concluídas)
     const overdue = filteredTasks.filter(t => 
       t.status !== 'concluida' && new Date() > t.endDate
     ).length;
 
     const completionRate = total > 0 ? (completed / total) * 100 : 0;
 
-    // Calcular atraso médio
     const completedTasks = filteredTasks.filter(t => t.status === 'concluida' && t.actualEndDate);
     const totalDelay = completedTasks.reduce((acc, task) => {
       if (task.actualEndDate) {
@@ -509,6 +772,7 @@ export default function TasksPage() {
       overdueTasks: overdue,
       completionRate,
       averageDelay,
+      fromOrdersCount: fromOrders,
     };
   }, [getFilteredTasks]);
 
@@ -780,9 +1044,18 @@ export default function TasksPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <SyncIndicator />
           <Button onClick={exportWeeklyPDF} variant="outline">
             <Download className="mr-2 h-4 w-4" />
             Exportar PDF
+          </Button>
+          <Button 
+            onClick={handleManualSync} 
+            variant="outline"
+            disabled={isSyncing}
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+            Sincronizar Pedidos
           </Button>
           <Button onClick={handleNewTask}>
             <Plus className="mr-2 h-4 w-4" />
@@ -792,28 +1065,34 @@ export default function TasksPage() {
       </div>
 
       {/* Dashboard de Estatísticas */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <StatCard
           title="Total de Tarefas"
-          value={tasksSummary.totalTasks.toString()}
+          value={enhancedTasksSummary.totalTasks.toString()}
           icon={Target}
-          description={`${tasksSummary.completionRate.toFixed(1)}% de conclusão`}
+          description={`${enhancedTasksSummary.completionRate.toFixed(1)}% de conclusão`}
+        />
+        <StatCard
+          title="Dos Pedidos"
+          value={enhancedTasksSummary.fromOrdersCount.toString()}
+          icon={Package}
+          description="Geradas automaticamente"
         />
         <StatCard
           title="Concluídas"
-          value={tasksSummary.completedTasks.toString()}
+          value={enhancedTasksSummary.completedTasks.toString()}
           icon={CheckCircle}
-          description={`${tasksSummary.pendingTasks} ainda pendentes`}
+          description={`${enhancedTasksSummary.pendingTasks} ainda pendentes`}
         />
         <StatCard
           title="Em Andamento"
-          value={tasksSummary.inProgressTasks.toString()}
+          value={enhancedTasksSummary.inProgressTasks.toString()}
           icon={PlayCircle}
-          description={`${tasksSummary.overdueTasks} em atraso`}
+          description={`${enhancedTasksSummary.overdueTasks} em atraso`}
         />
         <StatCard
           title="Atraso Médio"
-          value={`${tasksSummary.averageDelay.toFixed(1)} dias`}
+          value={`${enhancedTasksSummary.averageDelay.toFixed(1)} dias`}
           icon={Clock}
           description="Para tarefas concluídas"
         />
@@ -941,7 +1220,18 @@ export default function TasksPage() {
                   </SelectContent>
                 </Select>
 
-                {(filterStatus !== 'all' || filterPriority !== 'all' || filterResource !== 'all' || filterSupervisor !== 'all') && (
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="show-only-orders"
+                    checked={showOnlyFromOrders}
+                    onCheckedChange={setShowOnlyFromOrders}
+                  />
+                  <Label htmlFor="show-only-orders" className="text-sm">
+                    Apenas tarefas dos pedidos
+                  </Label>
+                </div>
+
+                {(filterStatus !== 'all' || filterPriority !== 'all' || filterResource !== 'all' || filterSupervisor !== 'all' || showOnlyFromOrders) && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -950,6 +1240,7 @@ export default function TasksPage() {
                       setFilterPriority('all');
                       setFilterResource('all');
                       setFilterSupervisor('all');
+                      setShowOnlyFromOrders(false);
                     }}
                   >
                     Limpar Filtros
@@ -1174,18 +1465,18 @@ export default function TasksPage() {
                   <div>
                     <div className="flex justify-between text-sm mb-2">
                       <span>Taxa de Conclusão</span>
-                      <span>{tasksSummary.completionRate.toFixed(1)}%</span>
+                      <span>{enhancedTasksSummary.completionRate.toFixed(1)}%</span>
                     </div>
-                    <Progress value={tasksSummary.completionRate} className="h-2" />
+                    <Progress value={enhancedTasksSummary.completionRate} className="h-2" />
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4 text-center">
                     <div className="p-3 bg-green-50 rounded-lg">
-                      <p className="text-2xl font-bold text-green-600">{tasksSummary.completedTasks}</p>
+                      <p className="text-2xl font-bold text-green-600">{enhancedTasksSummary.completedTasks}</p>
                       <p className="text-sm text-muted-foreground">Concluídas</p>
                     </div>
                     <div className="p-3 bg-blue-50 rounded-lg">
-                      <p className="text-2xl font-bold text-blue-600">{tasksSummary.pendingTasks + tasksSummary.inProgressTasks}</p>
+                      <p className="text-2xl font-bold text-blue-600">{enhancedTasksSummary.pendingTasks + enhancedTasksSummary.inProgressTasks}</p>
                       <p className="text-sm text-muted-foreground">Em Andamento</p>
                     </div>
                   </div>
