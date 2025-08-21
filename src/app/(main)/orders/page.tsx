@@ -1842,14 +1842,15 @@ export default function OrdersPage() {
       setIsAddingItem(false);
     };
 
-    // CORREÇÃO SIMPLES E DIRETA - handlePlanChange
     const handlePlanChange = (stageIndex: number, field: string, value: any) => {
-      console.log('🔧 Alterando:', { stageIndex, field, value });
-      
       const newPlan = [...editedPlan];
       const updatedStage = { ...newPlan[stageIndex] };
       
-      if (field === 'startDate' || field === 'completedDate') {
+      // ADICIONAR tratamento para os novos campos
+      if (field === 'assignedResource' || field === 'supervisor') {
+        updatedStage[field] = value;
+      } else if (field === 'startDate' || field === 'completedDate') {
+        // Código existente para datas
         if (value === null || value === '' || value === undefined) {
           updatedStage[field] = null;
         } else {
@@ -1868,39 +1869,13 @@ export default function OrdersPage() {
         if (!updatedStage.completedDate) {
           updatedStage.completedDate = new Date();
         }
-      } else if (field === 'assignedResource') {
-        // Lidar com seleção de recurso - CORRIGIDO
-        if (value === null || value === 'none' || value === '') {
-          updatedStage.assignedResource = undefined;
-        } else {
-          const resource = resources.find(r => r.id === value);
-          if (resource) {
-            updatedStage.assignedResource = {
-              resourceId: resource.id,
-              resourceName: resource.name || resource.nome || 'Recurso sem nome'
-            };
-          }
-        }
-      } else if (field === 'supervisor') {
-        // Lidar com seleção de supervisor - CORRIGIDO
-        if (value === null || value === 'none' || value === '') {
-          updatedStage.supervisor = undefined;
-        } else {
-          const member = teamMembers.find(m => m.id === value);
-          if (member) {
-            updatedStage.supervisor = {
-              memberId: member.id,
-              memberName: member.name || member.nome || 'Membro sem nome'
-            };
-          }
-        }
       } else {
         updatedStage[field] = value;
       }
       
       newPlan[stageIndex] = updatedStage;
       
-      // APLICAR LÓGICA SEQUENCIAL SIMPLES
+      // Manter lógica sequencial existente
       if (field === 'startDate' || field === 'durationDays' || field === 'useBusinessDays') {
         recalculateSequentialTasks(newPlan, stageIndex);
       }
@@ -2577,21 +2552,35 @@ export default function OrdersPage() {
                 getDoc(doc(db, "companies", "mecald", "settings", "team"))
             ]);
 
-            // Carregar recursos
-            const resources = resourcesDoc.exists() ? (resourcesDoc.data().resources || []) : [];
-            const validResources = resources.filter(r => 
-                r && r.id && r.id.trim() !== '' && r.name && r.name.trim() !== ''
-            );
-            setAvailableResources(validResources);
-            console.log('📋 Recursos carregados:', validResources);
+            // Carregar recursos - CORRIGIR estrutura
+            if (resourcesDoc.exists()) {
+                const resourcesData = resourcesDoc.data();
+                const resources = resourcesData?.resources || [];
+                const validResources = resources.filter(r => 
+                    r && r.id && typeof r.id === 'string' && r.id.trim() !== '' && 
+                    r.name && typeof r.name === 'string' && r.name.trim() !== ''
+                );
+                setAvailableResources(validResources);
+                console.log('📋 Recursos carregados:', validResources);
+            } else {
+                setAvailableResources([]);
+                console.log('📋 Nenhum documento de recursos encontrado');
+            }
 
-            // Carregar membros da equipe
-            const members = teamDoc.exists() ? (teamDoc.data().members || []) : [];
-            const validMembers = members.filter(m => 
-                m && m.id && m.id.trim() !== '' && m.name && m.name.trim() !== ''
-            );
-            setTeamMembers(validMembers);
-            console.log('👥 Membros carregados:', validMembers);
+            // Carregar membros - CORRIGIR estrutura
+            if (teamDoc.exists()) {
+                const teamData = teamDoc.data();
+                const members = teamData?.members || [];
+                const validMembers = members.filter(m => 
+                    m && m.id && typeof m.id === 'string' && m.id.trim() !== '' && 
+                    m.name && typeof m.name === 'string' && m.name.trim() !== ''
+                );
+                setTeamMembers(validMembers);
+                console.log('👥 Membros carregados:', validMembers);
+            } else {
+                setTeamMembers([]);
+                console.log('👥 Nenhum documento de membros encontrado');
+            }
 
             // Carregar template do produto (código existente)
             let productTemplateMap = new Map<string, any>();
@@ -2800,19 +2789,9 @@ export default function OrdersPage() {
                         useBusinessDays: Boolean(stage.useBusinessDays !== false),
                         startDate: startTimestamp,
                         completedDate: endTimestamp,
-                        // Novos campos para recurso e supervisor
-                        ...(stage.assignedResource && {
-                            assignedResource: {
-                                resourceId: String(stage.assignedResource.resourceId),
-                                resourceName: String(stage.assignedResource.resourceName)
-                            }
-                        }),
-                        ...(stage.supervisor && {
-                            supervisor: {
-                                memberId: String(stage.supervisor.memberId),
-                                memberName: String(stage.supervisor.memberName)
-                            }
-                        }),
+                        // NOVO: Adicionar campos de recurso e supervisor
+                        assignedResource: stage.assignedResource || null,
+                        supervisor: stage.supervisor || null,
                     };
                     
                     console.log(`💾 [handleSaveProgress] ✓ Etapa ${index + 1} convertida:`, {
@@ -2858,19 +2837,9 @@ export default function OrdersPage() {
                             useBusinessDays: Boolean(stage.useBusinessDays !== false),
                             startDate: stage.startDate || null,
                             completedDate: stage.completedDate || null,
-                            // Novos campos para recurso e supervisor
-                            ...(stage.assignedResource && {
-                                assignedResource: {
-                                    resourceId: String(stage.assignedResource.resourceId),
-                                    resourceName: String(stage.assignedResource.resourceName)
-                                }
-                            }),
-                            ...(stage.supervisor && {
-                                supervisor: {
-                                    memberId: String(stage.supervisor.memberId),
-                                    memberName: String(stage.supervisor.memberName)
-                                }
-                            }),
+                            // NOVO: Preservar campos de recurso e supervisor
+                            assignedResource: stage.assignedResource || null,
+                            supervisor: stage.supervisor || null,
                         }));
                     }
                     
@@ -5458,11 +5427,11 @@ export default function OrdersPage() {
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                                 <div className="space-y-2">
                                   <Label>Recurso Responsável</Label>
-                                  {/* Select de Recurso - CORRIGIDO */}
+                                  {/* Select de Recurso - VERSÃO CORRIGIDA */}
                                   <Select 
                                     value={stage.assignedResource?.resourceId || ""} 
                                     onValueChange={(value) => {
-                                      if (value === "none") {
+                                      if (!value || value === "none") {
                                         handlePlanChange(index, 'assignedResource', null);
                                       } else {
                                         const resource = availableResources.find(r => r.id === value);
@@ -5481,7 +5450,7 @@ export default function OrdersPage() {
                                     <SelectContent>
                                       <SelectItem value="none">Nenhum recurso</SelectItem>
                                       {availableResources
-                                        .filter(r => r.status === 'disponivel' && r.id && r.id.trim() !== '')
+                                        .filter(r => r.status === 'disponivel')
                                         .map(resource => (
                                           <SelectItem key={resource.id} value={resource.id}>
                                             {resource.name} ({resource.type})
@@ -5504,11 +5473,11 @@ export default function OrdersPage() {
                                 </div>
                                 <div className="space-y-2">
                                   <Label>Supervisor</Label>
-                                  {/* Select de Supervisor - CORRIGIDO */}
+                                  {/* Select de Supervisor - VERSÃO CORRIGIDA */}
                                   <Select 
                                     value={stage.supervisor?.memberId || ""} 
                                     onValueChange={(value) => {
-                                      if (value === "none") {
+                                      if (!value || value === "none") {
                                         handlePlanChange(index, 'supervisor', null);
                                       } else {
                                         const member = teamMembers.find(m => m.id === value);
@@ -5526,13 +5495,11 @@ export default function OrdersPage() {
                                     </SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="none">Nenhum supervisor</SelectItem>
-                                      {teamMembers
-                                        .filter(m => m.id && m.id.trim() !== '')
-                                        .map(member => (
-                                          <SelectItem key={member.id} value={member.id}>
-                                            {member.name} ({member.position})
-                                          </SelectItem>
-                                        ))}
+                                      {teamMembers.map(member => (
+                                        <SelectItem key={member.id} value={member.id}>
+                                          {member.name} ({member.position})
+                                        </SelectItem>
+                                      ))}
                                     </SelectContent>
                                   </Select>
                                   {stage.supervisor && (
