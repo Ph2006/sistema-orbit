@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock, ChevronDown } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -2536,6 +2536,345 @@ export default function OrdersPage() {
         }
     };
 
+    const handleExportScheduleSummary = async () => {
+        if (!selectedOrder) return;
+
+        toast({ title: "Gerando Resumo do Cronograma...", description: "Por favor, aguarde." });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let yPos = 15;
+
+            // Header com logo e informações da empresa
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+
+            // Informações da empresa
+            let companyInfoX = 65;
+            let companyInfoY = yPos + 5;
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', companyInfoX, companyInfoY);
+            companyInfoY += 6;
+            
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - companyInfoX - 15);
+                docPdf.text(addressLines, companyInfoX, companyInfoY);
+                companyInfoY += (addressLines.length * 3);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, companyInfoX, companyInfoY);
+            }
+
+            yPos = 45;
+
+            // Título do documento
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text('RESUMO DO CRONOGRAMA', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+
+            // Box com informações do pedido
+            docPdf.setFillColor(245, 245, 245);
+            docPdf.rect(10, yPos - 5, pageWidth - 20, 45, 'F');
+            docPdf.setDrawColor(200, 200, 200);
+            docPdf.rect(10, yPos - 5, pageWidth - 20, 45, 'S');
+            
+            // Informações do pedido em duas colunas dentro do box
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
+            
+            // Coluna esquerda
+            const leftColumnX = 15;
+            let leftColumnY = yPos;
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+            leftColumnY += 6;
+            docPdf.setFont('helvetica', 'normal');
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            if (selectedOrder.projectName) {
+                docPdf.text(`Projeto: ${selectedOrder.projectName}`, leftColumnX, leftColumnY);
+                leftColumnY += 5;
+            }
+            docPdf.text(`Total de Itens: ${selectedOrder.items.length}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            docPdf.text(`Peso Total: ${selectedOrder.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, leftColumnX, leftColumnY);
+            
+            // Coluna direita
+            const rightColumnX = pageWidth / 2 + 10;
+            let rightColumnY = yPos + 6;
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            if (selectedOrder.deliveryDate) {
+                docPdf.text(`Data de Entrega Geral: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+                rightColumnY += 5;
+            }
+            docPdf.text(`Status: ${selectedOrder.status}`, rightColumnX, rightColumnY);
+            
+            yPos += 50;
+
+            // Progresso geral do pedido
+            const orderProgress = calculateOrderProgress(selectedOrder);
+            
+            // Box de progresso geral
+            docPdf.setFillColor(240, 248, 255);
+            docPdf.rect(10, yPos - 5, pageWidth - 20, 20, 'F');
+            docPdf.setDrawColor(100, 149, 237);
+            docPdf.rect(10, yPos - 5, pageWidth - 20, 20, 'S');
+            
+            docPdf.setFontSize(10).setFont('helvetica', 'bold');
+            docPdf.text('PROGRESSO GERAL DO PEDIDO:', 15, yPos);
+            yPos += 8;
+            
+            // Barra de progresso geral
+            const progressBarWidth = 120;
+            const progressBarHeight = 6;
+            const progressBarX = 15;
+            
+            // Fundo da barra
+            docPdf.setFillColor(230, 230, 230);
+            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'F');
+            
+            // Barra de progresso colorida
+            const progressWidth = (orderProgress / 100) * progressBarWidth;
+            if (orderProgress < 30) {
+                docPdf.setFillColor(239, 68, 68);
+            } else if (orderProgress < 70) {
+                docPdf.setFillColor(245, 158, 11);
+            } else {
+                docPdf.setFillColor(34, 197, 94);
+            }
+            docPdf.rect(progressBarX, yPos, progressWidth, progressBarHeight, 'F');
+            
+            // Borda da barra
+            docPdf.setDrawColor(0, 0, 0);
+            docPdf.setLineWidth(0.1);
+            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'S');
+            
+            // Porcentagem
+            docPdf.setFontSize(9).setFont('helvetica', 'bold');
+            docPdf.setTextColor(0, 0, 0);
+            docPdf.text(`${orderProgress.toFixed(1)}%`, progressBarX + progressBarWidth + 5, yPos + 5);
+            
+            // Status de conclusão
+            const completedItems = selectedOrder.items.filter(item => calculateItemProgress(item) === 100).length;
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
+            docPdf.text(`${completedItems} de ${selectedOrder.items.length} itens concluídos`, pageWidth - 15, yPos + 5, { align: 'right' });
+            
+            yPos += 20;
+
+            // Calcular última data prevista de entrega
+            let latestDeliveryDate: Date | null = null;
+            selectedOrder.items.forEach(item => {
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    const lastStage = item.productionPlan[item.productionPlan.length - 1];
+                    if (lastStage.completedDate) {
+                        const stageDate = safeToDate(lastStage.completedDate);
+                        if (stageDate && (!latestDeliveryDate || stageDate > latestDeliveryDate)) {
+                            latestDeliveryDate = stageDate;
+                        }
+                    }
+                }
+            });
+
+            // Box com data de conclusão prevista
+            if (latestDeliveryDate) {
+                docPdf.setFillColor(255, 250, 230);
+                docPdf.rect(10, yPos - 5, pageWidth - 20, 15, 'F');
+                docPdf.setDrawColor(255, 165, 0);
+                docPdf.rect(10, yPos - 5, pageWidth - 20, 15, 'S');
+                
+                docPdf.setFontSize(10).setFont('helvetica', 'bold');
+                docPdf.setTextColor(200, 100, 0);
+                docPdf.text('PREVISÃO DE CONCLUSÃO DA PRODUÇÃO:', 15, yPos);
+                docPdf.setTextColor(0, 0, 0);
+                docPdf.text(format(latestDeliveryDate, "dd/MM/yyyy"), pageWidth - 15, yPos, { align: 'right' });
+                yPos += 20;
+            } else {
+                yPos += 5;
+            }
+
+            // Tabela resumo dos itens
+            docPdf.setTextColor(0, 0, 0);
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('RESUMO DOS ITENS', 15, yPos);
+            yPos += 10;
+
+            const tableBody: any[][] = [];
+            selectedOrder.items.forEach((item, index) => {
+                const itemProgress = calculateItemProgress(item);
+                const itemWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                
+                // Determinar última data prevista do item
+                let itemLastDate = 'N/A';
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    const lastStage = item.productionPlan[item.productionPlan.length - 1];
+                    if (lastStage.completedDate) {
+                        const date = safeToDate(lastStage.completedDate);
+                        if (date) {
+                            itemLastDate = format(date, 'dd/MM/yy');
+                        }
+                    }
+                }
+                
+                // Status do item
+                let itemStatus = 'Pendente';
+                if (itemProgress === 100) {
+                    itemStatus = 'Concluído';
+                } else if (itemProgress > 0) {
+                    itemStatus = 'Em Produção';
+                }
+                
+                tableBody.push([
+                    (index + 1).toString(),
+                    item.itemNumber || '-',
+                    item.code || '-',
+                    item.description.length > 35 ? item.description.substring(0, 35) + '...' : item.description,
+                    item.quantity.toString(),
+                    itemWeight.toLocaleString('pt-BR', { minimumFractionDigits: 1 }),
+                    `${itemProgress.toFixed(0)}%`,
+                    itemLastDate,
+                    itemStatus
+                ]);
+            });
+            
+            // Adicionar linha de total
+            tableBody.push([
+                { content: 'TOTAL', colSpan: 5, styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
+                { content: selectedOrder.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' kg', styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
+                { content: `${orderProgress.toFixed(0)}%`, styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
+                { content: '', styles: { fillColor: [240, 240, 240] } },
+                { content: '', styles: { fillColor: [240, 240, 240] } }
+            ]);
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['#', 'Item PC', 'Código', 'Descrição', 'Qtd', 'Peso (kg)', 'Progresso', 'Previsão', 'Status']],
+                body: tableBody,
+                styles: { 
+                    fontSize: 7,
+                    cellPadding: 2
+                },
+                headStyles: { 
+                    fillColor: [37, 99, 235], 
+                    fontSize: 8, 
+                    textColor: 255,
+                    fontStyle: 'bold'
+                },
+                columnStyles: {
+                    0: { cellWidth: 10, halign: 'center' }, // #
+                    1: { cellWidth: 15, halign: 'center' }, // Item PC
+                    2: { cellWidth: 20, halign: 'center' }, // Código
+                    3: { cellWidth: 55 }, // Descrição
+                    4: { cellWidth: 12, halign: 'center' }, // Qtd
+                    5: { cellWidth: 20, halign: 'right' }, // Peso
+                    6: { cellWidth: 18, halign: 'center' }, // Progresso
+                    7: { cellWidth: 20, halign: 'center' }, // Previsão
+                    8: { cellWidth: 20, halign: 'center' }, // Status
+                },
+                didDrawCell: (data) => {
+                    // Colorir células de progresso
+                    if (data.column.index === 6 && data.section === 'body' && data.row.index < tableBody.length - 1) {
+                        const progressValue = parseFloat(data.cell.raw as string);
+                        
+                        if (progressValue === 100) {
+                            data.cell.styles.fillColor = [220, 252, 231];
+                            data.cell.styles.textColor = [21, 128, 61];
+                        } else if (progressValue >= 50) {
+                            data.cell.styles.fillColor = [254, 249, 195];
+                            data.cell.styles.textColor = [133, 77, 14];
+                        } else if (progressValue > 0) {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                            data.cell.styles.textColor = [185, 28, 28];
+                        }
+                    }
+                    
+                    // Colorir status
+                    if (data.column.index === 8 && data.section === 'body' && data.row.index < tableBody.length - 1) {
+                        const status = data.cell.raw as string;
+                        if (status === 'Concluído') {
+                            data.cell.styles.fillColor = [220, 252, 231];
+                            data.cell.styles.textColor = [21, 128, 61];
+                            data.cell.styles.fontStyle = 'bold';
+                        } else if (status === 'Em Produção') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                            data.cell.styles.textColor = [37, 99, 235];
+                        }
+                    }
+                },
+                margin: { left: 15, right: 15 }
+            });
+
+            // Resumo de documentos
+            const finalY = (docPdf as any).lastAutoTable.finalY + 10;
+            
+            if (finalY + 30 < pageHeight - 20) {
+                docPdf.setFontSize(10).setFont('helvetica', 'bold');
+                docPdf.text('STATUS DOS DOCUMENTOS:', 15, finalY);
+                
+                let docY = finalY + 6;
+                docPdf.setFontSize(8).setFont('helvetica', 'normal');
+                
+                const docStatus = (hasDoc: boolean) => hasDoc ? '✓ Recebido' : '✗ Pendente';
+                const docColor = (hasDoc: boolean) => hasDoc ? [0, 128, 0] : [255, 0, 0];
+                
+                // Desenhos
+                docPdf.setTextColor(...docColor(selectedOrder.documents?.drawings || false));
+                docPdf.text(`Desenhos Técnicos: ${docStatus(selectedOrder.documents?.drawings || false)}`, 15, docY);
+                
+                // Plano de Inspeção
+                docPdf.setTextColor(...docColor(selectedOrder.documents?.inspectionTestPlan || false));
+                docPdf.text(`Plano de Inspeção: ${docStatus(selectedOrder.documents?.inspectionTestPlan || false)}`, 75, docY);
+                
+                // Plano de Pintura
+                docPdf.setTextColor(...docColor(selectedOrder.documents?.paintPlan || false));
+                docPdf.text(`Plano de Pintura: ${docStatus(selectedOrder.documents?.paintPlan || false)}`, 135, docY);
+                
+                docPdf.setTextColor(0, 0, 0);
+                
+                // Rodapé
+                docY += 15;
+                docPdf.setFontSize(7).setFont('helvetica', 'italic');
+                docPdf.text(
+                    `Resumo gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    docY,
+                    { align: 'center' }
+                );
+            }
+
+            // Salvar o PDF
+            docPdf.save(`Resumo_Cronograma_${selectedOrder.quotationNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
+
+            toast({
+                title: "Resumo do Cronograma gerado com sucesso!",
+                description: "O arquivo PDF foi baixado com todas as informações resumidas.",
+            });
+
+        } catch (error) {
+            console.error("Error generating schedule summary:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar resumo",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
+
     const handleOpenProgressModal = async (item: OrderItem) => {
         console.log('🔍 Abrindo modal de progresso para item:', item.id, item.description);
         
@@ -3793,7 +4132,7 @@ export default function OrdersPage() {
     };
 
     // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
-    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick }) => (
+    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, handleExportScheduleSummary, setIsEditing, handleDeleteClick }) => (
         <SheetFooter className="flex-shrink-0 pt-4 border-t">
             <div className="flex items-center justify-between w-full gap-4 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -3803,10 +4142,37 @@ export default function OrdersPage() {
                             Gerar Romaneio ({selectedItems.size} {selectedItems.size === 1 ? 'item' : 'itens'})
                         </Button>
                     )}
-                    <Button onClick={handleExportSchedule} variant="outline">
-                        <CalendarClock className="mr-2 h-4 w-4" />
-                        Exportar Cronograma
-                    </Button>
+                    
+                    {/* NOVO: Dropdown para opções de cronograma */}
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline">
+                                <CalendarClock className="mr-2 h-4 w-4" />
+                                Cronograma
+                                <ChevronDown className="ml-2 h-4 w-4" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-56" align="start">
+                            <div className="grid gap-2">
+                                <Button 
+                                    onClick={handleExportSchedule} 
+                                    variant="ghost" 
+                                    className="w-full justify-start"
+                                >
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Cronograma Detalhado
+                                </Button>
+                                <Button 
+                                    onClick={handleExportScheduleSummary} 
+                                    variant="ghost" 
+                                    className="w-full justify-start"
+                                >
+                                    <ClipboardList className="mr-2 h-4 w-4" />
+                                    Resumo do Cronograma
+                                </Button>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
                     
                     {/* BOTÃO LIMPO SEM DEBUG */}
                     <DeliveryReportButton order={selectedOrder} />
@@ -5285,6 +5651,7 @@ export default function OrdersPage() {
               selectedItems={selectedItems}
               handleGeneratePackingSlip={handleGeneratePackingSlip}
               handleExportSchedule={handleExportSchedule}
+              handleExportScheduleSummary={handleExportScheduleSummary}
               setIsEditing={setIsEditing}
               handleDeleteClick={handleDeleteClick}
             />
@@ -5296,41 +5663,45 @@ export default function OrdersPage() {
 </Sheet>
 
             <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
-                <DialogContent className="sm:max-w-3xl">
-                    <DialogHeader>
-                      <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
-                      <DialogDescription>
-                        Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
-                      </DialogDescription>
-                      
-                      {/* DEBUG - REMOVER DEPOIS */}
-                      <div className="bg-yellow-50 border border-yellow-200 rounded p-2 text-xs">
-                        <p>Recursos carregados: {availableResources.length}</p>
-                        <p>Membros carregados: {teamMembers.length}</p>
-                        {availableResources.length > 0 && <p>Primeiro recurso: {availableResources[0].name}</p>}
-                        {teamMembers.length > 0 && <p>Primeiro membro: {teamMembers[0].name}</p>}
+                <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
+                  {/* Header fixo */}
+                  <DialogHeader className="flex-shrink-0">
+                    <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
+                    <DialogDescription>
+                      Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
+                    </DialogDescription>
+                    
+                    {/* DEBUG - REMOVER DEPOIS */}
+                    <div className="bg-yellow-50 border border-yellow-200 rounded p-2 text-xs">
+                      <p>Recursos carregados: {availableResources.length}</p>
+                      <p>Membros carregados: {teamMembers.length}</p>
+                      {availableResources.length > 0 && <p>Primeiro recurso: {availableResources[0].name}</p>}
+                      {teamMembers.length > 0 && <p>Primeiro membro: {teamMembers[0].name}</p>}
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-4 w-4 text-blue-600" />
+                        <p className="text-sm text-blue-800">
+                          <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
+                        </p>
                       </div>
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                    </div>
+                    {(isLoadingResources || availableResources.length === 0 || teamMembers.length === 0) && (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
                         <div className="flex items-center gap-2">
-                          <CalendarIcon className="h-4 w-4 text-blue-600" />
-                          <p className="text-sm text-blue-800">
-                            <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
+                          <Clock className="h-4 w-4 text-yellow-600" />
+                          <p className="text-sm text-yellow-800">
+                            <strong>Carregando:</strong> Recursos e membros da equipe estão sendo carregados...
                           </p>
                         </div>
                       </div>
-                      {(isLoadingResources || availableResources.length === 0 || teamMembers.length === 0) && (
-                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-yellow-600" />
-                            <p className="text-sm text-yellow-800">
-                              <strong>Carregando:</strong> Recursos e membros da equipe estão sendo carregados...
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </DialogHeader>
-                    <ScrollArea className="max-h-[60vh]">
-                      <div className="space-y-4 p-1 pr-4">
+                    )}
+                  </DialogHeader>
+
+                  {/* Área de conteúdo com scroll */}
+                  <div className="flex-1 min-h-0">
+                    <ScrollArea className="h-full max-h-[50vh] pr-4">
+                      <div className="space-y-4">
                         {isFetchingPlan ? (
                           <div className="flex justify-center items-center h-48">
                             <div className="text-center">
@@ -5350,7 +5721,7 @@ export default function OrdersPage() {
                               supervisor: stage.supervisor
                             });
                             return (
-                            <Card key={`${stage.stageName}-${index}`} className="p-4 relative">
+                            <Card key={`${stage.stageName}-${index}`} className="p-3 relative">
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -5361,13 +5732,13 @@ export default function OrdersPage() {
                                 <XCircleIcon className="h-4 w-4" />
                                 <span className="sr-only">Remover etapa</span>
                               </Button>
-                              <CardTitle className="text-lg mb-4 pr-8 flex items-center gap-2">
+                              <CardTitle className="text-lg mb-3 pr-8 flex items-center gap-2">
                                 <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
                                   {index + 1}
                                 </span>
                                 {stage.stageName}
                               </CardTitle>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div className="space-y-2">
                                   <Label>Status</Label>
                                   <Select 
