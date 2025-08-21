@@ -54,6 +54,14 @@ const productionStageSchema = z.object({
     completedDate: z.date().nullable().optional(),
     durationDays: z.coerce.number().min(0).optional(),
     useBusinessDays: z.boolean().optional().default(true), // true = dias úteis, false = dias corridos
+    assignedResource: z.object({
+        resourceId: z.string(),
+        resourceName: z.string()
+    }).optional(),
+    supervisor: z.object({
+        memberId: z.string(), 
+        memberName: z.string()
+    }).optional(),
 });
 
 const orderItemSchema = z.object({
@@ -523,6 +531,11 @@ export default function OrdersPage() {
     const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
     const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
     
+    // Estados para recursos e membros da equipe
+    const [resources, setResources] = useState<any[]>([]);
+    const [teamMembers, setTeamMembers] = useState<any[]>([]);
+    const [isLoadingResources, setIsLoadingResources] = useState(false);
+    
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
     const [customers, setCustomers] = useState<CustomerInfo[]>([]);
@@ -758,10 +771,53 @@ export default function OrdersPage() {
         return ordersList;
     };
 
+    // Função para carregar recursos
+    const fetchResources = async () => {
+        if (!user) return;
+        try {
+            setIsLoadingResources(true);
+            const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
+            const resourcesSnap = await getDoc(resourcesRef);
+            if (resourcesSnap.exists()) {
+                setResources(resourcesSnap.data().resources || []);
+            }
+        } catch (error) {
+            console.error("Erro ao carregar recursos:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao carregar recursos",
+                description: "Não foi possível carregar a lista de recursos.",
+            });
+        } finally {
+            setIsLoadingResources(false);
+        }
+    };
+
+    // Função para carregar membros da equipe
+    const fetchTeamMembers = async () => {
+        if (!user) return;
+        try {
+            const teamRef = doc(db, "companies", "mecald", "settings", "team");
+            const teamSnap = await getDoc(teamRef);
+            if (teamSnap.exists()) {
+                setTeamMembers(teamSnap.data().members || []);
+            }
+        } catch (error) {
+            console.error("Erro ao carregar membros da equipe:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao carregar equipe",
+                description: "Não foi possível carregar a lista de membros da equipe.",
+            });
+        }
+    };
+
     useEffect(() => {
         if (!authLoading && user) {
             fetchOrders();
             fetchCustomers();
+            fetchResources();
+            fetchTeamMembers();
         }
     }, [user, authLoading]);
 
@@ -1776,6 +1832,32 @@ export default function OrdersPage() {
         if (!updatedStage.completedDate) {
           updatedStage.completedDate = new Date();
         }
+      } else if (field === 'assignedResource') {
+        // Lidar com seleção de recurso
+        if (value === '') {
+          updatedStage.assignedResource = undefined;
+        } else {
+          const resource = resources.find(r => r.id === value);
+          if (resource) {
+            updatedStage.assignedResource = {
+              resourceId: resource.id,
+              resourceName: resource.name || resource.nome || 'Recurso sem nome'
+            };
+          }
+        }
+      } else if (field === 'supervisor') {
+        // Lidar com seleção de supervisor
+        if (value === '') {
+          updatedStage.supervisor = undefined;
+        } else {
+          const member = teamMembers.find(m => m.id === value);
+          if (member) {
+            updatedStage.supervisor = {
+              memberId: member.id,
+              memberName: member.name || member.nome || 'Membro sem nome'
+            };
+          }
+        }
       } else {
         updatedStage[field] = value;
       }
@@ -2446,6 +2528,12 @@ export default function OrdersPage() {
     const handleOpenProgressModal = async (item: OrderItem) => {
         console.log('🔍 Abrindo modal de progresso para item:', item.id, item.description);
         
+        // Verificar se recursos e membros da equipe estão carregados
+        if (resources.length === 0 || teamMembers.length === 0) {
+            console.log('🔄 Carregando recursos e membros da equipe...');
+            await Promise.all([fetchResources(), fetchTeamMembers()]);
+        }
+        
         setItemToTrack(item);
         setIsProgressModalOpen(true);
         setEditedPlan([]);
@@ -2489,6 +2577,9 @@ export default function OrdersPage() {
                         // CORREÇÃO: Conversão segura de datas do Firestore
                         startDate: stage.startDate ? safeToDate(stage.startDate) : null,
                         completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
+                        // Novos campos para recurso e supervisor
+                        assignedResource: stage.assignedResource || undefined,
+                        supervisor: stage.supervisor || undefined,
                     };
                 });
             } else {
@@ -2502,10 +2593,16 @@ export default function OrdersPage() {
                     status: "Pendente",
                     startDate: null,
                     completedDate: null,
+                    assignedResource: undefined,
+                    supervisor: undefined,
                 }));
             }
 
             console.log('📊 Plano final carregado:', finalPlan);
+        console.log('📊 Recursos disponíveis:', resources.length);
+        console.log('📊 Membros da equipe:', teamMembers.length);
+        console.log('📊 Exemplo de recursos:', resources.slice(0, 2));
+        console.log('📊 Exemplo de membros:', teamMembers.slice(0, 2));
             setEditedPlan(finalPlan);
 
         } catch(error) {
@@ -2555,6 +2652,19 @@ export default function OrdersPage() {
                     useBusinessDays: Boolean(stage.useBusinessDays !== false),
                     startDate: stage.startDate || null,
                     completedDate: stage.completedDate || null,
+                    // Novos campos para recurso e supervisor
+                    ...(stage.assignedResource && {
+                        assignedResource: {
+                            resourceId: String(stage.assignedResource.resourceId),
+                            resourceName: String(stage.assignedResource.resourceName)
+                        }
+                    }),
+                    ...(stage.supervisor && {
+                        supervisor: {
+                            memberId: String(stage.supervisor.memberId),
+                            memberName: String(stage.supervisor.memberName)
+                        }
+                    }),
                 }));
         } else {
             cleanItem.productionPlan = [];
@@ -2567,7 +2677,9 @@ export default function OrdersPage() {
                 name: s.stageName,
                 status: s.status,
                 hasStart: !!s.startDate,
-                hasEnd: !!s.completedDate
+                hasEnd: !!s.completedDate,
+                hasResource: !!s.assignedResource,
+                hasSupervisor: !!s.supervisor
             }))
         });
         
@@ -2594,7 +2706,9 @@ export default function OrdersPage() {
             start: s.startDate ? s.startDate.toISOString() : null,
             end: s.completedDate ? s.completedDate.toISOString() : null,
             duration: s.durationDays,
-            businessDays: s.useBusinessDays
+            businessDays: s.useBusinessDays,
+            assignedResource: s.assignedResource,
+            supervisor: s.supervisor
         })));
 
         try {
@@ -2645,6 +2759,19 @@ export default function OrdersPage() {
                         useBusinessDays: Boolean(stage.useBusinessDays !== false),
                         startDate: startTimestamp,
                         completedDate: endTimestamp,
+                        // Novos campos para recurso e supervisor
+                        ...(stage.assignedResource && {
+                            assignedResource: {
+                                resourceId: String(stage.assignedResource.resourceId),
+                                resourceName: String(stage.assignedResource.resourceName)
+                            }
+                        }),
+                        ...(stage.supervisor && {
+                            supervisor: {
+                                memberId: String(stage.supervisor.memberId),
+                                memberName: String(stage.supervisor.memberName)
+                            }
+                        }),
                     };
                     
                     console.log(`💾 [handleSaveProgress] ✓ Etapa ${index + 1} convertida:`, {
@@ -2653,7 +2780,9 @@ export default function OrdersPage() {
                         duration: convertedStage.durationDays,
                         businessDays: convertedStage.useBusinessDays,
                         hasStart: !!convertedStage.startDate,
-                        hasEnd: !!convertedStage.completedDate
+                        hasEnd: !!convertedStage.completedDate,
+                        hasResource: !!convertedStage.assignedResource,
+                        hasSupervisor: !!convertedStage.supervisor
                     });
                     
                     return convertedStage;
@@ -2688,6 +2817,19 @@ export default function OrdersPage() {
                             useBusinessDays: Boolean(stage.useBusinessDays !== false),
                             startDate: stage.startDate || null,
                             completedDate: stage.completedDate || null,
+                            // Novos campos para recurso e supervisor
+                            ...(stage.assignedResource && {
+                                assignedResource: {
+                                    resourceId: String(stage.assignedResource.resourceId),
+                                    resourceName: String(stage.assignedResource.resourceName)
+                                }
+                            }),
+                            ...(stage.supervisor && {
+                                supervisor: {
+                                    memberId: String(stage.supervisor.memberId),
+                                    memberName: String(stage.supervisor.memberName)
+                                }
+                            }),
                         }));
                     }
                     
@@ -2898,6 +3040,8 @@ export default function OrdersPage() {
             completedDate: null,
             durationDays: 0,
             useBusinessDays: true, // Default para dias úteis
+            assignedResource: undefined,
+            supervisor: undefined,
         };
         setEditedPlan([...editedPlan, newStage]);
         setNewStageNameForPlan("");
@@ -5150,6 +5294,16 @@ export default function OrdersPage() {
                           </p>
                         </div>
                       </div>
+                      {(isLoadingResources || resources.length === 0 || teamMembers.length === 0) && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-yellow-600" />
+                            <p className="text-sm text-yellow-800">
+                              <strong>Carregando:</strong> Recursos e membros da equipe estão sendo carregados...
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </DialogHeader>
                     <ScrollArea className="max-h-[60vh]">
                       <div className="space-y-4 p-1 pr-4">
@@ -5167,7 +5321,9 @@ export default function OrdersPage() {
                               stageName: stage.stageName,
                               startDate: stage.startDate,
                               completedDate: stage.completedDate,
-                              status: stage.status
+                              status: stage.status,
+                              assignedResource: stage.assignedResource,
+                              supervisor: stage.supervisor
                             });
                             return (
                             <Card key={`${stage.stageName}-${index}`} className="p-4 relative">
@@ -5238,6 +5394,122 @@ export default function OrdersPage() {
                                   {stage.durationDays && stage.durationDays < 1 && (
                                     <p className="text-xs text-blue-600">
                                       ℹ️ Duração menor que 1 dia - será executada no mesmo dia
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Nova seção para recurso e supervisor */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                <div className="space-y-2">
+                                  <Label>Recurso Responsável</Label>
+                                  <Select 
+                                    value={stage.assignedResource?.resourceId || ''} 
+                                    onValueChange={(value) => {
+                                      console.log('🔧 Recurso alterado:', { index, value });
+                                      handlePlanChange(index, 'assignedResource', value);
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Selecione o recurso" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="">
+                                        <div className="flex items-center gap-2">
+                                          <XCircle className="h-4 w-4 text-gray-500" />
+                                          Nenhum recurso
+                                        </div>
+                                      </SelectItem>
+                                      {resources.length > 0 ? (
+                                        resources.map(resource => (
+                                          <SelectItem key={resource.id} value={resource.id}>
+                                            <div className="flex items-center gap-2">
+                                              <Package className="h-4 w-4 text-blue-500" />
+                                              <div>
+                                                <div className="font-medium">{resource.name || resource.nome || 'Recurso sem nome'}</div>
+                                                <div className="text-xs text-muted-foreground">
+                                                  Status: {resource.status || 'N/A'}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </SelectItem>
+                                        ))
+                                      ) : (
+                                        <SelectItem value="" disabled>
+                                          <div className="flex items-center gap-2">
+                                            <Clock className="h-4 w-4 text-gray-400" />
+                                            <span className="text-gray-400">Carregando recursos...</span>
+                                          </div>
+                                        </SelectItem>
+                                      )}
+                                    </SelectContent>
+                                  </Select>
+                                  {stage.assignedResource && (
+                                    <p className="text-xs text-green-600 flex items-center gap-1">
+                                      <CheckCircle className="h-3 w-3" />
+                                      Recurso: {stage.assignedResource.resourceName}
+                                    </p>
+                                  )}
+                                  {!stage.assignedResource && resources.length === 0 && (
+                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                      <Clock className="h-3 w-3" />
+                                      Carregando recursos...
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Supervisor</Label>
+                                  <Select 
+                                    value={stage.supervisor?.memberId || ''} 
+                                    onValueChange={(value) => {
+                                      console.log('🔧 Supervisor alterado:', { index, value });
+                                      handlePlanChange(index, 'supervisor', value);
+                                    }}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Selecione o supervisor" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="">
+                                        <div className="flex items-center gap-2">
+                                          <XCircle className="h-4 w-4 text-gray-500" />
+                                          Nenhum supervisor
+                                        </div>
+                                      </SelectItem>
+                                      {teamMembers.length > 0 ? (
+                                        teamMembers.map(member => (
+                                          <SelectItem key={member.id} value={member.id}>
+                                            <div className="flex items-center gap-2">
+                                              <ClipboardCheck className="h-4 w-4 text-green-500" />
+                                              <div>
+                                                <div className="font-medium">{member.name || member.nome || 'Membro sem nome'}</div>
+                                                <div className="text-xs text-muted-foreground">
+                                                  {member.role || member.cargo || 'Sem cargo definido'}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </SelectItem>
+                                        ))
+                                      ) : (
+                                        <SelectItem value="" disabled>
+                                          <div className="flex items-center gap-2">
+                                            <Clock className="h-4 w-4 text-gray-400" />
+                                            <span className="text-gray-400">Carregando membros...</span>
+                                          </div>
+                                        </SelectItem>
+                                      )}
+                                    </SelectContent>
+                                  </Select>
+                                  {stage.supervisor && (
+                                    <p className="text-xs text-green-600 flex items-center gap-1">
+                                      <CheckCircle className="h-3 w-3" />
+                                      Supervisor: {stage.supervisor.memberName}
+                                    </p>
+                                  )}
+                                  {!stage.supervisor && teamMembers.length === 0 && (
+                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                                      <Clock className="h-3 w-3" />
+                                      Carregando membros...
                                     </p>
                                   )}
                                 </div>
