@@ -54,14 +54,15 @@ const productionStageSchema = z.object({
     completedDate: z.date().nullable().optional(),
     durationDays: z.coerce.number().min(0).optional(),
     useBusinessDays: z.boolean().optional().default(true), // true = dias úteis, false = dias corridos
+    // NOVO: Adicionar campos para recurso e supervisor
     assignedResource: z.object({
         resourceId: z.string(),
         resourceName: z.string()
-    }).optional(),
+    }).nullable().optional(),
     supervisor: z.object({
-        memberId: z.string(), 
+        memberId: z.string(),
         memberName: z.string()
-    }).optional(),
+    }).nullable().optional(),
 });
 
 const orderItemSchema = z.object({
@@ -535,6 +536,9 @@ export default function OrdersPage() {
     const [resources, setResources] = useState<any[]>([]);
     const [teamMembers, setTeamMembers] = useState<any[]>([]);
     const [isLoadingResources, setIsLoadingResources] = useState(false);
+    
+    // Estados para recursos e membros (ADICIONAR)
+    const [availableResources, setAvailableResources] = useState<any[]>([]);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -2560,36 +2564,47 @@ export default function OrdersPage() {
     const handleOpenProgressModal = async (item: OrderItem) => {
         console.log('🔍 Abrindo modal de progresso para item:', item.id, item.description);
         
-        // Verificar se recursos e membros da equipe estão carregados
-        if (resources.length === 0 || teamMembers.length === 0) {
-            console.log('🔄 Carregando recursos e membros da equipe...');
-            await Promise.all([fetchResources(), fetchTeamMembers()]);
-        }
-        
         setItemToTrack(item);
         setIsProgressModalOpen(true);
         setEditedPlan([]);
         setIsFetchingPlan(true);
 
         try {
+            // NOVO: Carregar recursos e membros junto com o template
+            const [productDoc, resourcesDoc, teamDoc] = await Promise.all([
+                item.code ? getDoc(doc(db, "companies", "mecald", "products", item.code)) : Promise.resolve(null),
+                getDoc(doc(db, "companies", "mecald", "settings", "resources")),
+                getDoc(doc(db, "companies", "mecald", "settings", "team"))
+            ]);
+
+            // Carregar recursos
+            const resources = resourcesDoc.exists() ? (resourcesDoc.data().resources || []) : [];
+            const validResources = resources.filter(r => 
+                r && r.id && r.id.trim() !== '' && r.name && r.name.trim() !== ''
+            );
+            setAvailableResources(validResources);
+            console.log('📋 Recursos carregados:', validResources);
+
+            // Carregar membros da equipe
+            const members = teamDoc.exists() ? (teamDoc.data().members || []) : [];
+            const validMembers = members.filter(m => 
+                m && m.id && m.id.trim() !== '' && m.name && m.name.trim() !== ''
+            );
+            setTeamMembers(validMembers);
+            console.log('👥 Membros carregados:', validMembers);
+
+            // Carregar template do produto (código existente)
             let productTemplateMap = new Map<string, any>();
             
-            // Busca template do produto se houver código
-            if (item.code) {
-                console.log('🔍 Buscando template para produto:', item.code);
-                const productRef = doc(db, "companies", "mecald", "products", item.code);
-                const productSnap = await getDoc(productRef);
-                
-                if (productSnap.exists()) {
-                    const template = productSnap.data().productionPlanTemplate || [];
-                    template.forEach((stage: any) => {
-                        productTemplateMap.set(stage.stageName, {
-                            durationDays: stage.durationDays || 0,
-                            useBusinessDays: stage.useBusinessDays !== false
-                        });
+            if (productDoc && productDoc.exists()) {
+                const template = productDoc.data().productionPlanTemplate || [];
+                template.forEach((stage: any) => {
+                    productTemplateMap.set(stage.stageName, {
+                        durationDays: stage.durationDays || 0,
+                        useBusinessDays: stage.useBusinessDays !== false
                     });
-                    console.log('📋 Template encontrado:', Array.from(productTemplateMap.entries()));
-                }
+                });
+                console.log('📋 Template encontrado:', Array.from(productTemplateMap.entries()));
             }
 
             let finalPlan: ProductionStage[];
@@ -2597,7 +2612,6 @@ export default function OrdersPage() {
             if (item.productionPlan && item.productionPlan.length > 0) {
                 console.log('📊 Usando plano existente do item');
                 
-                // CORREÇÃO: Conversão mais cuidadosa das datas existentes
                 finalPlan = item.productionPlan.map(stage => {
                     const templateData = productTemplateMap.get(stage.stageName) || {};
                     
@@ -2606,18 +2620,16 @@ export default function OrdersPage() {
                         status: stage.status || 'Pendente',
                         durationDays: stage.durationDays ?? templateData.durationDays ?? 0,
                         useBusinessDays: stage.useBusinessDays ?? templateData.useBusinessDays ?? true,
-                        // CORREÇÃO: Conversão segura de datas do Firestore
                         startDate: stage.startDate ? safeToDate(stage.startDate) : null,
                         completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
-                        // Novos campos para recurso e supervisor
-                        assignedResource: stage.assignedResource || undefined,
-                        supervisor: stage.supervisor || undefined,
+                        // NOVO: Preservar dados de recurso e supervisor
+                        assignedResource: stage.assignedResource || null,
+                        supervisor: stage.supervisor || null,
                     };
                 });
             } else {
                 console.log('📋 Criando plano a partir do template');
                 
-                // Cria plano a partir do template
                 finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, templateData]) => ({
                     stageName,
                     durationDays: templateData.durationDays,
@@ -2625,16 +2637,13 @@ export default function OrdersPage() {
                     status: "Pendente",
                     startDate: null,
                     completedDate: null,
-                    assignedResource: undefined,
-                    supervisor: undefined,
+                    // NOVO: Campos vazios para recurso e supervisor
+                    assignedResource: null,
+                    supervisor: null,
                 }));
             }
 
             console.log('📊 Plano final carregado:', finalPlan);
-        console.log('📊 Recursos disponíveis:', resources.length);
-        console.log('📊 Membros da equipe:', teamMembers.length);
-        console.log('📊 Exemplo de recursos:', resources.slice(0, 2));
-        console.log('📊 Exemplo de membros:', teamMembers.slice(0, 2));
             setEditedPlan(finalPlan);
 
         } catch(error) {
@@ -5324,6 +5333,14 @@ export default function OrdersPage() {
                       <DialogDescription>
                         Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
                       </DialogDescription>
+                      
+                      {/* DEBUG - REMOVER DEPOIS */}
+                      <div className="bg-yellow-50 border border-yellow-200 rounded p-2 text-xs">
+                        <p>Recursos carregados: {availableResources.length}</p>
+                        <p>Membros carregados: {teamMembers.length}</p>
+                        {availableResources.length > 0 && <p>Primeiro recurso: {availableResources[0].name}</p>}
+                        {teamMembers.length > 0 && <p>Primeiro membro: {teamMembers[0].name}</p>}
+                      </div>
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                         <div className="flex items-center gap-2">
                           <CalendarIcon className="h-4 w-4 text-blue-600" />
@@ -5332,7 +5349,7 @@ export default function OrdersPage() {
                           </p>
                         </div>
                       </div>
-                      {(isLoadingResources || resources.length === 0 || teamMembers.length === 0) && (
+                      {(isLoadingResources || availableResources.length === 0 || teamMembers.length === 0) && (
                         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-yellow-600" />
@@ -5448,7 +5465,7 @@ export default function OrdersPage() {
                                       if (value === "none") {
                                         handlePlanChange(index, 'assignedResource', null);
                                       } else {
-                                        const resource = resources.find(r => r.id === value);
+                                        const resource = availableResources.find(r => r.id === value);
                                         if (resource) {
                                           handlePlanChange(index, 'assignedResource', {
                                             resourceId: value,
@@ -5463,7 +5480,7 @@ export default function OrdersPage() {
                                     </SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="none">Nenhum recurso</SelectItem>
-                                      {resources
+                                      {availableResources
                                         .filter(r => r.status === 'disponivel' && r.id && r.id.trim() !== '')
                                         .map(resource => (
                                           <SelectItem key={resource.id} value={resource.id}>
@@ -5478,7 +5495,7 @@ export default function OrdersPage() {
                                       Recurso: {stage.assignedResource.resourceName}
                                     </p>
                                   )}
-                                  {!stage.assignedResource && resources.length === 0 && (
+                                  {!stage.assignedResource && availableResources.length === 0 && (
                                     <p className="text-xs text-yellow-600 flex items-center gap-1">
                                       <Clock className="h-3 w-3" />
                                       Carregando recursos...
