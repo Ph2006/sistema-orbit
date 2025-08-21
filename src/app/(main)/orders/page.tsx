@@ -4133,6 +4133,39 @@ export default function OrdersPage() {
         );
     };
 
+    // Componente do menu de cronograma
+    const ScheduleMenuButton = ({ handleExportSchedule, handleExportScheduleSummary }) => (
+        <Popover>
+            <PopoverTrigger asChild>
+                <Button variant="outline">
+                    <CalendarClock className="mr-2 h-4 w-4" />
+                    Cronograma
+                    <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56" align="start">
+                <div className="grid gap-2">
+                    <Button 
+                        onClick={handleExportSchedule} 
+                        variant="ghost" 
+                        className="w-full justify-start"
+                    >
+                        <FileText className="mr-2 h-4 w-4" />
+                        Cronograma Detalhado
+                    </Button>
+                    <Button 
+                        onClick={handleExportScheduleSummary} 
+                        variant="ghost" 
+                        className="w-full justify-start"
+                    >
+                        <ClipboardList className="mr-2 h-4 w-4" />
+                        Resumo do Cronograma
+                    </Button>
+                </div>
+            </PopoverContent>
+        </Popover>
+    );
+
     // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
     const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, handleExportScheduleSummary, setIsEditing, handleDeleteClick }) => (
         <SheetFooter className="flex-shrink-0 pt-4 border-t">
@@ -4145,36 +4178,11 @@ export default function OrdersPage() {
                         </Button>
                     )}
                     
-                    {/* NOVO: Dropdown para opções de cronograma */}
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button variant="outline">
-                                <CalendarClock className="mr-2 h-4 w-4" />
-                                Cronograma
-                                <ChevronDown className="ml-2 h-4 w-4" />
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-56" align="start">
-                            <div className="grid gap-2">
-                                <Button 
-                                    onClick={handleExportSchedule} 
-                                    variant="ghost" 
-                                    className="w-full justify-start"
-                                >
-                                    <FileText className="mr-2 h-4 w-4" />
-                                    Cronograma Detalhado
-                                </Button>
-                                <Button 
-                                    onClick={handleExportScheduleSummary} 
-                                    variant="ghost" 
-                                    className="w-full justify-start"
-                                >
-                                    <ClipboardList className="mr-2 h-4 w-4" />
-                                    Resumo do Cronograma
-                                </Button>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
+                    {/* Substituir o botão antigo pelo novo componente */}
+                    <ScheduleMenuButton 
+                        handleExportSchedule={handleExportSchedule}
+                        handleExportScheduleSummary={handleExportScheduleSummary}
+                    />
                     
                     {/* BOTÃO LIMPO SEM DEBUG */}
                     <DeliveryReportButton order={selectedOrder} />
