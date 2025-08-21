@@ -779,7 +779,23 @@ export default function OrdersPage() {
             const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
             const resourcesSnap = await getDoc(resourcesRef);
             if (resourcesSnap.exists()) {
-                setResources(resourcesSnap.data().resources || []);
+                const rawResources = resourcesSnap.data().resources || [];
+                
+                // Validação dos dados - ANTES de setar os estados
+                const validResources = rawResources.filter(r => 
+                    r && r.id && r.id.trim() !== '' && r.name && r.name.trim() !== ''
+                );
+                
+                setResources(validResources);
+                
+                // DEBUG - remover depois
+                console.log('Resources:', validResources);
+                
+                // Verificar se há items com ID vazio
+                const emptyResourceIds = rawResources.filter(r => !r.id || r.id.trim() === '');
+                if (emptyResourceIds.length > 0) {
+                    console.error('Recursos com ID vazio:', emptyResourceIds);
+                }
             }
         } catch (error) {
             console.error("Erro ao carregar recursos:", error);
@@ -800,7 +816,23 @@ export default function OrdersPage() {
             const teamRef = doc(db, "companies", "mecald", "settings", "team");
             const teamSnap = await getDoc(teamRef);
             if (teamSnap.exists()) {
-                setTeamMembers(teamSnap.data().members || []);
+                const rawTeamMembers = teamSnap.data().members || [];
+                
+                // Validação dos dados - ANTES de setar os estados
+                const validTeamMembers = rawTeamMembers.filter(m => 
+                    m && m.id && m.id.trim() !== '' && m.name && m.name.trim() !== ''
+                );
+                
+                setTeamMembers(validTeamMembers);
+                
+                // DEBUG - remover depois
+                console.log('Team Members:', validTeamMembers);
+                
+                // Verificar se há items com ID vazio
+                const emptyMemberIds = rawTeamMembers.filter(m => !m.id || m.id.trim() === '');
+                if (emptyMemberIds.length > 0) {
+                    console.error('Membros com ID vazio:', emptyMemberIds);
+                }
             }
         } catch (error) {
             console.error("Erro ao carregar membros da equipe:", error);
@@ -1833,8 +1865,8 @@ export default function OrdersPage() {
           updatedStage.completedDate = new Date();
         }
       } else if (field === 'assignedResource') {
-        // Lidar com seleção de recurso
-        if (value === '') {
+        // Lidar com seleção de recurso - CORRIGIDO
+        if (value === null || value === 'none' || value === '') {
           updatedStage.assignedResource = undefined;
         } else {
           const resource = resources.find(r => r.id === value);
@@ -1846,8 +1878,8 @@ export default function OrdersPage() {
           }
         }
       } else if (field === 'supervisor') {
-        // Lidar com seleção de supervisor
-        if (value === '') {
+        // Lidar com seleção de supervisor - CORRIGIDO
+        if (value === null || value === 'none' || value === '') {
           updatedStage.supervisor = undefined;
         } else {
           const member = teamMembers.find(m => m.id === value);
@@ -4202,9 +4234,11 @@ export default function OrdersPage() {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">Todos os Status</SelectItem>
-                                {uniqueStatuses.map(status => (
-                                    <SelectItem key={status} value={status}>{status}</SelectItem>
-                                ))}
+                                {uniqueStatuses
+                                    .filter(status => status && status.trim() !== '')
+                                    .map(status => (
+                                        <SelectItem key={status} value={status}>{status}</SelectItem>
+                                    ))}
                             </SelectContent>
                         </Select>
 
@@ -4214,9 +4248,11 @@ export default function OrdersPage() {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">Todos os Clientes</SelectItem>
-                                {customers.map(customer => (
-                                    <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
-                                ))}
+                                {customers
+                                    .filter(customer => customer.id && customer.id.trim() !== '')
+                                    .map(customer => (
+                                        <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
+                                    ))}
                             </SelectContent>
                         </Select>
 
@@ -4442,7 +4478,9 @@ export default function OrdersPage() {
                                 </SelectTrigger>
                               </FormControl>
                               <SelectContent>
-                                {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                                {customers
+                                  .filter(c => c.id && c.id.trim() !== '')
+                                  .map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                               </SelectContent>
                             </Select>
                             <FormMessage />
@@ -5403,45 +5441,35 @@ export default function OrdersPage() {
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                                 <div className="space-y-2">
                                   <Label>Recurso Responsável</Label>
+                                  {/* Select de Recurso - CORRIGIDO */}
                                   <Select 
-                                    value={stage.assignedResource?.resourceId || ''} 
+                                    value={stage.assignedResource?.resourceId || ""} 
                                     onValueChange={(value) => {
-                                      console.log('🔧 Recurso alterado:', { index, value });
-                                      handlePlanChange(index, 'assignedResource', value);
+                                      if (value === "none") {
+                                        handlePlanChange(index, 'assignedResource', null);
+                                      } else {
+                                        const resource = resources.find(r => r.id === value);
+                                        if (resource) {
+                                          handlePlanChange(index, 'assignedResource', {
+                                            resourceId: value,
+                                            resourceName: resource.name
+                                          });
+                                        }
+                                      }
                                     }}
                                   >
                                     <SelectTrigger>
-                                      <SelectValue placeholder="Selecione o recurso" />
+                                      <SelectValue placeholder="Selecione um recurso" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="">
-                                        <div className="flex items-center gap-2">
-                                          <XCircle className="h-4 w-4 text-gray-500" />
-                                          Nenhum recurso
-                                        </div>
-                                      </SelectItem>
-                                      {resources.length > 0 ? (
-                                        resources.map(resource => (
+                                      <SelectItem value="none">Nenhum recurso</SelectItem>
+                                      {resources
+                                        .filter(r => r.status === 'disponivel' && r.id && r.id.trim() !== '')
+                                        .map(resource => (
                                           <SelectItem key={resource.id} value={resource.id}>
-                                            <div className="flex items-center gap-2">
-                                              <Package className="h-4 w-4 text-blue-500" />
-                                              <div>
-                                                <div className="font-medium">{resource.name || resource.nome || 'Recurso sem nome'}</div>
-                                                <div className="text-xs text-muted-foreground">
-                                                  Status: {resource.status || 'N/A'}
-                                                </div>
-                                              </div>
-                                            </div>
+                                            {resource.name} ({resource.type})
                                           </SelectItem>
-                                        ))
-                                      ) : (
-                                        <SelectItem value="" disabled>
-                                          <div className="flex items-center gap-2">
-                                            <Clock className="h-4 w-4 text-gray-400" />
-                                            <span className="text-gray-400">Carregando recursos...</span>
-                                          </div>
-                                        </SelectItem>
-                                      )}
+                                        ))}
                                     </SelectContent>
                                   </Select>
                                   {stage.assignedResource && (
@@ -5459,45 +5487,35 @@ export default function OrdersPage() {
                                 </div>
                                 <div className="space-y-2">
                                   <Label>Supervisor</Label>
+                                  {/* Select de Supervisor - CORRIGIDO */}
                                   <Select 
-                                    value={stage.supervisor?.memberId || ''} 
+                                    value={stage.supervisor?.memberId || ""} 
                                     onValueChange={(value) => {
-                                      console.log('🔧 Supervisor alterado:', { index, value });
-                                      handlePlanChange(index, 'supervisor', value);
+                                      if (value === "none") {
+                                        handlePlanChange(index, 'supervisor', null);
+                                      } else {
+                                        const member = teamMembers.find(m => m.id === value);
+                                        if (member) {
+                                          handlePlanChange(index, 'supervisor', {
+                                            memberId: value,
+                                            memberName: member.name
+                                          });
+                                        }
+                                      }
                                     }}
                                   >
                                     <SelectTrigger>
-                                      <SelectValue placeholder="Selecione o supervisor" />
+                                      <SelectValue placeholder="Selecione um supervisor" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="">
-                                        <div className="flex items-center gap-2">
-                                          <XCircle className="h-4 w-4 text-gray-500" />
-                                          Nenhum supervisor
-                                        </div>
-                                      </SelectItem>
-                                      {teamMembers.length > 0 ? (
-                                        teamMembers.map(member => (
+                                      <SelectItem value="none">Nenhum supervisor</SelectItem>
+                                      {teamMembers
+                                        .filter(m => m.id && m.id.trim() !== '')
+                                        .map(member => (
                                           <SelectItem key={member.id} value={member.id}>
-                                            <div className="flex items-center gap-2">
-                                              <ClipboardCheck className="h-4 w-4 text-green-500" />
-                                              <div>
-                                                <div className="font-medium">{member.name || member.nome || 'Membro sem nome'}</div>
-                                                <div className="text-xs text-muted-foreground">
-                                                  {member.role || member.cargo || 'Sem cargo definido'}
-                                                </div>
-                                              </div>
-                                            </div>
+                                            {member.name} ({member.position})
                                           </SelectItem>
-                                        ))
-                                      ) : (
-                                        <SelectItem value="" disabled>
-                                          <div className="flex items-center gap-2">
-                                            <Clock className="h-4 w-4 text-gray-400" />
-                                            <span className="text-gray-400">Carregando membros...</span>
-                                          </div>
-                                        </SelectItem>
-                                      )}
+                                        ))}
                                     </SelectContent>
                                   </Select>
                                   {stage.supervisor && (
