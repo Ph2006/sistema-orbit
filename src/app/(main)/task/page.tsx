@@ -121,6 +121,7 @@ export default function TasksPage() {
 
   // Função simplificada para buscar tarefas dos pedidos
   const fetchTasksFromOrders = async () => {
+    console.log('🔍 Buscando tarefas dos pedidos...');
     try {
       const ordersRef = collection(db, "companies", "mecald", "orders");
       const ordersSnapshot = await getDocs(ordersRef);
@@ -137,7 +138,7 @@ export default function TasksPage() {
         
         orderData.items?.forEach((item: any) => {
           item.productionPlan?.forEach((stage: any, stageIndex: number) => {
-            if (stage.assignedResource || stage.supervisor) {
+            if (stage.assignedResource || stage.supervisor || stage.status !== 'Pendente') {
               tasksList.push({
                 id: `${orderDoc.id}-${item.id}-${stageIndex}`,
                 orderNumber: orderData.quotationNumber || orderData.orderNumber || 'N/A',
@@ -146,8 +147,8 @@ export default function TasksPage() {
                 assignedResource: stage.assignedResource,
                 supervisor: stage.supervisor,
                 status: stage.status,
-                startDate: stage.startDate?.toDate() || new Date(),
-                endDate: stage.completedDate?.toDate() || new Date(),
+                startDate: stage.startDate ? (stage.startDate.toDate ? stage.startDate.toDate() : new Date(stage.startDate)) : new Date(),
+                endDate: stage.completedDate ? (stage.completedDate.toDate ? stage.completedDate.toDate() : new Date(stage.completedDate)) : new Date(),
                 priority: determinePriority(orderData),
                 estimatedHours: (stage.durationDays || 1) * 8,
               });
@@ -156,6 +157,8 @@ export default function TasksPage() {
         });
       });
       
+      console.log('📊 Total de tarefas encontradas:', tasksList.length);
+      console.log('📋 Tarefas:', tasksList);
       setTasks(tasksList);
     } catch (error) {
       console.error("Erro ao buscar tarefas:", error);
