@@ -5705,6 +5705,7 @@ return (
                         </Button>
                       </div>
                     </div>
+                  </div>
 
                     <DialogFooter>
                       <div className="flex items-center justify-between w-full">
