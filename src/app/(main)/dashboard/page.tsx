@@ -6,11 +6,13 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { BarChart, Package, Percent, Truck, Wrench, AlertTriangle, CheckCircle, Scale } from "lucide-react";
+import { BarChart, Package, Percent, Truck, Wrench, AlertTriangle, CheckCircle, Scale, TrendingUp, Users } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { MonthlyProductionChart } from "@/components/dashboard/kpi-charts";
 import { CustomerAnalysis } from "@/components/dashboard/production-status";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 interface MonthlyData {
   month: string;
@@ -144,6 +146,131 @@ function getShortCustomerName(fullName: string): string {
   }
   
   return shortName.substring(0, 25).trim();
+}
+
+// Componente melhorado para análise de clientes
+function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
+  const topCustomers = data.slice(0, 5);
+  
+  return (
+    <Card className="col-span-1">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="h-5 w-5" />
+          Análise por Cliente
+        </CardTitle>
+        <CardDescription>
+          Principais clientes por peso entregue e performance de qualidade
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Top 5 Clientes por Peso */}
+        <div>
+          <h4 className="text-sm font-semibold mb-3 text-muted-foreground">
+            TOP 5 CLIENTES POR PESO ENTREGUE
+          </h4>
+          <div className="space-y-3">
+            {topCustomers.map((customer, index) => (
+              <div key={customer.name} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" title={customer.name}>
+                      {customer.shortName || customer.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {customer.deliveredWeight.toLocaleString('pt-BR', { 
+                        minimumFractionDigits: 0, 
+                        maximumFractionDigits: 0 
+                      })} kg
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className="ml-2">
+                    #{index + 1}
+                  </Badge>
+                </div>
+                <div className="w-full bg-secondary rounded-full h-2">
+                  <div
+                    className="bg-primary h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.min((customer.deliveredWeight / Math.max(...topCustomers.map(c => c.deliveredWeight))) * 100, 100)}%`
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Tabela de Performance */}
+        <div>
+          <h4 className="text-sm font-semibold mb-3 text-muted-foreground">
+            PERFORMANCE DE ENTREGA E QUALIDADE
+          </h4>
+          <div className="space-y-2">
+            {/* Header */}
+            <div className="grid grid-cols-12 gap-2 text-xs font-medium text-muted-foreground pb-2 border-b">
+              <div className="col-span-6">Cliente</div>
+              <div className="col-span-3 text-center">Prazo</div>
+              <div className="col-span-3 text-center">NC</div>
+            </div>
+            
+            {/* Data rows */}
+            {topCustomers.map((customer) => {
+              const onTimeRate = customer.totalItems > 0 
+                ? (customer.onTimeItems / customer.totalItems) * 100 
+                : 0;
+              const ncRate = customer.totalItems > 0 
+                ? (customer.ncCount / customer.totalItems) * 100 
+                : 0;
+              
+              return (
+                <div key={customer.name} className="grid grid-cols-12 gap-2 text-xs py-2 hover:bg-muted/50 rounded-sm">
+                  <div className="col-span-6 truncate" title={customer.name}>
+                    {customer.shortName || customer.name}
+                  </div>
+                  <div className="col-span-3 text-center">
+                    <Badge 
+                      variant={onTimeRate >= 90 ? "default" : onTimeRate >= 70 ? "secondary" : "destructive"}
+                      className="text-xs"
+                    >
+                      {onTimeRate.toFixed(0)}%
+                    </Badge>
+                  </div>
+                  <div className="col-span-3 text-center">
+                    <Badge 
+                      variant={ncRate <= 5 ? "default" : ncRate <= 15 ? "secondary" : "destructive"}
+                      className="text-xs"
+                    >
+                      {ncRate.toFixed(1)}%
+                    </Badge>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Resumo */}
+        <div className="pt-4 border-t">
+          <div className="grid grid-cols-2 gap-4 text-center">
+            <div>
+              <p className="text-2xl font-bold">{data.length}</p>
+              <p className="text-xs text-muted-foreground">Clientes Ativos</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold">
+                {data.reduce((acc, c) => acc + c.deliveredWeight, 0).toLocaleString('pt-BR', {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0
+                })}
+              </p>
+              <p className="text-xs text-muted-foreground">kg Total</p>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function DashboardPage() {
@@ -305,7 +432,7 @@ export default function DashboardPage() {
                   <Skeleton className="h-36" />
                   <Skeleton className="h-36" />
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <Skeleton className="h-96" />
                   <Skeleton className="h-96" />
               </div>
@@ -313,50 +440,66 @@ export default function DashboardPage() {
       )
   }
 
+  const productionRate = data.totalToProduceWeight > 0 ? (data.totalProducedWeight / data.totalToProduceWeight) * 100 : 0;
+
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight font-headline">Dashboard de Performance</h1>
-      </div>
-      <div className="space-y-8">
-        <section>
-          <h2 className="text-2xl font-semibold tracking-tight font-headline mb-4">
-            Indicadores Chave de Performance (KPIs)
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              title="Produção (Peso)"
-              value={`${data.totalProducedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / ${data.totalToProduceWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`}
-              icon={Scale}
-              description="Peso total produzido vs. a produzir"
-              progress={(data.totalToProduceWeight > 0 ? (data.totalProducedWeight / data.totalToProduceWeight) * 100 : 0)}
-            />
-            <StatCard
-              title="Entregas no Prazo"
-              value={`${data.onTimeDeliveryRate.toFixed(1)}%`}
-              icon={Percent}
-              description="Itens entregues na data prometida"
-            />
-            <StatCard
-              title="Não Conformidade (Geral)"
-              value={`${data.geralNcRate.toFixed(2)}%`}
-              icon={AlertTriangle}
-              description="Percentual de itens enviados com RNC"
-            />
-             <StatCard
-              title="Não Conformidade (Interna)"
-              value={`${data.internalNcRate.toFixed(2)}%`}
-              icon={Wrench}
-              description="Falhas de qualidade detectadas internamente"
-            />
-          </div>
-        </section>
-        
-        <div className="grid gap-8 lg:grid-cols-2">
-          <MonthlyProductionChart data={data.monthlyProduction} />
-          <CustomerAnalysis data={data.customerAnalysis} />
+    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight font-headline">Dashboard de Performance</h1>
+          <p className="text-muted-foreground mt-2">
+            Acompanhe os principais indicadores de produção e qualidade da sua operação
+          </p>
         </div>
       </div>
+
+      {/* KPIs Section */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-5 w-5" />
+          <h2 className="text-xl font-semibold tracking-tight">Indicadores Principais</h2>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            title="Taxa de Produção"
+            value={`${productionRate.toFixed(1)}%`}
+            icon={Scale}
+            description={`${data.totalProducedWeight.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} de ${data.totalToProduceWeight.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg`}
+            progress={productionRate}
+          />
+          <StatCard
+            title="Entregas no Prazo"
+            value={`${data.onTimeDeliveryRate.toFixed(1)}%`}
+            icon={CheckCircle}
+            description="Itens entregues na data prometida"
+          />
+          <StatCard
+            title="Não Conformidade (Geral)"
+            value={`${data.geralNcRate.toFixed(1)}%`}
+            icon={AlertTriangle}
+            description="Percentual de itens com RNC"
+          />
+          <StatCard
+            title="Não Conformidade (Interna)"
+            value={`${data.internalNcRate.toFixed(1)}%`}
+            icon={Wrench}
+            description="Falhas detectadas internamente"
+          />
+        </div>
+      </section>
+      
+      {/* Charts Section */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <BarChart className="h-5 w-5" />
+          <h2 className="text-xl font-semibold tracking-tight">Análises Detalhadas</h2>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <MonthlyProductionChart data={data.monthlyProduction} />
+          <ImprovedCustomerAnalysis data={data.customerAnalysis} />
+        </div>
+      </section>
     </div>
   );
 }
