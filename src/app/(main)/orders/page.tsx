@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock, ArrowRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -498,6 +498,286 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
     );
 }
 
+// Componentes auxiliares para melhorar a experiência do usuário
+
+// 1. Componente de barra de progresso interativa
+const InteractiveProgressBar = ({ value, onChange, item, disabled = false }: { value: number; onChange: (value: number) => void; item: any; disabled?: boolean }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [tempValue, setTempValue] = useState(value);
+
+  const handleProgressClick = (e: React.MouseEvent) => {
+    if (disabled) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const newValue = Math.round((x / rect.width) * 100);
+    onChange(Math.min(100, Math.max(0, newValue)));
+  };
+
+  const handleSaveEdit = () => {
+    onChange(tempValue);
+    setIsEditing(false);
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div 
+        className={`flex-1 relative h-3 bg-gray-200 rounded-full overflow-hidden ${!disabled ? 'cursor-pointer hover:bg-gray-300' : ''}`}
+        onClick={handleProgressClick}
+      >
+        <div 
+          className="h-full bg-gradient-to-r from-red-400 via-yellow-400 to-green-500 transition-all duration-300"
+          style={{ width: `${value}%` }}
+        />
+      </div>
+      
+      {isEditing ? (
+        <div className="flex items-center gap-1">
+          <Input
+            type="number"
+            min="0"
+            max="100"
+            value={tempValue}
+            onChange={(e) => setTempValue(Number(e.target.value))}
+            className="w-16 h-8 text-xs"
+          />
+          <Button size="sm" variant="ghost" onClick={handleSaveEdit}>
+            <CheckCircle className="h-3 w-3" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1">
+          <span className="text-sm font-medium w-10">{Math.round(value)}%</span>
+          {!disabled && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setTempValue(value);
+                setIsEditing(true);
+              }}
+              className="h-6 w-6 p-0"
+            >
+              <Edit className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// 2. Checklist compacto de etapas
+const QuickStageChecklist = ({ stages = [], onStageUpdate, compact = true }: { stages?: any[]; onStageUpdate: (index: number, status: string) => void; compact?: boolean }) => {
+  const [expanded, setExpanded] = useState(!compact);
+
+  const getStageIcon = (status: string) => {
+    switch (status) {
+      case 'Concluído': return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case 'Em Andamento': return <PlayCircle className="h-4 w-4 text-blue-600" />;
+      default: return <Hourglass className="h-4 w-4 text-gray-400" />;
+    }
+  };
+
+  const handleQuickToggle = (index: number) => {
+    const stage = stages[index];
+    let newStatus;
+    
+    if (stage.status === 'Concluído') {
+      newStatus = 'Pendente';
+    } else if (stage.status === 'Em Andamento') {
+      newStatus = 'Concluído';
+    } else {
+      newStatus = 'Em Andamento';
+    }
+    
+    onStageUpdate(index, newStatus);
+  };
+
+  if (compact && !expanded) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex -space-x-1">
+          {stages.slice(0, 4).map((stage, index) => (
+            <TooltipProvider key={index}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => handleQuickToggle(index)}
+                    className="w-6 h-6 rounded-full border-2 border-white bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-all"
+                  >
+                    {getStageIcon(stage.status)}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{stage.stageName}: {stage.status}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ))}
+          {stages.length > 4 && (
+            <div className="w-6 h-6 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center text-xs">
+              +{stages.length - 4}
+            </div>
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setExpanded(true)}
+          className="h-6 px-2 text-xs"
+        >
+          Ver todas
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">
+          Etapas ({stages.filter(s => s.status === 'Concluído').length}/{stages.length})
+        </span>
+        {compact && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded(false)}
+            className="h-6 px-2 text-xs"
+          >
+            Ocultar
+          </Button>
+        )}
+      </div>
+      
+      <div className="space-y-1">
+        {stages.map((stage, index) => (
+          <div key={index} className="flex items-center gap-2 p-1 rounded hover:bg-gray-50">
+            <button
+              onClick={() => handleQuickToggle(index)}
+              className="flex items-center gap-2 text-sm flex-1 text-left"
+            >
+              {getStageIcon(stage.status)}
+              <span className={stage.status === 'Concluído' ? 'line-through text-gray-500' : ''}>
+                {stage.stageName}
+              </span>
+            </button>
+            {stage.status === 'Em Andamento' && (
+              <Badge variant="outline" className="text-xs px-1 py-0">
+                Em andamento
+              </Badge>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// 3. Botões de ação rápida
+const QuickActionButtons = ({ item, onAdvanceStage, onCompleteItem, onOpenModal }: { item: any; onAdvanceStage: (index: number) => void; onCompleteItem: () => void; onOpenModal: () => void }) => {
+  const getNextPendingStageIndex = () => {
+    return item.productionPlan?.findIndex(stage => stage.status === 'Pendente') ?? -1;
+  };
+
+  const isCompleted = item.productionPlan?.every(stage => stage.status === 'Concluído') ?? true;
+  const hasStages = item.productionPlan && item.productionPlan.length > 0;
+
+  return (
+    <div className="flex items-center gap-1">
+      <TooltipProvider>
+        {hasStages && !isCompleted && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onAdvanceStage(getNextPendingStageIndex())}
+                  className="h-8 px-2"
+                  disabled={getNextPendingStageIndex() === -1}
+                >
+                  <ArrowRight className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Avançar próxima etapa</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onCompleteItem}
+                  className="h-8 px-2"
+                >
+                  <CheckCircle className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Marcar como concluído</p>
+              </TooltipContent>
+            </Tooltip>
+          </>
+        )}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onOpenModal}
+              className="h-8 px-2"
+            >
+              <GanttChart className="h-3 w-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Editar progresso detalhado</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
+};
+
+// 4. Componente para versão mobile otimizada
+const MobileStageButtons = ({ item, onStart, onComplete }: { item: any; onStart: (stageIndex: number) => void; onComplete: (stageIndex: number) => void }) => {
+  const currentStage = item.productionPlan?.find(s => s.status === 'Em Andamento');
+  const nextStage = item.productionPlan?.find(s => s.status === 'Pendente');
+  
+  return (
+    <div className="md:hidden grid grid-cols-1 gap-2 mt-3">
+      {nextStage && (
+        <Button
+          size="lg"
+          className="h-12 bg-blue-600 hover:bg-blue-700 text-white"
+          onClick={() => onStart(item.productionPlan.indexOf(nextStage))}
+        >
+          <PlayCircle className="w-5 h-5 mr-2" />
+          Iniciar {nextStage.stageName}
+        </Button>
+      )}
+      
+      {currentStage && (
+        <Button
+          size="lg"
+          className="h-12 bg-green-600 hover:bg-green-700 text-white"
+          onClick={() => onComplete(item.productionPlan.indexOf(currentStage))}
+        >
+          <CheckCircle className="w-5 h-5 mr-2" />
+          Concluir {currentStage.stageName}
+        </Button>
+      )}
+    </div>
+  );
+};
+
 export default function OrdersPage() {
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -550,6 +830,46 @@ export default function OrdersPage() {
     // View states
     const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
     const [calendarDate, setCalendarDate] = useState(new Date());
+
+    // Estados para atualização em massa (opcional)
+    const [bulkUpdateMode, setBulkUpdateMode] = useState(false);
+    const [selectedItemsForBulk, setSelectedItemsForBulk] = useState<Set<string>>(new Set());
+
+    // NOVO: Notificações de atraso
+    useEffect(() => {
+      if (!selectedOrder) return;
+      
+      const checkOverdueStages = () => {
+        const now = new Date();
+        const overdueItems = [];
+        
+        selectedOrder.items.forEach(item => {
+          item.productionPlan?.forEach(stage => {
+            if (stage.status === 'Em Andamento' && 
+                stage.predictedEndDate && 
+                now > stage.predictedEndDate) {
+              overdueItems.push({
+                itemDescription: item.description,
+                stageName: stage.stageName,
+                daysOverdue: Math.ceil((now.getTime() - stage.predictedEndDate.getTime()) / (1000 * 60 * 60 * 24))
+              });
+            }
+          });
+        });
+        
+        if (overdueItems.length > 0) {
+          toast({
+            variant: "destructive",
+            title: "Etapas em atraso detectadas!",
+            description: `${overdueItems.length} etapa(s) ultrapassaram o prazo previsto`,
+          });
+        }
+      };
+      
+      // Verificar atrasos a cada hora
+      const interval = setInterval(checkOverdueStages, 60 * 60 * 1000);
+      return () => clearInterval(interval);
+    }, [selectedOrder]);
 
     // Estados para controlar posição do scroll no Kanban
     const kanbanScrollRef = useRef<HTMLDivElement>(null);
@@ -3383,6 +3703,265 @@ export default function OrdersPage() {
         })));
     };
 
+    // NOVAS FUNÇÕES AUXILIARES PARA ATUALIZAÇÃO DE PROGRESSO INLINE
+
+    // Função para atualizar progresso inline
+    const handleInlineProgressUpdate = async (item, newProgress) => {
+      if (!selectedOrder) return;
+      
+      try {
+        // Calcular quantas etapas devem estar concluídas baseado na porcentagem
+        const totalStages = item.productionPlan?.length || 0;
+        const completedStages = Math.round((newProgress / 100) * totalStages);
+        
+        // Atualizar status das etapas
+        const updatedPlan = item.productionPlan?.map((stage, index) => ({
+          ...stage,
+          status: index < completedStages ? 'Concluído' : 
+                  index === completedStages ? 'Em Andamento' : 'Pendente',
+          completedDate: index < completedStages ? new Date() : null
+        })) || [];
+
+        // Atualizar no backend
+        await updateItemProgress(item.id, updatedPlan);
+        
+        toast({
+          title: "Progresso atualizado!",
+          description: `Item marcado como ${newProgress}% concluído`,
+        });
+      } catch (error) {
+        console.error("Erro ao atualizar progresso:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "Não foi possível atualizar o progresso",
+        });
+      }
+    };
+
+    // Função para atualizar etapa rapidamente
+    const handleQuickStageUpdate = async (item, stageIndex, newStatus) => {
+      if (!selectedOrder) return;
+      
+      try {
+        const updatedPlan = item.productionPlan?.map((stage, index) => {
+          if (index === stageIndex) {
+            return {
+              ...stage,
+              status: newStatus,
+              startDate: newStatus === 'Em Andamento' && !stage.startDate ? new Date() : stage.startDate,
+              completedDate: newStatus === 'Concluído' ? new Date() : null
+            };
+          }
+          return stage;
+        }) || [];
+
+        await updateItemProgress(item.id, updatedPlan);
+        
+        toast({
+          title: "Etapa atualizada!",
+          description: `${item.productionPlan[stageIndex].stageName} marcada como ${newStatus}`,
+        });
+      } catch (error) {
+        console.error("Erro ao atualizar etapa:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "Não foi possível atualizar a etapa",
+        });
+      }
+    };
+
+    // Função para avançar para próxima etapa
+    const handleAdvanceStage = async (item, stageIndex) => {
+      if (stageIndex >= 0 && item.productionPlan && stageIndex < item.productionPlan.length) {
+        await handleQuickStageUpdate(item, stageIndex, 'Em Andamento');
+      }
+    };
+
+    // Função para concluir item completamente
+    const handleCompleteItem = async (item) => {
+      if (!item.productionPlan) return;
+      
+      try {
+        const updatedPlan = item.productionPlan.map(stage => ({
+          ...stage,
+          status: 'Concluído',
+          completedDate: new Date()
+        }));
+
+        await updateItemProgress(item.id, updatedPlan);
+        
+        toast({
+          title: "Item concluído!",
+          description: `Todas as etapas de "${item.description}" foram finalizadas`,
+        });
+      } catch (error) {
+        console.error("Erro ao concluir item:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "Não foi possível concluir o item",
+        });
+      }
+    };
+
+    // Função auxiliar para atualizar progresso no backend
+    const updateItemProgress = async (itemId, updatedPlan) => {
+      const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+      const orderSnap = await getDoc(orderRef);
+      
+      if (!orderSnap.exists()) {
+        throw new Error("Pedido não encontrado");
+      }
+      
+      const orderData = orderSnap.data();
+      const updatedItems = orderData.items.map(item => {
+        if (item.id === itemId) {
+          return {
+            ...item,
+            productionPlan: updatedPlan.map(stage => ({
+              ...stage,
+              startDate: stage.startDate ? Timestamp.fromDate(new Date(stage.startDate)) : null,
+              completedDate: stage.completedDate ? Timestamp.fromDate(new Date(stage.completedDate)) : null,
+            }))
+          };
+        }
+        return item;
+      });
+
+      await updateDoc(orderRef, { 
+        items: updatedItems,
+        lastUpdate: Timestamp.now() 
+      });
+      
+      // Recarregar dados locais
+      const allOrders = await fetchOrders();
+      const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
+      if (updatedOrder) {
+        setSelectedOrder(updatedOrder);
+        form.reset({
+          ...updatedOrder,
+          status: updatedOrder.status as any,
+        });
+      }
+    };
+
+    // NOVAS FUNÇÕES DE CRONOGRAMA AUTOMÁTICO
+
+    // Função para iniciar etapa automaticamente
+    const handleAutoStartStage = async (item, stageIndex) => {
+      if (!selectedOrder) return;
+      
+      try {
+        const now = new Date();
+        const updatedPlan = [...(item.productionPlan || [])];
+        const stage = updatedPlan[stageIndex];
+        
+        // Marcar como iniciada com timestamp
+        stage.status = 'Em Andamento';
+        stage.startDate = now;
+        
+        // Calcular previsão baseada no lead time
+        const leadTimeDays = stage.durationDays || 1;
+        stage.predictedEndDate = addBusinessDays(now, leadTimeDays);
+        
+        // Recalcular etapas seguintes
+        recalculateFollowingStages(updatedPlan, stageIndex + 1, stage.predictedEndDate);
+        
+        await updateItemProgress(item.id, updatedPlan);
+        
+        toast({
+          title: "Etapa iniciada!",
+          description: `${stage.stageName} iniciada às ${format(now, 'HH:mm')}. Previsão de conclusão: ${format(stage.predictedEndDate, 'dd/MM/yyyy')}`,
+        });
+      } catch (error) {
+        console.error("Erro ao iniciar etapa:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "Não foi possível iniciar a etapa",
+        });
+      }
+    };
+
+    // Função para concluir etapa automaticamente
+    const handleAutoCompleteStage = async (item, stageIndex) => {
+      if (!selectedOrder) return;
+      
+      try {
+        const now = new Date();
+        const updatedPlan = [...(item.productionPlan || [])];
+        const stage = updatedPlan[stageIndex];
+        
+        // Marcar como concluída com timestamp real
+        stage.status = 'Concluído';
+        stage.completedDate = now;
+        stage.actualEndDate = now;
+        
+        // Verificar se houve atraso
+        const wasLate = stage.predictedEndDate && now > stage.predictedEndDate;
+        const delayDays = wasLate ? 
+          Math.ceil((now.getTime() - stage.predictedEndDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+        
+        // Recalcular cronograma das etapas seguintes
+        recalculateFollowingStages(updatedPlan, stageIndex + 1, now);
+        
+        await updateItemProgress(item.id, updatedPlan);
+        
+        toast({
+          title: wasLate ? "Etapa concluída com atraso" : "Etapa concluída no prazo!",
+          description: wasLate ? 
+            `${stage.stageName} concluída com ${delayDays} dia(s) de atraso` :
+            `${stage.stageName} concluída às ${format(now, 'HH:mm')}`,
+          variant: wasLate ? "destructive" : "default"
+        });
+      } catch (error) {
+        console.error("Erro ao concluir etapa:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "Não foi possível concluir a etapa",
+        });
+      }
+    };
+
+    // Função para recalcular etapas seguintes automaticamente
+    const recalculateFollowingStages = (stages, fromIndex, previousEndDate) => {
+      for (let i = fromIndex; i < stages.length; i++) {
+        const stage = stages[i];
+        
+        if (stage.status === 'Pendente') {
+          // Data de início = fim da etapa anterior (ou próximo dia útil)
+          stage.predictedStartDate = getNextBusinessDay(previousEndDate);
+          
+          // Data de fim = início + lead time
+          const leadTimeDays = stage.durationDays || 1;
+          stage.predictedEndDate = addBusinessDays(stage.predictedStartDate, leadTimeDays);
+          
+          // Atualizar para próxima iteração
+          previousEndDate = stage.predictedEndDate;
+        } else if (stage.actualEndDate || stage.completedDate) {
+          // Se etapa já foi concluída, usar data real
+          previousEndDate = stage.actualEndDate || stage.completedDate;
+        }
+      }
+    };
+
+    // Calcular progresso baseado no tempo decorrido
+    const getTimeBasedProgress = (startDate, predictedEndDate) => {
+      if (!startDate || !predictedEndDate) return 0;
+      
+      const now = new Date();
+      const totalDuration = predictedEndDate.getTime() - startDate.getTime();
+      const elapsedDuration = now.getTime() - startDate.getTime();
+      
+      if (elapsedDuration <= 0) return 0;
+      if (elapsedDuration >= totalDuration) return 100;
+      
+      return (elapsedDuration / totalDuration) * 100;
+    };
+
     // FUNÇÃO AUXILIAR para criação segura de datas
     const createSafeDate = (dateString: string): Date | null => {
         if (!dateString) return null;
@@ -5279,7 +5858,282 @@ return (
               </ScrollArea>
             </div>
             
-            {/* Footer de visualização limpo */}
+            {/* Footer de edição */}
+            <UpdatedSheetFooter 
+              selectedOrder={selectedOrder}
+              selectedItems={selectedItems}
+              handleGeneratePackingSlip={handleGeneratePackingSlip}
+              handleExportSchedule={handleExportSchedule}
+              setIsEditing={setIsEditing}
+              handleDeleteClick={handleDeleteClick}
+            />
+          </div>
+        ) : (
+          // MODO DE VISUALIZAÇÃO - COM NOVOS COMPONENTES INTERATIVOS
+          <div className="flex flex-col flex-1 min-h-0">
+            {/* Área de conteúdo com scroll */}
+            <div className="flex-1 overflow-hidden py-4">
+              <ScrollArea className="h-full pr-4">
+                <div className="space-y-6">
+                  {/* Informações do Pedido */}
+                  <Card className="p-4 bg-secondary/50">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <span className="text-sm text-muted-foreground">Cliente:</span>
+                        <p className="font-medium">{selectedOrder.customer?.name || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <span className="text-sm text-muted-foreground">Valor Total:</span>
+                        <p className="font-medium">{selectedOrder.totalValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'R$ 0,00'}</p>
+                      </div>
+                      <div>
+                        <span className="text-sm text-muted-foreground">Peso Total:</span>
+                        <p className="font-medium">{(selectedOrder.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</p>
+                      </div>
+                      <div>
+                        <span className="text-sm text-muted-foreground">Status:</span>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={getStatusProps(selectedOrder.status).variant} className={getStatusProps(selectedOrder.status).colorClass}>
+                            {React.createElement(getStatusProps(selectedOrder.status).icon, { className: "mr-2 h-4 w-4" })}
+                            {getStatusProps(selectedOrder.status).label}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-sm text-muted-foreground">Data de Entrega:</span>
+                        <p className="font-medium">{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, "dd/MM/yyyy") : 'Não definida'}</p>
+                      </div>
+                      <div>
+                        <span className="text-sm text-muted-foreground">Link da Pasta:</span>
+                        {selectedOrder.driveLink ? (
+                          <a href={selectedOrder.driveLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
+                            Abrir Pasta
+                          </a>
+                        ) : (
+                          <p className="text-muted-foreground text-sm">Não definido</p>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Análise de Progresso do Pedido - Comentado temporariamente */}
+                  {/* <ProgressAnalysisCard selectedOrder={selectedOrder} /> */}
+
+                  {/* Itens do Pedido - MODO DE VISUALIZAÇÃO COM NOVOS COMPONENTES */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <span>Itens do Pedido</span>
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Package className="h-4 w-4" />
+                            <span>{selectedOrder.items.length} {selectedOrder.items.length === 1 ? 'item' : 'itens'}</span>
+                          </div>
+                        </div>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {selectedOrder.items.map((item, index) => {
+                        const itemProgress = calculateItemProgress(item);
+                        const totalItemWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                        
+                        return (
+                          <Card key={item.id} className={`p-4 ${selectedItems.has(item.id!) ? 'ring-2 ring-primary' : ''}`}>
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center space-x-3">
+                                <Checkbox
+                                  checked={selectedItems.has(item.id!)}
+                                  onCheckedChange={() => handleItemSelection(item.id!)}
+                                  aria-label={`Selecionar item ${item.description}`}
+                                />
+                                <div>
+                                  <h4 className="font-medium">{item.description}</h4>
+                                  {item.code && <p className="text-sm text-muted-foreground">Código: {item.code}</p>}
+                                </div>
+                              </div>
+                              
+                              {/* NOVO: Botões de ação rápida */}
+                              <QuickActionButtons
+                                item={item}
+                                onAdvanceStage={(stageIndex) => handleAdvanceStage(item, stageIndex)}
+                                onCompleteItem={() => handleCompleteItem(item)}
+                                onOpenModal={() => handleOpenProgressModal(item)}
+                              />
+                            </div>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Nº Item PC:</span>
+                                <p className="font-medium">{item.itemNumber || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Quantidade:</span>
+                                <p className="font-medium">{item.quantity}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Peso Unit.:</span>
+                                <p className="font-medium">{(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Peso Total:</span>
+                                <p className="font-medium">{totalItemWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Entrega:</span>
+                                <p className="font-medium">{item.itemDeliveryDate ? format(item.itemDeliveryDate, "dd/MM/yyyy") : 'A definir'}</p>
+                              </div>
+                            </div>
+                            
+                            {/* NOVO: Barra de progresso interativa com timeline */}
+                            <div className="mt-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm text-muted-foreground">Progresso:</span>
+                                <span className="text-sm font-medium">{Math.round(itemProgress)}%</span>
+                                
+                                {/* NOVO: Indicador de cronograma */}
+                                {item.productionPlan && item.productionPlan.length > 0 && (
+                                  <>
+                                    {(() => {
+                                      const currentStage = item.productionPlan.find(s => s.status === 'Em Andamento');
+                                      if (currentStage && currentStage.predictedEndDate) {
+                                        const now = new Date();
+                                        const isOverdue = now > currentStage.predictedEndDate;
+                                        const timeLeft = Math.ceil((currentStage.predictedEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                                        
+                                        return (
+                                          <Badge variant={isOverdue ? "destructive" : "secondary"} className="text-xs">
+                                            <Clock className="w-3 h-3 mr-1" />
+                                            {isOverdue ? 
+                                              `Atrasado ${Math.abs(timeLeft)}d` : 
+                                              `${timeLeft}d restantes`
+                                            }
+                                          </Badge>
+                                        );
+                                      }
+                                      
+                                      const nextStage = item.productionPlan.find(s => s.status === 'Pendente');
+                                      if (nextStage && nextStage.predictedStartDate) {
+                                        const daysToStart = Math.ceil((nextStage.predictedStartDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                                        return (
+                                          <Badge variant="outline" className="text-xs">
+                                            <CalendarIcon className="w-3 h-3 mr-1" />
+                                            Próxima: {daysToStart}d
+                                          </Badge>
+                                        );
+                                      }
+                                      
+                                      return null;
+                                    })()}
+                                  </>
+                                )}
+                              </div>
+                              
+                              {/* Barra de progresso interativa mantida */}
+                              <InteractiveProgressBar
+                                value={itemProgress}
+                                onChange={(newProgress) => handleInlineProgressUpdate(item, newProgress)}
+                                item={item}
+                              />
+                              
+                              {/* NOVO: Timeline compacto no card */}
+                              {item.productionPlan && item.productionPlan.length > 0 && (
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                  <div className="flex items-center justify-between">
+                                    <span>Timeline:</span>
+                                    <div className="flex items-center gap-1">
+                                      {item.productionPlan.map((stage, idx) => (
+                                        <div
+                                          key={idx}
+                                          className={`w-2 h-2 rounded-full ${
+                                            stage.status === 'Concluído' ? 'bg-green-500' :
+                                            stage.status === 'Em Andamento' ? 'bg-blue-500' : 'bg-gray-300'
+                                          }`}
+                                          title={`${stage.stageName}: ${stage.status}`}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Etapa atual com prazo */}
+                                  {(() => {
+                                    const currentStage = item.productionPlan.find(s => s.status === 'Em Andamento');
+                                    if (currentStage) {
+                                      return (
+                                        <div className="mt-1 flex items-center justify-between">
+                                          <span>Atual: {currentStage.stageName}</span>
+                                          {currentStage.predictedEndDate && (
+                                            <span>até {format(currentStage.predictedEndDate, 'dd/MM')}</span>
+                                          )}
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* NOVO: Checklist rápido de etapas */}
+                            {item.productionPlan && item.productionPlan.length > 0 && (
+                              <div className="mt-3 pt-3 border-t">
+                                <QuickStageChecklist
+                                  stages={item.productionPlan}
+                                  onStageUpdate={(stageIndex, newStatus) => handleQuickStageUpdate(item, stageIndex, newStatus)}
+                                  compact={true}
+                                />
+                              </div>
+                            )}
+
+                            {/* NOVO: Botões mobile para chão de fábrica */}
+                            <MobileStageButtons
+                              item={item}
+                              onStart={(stageIndex) => handleAutoStartStage(item, stageIndex)}
+                              onComplete={(stageIndex) => handleAutoCompleteStage(item, stageIndex)}
+                            />
+
+                            {/* Seção de Embarque para Itens Concluídos */}
+                            {itemProgress === 100 && (
+                              <>
+                                <Separator className="my-3" />
+                                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <CheckCircle className="h-5 w-5 text-green-600" />
+                                    <h5 className="font-semibold text-green-800">Item Concluído - Informações de Embarque</h5>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                      <span className="text-sm text-muted-foreground">Lista de Embarque (LE):</span>
+                                      <p className="font-medium">{item.shippingList || 'Não informado'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-sm text-muted-foreground">Data de Embarque:</span>
+                                      <p className="font-medium">{item.shippingDate ? format(item.shippingDate, "dd/MM/yyyy") : 'Não informado'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-sm text-muted-foreground">Transportadora:</span>
+                                      <p className="font-medium">{item.carrier || 'Não informado'}</p>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Status de entrega para itens embarcados - Comentado temporariamente */}
+                                  {/* {item.shippingDate && (
+                                    <div className="mt-3">
+                                      <ShippingStatusBadge item={item} expectedDate={item.itemDeliveryDate || selectedOrder.deliveryDate} />
+                                    </div>
+                                  )} */}
+                                </div>
+                              </>
+                            )}
+                          </Card>
+                        );
+                      })}
+                    </CardContent>
+                  </Card>
+                </div>
+              </ScrollArea>
+            </div>
+            
+            {/* Footer de visualização */}
             <UpdatedSheetFooter 
               selectedOrder={selectedOrder}
               selectedItems={selectedItems}
@@ -5344,33 +6198,164 @@ return (
                           </div>
                         ) : (editedPlan && editedPlan.length > 0) ? (
                           editedPlan.map((stage, index) => {
-                            console.log('🎨 RENDERIZANDO ETAPA:', {
-                              index,
-                              stageName: stage.stageName,
-                              startDate: stage.startDate,
-                              completedDate: stage.completedDate,
-                              status: stage.status,
-                              assignedResource: stage.assignedResource,
-                              supervisor: stage.supervisor
-                            });
+                            const now = new Date();
+                            const isOverdue = stage.predictedEndDate && stage.status === 'Em Andamento' && now > stage.predictedEndDate;
+                            const wasLate = stage.status === 'Concluído' && stage.actualEndDate && stage.predictedEndDate && 
+                                            stage.actualEndDate > stage.predictedEndDate;
+                            
                             return (
-                            <Card key={`${stage.stageName}-${index}`} className="p-3 relative">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-destructive"
-                                onClick={() => handleRemoveStageFromPlan(index)}
-                              >
-                                <XCircleIcon className="h-4 w-4" />
-                                <span className="sr-only">Remover etapa</span>
-                              </Button>
-                              <CardTitle className="text-lg mb-3 pr-8 flex items-center gap-2">
-                                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
-                                  {index + 1}
-                                </span>
-                                {stage.stageName}
-                              </CardTitle>
+                            <Card key={`${stage.stageName}-${index}`} className={`p-4 relative ${
+                              stage.status === 'Em Andamento' ? 'ring-2 ring-blue-300' : ''
+                            } ${isOverdue ? 'bg-red-50 border-red-200' : ''}`}>
+                              
+                              {/* Header da etapa */}
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="bg-primary text-primary-foreground rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold">
+                                    {index + 1}
+                                  </div>
+                                  <div>
+                                    <h4 className="font-medium">{stage.stageName}</h4>
+                                    <p className="text-xs text-muted-foreground">
+                                      Lead time: {stage.durationDays || 1} dia(s) úteis
+                                    </p>
+                                  </div>
+                                </div>
+                                
+                                {/* Botões de ação automática */}
+                                <div className="flex items-center gap-2">
+                                  {stage.status === 'Pendente' && (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleAutoStartStage(itemToTrack, index)}
+                                      className="bg-blue-600 hover:bg-blue-700"
+                                    >
+                                      <PlayCircle className="w-4 h-4 mr-1" />
+                                      Iniciar
+                                    </Button>
+                                  )}
+                                  
+                                  {stage.status === 'Em Andamento' && (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleAutoCompleteStage(itemToTrack, index)}
+                                      className="bg-green-600 hover:bg-green-700"
+                                    >
+                                      <CheckCircle className="w-4 h-4 mr-1" />
+                                      Concluir
+                                    </Button>
+                                  )}
+                                  
+                                  {/* Badge de status */}
+                                  <Badge variant={
+                                    stage.status === 'Concluído' ? 'default' :
+                                    stage.status === 'Em Andamento' ? 'secondary' : 'outline'
+                                  } className={
+                                    stage.status === 'Concluído' ? (wasLate ? 'bg-orange-500' : 'bg-green-600') :
+                                    stage.status === 'Em Andamento' ? (isOverdue ? 'bg-red-500' : 'bg-blue-500') : ''
+                                  }>
+                                    {stage.status}
+                                    {isOverdue && ' (ATRASADO)'}
+                                    {wasLate && ' (COM ATRASO)'}
+                                  </Badge>
+                                </div>
+                              </div>
+
+                              {/* Timeline automático */}
+                              <div className="space-y-2 bg-gray-50 p-3 rounded-lg">
+                                {/* Data de início */}
+                                {stage.startDate && (
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <PlayCircle className="w-4 h-4 text-green-600" />
+                                    <span className="text-muted-foreground">Iniciado:</span>
+                                    <span className="font-medium">
+                                      {format(stage.startDate, "dd/MM/yyyy 'às' HH:mm")}
+                                    </span>
+                                  </div>
+                                )}
+                                
+                                {/* Previsão de conclusão */}
+                                {stage.predictedEndDate && stage.status !== 'Concluído' && (
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <CalendarIcon className="w-4 h-4 text-blue-600" />
+                                    <span className="text-muted-foreground">Previsto:</span>
+                                    <span className="font-medium">
+                                      {format(stage.predictedEndDate, "dd/MM/yyyy 'às' HH:mm")}
+                                    </span>
+                                    {stage.status === 'Em Andamento' && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {stage.predictedEndDate > now ? 
+                                          `${Math.ceil((stage.predictedEndDate - now) / (1000 * 60 * 60 * 24))} dias restantes` :
+                                          'Prazo vencido'
+                                        }
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {/* Data de conclusão real */}
+                                {stage.status === 'Concluído' && (stage.completedDate || stage.actualEndDate) && (
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <CheckCircle className="w-4 w-4 text-green-600" />
+                                    <span className="text-muted-foreground">Concluído:</span>
+                                    <span className="font-medium">
+                                      {format(stage.completedDate || stage.actualEndDate, "dd/MM/yyyy 'às' HH:mm")}
+                                    </span>
+                                    {wasLate && (
+                                      <Badge variant="destructive" className="text-xs">
+                                        {Math.ceil((stage.actualEndDate.getTime() - stage.predictedEndDate.getTime()) / (1000 * 60 * 60 * 24))} dias de atraso
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Progresso estimado para etapas em andamento */}
+                              {stage.status === 'Em Andamento' && stage.startDate && stage.predictedEndDate && (
+                                <div className="mt-3">
+                                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                                    <span>Progresso estimado por tempo</span>
+                                    <span>{Math.round(getTimeBasedProgress(stage.startDate, stage.predictedEndDate))}%</span>
+                                  </div>
+                                  <Progress value={getTimeBasedProgress(stage.startDate, stage.predictedEndDate)} className="h-2" />
+                                </div>
+                              )}
+
+                              {/* Resto dos campos manuais (mantém funcionalidade existente) */}
+                              <Separator className="my-4" />
+                              <div className="text-xs text-muted-foreground mb-2">Ajustes manuais (opcional):</div>
+                              
+                              {/* Campos manuais originais - mantidos para casos especiais */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 opacity-75">
+                                <div className="space-y-2">
+                                  <Label>Status Manual</Label>
+                                  <Select 
+                                    value={stage.status} 
+                                    onValueChange={(value) => handlePlanChange(index, 'status', value)}
+                                  >
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Pendente">Pendente</SelectItem>
+                                      <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                                      <SelectItem value="Concluído">Concluído</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                
+                                <div className="space-y-2">
+                                  <Label>Duração (dias)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.125"
+                                    min="0.125"
+                                    className="h-8"
+                                    value={stage.durationDays ?? ''}
+                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
+                                  />
+                                </div>
+                              </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div className="space-y-2">
                                   <Label>Status</Label>
