@@ -438,10 +438,7 @@ export default function CustomersPage() {
                     <div>
                       <p className="font-medium">{ranking.name}</p>
                       <div className="text-xs text-muted-foreground">
-                        <span>{ranking.totalOrders} pedidos • {ranking.totalWeight.toLocaleString('pt-BR', { 
-                          minimumFractionDigits: 2, 
-                          maximumFractionDigits: 2 
-                        })} kg total</span>
+                        <span>{ranking.totalOrders} pedidos</span>
                       </div>
                     </div>
                   </div>
@@ -453,7 +450,7 @@ export default function CustomersPage() {
                       })}kg
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      média por pedido
+                      peso total
                     </div>
                   </div>
                 </div>
