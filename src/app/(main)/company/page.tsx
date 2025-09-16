@@ -34,6 +34,8 @@ const companySchema = z.object({
   celular: z.string().min(10, "O celular deve ser válido."),
   endereco: z.string().min(10, "O endereço é obrigatório."),
   website: z.string().url("O site deve ser uma URL válida.").optional(),
+  capacidadeInstalada: z.number().min(0, "A capacidade instalada deve ser maior ou igual a 0.").optional(),
+  metaMensal: z.number().min(0, "A meta mensal deve ser maior ou igual a 0.").optional(),
 });
 
 const teamMemberSchema = z.object({
@@ -102,6 +104,8 @@ export default function CompanyPage() {
       celular: "",
       endereco: "",
       website: "",
+      capacidadeInstalada: undefined,
+      metaMensal: undefined,
     },
   });
 
@@ -1033,6 +1037,56 @@ export default function CompanyPage() {
                               </FormItem>
                             )}
                           />
+                          <div className="grid md:grid-cols-2 gap-6">
+                            <FormField
+                              control={companyForm.control}
+                              name="capacidadeInstalada"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Capacidade Instalada Mensal (kg)</FormLabel>
+                                  <FormControl>
+                                    <Input 
+                                      type="number" 
+                                      min="0" 
+                                      step="0.01"
+                                      placeholder="Ex: 50000" 
+                                      {...field} 
+                                      value={field.value ?? ''} 
+                                      onChange={e => field.onChange(parseFloat(e.target.value) || undefined)}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                  <p className="text-xs text-muted-foreground">
+                                    Capacidade máxima de produção mensal da empresa (em kg)
+                                  </p>
+                                </FormItem>
+                              )}
+                            />
+                            <FormField
+                              control={companyForm.control}
+                              name="metaMensal"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Meta Mensal de Produção (kg)</FormLabel>
+                                  <FormControl>
+                                    <Input 
+                                      type="number" 
+                                      min="0" 
+                                      step="0.01"
+                                      placeholder="Ex: 35000" 
+                                      {...field} 
+                                      value={field.value ?? ''} 
+                                      onChange={e => field.onChange(parseFloat(e.target.value) || undefined)}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                  <p className="text-xs text-muted-foreground">
+                                    Meta de produção mensal que a empresa deseja atingir (em kg)
+                                  </p>
+                                </FormItem>
+                              )}
+                            />
+                          </div>
                           <FormField
                             control={companyForm.control}
                             name="endereco"
