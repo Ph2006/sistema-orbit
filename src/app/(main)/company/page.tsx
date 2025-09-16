@@ -29,13 +29,13 @@ import { Progress } from "@/components/ui/progress";
 const companySchema = z.object({
   nomeFantasia: z.string().min(3, "O nome fantasia é obrigatório."),
   cnpj: z.string().min(14, "O CNPJ deve ser válido."),
-  inscricaoEstadual: z.string().optional(),
+  inscricaoEstadual: z.string().optional().or(z.literal("")),
   email: z.string().email("O e-mail é inválido."),
   celular: z.string().min(10, "O celular deve ser válido."),
   endereco: z.string().min(10, "O endereço é obrigatório."),
-  website: z.string().url("O site deve ser uma URL válida.").optional(),
-  capacidadeInstalada: z.number().min(0, "A capacidade instalada deve ser maior ou igual a 0.").optional(),
-  metaMensal: z.number().min(0, "A meta mensal deve ser maior ou igual a 0.").optional(),
+  website: z.string().url("O site deve ser uma URL válida.").optional().or(z.literal("")),
+  capacidadeInstalada: z.number().positive("A capacidade deve ser maior que 0.").optional(),
+  metaMensal: z.number().positive("A meta deve ser maior que 0.").optional(),
 });
 
 const teamMemberSchema = z.object({
@@ -723,22 +723,36 @@ export default function CompanyPage() {
   // Funções de submit
   const onCompanySubmit = async (values: z.infer<typeof companySchema>) => {
     if (!user) {
-        toast({
-            variant: "destructive",
-            title: "Erro de Autenticação",
-            description: "Você precisa estar logado para salvar as alterações.",
-        });
-        return;
+      toast({
+        variant: "destructive",
+        title: "Erro de Autenticação",
+        description: "Você precisa estar logado para salvar as alterações.",
+      });
+      return;
     }
+    
     try {
       const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      
+      // Limpar campos vazios e converter números
       const dataToSave = {
-        ...values,
+        nomeFantasia: values.nomeFantasia,
+        cnpj: values.cnpj,
+        inscricaoEstadual: values.inscricaoEstadual || "",
+        email: values.email,
+        celular: values.celular,
+        endereco: values.endereco,
+        website: values.website || "",
+        capacidadeInstalada: values.capacidadeInstalada || null,
+        metaMensal: values.metaMensal || null,
         logo: {
           preview: logoPreview,
         },
+        updatedAt: new Date(),
       };
+      
       await setDoc(companyRef, dataToSave, { merge: true });
+      
       toast({
         title: "Dados atualizados!",
         description: "As informações da empresa foram salvas com sucesso.",
