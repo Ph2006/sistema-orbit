@@ -437,14 +437,24 @@ export default function CustomersPage() {
                     </Badge>
                     <div>
                       <p className="font-medium">{ranking.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {ranking.totalOrders} pedido{ranking.totalOrders !== 1 ? 's' : ''} • {ranking.totalWeight.toFixed(1)}kg total
-                      </p>
+                      <div className="text-xs text-muted-foreground">
+                        <span>{ranking.totalOrders} pedidos • {ranking.totalWeight.toLocaleString('pt-BR', { 
+                          minimumFractionDigits: 2, 
+                          maximumFractionDigits: 2 
+                        })} kg total</span>
+                      </div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-medium">{ranking.averageOrderSize.toFixed(1)}kg</p>
-                    <p className="text-xs text-muted-foreground">média por pedido</p>
+                    <div className="text-sm font-bold">
+                      {ranking.totalWeight.toLocaleString('pt-BR', { 
+                        minimumFractionDigits: 2, 
+                        maximumFractionDigits: 2 
+                      })}kg
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      média por pedido
+                    </div>
                   </div>
                 </div>
               );
