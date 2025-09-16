@@ -36,6 +36,10 @@ interface DashboardData {
   internalNcRate: number;
   monthlyProduction: MonthlyData[];
   customerAnalysis: CustomerData[];
+  companyCapacity: {
+    capacidadeInstalada?: number;
+    metaMensal?: number;
+  };
 }
 
 function safeParseDate(dateValue: any): Date | null {
@@ -150,7 +154,206 @@ function getShortCustomerName(fullName: string): string {
   return shortName.substring(0, 25).trim();
 }
 
-// Componente melhorado para análise de clientes
+// Componente melhorado para gráfico de produção mensal
+function ImprovedMonthlyProductionChart({ data, companyCapacity }: { 
+  data: MonthlyData[]; 
+  companyCapacity: { capacidadeInstalada?: number; metaMensal?: number; }; 
+}) {
+  const maxValue = Math.max(
+    ...data.map(d => d.weight),
+    companyCapacity.metaMensal || 0,
+    companyCapacity.capacidadeInstalada || 0
+  );
+
+  const currentMonth = new Date().getMonth();
+  const currentMonthName = format(new Date(), 'MMM', { locale: ptBR });
+  const currentMonthData = data.find(d => d.month === currentMonthName);
+  
+  // Calcular métricas de performance
+  const avgProduction = data.length > 0 ? data.reduce((acc, curr) => acc + curr.weight, 0) / data.length : 0;
+  const metaAchievementRate = companyCapacity.metaMensal && currentMonthData 
+    ? (currentMonthData.weight / companyCapacity.metaMensal) * 100 
+    : 0;
+  const capacityUtilization = companyCapacity.capacidadeInstalada && currentMonthData
+    ? (currentMonthData.weight / companyCapacity.capacidadeInstalada) * 100
+    : 0;
+
+  return (
+    <Card className="col-span-1">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <BarChart className="h-5 w-5" />
+          Produção Mensal (Peso Entregue)
+        </CardTitle>
+        <CardDescription>
+          Análise de produção com metas e capacidade instalada dos últimos 6 meses
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-6">
+          {/* Métricas de Performance */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-lg font-bold text-primary">
+                {avgProduction.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg
+              </div>
+              <div className="text-xs text-muted-foreground">Média Mensal</div>
+            </div>
+            
+            {companyCapacity.metaMensal && (
+              <div className="text-center p-3 bg-muted/50 rounded-lg">
+                <div className="text-lg font-bold text-green-600">
+                  {metaAchievementRate.toFixed(1)}%
+                </div>
+                <div className="text-xs text-muted-foreground">Atingimento da Meta</div>
+              </div>
+            )}
+            
+            {companyCapacity.capacidadeInstalada && (
+              <div className="text-center p-3 bg-muted/50 rounded-lg">
+                <div className="text-lg font-bold text-blue-600">
+                  {capacityUtilization.toFixed(1)}%
+                </div>
+                <div className="text-xs text-muted-foreground">Utilização da Capacidade</div>
+              </div>
+            )}
+          </div>
+
+          {/* Gráfico */}
+          <div className="space-y-4">
+            <div className="text-sm font-medium text-muted-foreground">
+              PESO ENTREGUE POR MÊS (KG)
+            </div>
+            
+            <div className="space-y-3">
+              {data.map((item, index) => {
+                const percentage = maxValue > 0 ? (item.weight / maxValue) * 100 : 0;
+                const isCurrentMonth = item.month === currentMonthName;
+                
+                return (
+                  <div key={item.month} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-medium min-w-[2rem] ${isCurrentMonth ? 'text-primary font-bold' : ''}`}>
+                          {item.month}
+                        </span>
+                        {isCurrentMonth && (
+                          <Badge variant="default" className="text-xs">
+                            Atual
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-medium">
+                          {item.weight.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg
+                        </span>
+                        {companyCapacity.metaMensal && (
+                          <div className="text-xs text-muted-foreground">
+                            {((item.weight / companyCapacity.metaMensal) * 100).toFixed(0)}% da meta
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="relative">
+                      {/* Barra principal de produção */}
+                      <div className="w-full bg-secondary rounded-full h-4 relative overflow-hidden">
+                        <div
+                          className={`h-4 rounded-full transition-all duration-300 ${
+                            isCurrentMonth ? 'bg-primary' : 'bg-primary/80'
+                          }`}
+                          style={{ width: `${Math.min(percentage, 100)}%` }}
+                        />
+                        
+                        {/* Linha da meta mensal */}
+                        {companyCapacity.metaMensal && maxValue > 0 && (
+                          <div
+                            className="absolute top-0 w-1 h-4 bg-green-600 z-10"
+                            style={{ 
+                              left: `${Math.min((companyCapacity.metaMensal / maxValue) * 100, 100)}%`,
+                              transform: 'translateX(-50%)'
+                            }}
+                          />
+                        )}
+                        
+                        {/* Linha da capacidade instalada */}
+                        {companyCapacity.capacidadeInstalada && maxValue > 0 && (
+                          <div
+                            className="absolute top-0 w-1 h-4 bg-blue-600 z-10"
+                            style={{ 
+                              left: `${Math.min((companyCapacity.capacidadeInstalada / maxValue) * 100, 100)}%`,
+                              transform: 'translateX(-50%)'
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* Legenda */}
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground pt-4 border-t">
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 bg-primary rounded" />
+                <span>Produção Realizada</span>
+              </div>
+              {companyCapacity.metaMensal && (
+                <div className="flex items-center gap-1">
+                  <div className="w-1 h-3 bg-green-600" />
+                  <span>Meta Mensal ({companyCapacity.metaMensal.toLocaleString('pt-BR')} kg)</span>
+                </div>
+              )}
+              {companyCapacity.capacidadeInstalada && (
+                <div className="flex items-center gap-1">
+                  <div className="w-1 h-3 bg-blue-600" />
+                  <span>Capacidade Instalada ({companyCapacity.capacidadeInstalada.toLocaleString('pt-BR')} kg)</span>
+                </div>
+              )}
+            </div>
+
+            {/* Análise de Gargalos */}
+            {companyCapacity.capacidadeInstalada && companyCapacity.metaMensal && (
+              <div className="pt-4 border-t">
+                <h4 className="text-sm font-semibold mb-2">Análise de Gargalos:</h4>
+                <div className="space-y-2 text-sm">
+                  {currentMonthData && (
+                    <>
+                      <div className={`flex items-center gap-2 ${
+                        capacityUtilization > 85 ? 'text-red-600' : 
+                        capacityUtilization > 70 ? 'text-yellow-600' : 'text-green-600'
+                      }`}>
+                        <div className={`w-2 h-2 rounded-full ${
+                          capacityUtilization > 85 ? 'bg-red-600' : 
+                          capacityUtilization > 70 ? 'bg-yellow-600' : 'bg-green-600'
+                        }`} />
+                        <span>
+                          Utilização da capacidade: {capacityUtilization.toFixed(1)}%
+                          {capacityUtilization > 85 ? ' (Alta - possível gargalo)' : 
+                           capacityUtilization > 70 ? ' (Moderada)' : ' (Baixa)'}
+                        </span>
+                      </div>
+                      <div className={`flex items-center gap-2 ml-4 text-xs ${
+                        metaAchievementRate >= 100 ? 'text-green-600' : 
+                        metaAchievementRate >= 80 ? 'text-yellow-600' : 'text-red-600'
+                      }`}>
+                        Meta vs Realizado: {(companyCapacity.metaMensal - currentMonthData.weight) >= 0 
+                          ? `Faltam ${(companyCapacity.metaMensal - currentMonthData.weight).toLocaleString('pt-BR')} kg para a meta`
+                          : `Meta superada em ${(currentMonthData.weight - companyCapacity.metaMensal).toLocaleString('pt-BR')} kg`
+                        }
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
   const topCustomers = data.slice(0, 5);
   
@@ -175,8 +378,8 @@ function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
             {topCustomers.map((customer, index) => (
               <div key={customer.name} className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium" title={customer.name}>
+                  <div className="flex-1 min-w-0 pr-2">
+                    <p className="text-sm font-medium break-words leading-tight" title={customer.name}>
                       {customer.name}
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -186,7 +389,7 @@ function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
                       })} kg
                     </p>
                   </div>
-                  <Badge variant="secondary" className="ml-2">
+                  <Badge variant="secondary" className="ml-2 flex-shrink-0">
                     #{index + 1}
                   </Badge>
                 </div>
@@ -227,7 +430,7 @@ function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
               
               return (
                 <div key={customer.name} className="grid grid-cols-12 gap-2 text-xs py-2 hover:bg-muted/50 rounded-sm">
-                  <div className="col-span-6" title={customer.name}>
+                  <div className="col-span-6 break-words leading-tight pr-1" title={customer.name}>
                     {customer.name}
                   </div>
                   <div className="col-span-3 text-center">
@@ -285,10 +488,21 @@ export default function DashboardPage() {
       const fetchData = async () => {
         setIsLoading(true);
         try {
-          const [ordersSnapshot, qualitySnapshot] = await Promise.all([
+          const [ordersSnapshot, qualitySnapshot, companySnapshot] = await Promise.all([
             getDocs(collection(db, "companies", "mecald", "orders")),
-            getDocs(collection(db, "companies", "mecald", "qualityReports"))
+            getDocs(collection(db, "companies", "mecald", "qualityReports")),
+            getDoc(doc(db, "companies", "mecald", "settings", "company"))
           ]);
+
+          // Buscar dados de capacidade da empresa
+          let companyCapacity = {};
+          if (companySnapshot.exists()) {
+            const companyData = companySnapshot.data();
+            companyCapacity = {
+              capacidadeInstalada: companyData.capacidadeInstalada,
+              metaMensal: companyData.metaMensal,
+            };
+          }
 
           let totalProducedWeight = 0;
           let totalToProduceWeight = 0;
@@ -412,6 +626,7 @@ export default function DashboardPage() {
             internalNcRate,
             monthlyProduction,
             customerAnalysis,
+            companyCapacity,
           });
 
         } catch (error) {
@@ -498,7 +713,10 @@ export default function DashboardPage() {
           <h2 className="text-xl font-semibold tracking-tight">Análises Detalhadas</h2>
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
-          <MonthlyProductionChart data={data.monthlyProduction} />
+          <ImprovedMonthlyProductionChart 
+            data={data.monthlyProduction} 
+            companyCapacity={data.companyCapacity} 
+          />
           <ImprovedCustomerAnalysis data={data.customerAnalysis} />
         </div>
       </section>
