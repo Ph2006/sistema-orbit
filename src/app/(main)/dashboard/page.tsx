@@ -174,8 +174,8 @@ function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
               <div key={customer.name} className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate" title={customer.name}>
-                      {customer.shortName || customer.name}
+                    <p className="text-sm font-medium" title={customer.name}>
+                      {customer.name}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {customer.deliveredWeight.toLocaleString('pt-BR', { 
@@ -225,8 +225,8 @@ function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
               
               return (
                 <div key={customer.name} className="grid grid-cols-12 gap-2 text-xs py-2 hover:bg-muted/50 rounded-sm">
-                  <div className="col-span-6 truncate" title={customer.name}>
-                    {customer.shortName || customer.name}
+                  <div className="col-span-6" title={customer.name}>
+                    {customer.name}
                   </div>
                   <div className="col-span-3 text-center">
                     <Badge 
