@@ -78,11 +78,12 @@ function safeFormatMonth(dateValue: any): string | null {
 function formatCustomerName(name: string): string {
   if (!name || name === "Desconhecido") return "Desconhecido";
   
+  // Preservar acentos e caracteres especiais, apenas limpar espaços extras
   let formattedName = name
-    .replace(/\s+/g, ' ')
-    .replace(/[^\w\s\-\&\.\,\/]/g, ' ')
+    .replace(/\s+/g, ' ') // Múltiplos espaços para um só
     .trim();
 
+  // Aplicar capitalização mantendo acentos
   formattedName = formattedName
     .split(' ')
     .map(word => {
@@ -99,6 +100,7 @@ function formatCustomerName(name: string): string {
     .filter(word => word.length > 0)
     .join(' ');
 
+  // Correções específicas mantendo acentos
   formattedName = formattedName
     .replace(/\bLtda\b/gi, 'Ltda')
     .replace(/\bS\.?a\.?\b/gi, 'S.A.')
@@ -107,17 +109,17 @@ function formatCustomerName(name: string): string {
     .replace(/\bBrasil\b/gi, 'Brasil')
     .replace(/\bMinas\s+Gerais\b/gi, 'Minas Gerais')
     .replace(/\bSao\s+Paulo\b/gi, 'São Paulo')
-    .replace(/\bSão\s+Paulo\b/gi, 'São Paulo')
     .replace(/\bRio\s+de\s+Janeiro\b/gi, 'Rio de Janeiro')
     .replace(/\s*-\s*/g, ' - ')
     .replace(/\s*\/\s*/g, ' / ')
     .replace(/\s*\&\s*/g, ' & ');
 
+  // Garantir que a primeira letra seja maiúscula
   if (formattedName.length > 0) {
     formattedName = formattedName.charAt(0).toUpperCase() + formattedName.slice(1);
   }
 
-  return formattedName.substring(0, 60).trim();
+  return formattedName.trim();
 }
 
 function getShortCustomerName(fullName: string): string {
