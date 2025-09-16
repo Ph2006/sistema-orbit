@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, Timestamp } from "firebase/firestore";
+import { collection, getDocs, getDoc, doc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { BarChart, Package, Percent, Truck, Wrench, AlertTriangle, CheckCircle, Scale, TrendingUp, Users } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { MonthlyProductionChart } from "@/components/dashboard/kpi-charts";
 import { CustomerAnalysis } from "@/components/dashboard/production-status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
