@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2 } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, Trophy, Package } from "lucide-react";
 import { useAuth } from "../layout";
 
 import { Button } from "@/components/ui/button";
@@ -31,9 +31,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
-  DialogClose,
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -71,6 +69,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 
 const customerSchema = z.object({
   razaoSocial: z.string().min(3, { message: "A razão social é obrigatória." }),
@@ -88,8 +87,33 @@ const customerSchema = z.object({
 
 type Customer = z.infer<typeof customerSchema> & { id: string };
 
+type CustomerRanking = {
+  id: string;
+  name: string;
+  totalWeight: number;
+  totalOrders: number;
+  averageOrderSize: number;
+  lastOrderDate?: Date;
+  customer: Customer;
+};
+
+function formatCustomerName(name: string): string {
+  if (!name || name === "Desconhecido") return "Desconhecido";
+  
+  let formattedName = name.replace(/\s+/g, ' ').trim();
+  
+  // Capitalizar primeira letra de cada palavra
+  formattedName = formattedName
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+  
+  return formattedName;
+}
+
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isViewSheetOpen, setIsViewSheetOpen] = useState(false);
@@ -118,8 +142,11 @@ export default function CustomersPage() {
     if (!user) return;
     setIsLoading(true);
     try {
-      const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
-      const customersList = querySnapshot.docs.map((doc) => {
+      const [customersSnapshot, ordersSnapshot] = await Promise.all([
+        getDocs(collection(db, "companies", "mecald", "customers")),
+        getDocs(collection(db, "companies", "mecald", "orders"))
+      ]);
+      const customersList = customersSnapshot.docs.map((doc) => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -135,6 +162,8 @@ export default function CustomersPage() {
         } as Customer;
       });
       setCustomers(customersList);
+      const ordersList = ordersSnapshot.docs.map(doc => doc.data());
+      setOrders(ordersList);
     } catch (error: any) {
       console.error("Detailed error fetching customers: ", error);
       let description = "Ocorreu um erro ao buscar os dados.";
@@ -288,6 +317,144 @@ export default function CustomersPage() {
     );
   };
 
+  const CustomerRankingComponent = ({ customers, orders }: { customers: Customer[], orders: any[] }) => {
+    const calculateCustomerRanking = (): CustomerRanking[] => {
+      const customerStats = new Map<string, {
+        totalWeight: number;
+        totalOrders: number;
+        lastOrderDate?: Date;
+        customer: Customer;
+      }>();
+
+      // Processar pedidos para calcular estatísticas
+      orders.forEach(order => {
+        const customerId = order.customerId || order.customer?.id;
+        if (!customerId) return;
+
+        const customer = customers.find(c => c.id === customerId);
+        if (!customer) return;
+
+        const weight = parseFloat(order.totalWeight || order.weight || "0") || 0;
+        const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : new Date(order.createdAt || order.date);
+
+        if (!customerStats.has(customerId)) {
+          customerStats.set(customerId, {
+            totalWeight: 0,
+            totalOrders: 0,
+            customer,
+            lastOrderDate: orderDate
+          });
+        }
+
+        const stats = customerStats.get(customerId)!;
+        stats.totalWeight += weight;
+        stats.totalOrders += 1;
+        
+        if (orderDate > (stats.lastOrderDate || new Date(0))) {
+          stats.lastOrderDate = orderDate;
+        }
+      });
+
+      // Converter para array e calcular média
+      const rankings: CustomerRanking[] = Array.from(customerStats.values())
+        .map(stats => ({
+          id: stats.customer.id,
+          name: formatCustomerName(stats.customer.nomeFantasia || stats.customer.razaoSocial),
+          totalWeight: stats.totalWeight,
+          totalOrders: stats.totalOrders,
+          averageOrderSize: stats.totalOrders > 0 ? stats.totalWeight / stats.totalOrders : 0,
+          lastOrderDate: stats.lastOrderDate,
+          customer: stats.customer
+        }))
+        .sort((a, b) => b.totalWeight - a.totalWeight)
+        .slice(0, 5); // Top 5
+
+      return rankings;
+    };
+
+    const rankings = calculateCustomerRanking();
+
+    if (rankings.length === 0) {
+      return (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Trophy className="h-5 w-5 text-yellow-500" />
+              Ranking de Clientes
+            </CardTitle>
+            <CardDescription>
+              Top clientes por volume de pedidos
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center text-muted-foreground py-4">
+              <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>Nenhum pedido encontrado para gerar ranking</p>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Trophy className="h-5 w-5 text-yellow-500" />
+            Ranking de Clientes
+          </CardTitle>
+          <CardDescription>
+            Top {rankings.length} clientes por volume de pedidos
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {rankings.map((ranking, index) => {
+              const position = index + 1;
+              const getPositionColor = () => {
+                switch (position) {
+                  case 1: return "bg-yellow-100 text-yellow-800 border-yellow-200";
+                  case 2: return "bg-gray-100 text-gray-800 border-gray-200";
+                  case 3: return "bg-orange-100 text-orange-800 border-orange-200";
+                  default: return "bg-blue-100 text-blue-800 border-blue-200";
+                }
+              };
+
+              const getPositionIcon = () => {
+                switch (position) {
+                  case 1: return "🥇";
+                  case 2: return "🥈";
+                  case 3: return "🥉";
+                  default: return `${position}º`;
+                }
+              };
+
+              return (
+                <div key={ranking.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline" className={`${getPositionColor()} font-semibold`}>
+                      {getPositionIcon()}
+                    </Badge>
+                    <div>
+                      <p className="font-medium">{ranking.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {ranking.totalOrders} pedido{ranking.totalOrders !== 1 ? 's' : ''} • {ranking.totalWeight.toFixed(1)}kg total
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium">{ranking.averageOrderSize.toFixed(1)}kg</p>
+                    <p className="text-xs text-muted-foreground">média por pedido</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   const DetailItem = ({ label, value }: { label: string, value?: string | null }) => (
     <div className="grid grid-cols-[150px_1fr] items-center">
       <span className="text-sm font-medium text-muted-foreground">{label}</span>
@@ -316,6 +483,10 @@ export default function CustomersPage() {
                  </Button>
             </div>
         </div>
+        
+        {/* Ranking de Clientes */}
+        <CustomerRankingComponent customers={customers} orders={orders} />
+        
         <Card>
           <CardHeader>
             <CardTitle>Lista de Clientes</CardTitle>
