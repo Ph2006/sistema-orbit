@@ -456,17 +456,19 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                                     order.dataBookSent ? (
                                         <div className="flex items-center gap-1">
                                             <CheckCircle className="h-4 w-4 text-green-600" />
-                                            <span className="text-sm text-green-700">
-                                                {order.dataBookSentAt ? format(order.dataBookSentAt, "dd/MM") : 'Enviado'}
+                                            <span className="text-sm text-green-700 font-medium">
+                                                Enviado
                                             </span>
                                         </div>
                                     ) : (
                                         <div className="flex items-center gap-1">
                                             <Clock className="h-4 w-4 text-orange-500" />
-                                            <span className="text-sm text-orange-600">Pendente</span>
+                                            <span className="text-sm text-orange-600 font-medium">Pendente</span>
                                         </div>
                                     )
-                                ) : '-'}
+                                ) : (
+                                    <span className="text-sm text-muted-foreground">-</span>
+                                )}
                             </TableCell>
                             <TableCell className="text-right font-medium">
                                 {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
@@ -561,6 +563,7 @@ export default function OrdersPage() {
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [customerFilter, setCustomerFilter] = useState<string>("all");
     const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+    const [dataBookFilter, setDataBookFilter] = useState<string>("all");
     
     // View states
     const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
@@ -1197,8 +1200,16 @@ export default function OrdersPage() {
             const statusMatch = statusFilter === 'all' || order.status === statusFilter;
             const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
             const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
+            
+            // NOVO FILTRO DE DATA BOOK
+            let dataBookMatch = true;
+            if (dataBookFilter === 'pendente') {
+                dataBookMatch = order.status === 'Concluído' && !order.dataBookSent;
+            } else if (dataBookFilter === 'enviado') {
+                dataBookMatch = order.dataBookSent === true;
+            }
 
-            return textMatch && statusMatch && customerMatch && dateMatch;
+            return textMatch && statusMatch && customerMatch && dateMatch && dataBookMatch;
         });
 
         return filtered.sort((a, b) => {
@@ -1220,7 +1231,7 @@ export default function OrdersPage() {
 
             return b.createdAt.getTime() - a.createdAt.getTime();
         });
-    }, [orders, searchQuery, statusFilter, customerFilter, dateFilter]);
+    }, [orders, searchQuery, statusFilter, customerFilter, dateFilter, dataBookFilter]);
     
     const watchedItems = form.watch("items");
     const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
@@ -1230,9 +1241,10 @@ export default function OrdersPage() {
         setStatusFilter("all");
         setCustomerFilter("all");
         setDateFilter(undefined);
+        setDataBookFilter("all");
     };
 
-    const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter;
+    const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter || dataBookFilter !== 'all';
 
     // Organiza os pedidos por data de entrega para visualização em calendário
     const ordersByDate = useMemo(() => {
@@ -4257,6 +4269,24 @@ return (
                                     .map(customer => (
                                         <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
                                     ))}
+                            </SelectContent>
+                        </Select>
+
+                        {/* NOVO FILTRO PARA DATA BOOK */}
+                        <Select value={dataBookFilter} onValueChange={setDataBookFilter}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Data Book" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">
+                                    Todos ({orders.length})
+                                </SelectItem>
+                                <SelectItem value="pendente">
+                                    Data Book Pendente ({orders.filter(o => o.status === 'Concluído' && !o.dataBookSent).length})
+                                </SelectItem>
+                                <SelectItem value="enviado">
+                                    Data Book Enviado ({orders.filter(o => o.dataBookSent).length})
+                                </SelectItem>
                             </SelectContent>
                         </Select>
 
