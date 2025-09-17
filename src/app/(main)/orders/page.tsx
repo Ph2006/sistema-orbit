@@ -5375,7 +5375,7 @@ return (
 </Sheet>
 
             <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
-                <DialogContent className="sm:max-w-4xl h-[95vh] flex flex-col">
+                <DialogContent className="sm:max-w-6xl lg:max-w-7xl w-[95vw] h-[95vh] flex flex-col overflow-hidden">
                   {/* Header fixo */}
                   <DialogHeader className="flex-shrink-0">
                     <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
@@ -5454,30 +5454,32 @@ return (
                   </div>
 
                   {/* Área de conteúdo com scroll */}
-                  <div className="flex-1 overflow-hidden">
-                    <ScrollArea className="h-full pr-4">
-                      <div className="p-6">
-                        {isFetchingPlan ? (
-                          <div className="flex justify-center items-center h-48">
-                            <div className="text-center">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-                              <p>Buscando plano de fabricação...</p>
-                            </div>
+                  <div className="flex-1 overflow-auto">
+                    <div className="min-w-[1200px] p-4">
+                      {isFetchingPlan ? (
+                        <div className="flex justify-center items-center h-48">
+                          <div className="text-center">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                            <p>Buscando plano de fabricação...</p>
                           </div>
-                        ) : (editedPlan && editedPlan.length > 0) ? (
-                          <div className="border rounded-lg">
-                            <Table>
-                              <TableHeader className="sticky top-0 bg-background">
-                                <TableRow>
-                                  <TableHead className="w-8">#</TableHead>
-                                  <TableHead className="min-w-[150px]">Etapa</TableHead>
-                                  <TableHead className="w-32">Status</TableHead>
-                                  <TableHead className="w-28">Início</TableHead>
-                                  <TableHead className="w-28">Fim</TableHead>
-                                  <TableHead className="w-20">Duração</TableHead>
-                                  <TableHead className="w-8">Ações</TableHead>
-                                </TableRow>
-                              </TableHeader>
+                        </div>
+                      ) : (editedPlan && editedPlan.length > 0) ? (
+                        <div className="border rounded-lg">
+                          <Table>
+                            <TableHeader className="sticky top-0 bg-background">
+                              <TableRow>
+                                <TableHead className="w-12">#</TableHead>
+                                <TableHead className="min-w-[200px]">Etapa</TableHead>
+                                <TableHead className="w-32">Status</TableHead>
+                                <TableHead className="w-32">Início</TableHead>
+                                <TableHead className="w-32">Fim</TableHead>
+                                <TableHead className="w-24">Duração</TableHead>
+                                <TableHead className="w-40">Recurso</TableHead>
+                                <TableHead className="w-40">Supervisor</TableHead>
+                                <TableHead className="w-28">Tipo</TableHead>
+                                <TableHead className="w-20">Ações</TableHead>
+                              </TableRow>
+                            </TableHeader>
                               <TableBody>
                                 {editedPlan.map((stage, index) => (
                                   <>
@@ -5545,8 +5547,85 @@ return (
                                           min="0.125"
                                           value={stage.durationDays ?? ''}
                                           onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
-                                          className="h-8 w-16"
+                                          className="h-8 w-20"
                                         />
+                                      </TableCell>
+                                      <TableCell>
+                                        <Select 
+                                          value={stage.assignedResource?.resourceId || ""} 
+                                          onValueChange={(value) => {
+                                            if (!value || value === "none") {
+                                              handlePlanChange(index, 'assignedResource', null);
+                                            } else {
+                                              const resource = availableResources.find(r => r.id === value);
+                                              if (resource) {
+                                                handlePlanChange(index, 'assignedResource', {
+                                                  resourceId: value,
+                                                  resourceName: resource.name
+                                                });
+                                              }
+                                            }
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-8">
+                                            <SelectValue placeholder="Recurso" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="none">Nenhum</SelectItem>
+                                            {availableResources.map(resource => (
+                                              <SelectItem key={resource.id} value={resource.id}>
+                                                {resource.name}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Select 
+                                          value={stage.supervisor?.memberId || ""} 
+                                          onValueChange={(value) => {
+                                            if (!value || value === "none") {
+                                              handlePlanChange(index, 'supervisor', null);
+                                            } else {
+                                              const member = teamMembers.find(m => m.id === value);
+                                              if (member) {
+                                                handlePlanChange(index, 'supervisor', {
+                                                  memberId: value,
+                                                  memberName: member.name
+                                                });
+                                              }
+                                            }
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-8">
+                                            <SelectValue placeholder="Supervisor" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="none">Nenhum</SelectItem>
+                                            {teamMembers.map(member => (
+                                              <SelectItem key={member.id} value={member.id}>
+                                                {member.name}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Select 
+                                          value={stage.useBusinessDays === false ? "corridos" : "uteis"} 
+                                          onValueChange={(value) => {
+                                            const useBusinessDays = value === "uteis";
+                                            handlePlanChange(index, 'useBusinessDays', useBusinessDays);
+                                          }}
+                                        >
+                                          <SelectTrigger className="h-8">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="uteis">Úteis</SelectItem>
+                                            <SelectItem value="corridos">Corridos</SelectItem>
+                                          </SelectContent>
+                                        </Select>
                                       </TableCell>
                                       <TableCell>
                                         <div className="flex items-center gap-1">
@@ -5575,7 +5654,7 @@ return (
                                     </TableRow>
                                     {expandedRow === index && (
                                       <TableRow>
-                                        <TableCell colSpan={7} className="bg-muted/50">
+                                        <TableCell colSpan={10} className="bg-muted/50">
                                           <div className="p-4 space-y-4">
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                               <div className="space-y-2">
@@ -5658,7 +5737,7 @@ return (
                           </div>
                         )}
                       </div>
-                    </ScrollArea>
+                    </div>
                   </div>
 
                     <DialogFooter>
