@@ -4153,7 +4153,6 @@ export default function OrdersPage() {
 
 
 return (
-        <>
     <div className="w-full">
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
@@ -5349,327 +5348,325 @@ return (
       </>
     )}
   </SheetContent>
-</Sheet>
+    </Sheet>
 
-            <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
-                <DialogContent className="sm:max-w-6xl lg:max-w-7xl w-[95vw] h-[95vh] flex flex-col overflow-hidden">
-                  {/* Header fixo */}
-                  <DialogHeader className="flex-shrink-0">
-                    <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
-                    <DialogDescription>
-                      Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
-                    </DialogDescription>
-                    
-                    {/* DEBUG - REMOVER DEPOIS */}
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                      <div className="flex items-center gap-2">
-                        <CalendarIcon className="h-4 w-4 text-blue-600" />
-                        <p className="text-sm text-blue-800">
-                          <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
-                        </p>
-                      </div>
-                    </div>
-                  </DialogHeader>
+    <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
+      <DialogContent className="sm:max-w-6xl lg:max-w-7xl w-[95vw] h-[95vh] flex flex-col overflow-hidden">
+        {/* Header fixo */}
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
+          <DialogDescription>
+            Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
+          </DialogDescription>
+          
+          {/* DEBUG - REMOVER DEPOIS */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="h-4 w-4 text-blue-600" />
+              <p className="text-sm text-blue-800">
+                <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
+              </p>
+            </div>
+          </div>
+        </DialogHeader>
 
-                  {/* Barra de progresso no cabeçalho */}
-                  <div className="px-6 py-4 border-b">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium">
-                        Progresso: {editedPlan.filter(s => s.status === 'Concluído').length} de {editedPlan.length} etapas
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {Math.round((editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100)}%
-                      </span>
-                    </div>
-                    <Progress 
-                      value={(editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100} 
-                      className="h-2" 
-                    />
-                  </div>
-
-                  {/* Ações em lote */}
-                  <div className="px-6 py-3 border-b">
-                    <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        onClick={() => autoScheduleFromToday()}
-                        size="sm"
-                      >
-                        📅 Agendar a partir de hoje
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        onClick={() => markPreviousAsCompleted()}
-                        size="sm"
-                      >
-                        ✅ Marcar anteriores como concluídas
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        onClick={() => applyStandardDurations()}
-                        size="sm"
-                      >
-                        ⏱️ Aplicar durações padrão
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Área de conteúdo com scroll */}
-                  <div className="flex-1 overflow-auto">
-                    <div className="min-w-[1200px] p-4">
-                        {isFetchingPlan ? (
-                          <div className="flex justify-center items-center h-48">
-                            <div className="text-center">
-                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-                              <p>Buscando plano de fabricação...</p>
-                            </div>
-                          </div>
-                        ) : (editedPlan && editedPlan.length > 0) ? (
-                        <div className="border rounded-lg">
-                          <Table>
-                            <TableHeader className="sticky top-0 bg-background">
-                              <TableRow>
-                                <TableHead className="w-12">#</TableHead>
-                                <TableHead className="min-w-[200px]">Etapa</TableHead>
-                                <TableHead className="w-32">Status</TableHead>
-                                <TableHead className="w-32">Início</TableHead>
-                                <TableHead className="w-32">Fim</TableHead>
-                                <TableHead className="w-24">Duração</TableHead>
-                                <TableHead className="w-36">Horário</TableHead>
-                                <TableHead className="w-20">Ações</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                              <TableBody>
-                                {editedPlan.map((stage, index) => (
-                                  <>
-                                    <TableRow key={`${stage.stageName}-${index}`} className="group">
-                                      <TableCell className="font-medium">{index + 1}</TableCell>
-                                      <TableCell>
-                                        <div className="flex items-center gap-2">
-                                          {getStatusIcon(stage.status)}
-                                          <span className="font-medium">{stage.stageName}</span>
-                                        </div>
-                                      </TableCell>
-                                      <TableCell>
-                                  <Select 
-                                    value={stage.status} 
-                                          onValueChange={(value) => handlePlanChange(index, 'status', value)}
-                                  >
-                                          <SelectTrigger className="h-8 w-full">
-                                            <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                            <SelectItem value="Pendente">Pendente</SelectItem>
-                                            <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                                            <SelectItem value="Concluído">Concluído</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                      </TableCell>
-                                      <TableCell>
-                                        {stage.status === 'Concluído' ? (
-                                          <div className="text-green-700 font-medium">
-                                            {stage.startDate ? format(stage.startDate, "dd/MM") : '-'}
-                                </div>
-                                        ) : (
-                                          <Input
-                                            type="date"
-                                            value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
-                                            onChange={(e) => {
-                                              const newDate = e.target.value ? createSafeDate(e.target.value) : null;
-                                              handlePlanChange(index, 'startDate', newDate);
-                                            }}
-                                            className="h-8"
-                                          />
-                                        )}
-                                      </TableCell>
-                                      <TableCell>
-                                        {stage.status === 'Concluído' ? (
-                                          <div className="text-green-700 font-medium">
-                                            {stage.completedDate ? format(stage.completedDate, "dd/MM") : '-'}
-                                          </div>
-                                        ) : (
-                                          <Input
-                                            type="date"
-                                            value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
-                                            onChange={(e) => {
-                                              const newDate = e.target.value ? createSafeDate(e.target.value) : null;
-                                              handlePlanChange(index, 'completedDate', newDate);
-                                            }}
-                                            className="h-8"
-                                          />
-                                        )}
-                                      </TableCell>
-                                      <TableCell>
-                                  <Input
-                                    type="number"
-                                    step="0.125"
-                                    min="0.125"
-                                    value={stage.durationDays ?? ''}
-                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
-                                          className="h-8 w-20"
-                                        />
-                                      </TableCell>
-                                      <TableCell>
-                                  <Select 
-                                          value={stage.workSchedule || "normal"} 
-                                    onValueChange={(value) => {
-                                            handlePlanChange(index, 'workSchedule', value);
-                                            // Automaticamente ajusta useBusinessDays baseado na seleção
-                                            const useBusinessDays = value === 'normal';
-                                      handlePlanChange(index, 'useBusinessDays', useBusinessDays);
-                                    }}
-                                  >
-                                          <SelectTrigger className="h-8">
-                                            <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                            <SelectItem value="normal">
-                                        <div className="flex items-center gap-2">
-                                          <CalendarDays className="h-4 w-4 text-blue-500" />
-                                          <div>
-                                                  <div className="font-medium">Normal</div>
-                                                  <div className="text-xs text-muted-foreground">Dias úteis</div>
-                                          </div>
-                                        </div>
-                                      </SelectItem>
-                                            <SelectItem value="especial">
-                                        <div className="flex items-center gap-2">
-                                                <Clock className="h-4 w-4 text-orange-500" />
-                                          <div>
-                                                  <div className="font-medium">Especial</div>
-                                                  <div className="text-xs text-muted-foreground">Dias corridos</div>
-                                          </div>
-                                        </div>
-                                      </SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                      </TableCell>
-                                      <TableCell>
-                                        <div className="flex items-center gap-1">
-                                          <Button 
-                                            variant="ghost" 
-                                            className="h-8 w-8 p-0"
-                                            onClick={() => setExpandedRow(expandedRow === index ? null : index)}
-                                          >
-                                            {expandedRow === index ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                          </Button>
-                                          <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                              <Button variant="ghost" className="h-8 w-8 p-0">
-                                                <MoreHorizontal className="h-4 w-4" />
-                                              </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                              <DropdownMenuItem onClick={() => handleRemoveStageFromPlan(index)}>
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                Remover
-                                              </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                          </DropdownMenu>
-                                  </div>
-                                      </TableCell>
-                                    </TableRow>
-                                  </>
-                                ))}
-                              </TableBody>
-                            </Table>
-                                    </div>
-                        ) : (
-                          <div className="text-center text-muted-foreground py-8">
-                            <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                            <p className="text-lg font-medium">Nenhuma etapa de fabricação definida</p>
-                            <p className="text-sm">Você pode definir as etapas na tela de Produtos ou adicionar manualmente abaixo.</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                    <DialogFooter>
-                      <div className="flex items-center justify-between w-full">
-                        <div className="text-sm text-muted-foreground">
-                          {editedPlan.length > 0 && (
-                            <span>
-                              {editedPlan.length} etapa{editedPlan.length !== 1 ? 's' : ''} configurada{editedPlan.length !== 1 ? 's' : ''}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>
-                            Cancelar
-                          </Button>
-                          <Button 
-                            onClick={handleSaveProgress}
-                            disabled={editedPlan.length === 0}
-                          >
-                            <CalendarCheck className="mr-2 h-4 w-4" />
-                            Salvar Progresso
-                          </Button>
-                        </div>
-                      </div>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-
-            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Esta ação não pode ser desfeita. Isso excluirá permanentemente o pedido Nº <span className="font-bold">{orderToDelete?.quotationNumber}</span> do sistema.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
-                            Sim, excluir pedido
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
-
-            {/* Alert Dialog para Exclusão de Itens */}
-            <AlertDialog open={isItemDeleteDialogOpen} onOpenChange={setIsItemDeleteDialogOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Remover Item do Pedido</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Você tem certeza que deseja remover este item do pedido?
-                    {itemToDelete && (
-                      <div className="mt-2 p-3 bg-muted rounded-lg">
-                        <p className="font-medium text-foreground">
-                          Item {itemToDelete.index + 1}: {itemToDelete.item.description}
-                        </p>
-                        {itemToDelete.item.itemNumber && (
-                          <p className="text-sm text-muted-foreground">
-                            Nº Item PC: {itemToDelete.item.itemNumber}
-                          </p>
-                        )}
-                        {itemToDelete.item.code && (
-                          <p className="text-sm text-muted-foreground">
-                            Código: {itemToDelete.item.code}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    <p className="mt-2 text-sm">
-                      <strong>Atenção:</strong> Esta ação não pode ser desfeita. O item será removido permanentemente do pedido.
-                    </p>
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction 
-                    onClick={handleConfirmDeleteItem} 
-                    className="bg-destructive hover:bg-destructive/90"
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Sim, remover item
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+        {/* Barra de progresso no cabeçalho */}
+        <div className="px-6 py-4 border-b">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">
+              Progresso: {editedPlan.filter(s => s.status === 'Concluído').length} de {editedPlan.length} etapas
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {Math.round((editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100)}%
+            </span>
+          </div>
+          <Progress 
+            value={(editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100} 
+            className="h-2" 
+          />
         </div>
-        </>
+
+        {/* Ações em lote */}
+        <div className="px-6 py-3 border-b">
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => autoScheduleFromToday()}
+              size="sm"
+            >
+              📅 Agendar a partir de hoje
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => markPreviousAsCompleted()}
+              size="sm"
+            >
+              ✅ Marcar anteriores como concluídas
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => applyStandardDurations()}
+              size="sm"
+            >
+              ⏱️ Aplicar durações padrão
+            </Button>
+          </div>
+        </div>
+
+        {/* Área de conteúdo com scroll */}
+        <div className="flex-1 overflow-auto">
+          <div className="min-w-[1200px] p-4">
+            {isFetchingPlan ? (
+              <div className="flex justify-center items-center h-48">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                  <p>Buscando plano de fabricação...</p>
+                </div>
+              </div>
+            ) : (editedPlan && editedPlan.length > 0) ? (
+              <div className="border rounded-lg">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background">
+                    <TableRow>
+                      <TableHead className="w-12">#</TableHead>
+                      <TableHead className="min-w-[200px]">Etapa</TableHead>
+                      <TableHead className="w-32">Status</TableHead>
+                      <TableHead className="w-32">Início</TableHead>
+                      <TableHead className="w-32">Fim</TableHead>
+                      <TableHead className="w-24">Duração</TableHead>
+                      <TableHead className="w-36">Horário</TableHead>
+                      <TableHead className="w-20">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {editedPlan.map((stage, index) => (
+                      <>
+                        <TableRow key={`${stage.stageName}-${index}`} className="group">
+                          <TableCell className="font-medium">{index + 1}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {getStatusIcon(stage.status)}
+                              <span className="font-medium">{stage.stageName}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={stage.status} 
+                              onValueChange={(value) => handlePlanChange(index, 'status', value)}
+                            >
+                              <SelectTrigger className="h-8 w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Pendente">Pendente</SelectItem>
+                                <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                                <SelectItem value="Concluído">Concluído</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            {stage.status === 'Concluído' ? (
+                              <div className="text-green-700 font-medium">
+                                {stage.startDate ? format(stage.startDate, "dd/MM") : '-'}
+                              </div>
+                            ) : (
+                              <Input
+                                type="date"
+                                value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                  const newDate = e.target.value ? createSafeDate(e.target.value) : null;
+                                  handlePlanChange(index, 'startDate', newDate);
+                                }}
+                                className="h-8"
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {stage.status === 'Concluído' ? (
+                              <div className="text-green-700 font-medium">
+                                {stage.completedDate ? format(stage.completedDate, "dd/MM") : '-'}
+                              </div>
+                            ) : (
+                              <Input
+                                type="date"
+                                value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                  const newDate = e.target.value ? createSafeDate(e.target.value) : null;
+                                  handlePlanChange(index, 'completedDate', newDate);
+                                }}
+                                className="h-8"
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              step="0.125"
+                              min="0.125"
+                              value={stage.durationDays ?? ''}
+                              onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
+                              className="h-8 w-20"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={stage.workSchedule || "normal"} 
+                              onValueChange={(value) => {
+                                handlePlanChange(index, 'workSchedule', value);
+                                // Automaticamente ajusta useBusinessDays baseado na seleção
+                                const useBusinessDays = value === 'normal';
+                                handlePlanChange(index, 'useBusinessDays', useBusinessDays);
+                              }}
+                            >
+                              <SelectTrigger className="h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="normal">
+                                  <div className="flex items-center gap-2">
+                                    <CalendarDays className="h-4 w-4 text-blue-500" />
+                                    <div>
+                                      <div className="font-medium">Normal</div>
+                                      <div className="text-xs text-muted-foreground">Dias úteis</div>
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                                <SelectItem value="especial">
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="h-4 w-4 text-orange-500" />
+                                    <div>
+                                      <div className="font-medium">Especial</div>
+                                      <div className="text-xs text-muted-foreground">Dias corridos</div>
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button 
+                                variant="ghost" 
+                                className="h-8 w-8 p-0"
+                                onClick={() => setExpandedRow(expandedRow === index ? null : index)}
+                              >
+                                {expandedRow === index ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleRemoveStageFromPlan(index)}>
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Remover
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      </>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground py-8">
+                <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-medium">Nenhuma etapa de fabricação definida</p>
+                <p className="text-sm">Você pode definir as etapas na tela de Produtos ou adicionar manualmente abaixo.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <div className="flex items-center justify-between w-full">
+            <div className="text-sm text-muted-foreground">
+              {editedPlan.length > 0 && (
+                <span>
+                  {editedPlan.length} etapa{editedPlan.length !== 1 ? 's' : ''} configurada{editedPlan.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleSaveProgress}
+                disabled={editedPlan.length === 0}
+              >
+                <CalendarCheck className="mr-2 h-4 w-4" />
+                Salvar Progresso
+              </Button>
+            </div>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Esta ação não pode ser desfeita. Isso excluirá permanentemente o pedido Nº <span className="font-bold">{orderToDelete?.quotationNumber}</span> do sistema.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
+            Sim, excluir pedido
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Alert Dialog para Exclusão de Itens */}
+    <AlertDialog open={isItemDeleteDialogOpen} onOpenChange={setIsItemDeleteDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remover Item do Pedido</AlertDialogTitle>
+          <AlertDialogDescription>
+            Você tem certeza que deseja remover este item do pedido?
+            {itemToDelete && (
+              <div className="mt-2 p-3 bg-muted rounded-lg">
+                <p className="font-medium text-foreground">
+                  Item {itemToDelete.index + 1}: {itemToDelete.item.description}
+                </p>
+                {itemToDelete.item.itemNumber && (
+                  <p className="text-sm text-muted-foreground">
+                    Nº Item PC: {itemToDelete.item.itemNumber}
+                  </p>
+                )}
+                {itemToDelete.item.code && (
+                  <p className="text-sm text-muted-foreground">
+                    Código: {itemToDelete.item.code}
+                  </p>
+                )}
+              </div>
+            )}
+            <p className="mt-2 text-sm">
+              <strong>Atenção:</strong> Esta ação não pode ser desfeita. O item será removido permanentemente do pedido.
+            </p>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction 
+            onClick={handleConfirmDeleteItem} 
+            className="bg-destructive hover:bg-destructive/90"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Sim, remover item
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+        </div>
     );
 }
