@@ -2958,6 +2958,71 @@ export default function OrdersPage() {
             });
         }
     };
+
+    // Funções de auto-preenchimento inteligente
+    const autoScheduleFromToday = () => {
+        const today = new Date();
+        const updatedPlan = editedPlan.map((stage, index) => {
+            if (index === 0) {
+                return {
+                    ...stage,
+                    startDate: today,
+                    status: stage.status === 'Pendente' ? 'Em Andamento' : stage.status
+                };
+            }
+            return stage;
+        });
+        setEditedPlan(updatedPlan);
+        toast({
+            title: "Agendamento automático aplicado",
+            description: "Primeira etapa agendada para hoje e marcada como 'Em Andamento'"
+        });
+    };
+
+    const markPreviousAsCompleted = () => {
+        const updatedPlan = editedPlan.map((stage, index) => {
+            const currentIndex = editedPlan.findIndex(s => s.status === 'Em Andamento');
+            if (index < currentIndex && stage.status !== 'Concluído') {
+                return {
+                    ...stage,
+                    status: 'Concluído',
+                    completedDate: stage.startDate || new Date()
+                };
+            }
+            return stage;
+        });
+        setEditedPlan(updatedPlan);
+        toast({
+            title: "Etapas anteriores marcadas como concluídas",
+            description: "Todas as etapas anteriores à atual foram finalizadas"
+        });
+    };
+
+    const applyStandardDurations = () => {
+        const standardDurations = {
+            'Preparação': 1,
+            'Corte': 2,
+            'Soldagem': 3,
+            'Usinagem': 2,
+            'Montagem': 2,
+            'Pintura': 1,
+            'Inspeção': 0.5,
+            'Embalagem': 0.5
+        };
+
+        const updatedPlan = editedPlan.map(stage => {
+            const standardDuration = standardDurations[stage.stageName] || 1;
+            return {
+                ...stage,
+                durationDays: standardDuration
+            };
+        });
+        setEditedPlan(updatedPlan);
+        toast({
+            title: "Durações padrão aplicadas",
+            description: "Durações padrão foram aplicadas a todas as etapas"
+        });
+    };
     
     const handleCopyProgress = (itemToCopy: OrderItem) => {
         setProgressClipboard(itemToCopy);
@@ -5331,10 +5396,49 @@ return (
                     )}
                   </DialogHeader>
 
+                  {/* Barra de progresso geral */}
+                  <div className="mb-4 p-4 bg-secondary rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">Progresso Geral</span>
+                      <span className="text-sm text-muted-foreground">
+                        {editedPlan.filter(s => s.status === 'Concluído').length}/{editedPlan.length} etapas
+                      </span>
+                    </div>
+                    <Progress 
+                      value={editedPlan.length > 0 ? (editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100 : 0} 
+                      className="h-3" 
+                    />
+                  </div>
+
+                  {/* Ações em lote */}
+                  <div className="flex gap-2 mb-4">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => autoScheduleFromToday()}
+                      size="sm"
+                    >
+                      📅 Agendar a partir de hoje
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => markPreviousAsCompleted()}
+                      size="sm"
+                    >
+                      ✅ Marcar anteriores como concluídas
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => applyStandardDurations()}
+                      size="sm"
+                    >
+                      ⏱️ Aplicar durações padrão
+                    </Button>
+                  </div>
+
                   {/* Área de conteúdo com scroll */}
                   <div className="flex-1 min-h-0 overflow-hidden">
                     <ScrollArea className="h-[60vh] pr-4">
-                      <div className="space-y-4 pb-4">
+                      <div className="pb-4">
                         {isFetchingPlan ? (
                           <div className="flex justify-center items-center h-48">
                             <div className="text-center">
@@ -5343,319 +5447,185 @@ return (
                             </div>
                           </div>
                         ) : (editedPlan && editedPlan.length > 0) ? (
-                          editedPlan.map((stage, index) => {
-                            console.log('🎨 RENDERIZANDO ETAPA:', {
-                              index,
-                              stageName: stage.stageName,
-                              startDate: stage.startDate,
-                              completedDate: stage.completedDate,
-                              status: stage.status,
-                              assignedResource: stage.assignedResource,
-                              supervisor: stage.supervisor
-                            });
-                            return (
-                            <Card key={`${stage.stageName}-${index}`} className="p-3 relative">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="absolute top-2 right-2 h-6 w-6 text-muted-foreground hover:text-destructive"
-                                onClick={() => handleRemoveStageFromPlan(index)}
-                              >
-                                <XCircleIcon className="h-4 w-4" />
-                                <span className="sr-only">Remover etapa</span>
-                              </Button>
-                              <CardTitle className="text-lg mb-3 pr-8 flex items-center gap-2">
-                                <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
-                                  {index + 1}
-                                </span>
-                                {stage.stageName}
-                              </CardTitle>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="space-y-2">
-                                  <Label>Status</Label>
-                                  <Select 
-                                    value={stage.status} 
-                                    onValueChange={(value) => {
-                                      console.log('🔧 Status alterado:', { index, value });
-                                      handlePlanChange(index, 'status', value);
-                                    }}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Selecione o status" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="Pendente">
-                                        <div className="flex items-center gap-2">
-                                          <Hourglass className="h-4 w-4 text-yellow-500" />
-                                          Pendente
-                                        </div>
-                                      </SelectItem>
-                                      <SelectItem value="Em Andamento">
-                                        <div className="flex items-center gap-2">
-                                          <PlayCircle className="h-4 w-4 text-blue-500" />
-                                          Em Andamento
-                                        </div>
-                                      </SelectItem>
-                                      <SelectItem value="Concluído">
-                                        <div className="flex items-center gap-2">
-                                          <CheckCircle className="h-4 w-4 text-green-500" />
-                                          Concluído
-                                        </div>
-                                      </SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Duração</Label>
-                                  <Input
-                                    type="number"
-                                    step="0.125"
-                                    min="0.125"
-                                    placeholder="Ex: 1.5 (1 dia e meio)"
-                                    value={stage.durationDays ?? ''}
-                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
-                                  />
-                                  <p className="text-xs text-muted-foreground">
-                                    Aceita decimais: 0.5 = meio dia, 1.5 = 1 dia e meio
-                                  </p>
-                                  {stage.durationDays && stage.durationDays < 1 && (
-                                    <p className="text-xs text-blue-600">
-                                      ℹ️ Duração menor que 1 dia - será executada no mesmo dia
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Nova seção para recurso e supervisor */}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                                <div className="space-y-2">
-                                  <Label>Recurso Responsável</Label>
-                                  {/* Select de Recurso - VERSÃO CORRIGIDA */}
-                                  <Select 
-                                    value={stage.assignedResource?.resourceId || ""} 
-                                    onValueChange={(value) => {
-                                      if (!value || value === "none") {
-                                        handlePlanChange(index, 'assignedResource', null);
-                                      } else {
-                                        const resource = availableResources.find(r => r.id === value);
-                                        if (resource) {
-                                          handlePlanChange(index, 'assignedResource', {
-                                            resourceId: value,
-                                            resourceName: resource.name
-                                          });
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-8">#</TableHead>
+                                <TableHead>Etapa</TableHead>
+                                <TableHead className="w-20">Status</TableHead>
+                                <TableHead className="w-24">Início</TableHead>
+                                <TableHead className="w-24">Fim</TableHead>
+                                <TableHead className="w-20">Duração</TableHead>
+                                <TableHead className="w-32">Recurso</TableHead>
+                                <TableHead className="w-32">Supervisor</TableHead>
+                                <TableHead className="w-8">Ações</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {editedPlan.map((stage, index) => {
+                                console.log('🎨 RENDERIZANDO ETAPA:', {
+                                  index,
+                                  stageName: stage.stageName,
+                                  startDate: stage.startDate,
+                                  completedDate: stage.completedDate,
+                                  status: stage.status,
+                                  assignedResource: stage.assignedResource,
+                                  supervisor: stage.supervisor
+                                });
+                                return (
+                                <TableRow key={`${stage.stageName}-${index}`} className="hover:bg-muted/50">
+                                  <TableCell className="font-medium">
+                                    <span className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+                                      {index + 1}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="font-medium">{stage.stageName}</TableCell>
+                                  <TableCell>
+                                    <Select value={stage.status} onValueChange={(value) => handlePlanChange(index, 'status', value)}>
+                                      <SelectTrigger className="h-8 w-32">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="Pendente">
+                                          <div className="flex items-center gap-2">
+                                            <Hourglass className="h-4 w-4 text-yellow-500" />
+                                            Pendente
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="Em Andamento">
+                                          <div className="flex items-center gap-2">
+                                            <PlayCircle className="h-4 w-4 text-blue-500" />
+                                            Em Andamento
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="Concluído">
+                                          <div className="flex items-center gap-2">
+                                            <CheckCircle className="h-4 w-4 text-green-500" />
+                                            Concluído
+                                          </div>
+                                        </SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button variant="outline" className="h-8 w-24 justify-start text-left font-normal">
+                                          {stage.startDate ? format(stage.startDate, "dd/MM") : "Definir"}
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-auto p-0">
+                                        <Calendar
+                                          mode="single"
+                                          selected={stage.startDate}
+                                          onSelect={(date) => handlePlanChange(index, 'startDate', date)}
+                                        />
+                                      </PopoverContent>
+                                    </Popover>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button variant="outline" className="h-8 w-24 justify-start text-left font-normal">
+                                          {stage.completedDate ? format(stage.completedDate, "dd/MM") : "Definir"}
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-auto p-0">
+                                        <Calendar
+                                          mode="single"
+                                          selected={stage.completedDate}
+                                          onSelect={(date) => handlePlanChange(index, 'completedDate', date)}
+                                        />
+                                      </PopoverContent>
+                                    </Popover>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Input
+                                      type="number"
+                                      value={stage.durationDays || 1}
+                                      onChange={(e) => handlePlanChange(index, 'durationDays', Number(e.target.value))}
+                                      className="h-8 w-20"
+                                      min="0"
+                                      step="0.5"
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Select 
+                                      value={stage.assignedResource?.resourceId || "none"} 
+                                      onValueChange={(value) => {
+                                        if (value === "none") {
+                                          handlePlanChange(index, 'assignedResource', null);
+                                        } else {
+                                          const resource = availableResources.find(r => r.id === value);
+                                          if (resource) {
+                                            handlePlanChange(index, 'assignedResource', {
+                                              resourceId: resource.id,
+                                              resourceName: resource.name
+                                            });
+                                          }
                                         }
-                                      }
-                                    }}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Selecione um recurso" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="none">Nenhum recurso</SelectItem>
-                                      {availableResources
-                                        .filter(r => r.status === 'disponivel')
-                                        .map(resource => (
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-8 w-32">
+                                        <SelectValue placeholder="Recurso" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none">Nenhum recurso</SelectItem>
+                                        {availableResources.map(resource => (
                                           <SelectItem key={resource.id} value={resource.id}>
-                                            {resource.name} ({resource.type})
+                                            {resource.name}
                                           </SelectItem>
                                         ))}
-                                    </SelectContent>
-                                  </Select>
-                                  {stage.assignedResource && (
-                                    <p className="text-xs text-green-600 flex items-center gap-1">
-                                      <CheckCircle className="h-3 w-3" />
-                                      Recurso: {stage.assignedResource.resourceName}
-                                    </p>
-                                  )}
-                                  {!stage.assignedResource && availableResources.length === 0 && (
-                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
-                                      <Clock className="h-3 w-3" />
-                                      Carregando recursos...
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="space-y-2">
-                                  <Label>Supervisor</Label>
-                                  {/* Select de Supervisor - VERSÃO CORRIGIDA */}
-                                  <Select 
-                                    value={stage.supervisor?.memberId || ""} 
-                                    onValueChange={(value) => {
-                                      if (!value || value === "none") {
-                                        handlePlanChange(index, 'supervisor', null);
-                                      } else {
-                                        const member = teamMembers.find(m => m.id === value);
-                                        if (member) {
-                                          handlePlanChange(index, 'supervisor', {
-                                            memberId: value,
-                                            memberName: member.name
-                                          });
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Select 
+                                      value={stage.supervisor?.memberId || "none"} 
+                                      onValueChange={(value) => {
+                                        if (value === "none") {
+                                          handlePlanChange(index, 'supervisor', null);
+                                        } else {
+                                          const member = teamMembers.find(m => m.id === value);
+                                          if (member) {
+                                            handlePlanChange(index, 'supervisor', {
+                                              memberId: member.id,
+                                              memberName: member.name
+                                            });
+                                          }
                                         }
-                                      }
-                                    }}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Selecione um supervisor" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="none">Nenhum supervisor</SelectItem>
-                                      {teamMembers.map(member => (
-                                        <SelectItem key={member.id} value={member.id}>
-                                          {member.name} ({member.position})
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                  {stage.supervisor && (
-                                    <p className="text-xs text-green-600 flex items-center gap-1">
-                                      <CheckCircle className="h-3 w-3" />
-                                      Supervisor: {stage.supervisor.memberName}
-                                    </p>
-                                  )}
-                                  {!stage.supervisor && teamMembers.length === 0 && (
-                                    <p className="text-xs text-yellow-600 flex items-center gap-1">
-                                      <Clock className="h-3 w-3" />
-                                      Carregando membros...
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Nova seção para tipo de cronograma */}
-                              <div className="grid grid-cols-1 gap-4 mt-4">
-                                <div className="space-y-2">
-                                  <Label>Tipo de Cronograma</Label>
-                                  <Select 
-                                    value={stage.useBusinessDays === false ? "corridos" : "uteis"} 
-                                    onValueChange={(value) => {
-                                      const useBusinessDays = value === "uteis";
-                                      console.log('📅 Tipo de cronograma alterado:', { index, useBusinessDays });
-                                      handlePlanChange(index, 'useBusinessDays', useBusinessDays);
-                                    }}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Selecione o tipo de cronograma" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="uteis">
-                                        <div className="flex items-center gap-2">
-                                          <CalendarDays className="h-4 w-4 text-blue-500" />
-                                          <div>
-                                            <div className="font-medium">Dias Úteis</div>
-                                            <div className="text-xs text-muted-foreground">Segunda a sexta, exclui feriados</div>
-                                          </div>
-                                        </div>
-                                      </SelectItem>
-                                      <SelectItem value="corridos">
-                                        <div className="flex items-center gap-2">
-                                          <CalendarIcon className="h-4 w-4 text-orange-500" />
-                                          <div>
-                                            <div className="font-medium">Dias Corridos</div>
-                                            <div className="text-xs text-muted-foreground">Todos os dias, incluindo fins de semana</div>
-                                          </div>
-                                        </div>
-                                      </SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                  <div className={`text-xs p-2 rounded border ${stage.useBusinessDays === false ? 'bg-orange-50 border-orange-200 text-orange-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
-                                    {stage.useBusinessDays === false 
-                                      ? "⚡ Tarefa urgente - conta todos os dias incluindo fins de semana e feriados"
-                                      : "📅 Tarefa normal - conta apenas dias úteis (seg-sex), excluindo feriados"
-                                    }
-                                  </div>
-                                </div>
-                              </div>
-                              {/* Seção de datas corrigida */}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                                {/* Data de Início */}
-                                <div className="space-y-2">
-                                  <Label>Data de Início</Label>
-                                  {stage.status === 'Concluído' ? (
-                                    <div className="w-full p-2 border rounded-md bg-green-50 border-green-200">
-                                      <div className="flex items-center gap-2">
-                                        <CalendarIcon className="h-4 w-4 text-green-600" />
-                                        <span className="text-green-800 font-medium">
-                                          {stage.startDate ? format(stage.startDate, "dd/MM/yyyy") : 'Não definida'}
-                                        </span>
-                                        <CheckCircle className="h-4 w-4 text-green-600 ml-auto" />
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <Input
-                                      type="date"
-                                      value={stage.startDate && !isNaN(stage.startDate.getTime()) ? format(stage.startDate, "yyyy-MM-dd") : ""}
-                                      onChange={(e) => {
-                                        console.log('📅 [INPUT] Data de início alterada:', e.target.value);
-                                        const newDate = e.target.value ? createSafeDate(e.target.value) : null;
-                                        console.log('📅 [INPUT] Data convertida:', newDate);
-                                        handlePlanChange(index, 'startDate', newDate);
                                       }}
-                                      className="w-full"
-                                      placeholder="Selecione a data de início"
-                                    />
-                                  )}
-                                  {stage.startDate && !isBusinessDay(stage.startDate) && stage.status !== 'Concluído' && (
-                                    <p className="text-xs text-orange-600 flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" />
-                                      Data será ajustada para próximo dia útil
-                                    </p>
-                                  )}
-                                </div>
-                                
-                                {/* Data de Conclusão */}
-                                <div className="space-y-2">
-                                  <Label>Data de Conclusão</Label>
-                                  {stage.status === 'Concluído' ? (
-                                    <div className="w-full p-2 border rounded-md bg-green-50 border-green-200">
-                                      <div className="flex items-center gap-2">
-                                        <CalendarIcon className="h-4 w-4 text-green-600" />
-                                        <span className="text-green-800 font-medium">
-                                          {stage.completedDate ? format(stage.completedDate, "dd/MM/yyyy") : 'Não definida'}
-                                        </span>
-                                        <CheckCircle className="h-4 w-4 text-green-600 ml-auto" />
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <Input
-                                      type="date"
-                                      value={stage.completedDate && !isNaN(stage.completedDate.getTime()) ? format(stage.completedDate, "yyyy-MM-dd") : ""}
-                                      onChange={(e) => {
-                                        console.log('📅 [INPUT] Data de conclusão alterada:', e.target.value);
-                                        const newDate = e.target.value ? createSafeDate(e.target.value) : null;
-                                        console.log('📅 [INPUT] Data convertida:', newDate);
-                                        handlePlanChange(index, 'completedDate', newDate);
-                                      }}
-                                      className="w-full"
-                                      placeholder="Selecione a data de conclusão"
-                                    />
-                                  )}
-                                  {stage.completedDate && !isBusinessDay(stage.completedDate) && stage.status !== 'Concluído' && (
-                                    <p className="text-xs text-orange-600 flex items-center gap-1">
-                                      <AlertTriangle className="h-3 w-3" />
-                                      Data será ajustada para dia útil anterior
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                              {stage.startDate && stage.completedDate && (
-                                <BusinessDayInfo 
-                                  startDate={stage.startDate} 
-                                  endDate={stage.completedDate} 
-                                  expectedDuration={Number(stage.durationDays) || 1} 
-                                />
-                              )}
-                              {index < editedPlan.length - 1 && (
-                                <div className="flex justify-center mt-4">
-                                  <div className="flex items-center gap-2 text-muted-foreground">
-                                    <div className="w-4 h-0.5 bg-border"></div>
-                                    <ArrowDown className="h-4 w-4" />
-                                    <div className="w-4 h-0.5 bg-border"></div>
-                                  </div>
-                                </div>
-                              )}
-                            </Card>
-                          );
-                          })
+                                    >
+                                      <SelectTrigger className="h-8 w-32">
+                                        <SelectValue placeholder="Supervisor" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none">Nenhum supervisor</SelectItem>
+                                        {teamMembers.map(member => (
+                                          <SelectItem key={member.id} value={member.id}>
+                                            {member.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                      onClick={() => handleRemoveStageFromPlan(index)}
+                                    >
+                                      <XCircleIcon className="h-4 w-4" />
+                                      <span className="sr-only">Remover etapa</span>
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
                         ) : (
                           <div className="text-center text-muted-foreground py-8">
                             <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
@@ -5665,46 +5635,6 @@ return (
                         )}
                       </div>
                     </ScrollArea>
-                    <div className="pt-4 border-t">
-                      <Label className="text-sm font-medium">Adicionar Nova Etapa</Label>
-                      <div className="flex items-center gap-2 mt-2">
-                        <Input
-                          placeholder="Nome da nova etapa"
-                          value={newStageNameForPlan}
-                          onChange={(e) => setNewStageNameForPlan(e.target.value)}
-                        />
-                        <Button 
-                          type="button" 
-                          variant="secondary" 
-                          onClick={handleAddStageToPlan}
-                          disabled={!newStageNameForPlan.trim()}
-                        >
-                          <PlusCircle className="mr-2 h-4 w-4" />
-                          Adicionar
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    {/* Resumo das etapas e debug */}
-                    <div className="pt-4 border-t">
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-muted-foreground">
-                          {editedPlan.length} etapas • {editedPlan.filter(s => s.status === 'Concluído').length} concluídas
-                        </div>
-                        <Button 
-                          type="button" 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => {
-                            console.log('\n🔍 DEBUG MANUAL EXECUTADO:');
-                            debugTaskAccumulation(editedPlan);
-                          }}
-                          className="text-xs"
-                        >
-                          🔍 Debug Cronograma
-                        </Button>
-                      </div>
-                    </div>
                   </div>
 
                     <DialogFooter>
