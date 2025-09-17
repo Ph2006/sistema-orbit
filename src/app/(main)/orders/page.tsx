@@ -5296,7 +5296,7 @@ return (
 </Sheet>
 
             <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
-                <DialogContent className="sm:max-w-3xl max-h-[90vh] flex flex-col">
+                <DialogContent className="sm:max-w-3xl h-[85vh] max-h-[85vh] flex flex-col">
                   {/* Header fixo */}
                   <DialogHeader className="flex-shrink-0">
                     <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
@@ -5332,9 +5332,9 @@ return (
                   </DialogHeader>
 
                   {/* Área de conteúdo com scroll */}
-                  <div className="flex-1 min-h-0">
-                    <ScrollArea className="h-full max-h-[50vh] pr-4">
-                      <div className="space-y-4">
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <ScrollArea className="h-[60vh] pr-4">
+                      <div className="space-y-4 pb-4">
                         {isFetchingPlan ? (
                           <div className="flex justify-center items-center h-48">
                             <div className="text-center">
