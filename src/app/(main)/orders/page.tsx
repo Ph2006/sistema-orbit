@@ -55,15 +55,7 @@ const productionStageSchema = z.object({
     completedDate: z.date().nullable().optional(),
     durationDays: z.coerce.number().min(0).optional(),
     useBusinessDays: z.boolean().optional().default(true), // true = dias úteis, false = dias corridos
-    // NOVO: Adicionar campos para recurso e supervisor
-    assignedResource: z.object({
-        resourceId: z.string(),
-        resourceName: z.string()
-    }).nullable().optional(),
-    supervisor: z.object({
-        memberId: z.string(),
-        memberName: z.string()
-    }).nullable().optional(),
+    workSchedule: z.enum(['normal', 'especial']).default('normal'),
 });
 
 const orderItemSchema = z.object({
@@ -103,6 +95,9 @@ const orderSchema = z.object({
   projectName: z.string().optional(),
   status: orderStatusEnum,
   deliveryDate: z.date().nullable().optional(),
+  completedAt: z.date().nullable().optional(),
+  dataBookSent: z.boolean().default(false),
+  dataBookSentAt: z.date().nullable().optional(),
   items: z.array(orderItemSchema).min(1, "O pedido deve ter pelo menos um item"),
   driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
   documents: z.object({
@@ -140,6 +135,9 @@ type Order = {
     status: string;
     createdAt: Date;
     deliveryDate?: Date;
+    completedAt?: Date;
+    dataBookSent: boolean;
+    dataBookSentAt?: Date;
     driveLink?: string;
     documents: {
         drawings: boolean;
@@ -412,7 +410,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
              <Table>
                 <TableBody>
                     <TableRow>
-                        <TableCell colSpan={9} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
+                        <TableCell colSpan={11} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
                     </TableRow>
                 </TableBody>
             </Table>
@@ -429,6 +427,8 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                     <TableHead>Cliente</TableHead>
                     <TableHead className="w-[100px] text-center">Docs</TableHead>
                     <TableHead className="w-[120px]">Data Entrega</TableHead>
+                    <TableHead className="w-[120px]">Data Conclusão</TableHead>
+                    <TableHead className="w-[120px]">Data Book</TableHead>
                     <TableHead className="w-[120px] text-right">Peso Total</TableHead>
                     <TableHead className="w-[150px]">Progresso</TableHead>
                     <TableHead className="w-[180px]">Status</TableHead>
@@ -448,6 +448,26 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                                 <DocumentStatusIcons documents={order.documents} />
                             </TableCell>
                             <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
+                            <TableCell>
+                                {order.completedAt ? format(order.completedAt, "dd/MM/yyyy") : '-'}
+                            </TableCell>
+                            <TableCell>
+                                {order.status === 'Concluído' ? (
+                                    order.dataBookSent ? (
+                                        <div className="flex items-center gap-1">
+                                            <CheckCircle className="h-4 w-4 text-green-600" />
+                                            <span className="text-sm text-green-700">
+                                                {order.dataBookSentAt ? format(order.dataBookSentAt, "dd/MM") : 'Enviado'}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1">
+                                            <Clock className="h-4 w-4 text-orange-500" />
+                                            <span className="text-sm text-orange-600">Pendente</span>
+                                        </div>
+                                    )
+                                ) : '-'}
+                            </TableCell>
                             <TableCell className="text-right font-medium">
                                 {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                             </TableCell>
@@ -534,13 +554,6 @@ export default function OrdersPage() {
     const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
     const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
     
-    // Estados para recursos e membros da equipe
-    const [resources, setResources] = useState<any[]>([]);
-    const [teamMembers, setTeamMembers] = useState<any[]>([]);
-    const [isLoadingResources, setIsLoadingResources] = useState(false);
-    
-    // Estados para recursos e membros (ADICIONAR)
-    const [availableResources, setAvailableResources] = useState<any[]>([]);
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -737,6 +750,9 @@ export default function OrdersPage() {
                     status: finalStatus,
                     createdAt: createdAtDate,
                     deliveryDate: deliveryDate,
+                    completedAt: safeToDate(data.completedAt),
+                    dataBookSent: Boolean(data.dataBookSent),
+                    dataBookSentAt: safeToDate(data.dataBookSentAt),
                     totalWeight: calculateTotalWeight(enrichedItems),
                     driveLink: data.driveLink || '',
                     documents: data.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
@@ -756,6 +772,9 @@ export default function OrdersPage() {
                         status: 'Erro',
                         createdAt: new Date(),
                         deliveryDate: undefined,
+                        completedAt: undefined,
+                        dataBookSent: false,
+                        dataBookSentAt: undefined,
                         totalWeight: 0,
                         driveLink: '',
                         documents: { drawings: false, inspectionTestPlan: false, paintPlan: false },
@@ -777,85 +796,11 @@ export default function OrdersPage() {
         return ordersList;
     };
 
-    // Função para carregar recursos
-    const fetchResources = async () => {
-        if (!user) return;
-        try {
-            setIsLoadingResources(true);
-            const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-            const resourcesSnap = await getDoc(resourcesRef);
-            if (resourcesSnap.exists()) {
-                const rawResources = resourcesSnap.data().resources || [];
-                
-                // Validação dos dados - ANTES de setar os estados
-                const validResources = rawResources.filter(r => 
-                    r && r.id && r.id.trim() !== '' && r.name && r.name.trim() !== ''
-                );
-                
-                setResources(validResources);
-                
-                // DEBUG - remover depois
-                console.log('Resources:', validResources);
-                
-                // Verificar se há items com ID vazio
-                const emptyResourceIds = rawResources.filter(r => !r.id || r.id.trim() === '');
-                if (emptyResourceIds.length > 0) {
-                    console.error('Recursos com ID vazio:', emptyResourceIds);
-                }
-            }
-        } catch (error) {
-            console.error("Erro ao carregar recursos:", error);
-            toast({
-                variant: "destructive",
-                title: "Erro ao carregar recursos",
-                description: "Não foi possível carregar a lista de recursos.",
-            });
-        } finally {
-            setIsLoadingResources(false);
-        }
-    };
-
-    // Função para carregar membros da equipe
-    const fetchTeamMembers = async () => {
-        if (!user) return;
-        try {
-            const teamRef = doc(db, "companies", "mecald", "settings", "team");
-            const teamSnap = await getDoc(teamRef);
-            if (teamSnap.exists()) {
-                const rawTeamMembers = teamSnap.data().members || [];
-                
-                // Validação dos dados - ANTES de setar os estados
-                const validTeamMembers = rawTeamMembers.filter(m => 
-                    m && m.id && m.id.trim() !== '' && m.name && m.name.trim() !== ''
-                );
-                
-                setTeamMembers(validTeamMembers);
-                
-                // DEBUG - remover depois
-                console.log('Team Members:', validTeamMembers);
-                
-                // Verificar se há items com ID vazio
-                const emptyMemberIds = rawTeamMembers.filter(m => !m.id || m.id.trim() === '');
-                if (emptyMemberIds.length > 0) {
-                    console.error('Membros com ID vazio:', emptyMemberIds);
-                }
-            }
-        } catch (error) {
-            console.error("Erro ao carregar membros da equipe:", error);
-            toast({
-                variant: "destructive",
-                title: "Erro ao carregar equipe",
-                description: "Não foi possível carregar a lista de membros da equipe.",
-            });
-        }
-    };
 
     useEffect(() => {
         if (!authLoading && user) {
             fetchOrders();
             fetchCustomers();
-            fetchResources();
-            fetchTeamMembers();
         }
     }, [user, authLoading]);
 
@@ -1848,9 +1793,10 @@ export default function OrdersPage() {
       const newPlan = [...editedPlan];
       const updatedStage = { ...newPlan[stageIndex] };
       
-      // ADICIONAR tratamento para os novos campos
-      if (field === 'assignedResource' || field === 'supervisor') {
+      if (field === 'workSchedule') {
         updatedStage[field] = value;
+        // Automaticamente define useBusinessDays baseado no horário
+        updatedStage.useBusinessDays = value === 'normal';
       } else if (field === 'startDate' || field === 'completedDate') {
         // Código existente para datas
         if (value === null || value === '' || value === undefined) {
@@ -1878,7 +1824,7 @@ export default function OrdersPage() {
       newPlan[stageIndex] = updatedStage;
       
       // Manter lógica sequencial existente
-      if (field === 'startDate' || field === 'durationDays' || field === 'useBusinessDays') {
+      if (field === 'startDate' || field === 'durationDays' || field === 'workSchedule') {
         recalculateSequentialTasks(newPlan, stageIndex);
       }
       
@@ -1996,6 +1942,52 @@ export default function OrdersPage() {
         month: '2-digit', 
         year: 'numeric' 
       });
+    };
+
+    // FUNÇÃO PARA MARCAR DATA BOOK COMO ENVIADO
+    const handleDataBookSent = async () => {
+        if (!selectedOrder || selectedOrder.status !== 'Concluído') {
+            toast({
+                variant: "destructive",
+                title: "Erro",
+                description: "Só é possível marcar Data Book para pedidos concluídos.",
+            });
+            return;
+        }
+
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            const updateData = {
+                dataBookSent: true,
+                dataBookSentAt: Timestamp.now(),
+                lastUpdate: Timestamp.now(),
+            };
+
+            await updateDoc(orderRef, updateData);
+
+            toast({
+                title: "Data Book marcado como enviado!",
+                description: "A informação foi salva com sucesso.",
+            });
+
+            // Atualizar estado local
+            const updatedOrder = {
+                ...selectedOrder,
+                dataBookSent: true,
+                dataBookSentAt: new Date(),
+            };
+            setSelectedOrder(updatedOrder);
+
+            // Recarregar lista
+            await fetchOrders();
+        } catch (error) {
+            console.error("Erro ao marcar Data Book:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao salvar",
+                description: "Não foi possível marcar o Data Book como enviado.",
+            });
+        }
     };
 
     // FUNÇÃO AUXILIAR PARA ADICIONAR APENAS DIAS ÚTEIS
@@ -2539,52 +2531,17 @@ export default function OrdersPage() {
     };
 
     const handleOpenProgressModal = async (item: OrderItem) => {
-        console.log('🔍 Abrindo modal de progresso para item:', item.id, item.description);
-        
         setItemToTrack(item);
         setIsProgressModalOpen(true);
         setEditedPlan([]);
         setIsFetchingPlan(true);
 
         try {
-            // NOVO: Carregar recursos e membros junto com o template
-            const [productDoc, resourcesDoc, teamDoc] = await Promise.all([
-                item.code ? getDoc(doc(db, "companies", "mecald", "products", item.code)) : Promise.resolve(null),
-                getDoc(doc(db, "companies", "mecald", "settings", "resources")),
-                getDoc(doc(db, "companies", "mecald", "settings", "team"))
-            ]);
+            // Apenas carregar template do produto
+            const productDoc = item.code ? 
+                await getDoc(doc(db, "companies", "mecald", "products", item.code)) : 
+                null;
 
-            // Carregar recursos - CORRIGIR estrutura
-            if (resourcesDoc.exists()) {
-                const resourcesData = resourcesDoc.data();
-                const resources = resourcesData?.resources || [];
-                const validResources = resources.filter(r => 
-                    r && r.id && typeof r.id === 'string' && r.id.trim() !== '' && 
-                    r.name && typeof r.name === 'string' && r.name.trim() !== ''
-                );
-                setAvailableResources(validResources);
-                console.log('📋 Recursos carregados:', validResources);
-            } else {
-                setAvailableResources([]);
-                console.log('📋 Nenhum documento de recursos encontrado');
-            }
-
-            // Carregar membros - CORRIGIR estrutura
-            if (teamDoc.exists()) {
-                const teamData = teamDoc.data();
-                const members = teamData?.members || [];
-                const validMembers = members.filter(m => 
-                    m && m.id && typeof m.id === 'string' && m.id.trim() !== '' && 
-                    m.name && typeof m.name === 'string' && m.name.trim() !== ''
-                );
-                setTeamMembers(validMembers);
-                console.log('👥 Membros carregados:', validMembers);
-            } else {
-                setTeamMembers([]);
-                console.log('👥 Nenhum documento de membros encontrado');
-            }
-
-            // Carregar template do produto (código existente)
             let productTemplateMap = new Map<string, any>();
             
             if (productDoc && productDoc.exists()) {
@@ -2592,17 +2549,14 @@ export default function OrdersPage() {
                 template.forEach((stage: any) => {
                     productTemplateMap.set(stage.stageName, {
                         durationDays: stage.durationDays || 0,
-                        useBusinessDays: stage.useBusinessDays !== false
+                        workSchedule: stage.workSchedule || 'normal'
                     });
                 });
-                console.log('📋 Template encontrado:', Array.from(productTemplateMap.entries()));
             }
 
             let finalPlan: ProductionStage[];
 
             if (item.productionPlan && item.productionPlan.length > 0) {
-                console.log('📊 Usando plano existente do item');
-                
                 finalPlan = item.productionPlan.map(stage => {
                     const templateData = productTemplateMap.get(stage.stageName) || {};
                     
@@ -2610,40 +2564,27 @@ export default function OrdersPage() {
                         stageName: stage.stageName || '',
                         status: stage.status || 'Pendente',
                         durationDays: stage.durationDays ?? templateData.durationDays ?? 0,
-                        useBusinessDays: stage.useBusinessDays ?? templateData.useBusinessDays ?? true,
+                        workSchedule: stage.workSchedule ?? templateData.workSchedule ?? 'normal',
+                        useBusinessDays: stage.workSchedule === 'normal',
                         startDate: stage.startDate ? safeToDate(stage.startDate) : null,
                         completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
-                        // NOVO: Preservar dados de recurso e supervisor
-                        assignedResource: stage.assignedResource || null,
-                        supervisor: stage.supervisor || null,
                     };
                 });
             } else {
-                console.log('📋 Criando plano a partir do template');
-                
                 finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, templateData]) => ({
                     stageName,
                     durationDays: templateData.durationDays,
-                    useBusinessDays: templateData.useBusinessDays,
+                    workSchedule: templateData.workSchedule,
+                    useBusinessDays: templateData.workSchedule === 'normal',
                     status: "Pendente",
                     startDate: null,
                     completedDate: null,
-                    // NOVO: Campos vazios para recurso e supervisor
-                    assignedResource: null,
-                    supervisor: null,
                 }));
             }
 
-            console.log('📊 Plano final carregado:', finalPlan);
             setEditedPlan(finalPlan);
-
         } catch(error) {
-            console.error("❌ Erro ao preparar plano de produção:", error);
-            toast({ 
-                variant: "destructive", 
-                title: "Erro ao carregar plano", 
-                description: "Não foi possível carregar os dados do plano de produção." 
-            });
+            console.error("Erro ao preparar plano de produção:", error);
             setEditedPlan([]);
         } finally {
             setIsFetchingPlan(false);
@@ -2682,21 +2623,9 @@ export default function OrdersPage() {
                     status: stage.status || 'Pendente',
                     durationDays: Number(stage.durationDays) || 0,
                     useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                    workSchedule: stage.workSchedule || 'normal',
                     startDate: stage.startDate || null,
                     completedDate: stage.completedDate || null,
-                    // Novos campos para recurso e supervisor
-                    ...(stage.assignedResource && {
-                        assignedResource: {
-                            resourceId: String(stage.assignedResource.resourceId),
-                            resourceName: String(stage.assignedResource.resourceName)
-                        }
-                    }),
-                    ...(stage.supervisor && {
-                        supervisor: {
-                            memberId: String(stage.supervisor.memberId),
-                            memberName: String(stage.supervisor.memberName)
-                        }
-                    }),
                 }));
         } else {
             cleanItem.productionPlan = [];
@@ -2710,8 +2639,7 @@ export default function OrdersPage() {
                 status: s.status,
                 hasStart: !!s.startDate,
                 hasEnd: !!s.completedDate,
-                hasResource: !!s.assignedResource,
-                hasSupervisor: !!s.supervisor
+                workSchedule: s.workSchedule
             }))
         });
         
@@ -2907,7 +2835,8 @@ export default function OrdersPage() {
             if (allItemsCompleted && currentOrderData.status !== 'Concluído') {
                 await updateDoc(orderRef, { 
                     status: "Concluído",
-                    completedAt: Timestamp.now()
+                    completedAt: Timestamp.now(),
+                    lastUpdate: Timestamp.now()
                 });
                 
                 toast({ 
@@ -3872,7 +3801,7 @@ export default function OrdersPage() {
     };
 
     // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
-    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick }) => (
+    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent }) => (
         <SheetFooter className="flex-shrink-0 pt-4 border-t">
             <div className="flex items-center justify-between w-full gap-4 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -3889,6 +3818,24 @@ export default function OrdersPage() {
                     
                     {/* BOTÃO LIMPO SEM DEBUG */}
                     <DeliveryReportButton order={selectedOrder} />
+                    
+                    {/* Botão Data Book */}
+                    {selectedOrder.status === 'Concluído' && !selectedOrder.dataBookSent && (
+                        <Button onClick={onDataBookSent} variant="outline" className="bg-blue-50 hover:bg-blue-100 border-blue-300">
+                            <FileText className="mr-2 h-4 w-4" />
+                            Data Book Enviado
+                        </Button>
+                    )}
+                    
+                    {selectedOrder.dataBookSent && (
+                        <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-md">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm text-green-700">
+                                Data Book enviado {selectedOrder.dataBookSentAt ? 
+                                    `em ${format(selectedOrder.dataBookSentAt, "dd/MM/yyyy")}` : ''}
+                            </span>
+                        </div>
+                    )}
                 </div>
                 
                 <div className="flex items-center gap-2">
@@ -4205,9 +4152,9 @@ export default function OrdersPage() {
 
 
 
-    return (
+return (
         <>
-            <div className="w-full">
+    <div className="w-full">
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de Produção</h1>
@@ -4585,6 +4532,34 @@ export default function OrdersPage() {
                           )}
                         />
                       </div>
+
+                      {/* Controle de Data Book */}
+                      {form.watch("status") === "Concluído" && (
+                        <Card className="mt-4">
+                          <CardHeader>
+                            <CardTitle>Controle de Data Book</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <FormField 
+                              control={form.control} 
+                              name="dataBookSent" 
+                              render={({ field }) => (
+                                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                  <div className="space-y-0.5">
+                                    <FormLabel>Data Book Enviado</FormLabel>
+                                    <FormDescription>
+                                      Marque quando o Data Book tiver sido enviado ao cliente.
+                                    </FormDescription>
+                                  </div>
+                                  <FormControl>
+                                    <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                                  </FormControl>
+                                </FormItem>
+                              )}
+                            />
+                          </CardContent>
+                        </Card>
+                      )}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                         <FormField control={form.control} name="quotationNumber" render={({ field }) => (
                           <FormItem>
@@ -5367,6 +5342,7 @@ export default function OrdersPage() {
               handleExportSchedule={handleExportSchedule}
               setIsEditing={setIsEditing}
               handleDeleteClick={handleDeleteClick}
+              onDataBookSent={handleDataBookSent}
             />
           </div>
         )}
@@ -5385,12 +5361,6 @@ export default function OrdersPage() {
                     </DialogDescription>
                     
                     {/* DEBUG - REMOVER DEPOIS */}
-                    <div className="bg-yellow-50 border border-yellow-200 rounded p-2 text-xs">
-                      <p>Recursos carregados: {availableResources.length}</p>
-                      <p>Membros carregados: {teamMembers.length}</p>
-                      {availableResources.length > 0 && <p>Primeiro recurso: {availableResources[0].name}</p>}
-                      {teamMembers.length > 0 && <p>Primeiro membro: {teamMembers[0].name}</p>}
-                    </div>
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
                       <div className="flex items-center gap-2">
                         <CalendarIcon className="h-4 w-4 text-blue-600" />
@@ -5399,16 +5369,6 @@ export default function OrdersPage() {
                         </p>
                       </div>
                     </div>
-                    {(isLoadingResources || availableResources.length === 0 || teamMembers.length === 0) && (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-yellow-600" />
-                          <p className="text-sm text-yellow-800">
-                            <strong>Carregando:</strong> Recursos e membros da equipe estão sendo carregados...
-                          </p>
-                        </div>
-                      </div>
-                    )}
                   </DialogHeader>
 
                   {/* Barra de progresso no cabeçalho */}
@@ -5457,14 +5417,14 @@ export default function OrdersPage() {
                   {/* Área de conteúdo com scroll */}
                   <div className="flex-1 overflow-auto">
                     <div className="min-w-[1200px] p-4">
-                      {isFetchingPlan ? (
-                        <div className="flex justify-center items-center h-48">
-                          <div className="text-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-                            <p>Buscando plano de fabricação...</p>
+                        {isFetchingPlan ? (
+                          <div className="flex justify-center items-center h-48">
+                            <div className="text-center">
+                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                              <p>Buscando plano de fabricação...</p>
+                            </div>
                           </div>
-                        </div>
-                      ) : (editedPlan && editedPlan.length > 0) ? (
+                        ) : (editedPlan && editedPlan.length > 0) ? (
                         <div className="border rounded-lg">
                           <Table>
                             <TableHeader className="sticky top-0 bg-background">
@@ -5475,9 +5435,7 @@ export default function OrdersPage() {
                                 <TableHead className="w-32">Início</TableHead>
                                 <TableHead className="w-32">Fim</TableHead>
                                 <TableHead className="w-24">Duração</TableHead>
-                                <TableHead className="w-40">Recurso</TableHead>
-                                <TableHead className="w-40">Supervisor</TableHead>
-                                <TableHead className="w-28">Tipo</TableHead>
+                                <TableHead className="w-36">Horário</TableHead>
                                 <TableHead className="w-20">Ações</TableHead>
                               </TableRow>
                             </TableHeader>
@@ -5493,25 +5451,25 @@ export default function OrdersPage() {
                                         </div>
                                       </TableCell>
                                       <TableCell>
-                                        <Select 
-                                          value={stage.status} 
+                                  <Select 
+                                    value={stage.status} 
                                           onValueChange={(value) => handlePlanChange(index, 'status', value)}
-                                        >
+                                  >
                                           <SelectTrigger className="h-8 w-full">
                                             <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
+                                    </SelectTrigger>
+                                    <SelectContent>
                                             <SelectItem value="Pendente">Pendente</SelectItem>
                                             <SelectItem value="Em Andamento">Em Andamento</SelectItem>
                                             <SelectItem value="Concluído">Concluído</SelectItem>
-                                          </SelectContent>
-                                        </Select>
+                                    </SelectContent>
+                                  </Select>
                                       </TableCell>
                                       <TableCell>
                                         {stage.status === 'Concluído' ? (
                                           <div className="text-green-700 font-medium">
                                             {stage.startDate ? format(stage.startDate, "dd/MM") : '-'}
-                                          </div>
+                                </div>
                                         ) : (
                                           <Input
                                             type="date"
@@ -5542,91 +5500,49 @@ export default function OrdersPage() {
                                         )}
                                       </TableCell>
                                       <TableCell>
-                                        <Input
-                                          type="number"
-                                          step="0.125"
-                                          min="0.125"
-                                          value={stage.durationDays ?? ''}
-                                          onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
+                                  <Input
+                                    type="number"
+                                    step="0.125"
+                                    min="0.125"
+                                    value={stage.durationDays ?? ''}
+                                    onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
                                           className="h-8 w-20"
                                         />
                                       </TableCell>
                                       <TableCell>
-                                        <Select 
-                                          value={stage.assignedResource?.resourceId || ""} 
-                                          onValueChange={(value) => {
-                                            if (!value || value === "none") {
-                                              handlePlanChange(index, 'assignedResource', null);
-                                            } else {
-                                              const resource = availableResources.find(r => r.id === value);
-                                              if (resource) {
-                                                handlePlanChange(index, 'assignedResource', {
-                                                  resourceId: value,
-                                                  resourceName: resource.name
-                                                });
-                                              }
-                                            }
-                                          }}
-                                        >
-                                          <SelectTrigger className="h-8">
-                                            <SelectValue placeholder="Recurso" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            <SelectItem value="none">Nenhum</SelectItem>
-                                            {availableResources.map(resource => (
-                                              <SelectItem key={resource.id} value={resource.id}>
-                                                {resource.name}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      </TableCell>
-                                      <TableCell>
-                                        <Select 
-                                          value={stage.supervisor?.memberId || ""} 
-                                          onValueChange={(value) => {
-                                            if (!value || value === "none") {
-                                              handlePlanChange(index, 'supervisor', null);
-                                            } else {
-                                              const member = teamMembers.find(m => m.id === value);
-                                              if (member) {
-                                                handlePlanChange(index, 'supervisor', {
-                                                  memberId: value,
-                                                  memberName: member.name
-                                                });
-                                              }
-                                            }
-                                          }}
-                                        >
-                                          <SelectTrigger className="h-8">
-                                            <SelectValue placeholder="Supervisor" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            <SelectItem value="none">Nenhum</SelectItem>
-                                            {teamMembers.map(member => (
-                                              <SelectItem key={member.id} value={member.id}>
-                                                {member.name}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                      </TableCell>
-                                      <TableCell>
-                                        <Select 
-                                          value={stage.useBusinessDays === false ? "corridos" : "uteis"} 
-                                          onValueChange={(value) => {
-                                            const useBusinessDays = value === "uteis";
-                                            handlePlanChange(index, 'useBusinessDays', useBusinessDays);
-                                          }}
-                                        >
+                                  <Select 
+                                          value={stage.workSchedule || "normal"} 
+                                    onValueChange={(value) => {
+                                            handlePlanChange(index, 'workSchedule', value);
+                                            // Automaticamente ajusta useBusinessDays baseado na seleção
+                                            const useBusinessDays = value === 'normal';
+                                      handlePlanChange(index, 'useBusinessDays', useBusinessDays);
+                                    }}
+                                  >
                                           <SelectTrigger className="h-8">
                                             <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            <SelectItem value="uteis">Úteis</SelectItem>
-                                            <SelectItem value="corridos">Corridos</SelectItem>
-                                          </SelectContent>
-                                        </Select>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                            <SelectItem value="normal">
+                                        <div className="flex items-center gap-2">
+                                          <CalendarDays className="h-4 w-4 text-blue-500" />
+                                          <div>
+                                                  <div className="font-medium">Normal</div>
+                                                  <div className="text-xs text-muted-foreground">Dias úteis</div>
+                                          </div>
+                                        </div>
+                                      </SelectItem>
+                                            <SelectItem value="especial">
+                                        <div className="flex items-center gap-2">
+                                                <Clock className="h-4 w-4 text-orange-500" />
+                                          <div>
+                                                  <div className="font-medium">Especial</div>
+                                                  <div className="text-xs text-muted-foreground">Dias corridos</div>
+                                          </div>
+                                        </div>
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                       </TableCell>
                                       <TableCell>
                                         <div className="flex items-center gap-1">
@@ -5650,86 +5566,14 @@ export default function OrdersPage() {
                                               </DropdownMenuItem>
                                             </DropdownMenuContent>
                                           </DropdownMenu>
-                                        </div>
+                                  </div>
                                       </TableCell>
                                     </TableRow>
-                                    {expandedRow === index && (
-                                      <TableRow>
-                                        <TableCell colSpan={10} className="bg-muted/50">
-                                          <div className="p-4 space-y-4">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                              <div className="space-y-2">
-                                                <Label>Recurso Responsável</Label>
-                                                <Select 
-                                                  value={stage.assignedResource?.resourceId || "none"} 
-                                                  onValueChange={(value) => {
-                                                    if (value === "none") {
-                                                      handlePlanChange(index, 'assignedResource', null);
-                                                    } else {
-                                                      const resource = availableResources.find(r => r.id === value);
-                                                      if (resource) {
-                                                        handlePlanChange(index, 'assignedResource', {
-                                                          resourceId: resource.id,
-                                                          resourceName: resource.name
-                                                        });
-                                                      }
-                                                    }
-                                                  }}
-                                                >
-                                                  <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione um recurso" />
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    <SelectItem value="none">Nenhum recurso</SelectItem>
-                                                    {availableResources.map(resource => (
-                                                      <SelectItem key={resource.id} value={resource.id}>
-                                                        {resource.name}
-                                                      </SelectItem>
-                                                    ))}
-                                                  </SelectContent>
-                                                </Select>
-                                              </div>
-                                              <div className="space-y-2">
-                                                <Label>Supervisor</Label>
-                                                <Select 
-                                                  value={stage.supervisor?.memberId || "none"} 
-                                                  onValueChange={(value) => {
-                                                    if (value === "none") {
-                                                      handlePlanChange(index, 'supervisor', null);
-                                                    } else {
-                                                      const member = teamMembers.find(m => m.id === value);
-                                                      if (member) {
-                                                        handlePlanChange(index, 'supervisor', {
-                                                          memberId: member.id,
-                                                          memberName: member.name
-                                                        });
-                                                      }
-                                                    }
-                                                  }}
-                                                >
-                                                  <SelectTrigger>
-                                                    <SelectValue placeholder="Selecione um supervisor" />
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    <SelectItem value="none">Nenhum supervisor</SelectItem>
-                                                    {teamMembers.map(member => (
-                                                      <SelectItem key={member.id} value={member.id}>
-                                                        {member.name}
-                                                      </SelectItem>
-                                                    ))}
-                                                  </SelectContent>
-                                                </Select>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </TableCell>
-                                      </TableRow>
-                                    )}
                                   </>
                                 ))}
                               </TableBody>
                             </Table>
-                          </div>
+                                    </div>
                         ) : (
                           <div className="text-center text-muted-foreground py-8">
                             <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
@@ -5825,7 +5669,7 @@ export default function OrdersPage() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-            </div>
+        </div>
         </>
     );
 }
