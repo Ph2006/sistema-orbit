@@ -149,16 +149,43 @@ export default function TasksPage() {
 
   // Função simplificada para determinar prioridade
   const determinePriority = (orderData: any): string => {
-    if (orderData.deliveryDate) {
-      const deliveryDate = new Date(orderData.deliveryDate.seconds ? orderData.deliveryDate.toDate() : orderData.deliveryDate);
+    try {
+      if (!orderData.deliveryDate) return "baixa";
+      
+      let deliveryDate: Date;
+      
+      // Tratar diferentes formatos de data
+      if (orderData.deliveryDate.seconds) {
+        // Timestamp do Firestore
+        deliveryDate = new Date(orderData.deliveryDate.seconds * 1000);
+      } else if (orderData.deliveryDate.toDate && typeof orderData.deliveryDate.toDate === 'function') {
+        // Timestamp com método toDate
+        deliveryDate = orderData.deliveryDate.toDate();
+      } else if (orderData.deliveryDate instanceof Date) {
+        // Já é uma Date
+        deliveryDate = orderData.deliveryDate;
+      } else {
+        // String ou número
+        deliveryDate = new Date(orderData.deliveryDate);
+      }
+      
+      // Verificar se a data é válida
+      if (isNaN(deliveryDate.getTime())) {
+        console.warn('Data de entrega inválida:', orderData.deliveryDate);
+        return "baixa";
+      }
+      
       const today = new Date();
       const daysUntilDelivery = Math.ceil((deliveryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       
       if (daysUntilDelivery < 0) return "urgente";
       if (daysUntilDelivery <= 3) return "alta";
       if (daysUntilDelivery <= 7) return "media";
+      return "baixa";
+    } catch (error) {
+      console.error('Erro ao determinar prioridade:', error);
+      return "baixa";
     }
-    return "baixa";
   };
 
   // Função auxiliar para validar dados de data
@@ -227,40 +254,76 @@ export default function TasksPage() {
             }
             
             productionPlan.forEach((stage: any, stageIndex: number) => {
-              // Só incluir etapas que não estão concluídas
-              if (stage.status !== 'Concluído') {
-                // Determinar status da tarefa
-                let taskStatus = stage.status;
-                const endDate = safeToDate(stage.endDate);
-                if (endDate && endDate < new Date() && stage.status !== 'Concluído') {
-                  taskStatus = 'Atrasado';
+              try {
+                // Validações básicas
+                if (!stage || typeof stage !== 'object') {
+                  console.warn(`Etapa inválida no item ${itemIndex}:`, stage);
+                  return;
                 }
+                
+                if (!stage.stageName || typeof stage.stageName !== 'string') {
+                  console.warn(`Nome da etapa inválido:`, stage);
+                  return;
+                }
+                
+                // Só incluir etapas que não estão concluídas
+                if (stage.status !== 'Concluído') {
+                  // Determinar status da tarefa com validação
+                  let taskStatus = stage.status || 'Pendente';
+                  const endDate = safeToDate(stage.completedDate);
+                  
+                  if (endDate && endDate < new Date() && stage.status !== 'Concluído') {
+                    taskStatus = 'Atrasado';
+                  }
 
-                // Calcular progresso
-                const progress = taskStatus === 'Concluído' ? 100 : 
-                               taskStatus === 'Em Andamento' ? 50 : 0;
+                  // Calcular progresso
+                  const progress = taskStatus === 'Concluído' ? 100 : 
+                                 taskStatus === 'Em Andamento' ? 50 : 0;
 
-                tasksList.push({
-                  id: `${orderDoc.id}-${item.id}-${stageIndex}`,
-                  orderId: orderDoc.id,
-                  orderNumber: orderData.quotationNumber || orderData.orderNumber || 'N/A',
-                  customerName: orderData.customer?.name || 'Cliente não informado',
-                  itemId: item.id || `item-${stageIndex}`,
-                  itemDescription: item.description,
-                  itemNumber: item.itemNumber,
-                  stageName: stage.stageName,
-                  assignedResource: stage.assignedResource,
-                  supervisor: stage.supervisor,
-                  status: taskStatus,
-                  startDate: safeToDate(stage.startDate),
-                  endDate: safeToDate(stage.completedDate),
-                  completedDate: safeToDate(stage.completedDate),
-                  priority: determinePriority(orderData),
-                  estimatedHours: (stage.durationDays || 1) * 8,
-                  actualHours: stage.actualHours,
-                  notes: stage.notes,
-                  progress,
-                });
+                  // Validar dados do recurso atribuído
+                  let assignedResource = undefined;
+                  if (stage.assignedResource && typeof stage.assignedResource === 'object') {
+                    assignedResource = {
+                      resourceId: String(stage.assignedResource.resourceId || ''),
+                      resourceName: String(stage.assignedResource.resourceName || ''),
+                      resourceType: String(stage.assignedResource.resourceType || '')
+                    };
+                  }
+
+                  // Validar dados do supervisor
+                  let supervisor = undefined;
+                  if (stage.supervisor && typeof stage.supervisor === 'object') {
+                    supervisor = {
+                      memberId: String(stage.supervisor.memberId || ''),
+                      memberName: String(stage.supervisor.memberName || ''),
+                      memberPosition: String(stage.supervisor.memberPosition || '')
+                    };
+                  }
+
+                  tasksList.push({
+                    id: `${orderDoc.id}-${item.id || itemIndex}-${stageIndex}`,
+                    orderId: orderDoc.id,
+                    orderNumber: String(orderData.quotationNumber || orderData.orderNumber || 'N/A'),
+                    customerName: String(orderData.customer?.name || 'Cliente não informado'),
+                    itemId: String(item.id || `item-${itemIndex}`),
+                    itemDescription: String(item.description || 'Sem descrição'),
+                    itemNumber: item.itemNumber ? String(item.itemNumber) : undefined,
+                    stageName: String(stage.stageName),
+                    assignedResource,
+                    supervisor,
+                    status: String(taskStatus),
+                    startDate: safeToDate(stage.startDate),
+                    endDate: endDate,
+                    completedDate: safeToDate(stage.completedDate),
+                    priority: determinePriority(orderData),
+                    estimatedHours: Number(stage.durationDays || 1) * 8,
+                    actualHours: stage.actualHours ? Number(stage.actualHours) : undefined,
+                    notes: stage.notes ? String(stage.notes) : undefined,
+                    progress,
+                  });
+                }
+              } catch (stageError) {
+                console.error(`Erro ao processar etapa ${stageIndex} do item ${itemIndex}:`, stageError);
               }
             });
           });
@@ -452,15 +515,26 @@ export default function TasksPage() {
 
   // Funções de manipulação de alocação
   const handleAllocateTask = (task: SimpleTask) => {
-    setSelectedTask(task);
-    setAllocationData({
-      taskId: task.id,
-      resourceId: task.assignedResource?.resourceId,
-      supervisorId: task.supervisor?.memberId,
-      notes: task.notes || '',
-      estimatedHours: task.estimatedHours
-    });
-    setIsAllocationDialogOpen(true);
+    console.log('Alocando tarefa:', task);
+    
+    try {
+      setSelectedTask(task);
+      setAllocationData({
+        taskId: String(task.id),
+        resourceId: task.assignedResource?.resourceId ? String(task.assignedResource.resourceId) : undefined,
+        supervisorId: task.supervisor?.memberId ? String(task.supervisor.memberId) : undefined,
+        notes: task.notes || '',
+        estimatedHours: Number(task.estimatedHours) || 0
+      });
+      setIsAllocationDialogOpen(true);
+    } catch (error) {
+      console.error('Erro ao preparar alocação:', error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Não foi possível preparar a alocação da tarefa.",
+      });
+    }
   };
 
   const handleSaveAllocation = async () => {
@@ -649,7 +723,7 @@ export default function TasksPage() {
     return (
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold tracking-tight">Gestão de Tarefas</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Carregando...</h1>
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -657,6 +731,29 @@ export default function TasksPage() {
           ))}
         </div>
         <Skeleton className="h-96" />
+      </div>
+    );
+  }
+
+  // Validação adicional de dados
+  if (!Array.isArray(tasks)) {
+    console.error('Tasks não é um array válido:', tasks);
+    return (
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold tracking-tight">Erro ao Carregar Dados</h1>
+        </div>
+        <div className="text-center py-12">
+          <AlertTriangle className="mx-auto h-12 w-12 text-red-400 mb-4" />
+          <h3 className="text-lg font-medium mb-2">Erro ao carregar tarefas</h3>
+          <p className="text-gray-600 mb-4">
+            Não foi possível carregar as tarefas. Verifique sua conexão e tente novamente.
+          </p>
+          <Button onClick={fetchTasksFromOrders} variant="outline">
+            <Target className="mr-2 h-4 w-4" />
+            Tentar Novamente
+          </Button>
+        </div>
       </div>
     );
   }
@@ -1000,16 +1097,22 @@ export default function TasksPage() {
               {/* Seleção de recurso */}
               <div className="space-y-2">
                 <Label>Recurso Produtivo</Label>
-                <Select value={allocationData.resourceId || ''} onValueChange={(value) => 
-                  setAllocationData(prev => ({ ...prev, resourceId: value || undefined }))
-                }>
+                <Select 
+                  value={allocationData.resourceId || ''} 
+                  onValueChange={(value) => 
+                    setAllocationData(prev => ({ 
+                      ...prev, 
+                      resourceId: value === '' ? undefined : value 
+                    }))
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione um recurso" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">Nenhum recurso</SelectItem>
                     {resources.filter(r => r.status === 'disponivel').map(resource => (
-                      <SelectItem key={resource.id} value={resource.id}>
+                      <SelectItem key={resource.id} value={String(resource.id)}>
                         <div className="flex items-center gap-2">
                           <span>{resource.name}</span>
                           <Badge variant="outline" className="text-xs">
@@ -1025,16 +1128,22 @@ export default function TasksPage() {
               {/* Seleção de supervisor */}
               <div className="space-y-2">
                 <Label>Supervisor</Label>
-                <Select value={allocationData.supervisorId || ''} onValueChange={(value) => 
-                  setAllocationData(prev => ({ ...prev, supervisorId: value || undefined }))
-                }>
+                <Select 
+                  value={allocationData.supervisorId || ''} 
+                  onValueChange={(value) => 
+                    setAllocationData(prev => ({ 
+                      ...prev, 
+                      supervisorId: value === '' ? undefined : value 
+                    }))
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecione um supervisor" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">Nenhum supervisor</SelectItem>
                     {teamMembers.map(member => (
-                      <SelectItem key={member.id} value={member.id}>
+                      <SelectItem key={member.id} value={String(member.id)}>
                         <div className="flex items-center gap-2">
                           <span>{member.name}</span>
                           <Badge variant="outline" className="text-xs">
