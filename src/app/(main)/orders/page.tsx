@@ -34,7 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock, MoreHorizontal, ChevronUp, ChevronDown } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock, MoreHorizontal, ChevronUp, ChevronDown, Send } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -3833,18 +3833,20 @@ export default function OrdersPage() {
                     
                     {/* Botão Data Book */}
                     {selectedOrder.status === 'Concluído' && !selectedOrder.dataBookSent && (
-                        <Button onClick={onDataBookSent} variant="outline" className="bg-blue-50 hover:bg-blue-100 border-blue-300">
-                            <FileText className="mr-2 h-4 w-4" />
-                            Data Book Enviado
+                        <Button 
+                            onClick={onDataBookSent} 
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-md hover:shadow-lg transition-all duration-200"
+                        >
+                            <Send className="mr-2 h-4 w-4" />
+                            Marcar Data Book como Enviado
                         </Button>
                     )}
                     
                     {selectedOrder.dataBookSent && (
-                        <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-md">
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                            <span className="text-sm text-green-700">
-                                Data Book enviado {selectedOrder.dataBookSentAt ? 
-                                    `em ${format(selectedOrder.dataBookSentAt, "dd/MM/yyyy")}` : ''}
+                        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 border-2 border-emerald-400 rounded-lg shadow-sm">
+                            <CheckCircle className="h-5 w-5 text-emerald-700" />
+                            <span className="text-sm font-bold text-emerald-800">
+                                Data Book enviado
                             </span>
                         </div>
                     )}
@@ -4173,28 +4175,34 @@ return (
                         {/* Botões de visualização */}
                         <div className="flex items-center rounded-lg border p-1">
                             <Button
-                                variant={viewMode === 'list' ? 'default' : 'ghost'}
                                 size="sm"
                                 onClick={() => setViewMode('list')}
-                                className="h-8"
+                                className={`h-8 font-medium ${viewMode === 'list' 
+                                    ? 'bg-primary text-primary-foreground shadow-sm' 
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                }`}
                             >
                                 <ListChecks className="mr-2 h-4 w-4" />
                                 Lista
                             </Button>
                             <Button
-                                variant={viewMode === 'kanban' ? 'default' : 'ghost'}
                                 size="sm"
                                 onClick={() => setViewMode('kanban')}
-                                className="h-8"
+                                className={`h-8 font-medium ${viewMode === 'kanban' 
+                                    ? 'bg-primary text-primary-foreground shadow-sm' 
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                }`}
                             >
                                 <GanttChart className="mr-2 h-4 w-4" />
                                 Kanban
                             </Button>
                             <Button
-                                variant={viewMode === 'calendar' ? 'default' : 'ghost'}
                                 size="sm"
                                 onClick={() => setViewMode('calendar')}
-                                className="h-8"
+                                className={`h-8 font-medium ${viewMode === 'calendar' 
+                                    ? 'bg-primary text-primary-foreground shadow-sm' 
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                }`}
                             >
                                 <CalendarDays className="mr-2 h-4 w-4" />
                                 Calendário
