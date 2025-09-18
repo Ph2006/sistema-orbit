@@ -5472,7 +5472,7 @@ return (
                       <TableHead className="w-32">Início</TableHead>
                       <TableHead className="w-32">Fim</TableHead>
                       <TableHead className="w-24">Duração</TableHead>
-                      <TableHead className="w-36">Horário</TableHead>
+                      <TableHead className="w-40">Horário</TableHead>
                       <TableHead className="w-20">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -5556,25 +5556,25 @@ return (
                                 handlePlanChange(index, 'useBusinessDays', useBusinessDays);
                               }}
                             >
-                              <SelectTrigger className="h-8">
-                                <SelectValue />
+                              <SelectTrigger className="h-10 w-full">
+                                <SelectValue placeholder="Selecionar horário" />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="normal">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-3 py-1">
                                     <CalendarDays className="h-4 w-4 text-blue-500" />
-                                    <div>
+                                    <div className="text-left">
                                       <div className="font-medium">Normal</div>
-                                      <div className="text-xs text-muted-foreground">Dias úteis</div>
+                                      <div className="text-xs text-muted-foreground">Dias úteis apenas</div>
                                     </div>
                                   </div>
                                 </SelectItem>
                                 <SelectItem value="especial">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-3 py-1">
                                     <Clock className="h-4 w-4 text-orange-500" />
-                                    <div>
+                                    <div className="text-left">
                                       <div className="font-medium">Especial</div>
-                                      <div className="text-xs text-muted-foreground">Dias corridos</div>
+                                      <div className="text-xs text-muted-foreground">Incluí fins de semana</div>
                                     </div>
                                   </div>
                                 </SelectItem>
