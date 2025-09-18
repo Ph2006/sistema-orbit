@@ -6,6 +6,8 @@ import {
   getDocs, 
   doc, 
   getDoc,
+  updateDoc,
+  Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
@@ -33,7 +35,10 @@ import {
   Target,
   BarChart3,
   Filter,
-  Package
+  Package,
+  Settings,
+  User,
+  Edit
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -41,26 +46,51 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 // Tipos simplificados
+type AssignedResource = {
+  resourceId: string;
+  resourceName: string;
+  resourceType: string;
+};
+
+type AssignedSupervisor = {
+  memberId: string;
+  memberName: string;
+  memberPosition: string;
+};
+
+type TaskAllocation = {
+  taskId: string;
+  resourceId?: string;
+  supervisorId?: string;
+  notes?: string;
+  estimatedHours?: number;
+};
+
 type SimpleTask = {
   id: string;
+  orderId: string;
   orderNumber: string;
+  customerName: string;
+  itemId: string;
   itemDescription: string;
+  itemNumber?: string;
   stageName: string;
-  assignedResource?: {
-    resourceId: string;
-    resourceName: string;
-  };
-  supervisor?: {
-    memberId: string;
-    memberName: string;
-  };
+  assignedResource?: AssignedResource;
+  supervisor?: AssignedSupervisor;
   status: string;
-  startDate: Date;
-  endDate: Date;
+  startDate: Date | null;
+  endDate: Date | null;
+  completedDate: Date | null;
   priority: string;
   estimatedHours: number;
+  actualHours?: number;
+  notes?: string;
+  progress: number;
 };
 
 type Resource = {
@@ -104,6 +134,18 @@ export default function TasksPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterResource, setFilterResource] = useState<string>('all');
   const [filterSupervisor, setFilterSupervisor] = useState<string>('all');
+  
+  // Novos estados para alocação
+  const [selectedTask, setSelectedTask] = useState<SimpleTask | null>(null);
+  const [isAllocationDialogOpen, setIsAllocationDialogOpen] = useState(false);
+  const [allocationData, setAllocationData] = useState<TaskAllocation>({
+    taskId: '',
+    resourceId: undefined,
+    supervisorId: undefined,
+    notes: '',
+    estimatedHours: 0
+  });
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   // Função simplificada para determinar prioridade
   const determinePriority = (orderData: any): string => {
@@ -131,26 +173,45 @@ export default function TasksPage() {
       ordersSnapshot.docs.forEach(orderDoc => {
         const orderData = orderDoc.data();
         
-        // Processar apenas pedidos ativos
+        // Processar pedidos ativos
         if (!['Em Produção', 'Aguardando Produção', 'Pronto para Entrega'].includes(orderData.status)) {
           return;
         }
         
         orderData.items?.forEach((item: any) => {
           item.productionPlan?.forEach((stage: any, stageIndex: number) => {
-            if (stage.assignedResource || stage.supervisor || stage.status !== 'Pendente') {
+            // Só incluir etapas que não estão concluídas
+            if (stage.status !== 'Concluído') {
+              // Determinar status da tarefa
+              let taskStatus = stage.status;
+              if (stage.endDate && new Date(stage.endDate.toDate ? stage.endDate.toDate() : stage.endDate) < new Date() && stage.status !== 'Concluído') {
+                taskStatus = 'Atrasado';
+              }
+
+              // Calcular progresso
+              const progress = taskStatus === 'Concluído' ? 100 : 
+                             taskStatus === 'Em Andamento' ? 50 : 0;
+
               tasksList.push({
                 id: `${orderDoc.id}-${item.id}-${stageIndex}`,
+                orderId: orderDoc.id,
                 orderNumber: orderData.quotationNumber || orderData.orderNumber || 'N/A',
+                customerName: orderData.customer?.name || 'Cliente não informado',
+                itemId: item.id || `item-${stageIndex}`,
                 itemDescription: item.description,
+                itemNumber: item.itemNumber,
                 stageName: stage.stageName,
                 assignedResource: stage.assignedResource,
                 supervisor: stage.supervisor,
-                status: stage.status,
-                startDate: stage.startDate ? (stage.startDate.toDate ? stage.startDate.toDate() : new Date(stage.startDate)) : new Date(),
-                endDate: stage.completedDate ? (stage.completedDate.toDate ? stage.completedDate.toDate() : new Date(stage.completedDate)) : new Date(),
+                status: taskStatus,
+                startDate: stage.startDate ? (stage.startDate.toDate ? stage.startDate.toDate() : new Date(stage.startDate)) : null,
+                endDate: stage.completedDate ? (stage.completedDate.toDate ? stage.completedDate.toDate() : new Date(stage.completedDate)) : null,
+                completedDate: stage.completedDate ? (stage.completedDate.toDate ? stage.completedDate.toDate() : new Date(stage.completedDate)) : null,
                 priority: determinePriority(orderData),
                 estimatedHours: (stage.durationDays || 1) * 8,
+                actualHours: stage.actualHours,
+                notes: stage.notes,
+                progress,
               });
             }
           });
@@ -158,7 +219,6 @@ export default function TasksPage() {
       });
       
       console.log('📊 Total de tarefas encontradas:', tasksList.length);
-      console.log('📋 Tarefas:', tasksList);
       setTasks(tasksList);
     } catch (error) {
       console.error("Erro ao buscar tarefas:", error);
@@ -167,6 +227,28 @@ export default function TasksPage() {
         title: "Erro ao buscar tarefas",
         description: "Não foi possível carregar as tarefas dos pedidos.",
       });
+    }
+  };
+
+  // Adicionar função para buscar recursos e membros da equipe
+  const fetchResourcesAndTeam = async () => {
+    try {
+      // Buscar recursos
+      const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
+      const resourcesSnap = await getDoc(resourcesRef);
+      if (resourcesSnap.exists()) {
+        const resourcesData = resourcesSnap.data().resources || [];
+        setResources(resourcesData.filter((r: any) => r.status !== 'inativo'));
+      }
+
+      // Buscar membros da equipe
+      const teamRef = doc(db, "companies", "mecald", "settings", "team");
+      const teamSnap = await getDoc(teamRef);
+      if (teamSnap.exists()) {
+        setTeamMembers(teamSnap.data().members || []);
+      }
+    } catch (error) {
+      console.error("Erro ao buscar recursos e equipe:", error);
     }
   };
 
@@ -236,7 +318,14 @@ export default function TasksPage() {
   // UseEffect principal
   useEffect(() => {
     if (!authLoading && user) {
-      fetchInitialData();
+      const loadData = async () => {
+        await Promise.all([
+          fetchTasksFromOrders(),
+          fetchResourcesAndTeam()
+        ]);
+        setIsLoading(false);
+      };
+      loadData();
     }
   }, [user, authLoading]);
 
@@ -268,8 +357,10 @@ export default function TasksPage() {
       
       // Filtros adicionais
       const statusMatch = filterStatus === 'all' || task.status === filterStatus;
-      const resourceMatch = filterResource === 'all' || task.assignedResource?.resourceId === filterResource;
-      const supervisorMatch = filterSupervisor === 'all' || task.supervisor?.memberId === filterSupervisor;
+      const resourceMatch = filterResource === 'all' || 
+        (filterResource === 'unassigned' ? !task.assignedResource : task.assignedResource?.resourceId === filterResource);
+      const supervisorMatch = filterSupervisor === 'all' || 
+        (filterSupervisor === 'unassigned' ? !task.supervisor : task.supervisor?.memberId === filterSupervisor);
 
       return isInPeriod && statusMatch && resourceMatch && supervisorMatch;
     });
@@ -294,6 +385,96 @@ export default function TasksPage() {
       completionRate: total > 0 ? (completed / total) * 100 : 0,
     };
   }, [getFilteredTasks]);
+
+  // Funções de manipulação de alocação
+  const handleAllocateTask = (task: SimpleTask) => {
+    setSelectedTask(task);
+    setAllocationData({
+      taskId: task.id,
+      resourceId: task.assignedResource?.resourceId,
+      supervisorId: task.supervisor?.memberId,
+      notes: task.notes || '',
+      estimatedHours: task.estimatedHours
+    });
+    setIsAllocationDialogOpen(true);
+  };
+
+  const handleSaveAllocation = async () => {
+    if (!selectedTask) return;
+    
+    try {
+      // Encontrar o documento do pedido
+      const orderRef = doc(db, "companies", "mecald", "orders", selectedTask.orderId);
+      const orderSnap = await getDoc(orderRef);
+      
+      if (!orderSnap.exists()) return;
+      
+      const orderData = orderSnap.data();
+      const updatedItems = orderData.items.map((item: any) => {
+        if (item.id === selectedTask.itemId) {
+          const updatedPlan = item.productionPlan.map((stage: any, index: number) => {
+            if (`${selectedTask.orderId}-${selectedTask.itemId}-${index}` === selectedTask.id) {
+              const selectedResource = resources.find(r => r.id === allocationData.resourceId);
+              const selectedSupervisor = teamMembers.find(m => m.id === allocationData.supervisorId);
+              
+              return {
+                ...stage,
+                assignedResource: selectedResource ? {
+                  resourceId: selectedResource.id,
+                  resourceName: selectedResource.name,
+                  resourceType: selectedResource.type
+                } : null,
+                supervisor: selectedSupervisor ? {
+                  memberId: selectedSupervisor.id,
+                  memberName: selectedSupervisor.name,
+                  memberPosition: selectedSupervisor.position
+                } : null,
+                notes: allocationData.notes,
+                estimatedHours: allocationData.estimatedHours,
+                updatedAt: Timestamp.now()
+              };
+            }
+            return stage;
+          });
+          
+          return { ...item, productionPlan: updatedPlan };
+        }
+        return item;
+      });
+      
+      await updateDoc(orderRef, { 
+        items: updatedItems,
+        lastUpdate: Timestamp.now()
+      });
+      
+      toast({
+        title: "Alocação salva!",
+        description: "A tarefa foi alocada com sucesso.",
+      });
+      
+      setIsAllocationDialogOpen(false);
+      fetchTasksFromOrders(); // Recarregar dados
+    } catch (error) {
+      console.error("Erro ao salvar alocação:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar a alocação.",
+      });
+    }
+  };
+
+  const toggleRowExpansion = (taskId: string) => {
+    setExpandedRows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(taskId)) {
+        newSet.delete(taskId);
+      } else {
+        newSet.add(taskId);
+      }
+      return newSet;
+    });
+  };
 
   // Funções auxiliares para badges
   const getStatusBadge = (status: string) => {
@@ -547,10 +728,11 @@ export default function TasksPage() {
 
                 <Select value={filterResource} onValueChange={setFilterResource}>
                   <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Recurso" />
+                    <SelectValue placeholder="Filtrar por Recurso" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos os Recursos</SelectItem>
+                    <SelectItem value="unassigned">Sem Recurso</SelectItem>
                     {resources.map(resource => (
                       <SelectItem key={resource.id} value={resource.id}>
                         {resource.name}
@@ -561,10 +743,11 @@ export default function TasksPage() {
 
                 <Select value={filterSupervisor} onValueChange={setFilterSupervisor}>
                   <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Supervisor" />
+                    <SelectValue placeholder="Filtrar por Supervisor" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todos os Supervisores</SelectItem>
+                    <SelectItem value="unassigned">Sem Supervisor</SelectItem>
                     {teamMembers.map(member => (
                       <SelectItem key={member.id} value={member.id}>
                         {member.name}
@@ -620,6 +803,7 @@ export default function TasksPage() {
                         <TableHead>Prazo</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Prioridade</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -628,11 +812,39 @@ export default function TasksPage() {
                           <TableCell className="font-medium">{task.orderNumber}</TableCell>
                           <TableCell>{task.itemDescription.substring(0, 30)}...</TableCell>
                           <TableCell>{task.stageName}</TableCell>
-                          <TableCell>{task.assignedResource?.resourceName || 'N/A'}</TableCell>
-                          <TableCell>{task.supervisor?.memberName || 'N/A'}</TableCell>
-                          <TableCell>{format(task.endDate, 'dd/MM/yyyy')}</TableCell>
+                          <TableCell>
+                            {task.assignedResource ? (
+                              <div className="flex items-center gap-2">
+                                <Settings className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-sm">{task.assignedResource.resourceName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Não alocado</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {task.supervisor ? (
+                              <div className="flex items-center gap-2">
+                                <User className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-sm">{task.supervisor.memberName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Sem supervisor</span>
+                            )}
+                          </TableCell>
+                          <TableCell>{task.endDate ? format(task.endDate, 'dd/MM/yyyy') : 'N/A'}</TableCell>
                           <TableCell>{getStatusBadge(task.status)}</TableCell>
                           <TableCell>{getPriorityBadge(task.priority)}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleAllocateTask(task)}
+                            >
+                              <Edit className="h-4 w-4 mr-1" />
+                              Alocar
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -697,6 +909,117 @@ export default function TasksPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Dialog de Alocação */}
+      <Dialog open={isAllocationDialogOpen} onOpenChange={setIsAllocationDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Alocar Recurso e Supervisor</DialogTitle>
+            <DialogDescription>
+              Defina o recurso e supervisor responsáveis pela execução desta tarefa.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedTask && (
+            <div className="space-y-6">
+              {/* Informações da tarefa */}
+              <div className="bg-muted p-4 rounded-lg">
+                <h4 className="font-semibold mb-2">{selectedTask.stageName}</h4>
+                <p className="text-sm text-muted-foreground">
+                  Pedido: {selectedTask.orderNumber} | Item: {selectedTask.itemDescription}
+                </p>
+              </div>
+              
+              {/* Seleção de recurso */}
+              <div className="space-y-2">
+                <Label>Recurso Produtivo</Label>
+                <Select value={allocationData.resourceId || ''} onValueChange={(value) => 
+                  setAllocationData(prev => ({ ...prev, resourceId: value || undefined }))
+                }>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um recurso" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Nenhum recurso</SelectItem>
+                    {resources.filter(r => r.status === 'disponivel').map(resource => (
+                      <SelectItem key={resource.id} value={resource.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{resource.name}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {resource.type}
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Seleção de supervisor */}
+              <div className="space-y-2">
+                <Label>Supervisor</Label>
+                <Select value={allocationData.supervisorId || ''} onValueChange={(value) => 
+                  setAllocationData(prev => ({ ...prev, supervisorId: value || undefined }))
+                }>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um supervisor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Nenhum supervisor</SelectItem>
+                    {teamMembers.map(member => (
+                      <SelectItem key={member.id} value={member.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{member.name}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {member.position}
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Horas estimadas */}
+              <div className="space-y-2">
+                <Label>Horas Estimadas</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={allocationData.estimatedHours}
+                  onChange={(e) => setAllocationData(prev => ({ 
+                    ...prev, 
+                    estimatedHours: parseFloat(e.target.value) || 0 
+                  }))}
+                />
+              </div>
+              
+              {/* Observações */}
+              <div className="space-y-2">
+                <Label>Observações</Label>
+                <Textarea
+                  placeholder="Adicione observações sobre a tarefa..."
+                  value={allocationData.notes}
+                  onChange={(e) => setAllocationData(prev => ({ 
+                    ...prev, 
+                    notes: e.target.value 
+                  }))}
+                />
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAllocationDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveAllocation}>
+              Salvar Alocação
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
