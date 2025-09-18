@@ -1365,8 +1365,8 @@ export default function OrdersPage() {
             return (
                 <div className="text-center py-12">
                     <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <h3 className="text-lg font-medium mb-2 text-gray-700">Nenhum pedido para exibir no Kanban</h3>
-                    <p className="text-gray-600">
+                    <h3 className="text-lg font-medium mb-2 text-foreground">Nenhum pedido para exibir no Kanban</h3>
+                    <p className="text-foreground/70">
                         Os pedidos aparecerão aqui quando tiverem data de entrega definida ou estiverem concluídos.
                         {hasActiveFilters && (
                             <span className="block mt-2 text-sm">
@@ -1576,7 +1576,7 @@ export default function OrdersPage() {
             <div className="bg-white rounded-lg border">
                 {/* Header do calendário */}
                 <div className="flex items-center justify-between p-4 border-b">
-                    <h2 className="text-lg font-semibold text-gray-800">
+                    <h2 className="text-lg font-semibold text-foreground">
                         {calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
                     </h2>
                     <div className="flex items-center gap-2">
@@ -3773,7 +3773,7 @@ export default function OrdersPage() {
                                     <Clock className="h-4 w-4 text-gray-600" />
                                 </div>
                                 <p className="font-semibold text-gray-800">{analysis.summary.pendingItems}</p>
-                                <p className="text-gray-600">Pendentes</p>
+                                <p className="text-foreground/70">Pendentes</p>
                             </div>
                         </div>
                         
@@ -4335,8 +4335,8 @@ return (
                 {viewMode === 'list' ? (
                     <Card>
                         <CardHeader>
-                            <CardTitle className="text-gray-800">Lista de Pedidos</CardTitle>
-                            <CardDescription className="text-gray-600">Acompanhe todos os pedidos de produção aprovados.</CardDescription>
+                            <CardTitle className="text-foreground">Lista de Pedidos</CardTitle>
+                            <CardDescription className="text-foreground/80">Acompanhe todos os pedidos de produção aprovados.</CardDescription>
                         </CardHeader>
                         <CardContent>
                             {isLoading ? (
@@ -4355,8 +4355,8 @@ return (
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle className="text-gray-800">Kanban de Pedidos por Mês de Entrega</CardTitle>
-                                    <CardDescription className="text-gray-600">
+                                    <CardTitle className="text-foreground">Kanban de Pedidos por Mês de Entrega</CardTitle>
+                                    <CardDescription className="text-foreground/80">
                                         Visualize os pedidos organizados por mês de entrega com peso total por coluna.
                                         {filteredOrders.length > 0 && (
                                             <span className="ml-2">
@@ -4406,8 +4406,8 @@ return (
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle className="text-gray-800">Calendário de Entregas</CardTitle>
-                                    <CardDescription className="text-gray-600">
+                                    <CardTitle className="text-foreground">Calendário de Entregas</CardTitle>
+                                    <CardDescription className="text-foreground/80">
                                         Visualize os pedidos organizados por data de entrega. 
                                         {filteredOrders.length > 0 && (
                                             <span className="ml-2">
@@ -4445,8 +4445,8 @@ return (
                             ) : filteredOrders.filter(o => o.deliveryDate).length === 0 ? (
                                 <div className="text-center py-12">
                                     <CalendarDays className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                                    <h3 className="text-lg font-medium mb-2 text-gray-700">Nenhum pedido com data de entrega</h3>
-                                    <p className="text-gray-600">
+                                    <h3 className="text-lg font-medium mb-2 text-foreground">Nenhum pedido com data de entrega</h3>
+                                    <p className="text-foreground/70">
                                         Os pedidos aparecerão no calendário quando tiverem data de entrega definida.
                                     </p>
                                 </div>
