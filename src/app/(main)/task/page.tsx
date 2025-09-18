@@ -161,6 +161,31 @@ export default function TasksPage() {
     return "baixa";
   };
 
+  // Função auxiliar para validar dados de data
+  const safeToDate = (dateField: any): Date | null => {
+    if (!dateField) return null;
+    
+    try {
+      if (dateField.toDate && typeof dateField.toDate === 'function') {
+        return dateField.toDate();
+      }
+      
+      if (dateField instanceof Date) {
+        return dateField;
+      }
+      
+      if (typeof dateField === 'string' || typeof dateField === 'number') {
+        const date = new Date(dateField);
+        return isNaN(date.getTime()) ? null : date;
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('Erro ao converter data:', error);
+      return null;
+    }
+  };
+
   // Função simplificada para buscar tarefas dos pedidos
   const fetchTasksFromOrders = async () => {
     console.log('🔍 Buscando tarefas dos pedidos...');
@@ -168,54 +193,81 @@ export default function TasksPage() {
       const ordersRef = collection(db, "companies", "mecald", "orders");
       const ordersSnapshot = await getDocs(ordersRef);
       
+      if (ordersSnapshot.empty) {
+        console.log('Nenhum pedido encontrado');
+        setTasks([]);
+        return;
+      }
+      
       const tasksList: SimpleTask[] = [];
       
+      // Processar cada documento com tratamento individual de erro
       ordersSnapshot.docs.forEach(orderDoc => {
-        const orderData = orderDoc.data();
-        
-        // Processar pedidos ativos
-        if (!['Em Produção', 'Aguardando Produção', 'Pronto para Entrega'].includes(orderData.status)) {
-          return;
-        }
-        
-        orderData.items?.forEach((item: any) => {
-          item.productionPlan?.forEach((stage: any, stageIndex: number) => {
-            // Só incluir etapas que não estão concluídas
-            if (stage.status !== 'Concluído') {
-              // Determinar status da tarefa
-              let taskStatus = stage.status;
-              if (stage.endDate && new Date(stage.endDate.toDate ? stage.endDate.toDate() : stage.endDate) < new Date() && stage.status !== 'Concluído') {
-                taskStatus = 'Atrasado';
-              }
-
-              // Calcular progresso
-              const progress = taskStatus === 'Concluído' ? 100 : 
-                             taskStatus === 'Em Andamento' ? 50 : 0;
-
-              tasksList.push({
-                id: `${orderDoc.id}-${item.id}-${stageIndex}`,
-                orderId: orderDoc.id,
-                orderNumber: orderData.quotationNumber || orderData.orderNumber || 'N/A',
-                customerName: orderData.customer?.name || 'Cliente não informado',
-                itemId: item.id || `item-${stageIndex}`,
-                itemDescription: item.description,
-                itemNumber: item.itemNumber,
-                stageName: stage.stageName,
-                assignedResource: stage.assignedResource,
-                supervisor: stage.supervisor,
-                status: taskStatus,
-                startDate: stage.startDate ? (stage.startDate.toDate ? stage.startDate.toDate() : new Date(stage.startDate)) : null,
-                endDate: stage.completedDate ? (stage.completedDate.toDate ? stage.completedDate.toDate() : new Date(stage.completedDate)) : null,
-                completedDate: stage.completedDate ? (stage.completedDate.toDate ? stage.completedDate.toDate() : new Date(stage.completedDate)) : null,
-                priority: determinePriority(orderData),
-                estimatedHours: (stage.durationDays || 1) * 8,
-                actualHours: stage.actualHours,
-                notes: stage.notes,
-                progress,
-              });
+        try {
+          const orderData = orderDoc.data();
+          
+          // Processar pedidos ativos
+          if (!['Em Produção', 'Aguardando Produção', 'Pronto para Entrega'].includes(orderData.status)) {
+            return;
+          }
+          
+          // CORREÇÃO: Verificar se items é um array
+          const items = orderData.items;
+          if (!Array.isArray(items)) {
+            console.warn(`Pedido ${orderDoc.id} não possui items válidos:`, items);
+            return;
+          }
+          
+          items.forEach((item: any, itemIndex: number) => {
+            // CORREÇÃO: Verificar se productionPlan é um array
+            const productionPlan = item.productionPlan;
+            if (!Array.isArray(productionPlan)) {
+              console.warn(`Item ${item.id || itemIndex} não possui productionPlan válido:`, productionPlan);
+              return;
             }
+            
+            productionPlan.forEach((stage: any, stageIndex: number) => {
+              // Só incluir etapas que não estão concluídas
+              if (stage.status !== 'Concluído') {
+                // Determinar status da tarefa
+                let taskStatus = stage.status;
+                const endDate = safeToDate(stage.endDate);
+                if (endDate && endDate < new Date() && stage.status !== 'Concluído') {
+                  taskStatus = 'Atrasado';
+                }
+
+                // Calcular progresso
+                const progress = taskStatus === 'Concluído' ? 100 : 
+                               taskStatus === 'Em Andamento' ? 50 : 0;
+
+                tasksList.push({
+                  id: `${orderDoc.id}-${item.id}-${stageIndex}`,
+                  orderId: orderDoc.id,
+                  orderNumber: orderData.quotationNumber || orderData.orderNumber || 'N/A',
+                  customerName: orderData.customer?.name || 'Cliente não informado',
+                  itemId: item.id || `item-${stageIndex}`,
+                  itemDescription: item.description,
+                  itemNumber: item.itemNumber,
+                  stageName: stage.stageName,
+                  assignedResource: stage.assignedResource,
+                  supervisor: stage.supervisor,
+                  status: taskStatus,
+                  startDate: safeToDate(stage.startDate),
+                  endDate: safeToDate(stage.completedDate),
+                  completedDate: safeToDate(stage.completedDate),
+                  priority: determinePriority(orderData),
+                  estimatedHours: (stage.durationDays || 1) * 8,
+                  actualHours: stage.actualHours,
+                  notes: stage.notes,
+                  progress,
+                });
+              }
+            });
           });
-        });
+        } catch (docError) {
+          console.error(`Erro ao processar pedido ${orderDoc.id}:`, docError);
+          // Continua processando outros documentos
+        }
       });
       
       console.log('📊 Total de tarefas encontradas:', tasksList.length);
@@ -227,6 +279,7 @@ export default function TasksPage() {
         title: "Erro ao buscar tarefas",
         description: "Não foi possível carregar as tarefas dos pedidos.",
       });
+      setTasks([]); // Definir array vazio em caso de erro
     }
   };
 
@@ -340,6 +393,11 @@ export default function TasksPage() {
 
   // Filtrar tarefas por período
   const getFilteredTasks = useMemo(() => {
+    if (!Array.isArray(tasks)) {
+      console.warn('Tasks não é um array:', tasks);
+      return [];
+    }
+    
     let periodStart: Date;
     let periodEnd: Date;
 
@@ -352,8 +410,14 @@ export default function TasksPage() {
     }
 
     return tasks.filter(task => {
-      // Filtro por período
-      const isInPeriod = isWithinInterval(task.startDate, { start: periodStart, end: periodEnd });
+      // Verificar se task é válido
+      if (!task || typeof task !== 'object') {
+        console.warn('Task inválido encontrado:', task);
+        return false;
+      }
+      
+      // Filtro por período - verificar se startDate é válido
+      const isInPeriod = task.startDate && isWithinInterval(task.startDate, { start: periodStart, end: periodEnd });
       
       // Filtros adicionais
       const statusMatch = filterStatus === 'all' || task.status === filterStatus;
@@ -778,16 +842,19 @@ export default function TasksPage() {
             <CardHeader>
               <CardTitle>Tarefas do Período</CardTitle>
               <CardDescription>
-                {getFilteredTasks.length} tarefa{getFilteredTasks.length !== 1 ? 's' : ''} encontrada{getFilteredTasks.length !== 1 ? 's' : ''}
+                {Array.isArray(getFilteredTasks) ? getFilteredTasks.length : 0} tarefa{Array.isArray(getFilteredTasks) && getFilteredTasks.length !== 1 ? 's' : ''} encontrada{Array.isArray(getFilteredTasks) && getFilteredTasks.length !== 1 ? 's' : ''}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {getFilteredTasks.length === 0 ? (
+              {!Array.isArray(getFilteredTasks) || getFilteredTasks.length === 0 ? (
                 <div className="text-center py-12">
                   <Target className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                   <h3 className="text-lg font-medium mb-2">Nenhuma tarefa encontrada</h3>
                   <p className="text-gray-600 mb-4">
-                    Não há tarefas para o período selecionado com os filtros aplicados.
+                    {!Array.isArray(getFilteredTasks) 
+                      ? "Erro ao carregar tarefas. Verifique a conexão."
+                      : "Não há tarefas para exibir com os filtros aplicados."
+                    }
                   </p>
                 </div>
               ) : (
@@ -807,7 +874,7 @@ export default function TasksPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {getFilteredTasks.map((task) => (
+                      {Array.isArray(getFilteredTasks) && getFilteredTasks.map((task) => (
                         <TableRow key={task.id}>
                           <TableCell className="font-medium">{task.orderNumber}</TableCell>
                           <TableCell>{task.itemDescription.substring(0, 30)}...</TableCell>
