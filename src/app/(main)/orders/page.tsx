@@ -896,13 +896,14 @@ export default function OrdersPage() {
     };
 
     const handleViewOrder = (order: Order) => {
-        // Salvar posição atual do scroll
-        if (viewMode === 'kanban' && kanbanScrollRef.current) {
-            scrollPositionRef.current = kanbanScrollRef.current.scrollLeft;
-            console.log('💾 Salvando posição do scroll:', scrollPositionRef.current);
-            
-            // Salvar também no sessionStorage como backup
-            sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
+        // Salvar posição atual do scroll do Kanban
+        if (viewMode === 'kanban') {
+            const kanbanContainer = document.querySelector('[data-kanban-scroll]');
+            if (kanbanContainer) {
+                scrollPositionRef.current = kanbanContainer.scrollLeft;
+                sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
+                console.log('💾 Salvando posição do scroll:', scrollPositionRef.current);
+            }
         }
         
         console.log('🔍 [DEBUG] Inicializando formulário com:', {
@@ -915,7 +916,7 @@ export default function OrdersPage() {
             ...order,
             status: order.status as any,
             documents: order.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
-            quotationNumber: order.quotationNumber || '', // Garantir que não seja undefined
+            quotationNumber: order.quotationNumber || '',
         });
         setIsEditing(false);
         setSelectedItems(new Set());
@@ -1329,35 +1330,22 @@ export default function OrdersPage() {
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
-        // Efeito para restaurar scroll quando componente renderiza ou modal fecha
+        // Efeito para restaurar scroll quando o modal fecha
         useEffect(() => {
-            if (viewMode === 'kanban' && kanbanScrollRef.current) {
-                const restorePosition = () => {
-                    // Tentar restaurar da ref primeiro
-                    let savedPosition = scrollPositionRef.current;
+            if (viewMode === 'kanban' && !isSheetOpen) {
+                const kanbanContainer = document.querySelector('[data-kanban-scroll]');
+                if (kanbanContainer) {
+                    const savedPosition = scrollPositionRef.current || 
+                        parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
                     
-                    // Se não houver na ref, tentar do sessionStorage
-                    if (savedPosition === 0) {
-                        const stored = sessionStorage.getItem('kanbanScrollPosition');
-                        if (stored) {
-                            savedPosition = parseInt(stored, 10);
-                        }
+                    if (savedPosition > 0) {
+                        // Usar setTimeout para garantir que o DOM foi atualizado
+                        setTimeout(() => {
+                            kanbanContainer.scrollLeft = savedPosition;
+                            console.log('🔄 Posição restaurada:', savedPosition);
+                        }, 100);
                     }
-                    
-                    if (savedPosition > 0 && kanbanScrollRef.current) {
-                        console.log('🔄 Restaurando posição:', savedPosition);
-                        kanbanScrollRef.current.scrollLeft = savedPosition;
-                        console.log('✅ Posição atual após restauração:', kanbanScrollRef.current.scrollLeft);
-                    }
-                };
-                
-                // Restaurar imediatamente
-                restorePosition();
-                
-                // E também após um pequeno delay para garantir
-                const timer = setTimeout(restorePosition, 100);
-                
-                return () => clearTimeout(timer);
+                }
             }
         }, [viewMode, isSheetOpen]);
         
@@ -1380,14 +1368,15 @@ export default function OrdersPage() {
 
         return (
             <div className="w-full">
-                <div className="w-full overflow-x-auto" 
-                     ref={kanbanScrollRef}
-                     onScroll={(e) => {
-                         const target = e.target as HTMLDivElement;
-                         scrollPositionRef.current = target.scrollLeft;
-                         // Também salvar no sessionStorage em tempo real
-                         sessionStorage.setItem('kanbanScrollPosition', target.scrollLeft.toString());
-                     }}
+                <div 
+                    className="w-full overflow-x-auto" 
+                    data-kanban-scroll
+                    ref={kanbanScrollRef}
+                    onScroll={(e) => {
+                        const target = e.target as HTMLDivElement;
+                        scrollPositionRef.current = target.scrollLeft;
+                        sessionStorage.setItem('kanbanScrollPosition', target.scrollLeft.toString());
+                    }}
                 >
                     <div className="flex w-max space-x-4 p-4 min-w-full">
                         {allColumns.map(([monthKey, monthData]) => {
@@ -2200,27 +2189,23 @@ export default function OrdersPage() {
             docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
     
-            docPdf.setFontSize(10).setFont('helvetica', 'normal');  // Reduzido de 11 para 10
+            // Informações do pedido
+            docPdf.setFontSize(11).setFont('helvetica', 'normal');
+            docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
+            docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
+
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
-            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 6;  // Reduzido de 7 para 6
-            
-            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, 15, yPos);
-            if (selectedOrder.deliveryDate) {
-                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
-            }
-            yPos += 6;  // Reduzido de 7 para 6
+            docPdf.text(`OS: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
 
-            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
-            yPos += 6;  // Reduzido de 7 para 6
-
-            // ADICIONAR ESTA LINHA PARA O PROJETO DO CLIENTE
+            // ADICIONAR PROJETO DO CLIENTE
             if (selectedOrder.projectName) {
                 docPdf.text(`Projeto: ${selectedOrder.projectName}`, 15, yPos);
-                yPos += 6;
+                yPos += 7;
             }
 
-            yPos += 4; // Espaço extra antes dos dados do item
+            yPos += 8; // Espaço extra antes dos dados do item
     
             const tableBody = itemsToInclude.map(item => {
                 const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
@@ -4474,18 +4459,19 @@ return (
     setProgressClipboard(null);
     
     // Restaurar scroll quando fechar o modal
-    if (viewMode === 'kanban' && kanbanScrollRef.current) {
-      const savedPosition = scrollPositionRef.current || 
-        parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
-      
-      if (savedPosition > 0) {
-        setTimeout(() => {
-          if (kanbanScrollRef.current) {
+    if (viewMode === 'kanban') {
+      setTimeout(() => {
+        const kanbanContainer = document.querySelector('[data-kanban-scroll]');
+        if (kanbanContainer) {
+          const savedPosition = scrollPositionRef.current || 
+            parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
+          
+          if (savedPosition > 0) {
+            kanbanContainer.scrollLeft = savedPosition;
             console.log('🔄 Restaurando ao fechar modal:', savedPosition);
-            kanbanScrollRef.current.scrollLeft = savedPosition;
           }
-        }, 100);
-      }
+        }
+      }, 100);
     }
   } 
 }}>
