@@ -405,11 +405,82 @@ export default function QuotationsPage() {
         }
     };
 
+    const checkAndUpdateExpiredQuotations = async () => {
+        if (!user) return;
+        
+        try {
+            const now = new Date();
+            const quotationsRef = collection(db, "companies", "mecald", "quotations");
+            const querySnapshot = await getDocs(quotationsRef);
+            
+            const updatePromises: Promise<void>[] = [];
+            
+            querySnapshot.docs.forEach((docSnapshot) => {
+                const data = docSnapshot.data();
+                const status = data.status;
+                
+                // Apenas verificar orçamentos que ainda não foram aprovados ou reprovados
+                const statusesToCheck = ["Aguardando Aprovação", "Enviado"];
+                
+                if (statusesToCheck.includes(status)) {
+                    let validityDate: Date;
+                    
+                    // Converter a data de validade para Date
+                    if (data.validity?.toDate) {
+                        validityDate = data.validity.toDate();
+                    } else if (data.expiresAt) {
+                        validityDate = new Date(data.expiresAt);
+                    } else {
+                        return; // Pular se não houver data de validade
+                    }
+                    
+                    // Verificar se a data de validade já passou
+                    if (validityDate < now) {
+                        const quotationRef = doc(db, "companies", "mecald", "quotations", docSnapshot.id);
+                        updatePromises.push(
+                            updateDoc(quotationRef, {
+                                status: "Expirado",
+                                updatedAt: Timestamp.now(),
+                                expiredAt: Timestamp.now(),
+                            })
+                        );
+                    }
+                }
+            });
+            
+            // Executar todas as atualizações
+            if (updatePromises.length > 0) {
+                await Promise.all(updatePromises);
+                console.log(`${updatePromises.length} orçamento(s) expirado(s) atualizado(s).`);
+                // Recarregar a lista de orçamentos após as atualizações
+                await fetchQuotations();
+            }
+        } catch (error) {
+            console.error("Erro ao verificar orçamentos expirados:", error);
+        }
+    };
+
     useEffect(() => {
         if (!authLoading && user && isAuthenticated) {
             fetchCustomers();
             fetchProducts();
             fetchQuotations();
+        }
+    }, [user, authLoading, isAuthenticated]);
+    
+    // UseEffect para verificar orçamentos expirados periodicamente
+    useEffect(() => {
+        if (!authLoading && user && isAuthenticated) {
+            // Executar verificação imediatamente ao carregar
+            checkAndUpdateExpiredQuotations();
+            
+            // Configurar intervalo para verificar a cada hora (3600000 ms)
+            const intervalId = setInterval(() => {
+                checkAndUpdateExpiredQuotations();
+            }, 3600000); // 1 hora
+            
+            // Limpar o intervalo quando o componente for desmontado
+            return () => clearInterval(intervalId);
         }
     }, [user, authLoading, isAuthenticated]);
     
@@ -707,7 +778,38 @@ export default function QuotationsPage() {
         }
     };
     
-    const handleViewQuotation = (quotation: Quotation) => {
+    const handleViewQuotation = async (quotation: Quotation) => {
+        // Verificar se o orçamento está expirado
+        const now = new Date();
+        const validityDate = quotation.validity;
+        const statusesToCheck = ["Aguardando Aprovação", "Enviado"];
+        
+        if (statusesToCheck.includes(quotation.status) && validityDate < now) {
+            try {
+                // Atualizar o status para Expirado
+                const quotationRef = doc(db, "companies", "mecald", "quotations", quotation.id);
+                await updateDoc(quotationRef, {
+                    status: "Expirado",
+                    updatedAt: Timestamp.now(),
+                    expiredAt: Timestamp.now(),
+                });
+                
+                // Atualizar o orçamento localmente
+                quotation.status = "Expirado";
+                
+                toast({
+                    title: "Orçamento expirado",
+                    description: "Este orçamento passou da validade e foi marcado como expirado.",
+                    variant: "destructive",
+                });
+                
+                // Recarregar a lista
+                await fetchQuotations();
+            } catch (error) {
+                console.error("Erro ao atualizar orçamento expirado:", error);
+            }
+        }
+        
         setSelectedQuotation(quotation);
         setIsViewSheetOpen(true);
     };
@@ -1059,8 +1161,13 @@ export default function QuotationsPage() {
             return { approvalRate: 0, issuedValue: 0, approvedValue: 0, totalCount: 0 };
         }
 
-        const relevantQuotations = quotations.filter(q => q.status !== "Informativo");
-        const approvedQuotations = relevantQuotations.filter(q => q.status === "Aprovado" || q.status === "Pedido Gerado");
+        // Excluir orçamentos informativos E expirados das estatísticas
+        const relevantQuotations = quotations.filter(q => 
+            q.status !== "Informativo" && q.status !== "Expirado"
+        );
+        const approvedQuotations = relevantQuotations.filter(q => 
+            q.status === "Aprovado" || q.status === "Pedido Gerado"
+        );
 
         const totalCount = relevantQuotations.length;
         const approvedCount = approvedQuotations.length;
