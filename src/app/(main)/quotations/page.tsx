@@ -635,9 +635,21 @@ export default function QuotationsPage() {
 
     const handleEditItem = (index: number) => {
         const item = watchedItems[index];
-        // Normalizar valores antes de editar
         setCurrentItem(normalizeItemValues(item));
         setEditIndex(index);
+        
+        // Scroll suave até o card de edição
+        setTimeout(() => {
+            const editCard = document.querySelector('[data-edit-card="true"]');
+            if (editCard) {
+                editCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }, 100);
+        
+        toast({
+            title: "Modo de edição ativado",
+            description: `Editando item da linha ${index + 1}. Faça as alterações no formulário acima e clique em "Atualizar Item".`,
+        });
     };
 
     const handleCancelEdit = () => {
@@ -1158,7 +1170,13 @@ export default function QuotationsPage() {
 
     const dashboardStats = useMemo(() => {
         if (!quotations || quotations.length === 0) {
-            return { approvalRate: 0, issuedValue: 0, approvedValue: 0, totalCount: 0 };
+            return { 
+                approvalRate: 0, 
+                valueApprovalRate: 0,
+                issuedValue: 0, 
+                approvedValue: 0, 
+                totalCount: 0 
+            };
         }
 
         // Excluir orçamentos informativos E expirados das estatísticas
@@ -1175,8 +1193,16 @@ export default function QuotationsPage() {
 
         const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
         const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
+        
+        const valueApprovalRate = issuedValue > 0 ? (approvedValue / issuedValue) * 100 : 0;
 
-        return { approvalRate, issuedValue, approvedValue, totalCount };
+        return { 
+            approvalRate, 
+            valueApprovalRate,
+            issuedValue, 
+            approvedValue, 
+            totalCount 
+        };
     }, [quotations]);
 
     // Se não estiver autenticado, mostra modal de senha
@@ -1249,12 +1275,18 @@ export default function QuotationsPage() {
                     </div>
                 </div>
 
-                <div className="mb-4 grid gap-4 md:grid-cols-3">
+                <div className="mb-4 grid gap-4 md:grid-cols-4">
                     <StatCard
                         title="Taxa de Aprovação"
                         value={`${dashboardStats.approvalRate.toFixed(1)}%`}
                         icon={Percent}
                         description={`Baseado em ${dashboardStats.totalCount} orçamentos válidos`}
+                    />
+                    <StatCard
+                        title="Taxa de Aprovação por Valor"
+                        value={`${dashboardStats.valueApprovalRate.toFixed(1)}%`}
+                        icon={DollarSign}
+                        description="Percentual do valor emitido que foi aprovado"
                     />
                     <StatCard
                         title="Valor Emitido (Total)"
@@ -1265,7 +1297,7 @@ export default function QuotationsPage() {
                     <StatCard
                         title="Valor Aprovado"
                         value={dashboardStats.approvedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        icon={DollarSign}
+                        icon={Check}
                         description="Soma de todos os orçamentos aprovados"
                     />
                 </div>
@@ -1385,11 +1417,29 @@ export default function QuotationsPage() {
                                         )} />
                                     </div>
                                     
-                                    <Card>
+                                    <Card data-edit-card="true" className={cn(editIndex !== null && "border-2 border-blue-500 shadow-lg")}>
                                         <CardHeader>
-                                            <CardTitle>Adicionar Novo Item</CardTitle>
+                                            <CardTitle className="flex items-center gap-2">
+                                                {editIndex !== null ? (
+                                                    <>
+                                                        <Pencil className="h-5 w-5 text-blue-600" />
+                                                        Editando Item da Linha {editIndex + 1}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <PlusCircle className="h-5 w-5" />
+                                                        Adicionar Novo Item
+                                                    </>
+                                                )}
+                                            </CardTitle>
                                             <CardDescription>
-                                                Preencha os dados e adicione um novo item ao orçamento. Para editar itens existentes, clique no ícone de edição na lista abaixo.
+                                                {editIndex !== null ? (
+                                                    <span className="text-blue-600 font-medium">
+                                                        Faça as alterações necessárias nos campos abaixo e clique em "Atualizar Item" para salvar, ou "Cancelar" para descartar as mudanças.
+                                                    </span>
+                                                ) : (
+                                                    "Preencha os dados e adicione um novo item ao orçamento. Para editar itens existentes, clique no ícone de edição na lista abaixo."
+                                                )}
                                             </CardDescription>
                                         </CardHeader>
                                         <CardContent className="space-y-4">
@@ -1409,19 +1459,13 @@ export default function QuotationsPage() {
                                                         Produto: {currentItem.code}
                                                     </Badge>
                                                 )}
-                                                {editIndex !== null && (
-                                                    <Badge variant="outline" className="mb-4">
-                                                        Editando item na linha {editIndex + 1}
-                                                    </Badge>
-                                                )}
                                             </div>
                                             <div>
                                                 <FormLabel>Descrição do Item</FormLabel>
                                                 <Textarea 
                                                     placeholder="Descrição detalhada do produto ou serviço" 
-                                                    value={editIndex !== null ? '' : currentItem.description}
-                                                    onChange={e => editIndex === null && handleCurrentItemChange('description', e.target.value)}
-                                                    disabled={editIndex !== null}
+                                                    value={currentItem.description}
+                                                    onChange={e => handleCurrentItemChange('description', e.target.value)}
                                                 />
                                             </div>
                                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
@@ -1429,9 +1473,8 @@ export default function QuotationsPage() {
                                                     <FormLabel>Código</FormLabel>
                                                     <Input 
                                                         placeholder="Opcional" 
-                                                        value={editIndex !== null ? '' : (currentItem.code || '')} 
-                                                        onChange={e => editIndex === null && handleCurrentItemChange('code', e.target.value)}
-                                                        disabled={editIndex !== null}
+                                                        value={currentItem.code || ''} 
+                                                        onChange={e => handleCurrentItemChange('code', e.target.value)}
                                                     />
                                                 </div>
                                                 <div>
@@ -1439,9 +1482,8 @@ export default function QuotationsPage() {
                                                     <Input 
                                                         type="number" 
                                                         placeholder="1" 
-                                                        value={editIndex !== null ? '' : currentItem.quantity} 
-                                                        onChange={e => editIndex === null && handleCurrentItemChange('quantity', e.target.value)}
-                                                        disabled={editIndex !== null}
+                                                        value={currentItem.quantity} 
+                                                        onChange={e => handleCurrentItemChange('quantity', e.target.value)}
                                                     />
                                                 </div>
                                                 <div>
@@ -1450,9 +1492,8 @@ export default function QuotationsPage() {
                                                         type="number" 
                                                         step="0.01" 
                                                         placeholder="0.00" 
-                                                        value={editIndex !== null ? '' : currentItem.unitPrice} 
-                                                        onChange={e => editIndex === null && handleCurrentItemChange('unitPrice', e.target.value)}
-                                                        disabled={editIndex !== null}
+                                                        value={currentItem.unitPrice} 
+                                                        onChange={e => handleCurrentItemChange('unitPrice', e.target.value)}
                                                     />
                                                 </div>
                                                 <div>
@@ -1461,9 +1502,8 @@ export default function QuotationsPage() {
                                                         type="number" 
                                                         step="0.01" 
                                                         placeholder="0" 
-                                                        value={editIndex !== null ? '' : (currentItem.taxRate || '')} 
-                                                        onChange={e => editIndex === null && handleCurrentItemChange('taxRate', e.target.value)}
-                                                        disabled={editIndex !== null}
+                                                        value={currentItem.taxRate || ''} 
+                                                        onChange={e => handleCurrentItemChange('taxRate', e.target.value)}
                                                     />
                                                 </div>
                                                 <div>
@@ -1472,9 +1512,8 @@ export default function QuotationsPage() {
                                                         type="number" 
                                                         step="0.01" 
                                                         placeholder="0.00" 
-                                                        value={editIndex !== null ? '' : (currentItem.unitWeight || '')} 
-                                                        onChange={e => editIndex === null && handleCurrentItemChange('unitWeight', e.target.value)}
-                                                        disabled={editIndex !== null}
+                                                        value={currentItem.unitWeight || ''} 
+                                                        onChange={e => handleCurrentItemChange('unitWeight', e.target.value)}
                                                     />
                                                 </div>
                                                 <div>
@@ -1482,41 +1521,53 @@ export default function QuotationsPage() {
                                                     <Input 
                                                         type="number" 
                                                         placeholder="0" 
-                                                        value={editIndex !== null ? '' : (currentItem.leadTimeDays || '')} 
-                                                        onChange={e => editIndex === null && handleCurrentItemChange('leadTimeDays', e.target.value)}
-                                                        disabled={editIndex !== null}
+                                                        value={currentItem.leadTimeDays || ''} 
+                                                        onChange={e => handleCurrentItemChange('leadTimeDays', e.target.value)}
                                                     />
                                                 </div>
                                             </div>
                                             <div className="flex justify-end gap-2">
-                                                <Button 
-                                                    type="button" 
-                                                    onClick={handleAddItem}
-                                                    disabled={editIndex !== null}
-                                                >
-                                                    <PlusCircle className="mr-2 h-4 w-4" />
-                                                    Adicionar Item
-                                                </Button>
+                                                {editIndex !== null ? (
+                                                    <>
+                                                        <Button 
+                                                            type="button" 
+                                                            variant="outline"
+                                                            onClick={handleCancelEdit}
+                                                        >
+                                                            <X className="mr-2 h-4 w-4" />
+                                                            Cancelar Edição
+                                                        </Button>
+                                                        <Button 
+                                                            type="button" 
+                                                            onClick={handleUpdateItem}
+                                                        >
+                                                            <Check className="mr-2 h-4 w-4" />
+                                                            Atualizar Item
+                                                        </Button>
+                                                    </>
+                                                ) : (
+                                                    <Button 
+                                                        type="button" 
+                                                        onClick={handleAddItem}
+                                                    >
+                                                        <PlusCircle className="mr-2 h-4 w-4" />
+                                                        Adicionar Item
+                                                    </Button>
+                                                )}
                                             </div>
                                         </CardContent>
                                     </Card>
 
                                     {watchedItems.length > 0 && (
                                         <Card>
-                                                                                                                    <CardHeader>
-                                                                <CardTitle className="flex items-center gap-3">
-                                                                    Itens Adicionados
-                                                                    {editIndex !== null && (
-                                                                        <Badge variant="secondary" className="bg-blue-100 text-blue-800 px-3 py-1">
-                                                                            🔧 Editando linha {editIndex + 1}
-                                                                        </Badge>
-                                                                    )}
-                                                                </CardTitle>
-                                                                <CardDescription>
-                                                                    Use as setas para reordenar os itens, o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
-                                                                    {editIndex !== null && " Clique no ✓ para salvar ou ✗ para cancelar a edição."}
-                                                                </CardDescription>
-                                                            </CardHeader>
+                                            <CardHeader>
+                                                <CardTitle className="flex items-center gap-3">
+                                                    Itens Adicionados
+                                                </CardTitle>
+                                                <CardDescription>
+                                                    Use as setas para reordenar os itens, o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
+                                                </CardDescription>
+                                            </CardHeader>
                                             <CardContent>
                                                 <Table>
                                                     <TableHeader>
@@ -1535,111 +1586,14 @@ export default function QuotationsPage() {
                                                     <TableBody>
                                                         {watchedItems.map((item, index) => {
                                                             const { totalWithTax } = calculateItemTotals(item);
-                                                            const isEditing = editIndex === index;
-                                                            
-                                                            if (isEditing) {
-                                                                return (
-                                                                    <TableRow key={index} className="bg-blue-50 border-2 border-blue-300 shadow-sm">
-                                                                        <TableCell className="p-3">
-                                                                            <Input 
-                                                                                placeholder="Código" 
-                                                                                value={currentItem.code || ''} 
-                                                                                onChange={e => handleCurrentItemChange('code', e.target.value)}
-                                                                                className="h-12 text-base w-full font-medium"
-                                                                            />
-                                                                        </TableCell>
-                                                                        <TableCell className="p-3">
-                                                                            <Textarea 
-                                                                                placeholder="Descrição detalhada do produto..." 
-                                                                                value={currentItem.description}
-                                                                                onChange={e => handleCurrentItemChange('description', e.target.value)}
-                                                                                className="min-h-[80px] text-base resize-none w-full font-medium"
-                                                                                rows={3}
-                                                                            />
-                                                                        </TableCell>
-                                                                        <TableCell className="p-3">
-                                                                            <Input 
-                                                                                type="number" 
-                                                                                placeholder="1" 
-                                                                                value={currentItem.quantity} 
-                                                                                onChange={e => handleCurrentItemChange('quantity', e.target.value)}
-                                                                                className="h-12 text-base w-full font-medium text-center"
-                                                                            />
-                                                                        </TableCell>
-                                                                        <TableCell className="p-3">
-                                                                            <Input 
-                                                                                type="number" 
-                                                                                step="0.01" 
-                                                                                placeholder="0.00" 
-                                                                                value={currentItem.unitWeight || ''} 
-                                                                                onChange={e => handleCurrentItemChange('unitWeight', e.target.value)}
-                                                                                className="h-12 text-base w-full font-medium text-center"
-                                                                            />
-                                                                        </TableCell>
-                                                                        <TableCell className="p-3">
-                                                                            <Input 
-                                                                                type="number" 
-                                                                                step="0.01" 
-                                                                                placeholder="0.00" 
-                                                                                value={currentItem.unitPrice} 
-                                                                                onChange={e => handleCurrentItemChange('unitPrice', e.target.value)}
-                                                                                className="h-12 text-base w-full font-medium text-right"
-                                                                            />
-                                                                        </TableCell>
-                                                                        <TableCell className="p-3">
-                                                                            <Input 
-                                                                                type="number" 
-                                                                                step="0.01" 
-                                                                                placeholder="0" 
-                                                                                value={currentItem.taxRate || ''} 
-                                                                                onChange={e => handleCurrentItemChange('taxRate', e.target.value)}
-                                                                                className="h-12 text-base w-full font-medium text-center"
-                                                                            />
-                                                                        </TableCell>
-                                                                        <TableCell className="p-3">
-                                                                            <Input 
-                                                                                type="number" 
-                                                                                placeholder="0" 
-                                                                                value={currentItem.leadTimeDays || ''} 
-                                                                                onChange={e => handleCurrentItemChange('leadTimeDays', e.target.value)}
-                                                                                className="h-12 text-base w-full font-medium text-center"
-                                                                            />
-                                                                        </TableCell>
-                                                                        <TableCell className="p-3">
-                                                                            <div className="text-base font-bold text-center bg-green-50 p-2 rounded border">
-                                                                                {calculateItemTotals(currentItem).totalWithTax.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}
-                                                                            </div>
-                                                                        </TableCell>
-                                                                        <TableCell className="text-right p-3">
-                                                                            <div className="flex items-center justify-center gap-2">
-                                                                                <Button 
-                                                                                    type="button" 
-                                                                                    variant="ghost" 
-                                                                                    size="icon"
-                                                                                    onClick={handleUpdateItem}
-                                                                                    title="Salvar alterações"
-                                                                                    className="h-11 w-11 text-green-600 hover:text-green-700 hover:bg-green-50 border border-green-200"
-                                                                                >
-                                                                                    <Check className="h-5 w-5" />
-                                                                                </Button>
-                                                                                <Button 
-                                                                                    type="button" 
-                                                                                    variant="ghost" 
-                                                                                    size="icon"
-                                                                                    onClick={handleCancelEdit}
-                                                                                    title="Cancelar edição"
-                                                                                    className="h-11 w-11 text-red-600 hover:text-red-700 hover:bg-red-50 border border-red-200"
-                                                                                >
-                                                                                    <X className="h-5 w-5" />
-                                                                                </Button>
-                                                                            </div>
-                                                                        </TableCell>
-                                                                    </TableRow>
-                                                                );
-                                                            }
                                                             
                                                             return (
-                                                                <TableRow key={index}>
+                                                                <TableRow 
+                                                                    key={index}
+                                                                    className={cn(
+                                                                        editIndex === index && "bg-blue-50 border-l-4 border-l-blue-500"
+                                                                    )}
+                                                                >
                                                                     <TableCell className="font-mono text-base p-3 font-medium">{item.code || '-'}</TableCell>
                                                                     <TableCell className="font-medium p-3 text-base">
                                                                         <div className="whitespace-normal break-words leading-relaxed">
