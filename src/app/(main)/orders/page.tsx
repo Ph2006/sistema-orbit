@@ -2212,7 +2212,15 @@ export default function OrdersPage() {
             yPos += 6;  // Reduzido de 7 para 6
 
             docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, 15, yPos);
-            yPos += 10; // Reduzido de 12 para 10
+            yPos += 6;  // Reduzido de 7 para 6
+
+            // ADICIONAR ESTA LINHA PARA O PROJETO DO CLIENTE
+            if (selectedOrder.projectName) {
+                docPdf.text(`Projeto: ${selectedOrder.projectName}`, 15, yPos);
+                yPos += 6;
+            }
+
+            yPos += 4; // Espaço extra antes dos dados do item
     
             const tableBody = itemsToInclude.map(item => {
                 const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
