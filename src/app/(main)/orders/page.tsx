@@ -572,6 +572,8 @@ export default function OrdersPage() {
     // Estados para controlar posição do scroll no Kanban
     const kanbanScrollRef = useRef<HTMLDivElement>(null);
     const scrollPositionRef = useRef<number>(0);
+    // ADICIONAR ESTE NOVO:
+    const columnScrollPositions = useRef<Map<string, number>>(new Map());
 
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
@@ -896,14 +898,24 @@ export default function OrdersPage() {
     };
 
     const handleViewOrder = (order: Order) => {
-        // Salvar posição atual do scroll do Kanban
+        // Salvar posição do scroll horizontal do Kanban
+        if (viewMode === 'kanban' && kanbanScrollRef.current) {
+            scrollPositionRef.current = kanbanScrollRef.current.scrollLeft;
+            sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
+            console.log('💾 Salvando posição horizontal:', scrollPositionRef.current);
+        }
+        
+        // NOVO: Salvar posição do scroll vertical de cada coluna
         if (viewMode === 'kanban') {
-            const kanbanContainer = document.querySelector('[data-kanban-scroll]');
-            if (kanbanContainer) {
-                scrollPositionRef.current = kanbanContainer.scrollLeft;
-                sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
-                console.log('💾 Salvando posição do scroll:', scrollPositionRef.current);
-            }
+            const columns = document.querySelectorAll('[data-column-scroll]');
+            columns.forEach((column) => {
+                const columnId = column.getAttribute('data-column-id');
+                if (columnId) {
+                    const scrollTop = column.scrollTop;
+                    columnScrollPositions.current.set(columnId, scrollTop);
+                    console.log(`💾 Salvando scroll da coluna ${columnId}:`, scrollTop);
+                }
+            });
         }
         
         console.log('🔍 [DEBUG] Inicializando formulário com:', {
@@ -1330,22 +1342,38 @@ export default function OrdersPage() {
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
-        // Efeito para restaurar scroll quando o modal fecha
+        // Efeito para restaurar scroll horizontal E vertical quando modal fecha
         useEffect(() => {
             if (viewMode === 'kanban' && !isSheetOpen) {
-                const kanbanContainer = document.querySelector('[data-kanban-scroll]');
-                if (kanbanContainer) {
+                // Restaurar scroll horizontal
+                if (kanbanScrollRef.current) {
                     const savedPosition = scrollPositionRef.current || 
                         parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
                     
                     if (savedPosition > 0) {
-                        // Usar setTimeout para garantir que o DOM foi atualizado
                         setTimeout(() => {
-                            kanbanContainer.scrollLeft = savedPosition;
-                            console.log('🔄 Posição restaurada:', savedPosition);
-                        }, 100);
+                            if (kanbanScrollRef.current) {
+                                kanbanScrollRef.current.scrollLeft = savedPosition;
+                                console.log('🔄 Posição horizontal restaurada:', savedPosition);
+                            }
+                        }, 50);
                     }
                 }
+                
+                // NOVO: Restaurar scroll vertical de cada coluna
+                setTimeout(() => {
+                    const columns = document.querySelectorAll('[data-column-scroll]');
+                    columns.forEach((column) => {
+                        const columnId = column.getAttribute('data-column-id');
+                        if (columnId) {
+                            const savedScroll = columnScrollPositions.current.get(columnId);
+                            if (savedScroll !== undefined) {
+                                column.scrollTop = savedScroll;
+                                console.log(`🔄 Scroll da coluna ${columnId} restaurado:`, savedScroll);
+                            }
+                        }
+                    });
+                }, 100);
             }
         }, [viewMode, isSheetOpen]);
         
@@ -1439,8 +1467,16 @@ export default function OrdersPage() {
                                         </div>
                                     </div>
 
-                                    {/* Cards dos pedidos */}
-                                    <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
+                                    {/* Cards dos pedidos - ADICIONAR ATRIBUTOS AQUI */}
+                                    <div 
+                                        className="space-y-3 max-h-[600px] overflow-y-auto pr-2"
+                                        data-column-scroll
+                                        data-column-id={monthKey}
+                                        onScroll={(e) => {
+                                            const target = e.target as HTMLDivElement;
+                                            columnScrollPositions.current.set(monthKey, target.scrollTop);
+                                        }}
+                                    >
                                         {monthData.orders.map(order => {
                                             const statusProps = getStatusProps(order.status);
                                             const orderProgress = calculateOrderProgress(order);
@@ -4458,19 +4494,32 @@ return (
     setSelectedItems(new Set()); 
     setProgressClipboard(null);
     
-    // Restaurar scroll quando fechar o modal
+    // Restaurar scrolls quando fechar o modal
     if (viewMode === 'kanban') {
+      // Scroll horizontal
       setTimeout(() => {
-        const kanbanContainer = document.querySelector('[data-kanban-scroll]');
-        if (kanbanContainer) {
+        if (kanbanScrollRef.current) {
           const savedPosition = scrollPositionRef.current || 
             parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
           
           if (savedPosition > 0) {
-            kanbanContainer.scrollLeft = savedPosition;
-            console.log('🔄 Restaurando ao fechar modal:', savedPosition);
+            kanbanScrollRef.current.scrollLeft = savedPosition;
+            console.log('🔄 Restaurando scroll horizontal ao fechar:', savedPosition);
           }
         }
+        
+        // NOVO: Restaurar scroll vertical das colunas
+        const columns = document.querySelectorAll('[data-column-scroll]');
+        columns.forEach((column) => {
+          const columnId = column.getAttribute('data-column-id');
+          if (columnId) {
+            const savedScroll = columnScrollPositions.current.get(columnId);
+            if (savedScroll !== undefined) {
+              column.scrollTop = savedScroll;
+              console.log(`🔄 Restaurando scroll da coluna ${columnId}:`, savedScroll);
+            }
+          }
+        });
       }, 100);
     }
   } 
