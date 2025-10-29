@@ -872,9 +872,10 @@ export default function QuotationsPage() {
                     return acc + itemWeight;
                 }, 0);
 
-                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.']];
+                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.']];
                 const body = items.map(item => {
                     const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                    const unitPriceWithTax = item.unitPrice * (1 + (item.taxRate || 0) / 100);
                     return [
                         item.code || '-',
                         item.description,
@@ -884,6 +885,7 @@ export default function QuotationsPage() {
                         item.leadTimeDays ? `${item.leadTimeDays} dias` : '-',
                         item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                         (item.taxRate || 0).toLocaleString('pt-BR'),
+                        unitPriceWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                         calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                     ];
                 });
@@ -895,6 +897,7 @@ export default function QuotationsPage() {
                     '', 
                     '', 
                     totalWeight > 0 ? `${totalWeight.toLocaleString('pt-BR')} kg` : '-', 
+                    '', 
                     '', 
                     '', 
                     '', 
@@ -915,7 +918,8 @@ export default function QuotationsPage() {
                         5: { cellWidth: 20, halign: 'center' },
                         6: { cellWidth: 30, halign: 'right' },
                         7: { cellWidth: 20, halign: 'right' },
-                        8: { cellWidth: 35, halign: 'right' },
+                        8: { cellWidth: 30, halign: 'right' },
+                        9: { cellWidth: 35, halign: 'right' },
                     },
                     didParseCell: function (data: any) {
                         // Destacar a linha de total (última linha)
@@ -983,9 +987,10 @@ export default function QuotationsPage() {
                     [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
                     ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
                     [],
-                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Total c/ Imp.'],
+                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.'],
                     ...items.map(item => {
                         const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                        const unitPriceWithTax = item.unitPrice * (1 + (item.taxRate || 0) / 100);
                         return [
                             item.description,
                             item.code,
@@ -995,11 +1000,12 @@ export default function QuotationsPage() {
                             item.leadTimeDays || 0,
                             item.unitPrice,
                             item.taxRate || 0,
+                            unitPriceWithTax,
                             calculateItemTotals(item).totalWithTax
                         ];
                     }),
                     [],
-                    ['TOTAL:', '', '', '', totalWeightExcel > 0 ? totalWeightExcel : '', '', '', 'Valor Total:', grandTotal],
+                    ['TOTAL:', '', '', '', totalWeightExcel > 0 ? totalWeightExcel : '', '', '', '', 'Valor Total:', grandTotal],
                     [],
                     ['Serviços Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
