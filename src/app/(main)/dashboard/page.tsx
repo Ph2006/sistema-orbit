@@ -540,40 +540,60 @@ export default function DashboardPage() {
             const customerEntry = customerDataMap.get(customerName)!;
 
             if (order.items && Array.isArray(order.items)) {
-              order.items.forEach((item: any, itemIndex: number) => {
+              order.items.forEach((item: any) => {
+                // ✅ CALCULAR O PESO CORRETAMENTE
                 const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
                 totalToProduceWeight += itemWeight;
-                
-                // ✅ ADICIONAR LOGS DE DIAGNÓSTICO
-                console.log(`📦 [${customerName}] Item ${itemIndex + 1}:`, {
-                  description: item.description,
-                  quantity: item.quantity,
-                  unitWeight: item.unitWeight,
-                  calculatedWeight: itemWeight,
-                  hasShippingDate: !!item.shippingDate,
-                  shippingDate: item.shippingDate
-                });
-                
-                // Para cálculo de peso ENTREGUE (análise de clientes e produção mensal)
-                // Apenas considerar itens que TÊM shippingDate
+
+                // ✅ LOG PARA DEBUG (REMOVER DEPOIS)
+                if (customerName.includes('Sandvik')) {
+                  console.log('🔍 [SANDVIK] Item:', {
+                    description: item.description,
+                    quantity: item.quantity,
+                    unitWeight: item.unitWeight,
+                    calculatedWeight: itemWeight,
+                    hasShippingDate: !!item.shippingDate,
+                    shippingDate: item.shippingDate
+                  });
+                }
+
+                // ✅ VERIFICAR SE ITEM ESTÁ PRODUZIDO (para taxa de produção)
+                const isItemCompleted = item.productionPlan?.length > 0
+                  ? item.productionPlan.every((p: any) => p.status === 'Concluído')
+                  : !!item.shippingDate;
+
+                if (isItemCompleted) {
+                  totalProducedWeight += itemWeight;
+                }
+
+                // ✅ PROCESSAR APENAS ITENS COM DATA DE EMBARQUE
                 if (item.shippingDate) {
                   const shippingDate = safeParseDate(item.shippingDate);
-                  
+
                   if (shippingDate) {
-                    // Item foi entregue - adicionar aos dados do cliente
                     totalShippedItems++;
                     customerEntry.totalItems++;
-                    
+
+                    // ✅ ADICIONAR PESO AO CLIENTE - GARANTIR QUE SEJA ADICIONADO!
+                    customerEntry.deliveredWeight += itemWeight;
+
+                    // ✅ LOG PARA CONFIRMAR (REMOVER DEPOIS)
+                    if (customerName.includes('Sandvik')) {
+                      console.log('✅ [SANDVIK] Adicionando peso:', {
+                        itemWeight,
+                        totalAcumulado: customerEntry.deliveredWeight
+                      });
+                    }
+
+                    // Adicionar ao mapa mensal
                     const monthKey = safeFormatMonth(shippingDate);
                     if (monthKey) {
                       monthlyProductionMap.set(monthKey, (monthlyProductionMap.get(monthKey) || 0) + itemWeight);
                     }
-                    
-                    // ✅ ADICIONAR: Peso entregue ao cliente
-                    customerEntry.deliveredWeight += itemWeight;
-                    
-                    // Verificar se foi no prazo
+
+                    // Verificar se entregou no prazo
                     const itemDeliveryDate = safeParseDate(item.itemDeliveryDate);
+                    
                     if (itemDeliveryDate) {
                       const sDate = new Date(shippingDate);
                       sDate.setHours(0, 0, 0, 0);
@@ -586,20 +606,23 @@ export default function DashboardPage() {
                     }
                   }
                 }
-                
-                // Para cálculo de peso PRODUZIDO (taxa de produção)
-                // Verificar se todas as etapas estão concluídas
-                const isItemFullyProduced = item.productionPlan?.length > 0
-                  ? item.productionPlan.every((p: any) => p.status === 'Concluído')
-                  : !!item.shippingDate;
-
-                if (isItemFullyProduced) {
-                  totalProducedWeight += itemWeight;
-                }
               });
             }
           });
-          
+
+          // ✅ ADICIONAR DEPOIS DE PROCESSAR TODOS OS PEDIDOS
+          console.log('📊 ========================================');
+          console.log('📊 VERIFICAÇÃO FINAL - DADOS POR CLIENTE');
+          console.log('📊 ========================================');
+          customerDataMap.forEach((data, customerName) => {
+            console.log(`\n👤 ${customerName}:`);
+            console.log(`   Peso Total Entregue: ${data.deliveredWeight.toFixed(2)} kg`);
+            console.log(`   Total de Itens: ${data.totalItems}`);
+            console.log(`   Itens no Prazo: ${data.onTimeItems}`);
+            console.log(`   NCs: ${data.ncCount}`);
+          });
+          console.log('\n📊 ========================================\n');
+
           const qualityReports = qualitySnapshot.docs.map(doc => doc.data());
           qualityReports.forEach(report => {
               if (report.customerName) {
