@@ -217,8 +217,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 // Definições auxiliares
 const fiveWhysSchema = z.object({
-  question: z.string(),
-  answer: z.string(),
+  why1: z.string().optional(),
+  why2: z.string().optional(),
+  why3: z.string().optional(),
+  why4: z.string().optional(),
+  why5: z.string().optional(),
+  rootCause: z.string().optional(),
 });
 
 const actionPlanItemSchema = z.object({
@@ -3571,6 +3575,8 @@ export default function QualityPage() {
                     toast={toast}
                     user={user}
                     reports={reports}
+                    occurrences={occurrences}
+                    fetchAllData={fetchAllData}
                 />
             </TabsContent>
         </Tabs>
@@ -5888,14 +5894,16 @@ function LessonsLearnedForm({ form, orders, teamMembers, selectedInspection }: {
 
 // ===== COMPONENTES PARA PLANOS DE AÇÃO - VERSÃO CORRIGIDA =====
 
-function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = [] }: {
+function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = [], occurrences = [], fetchAllData }: {
   orders?: any[];
   teamMembers?: any[];
   toast?: any;
   user?: any;
   reports?: any[]; // ✅ RNCs disponíveis
+  occurrences?: Occurrence[];
+  fetchAllData?: () => Promise<void>;
 }) {
-  const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
+  const occurrenceList = occurrences || [];
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedOccurrence, setSelectedOccurrence] = useState<Occurrence | null>(null);
@@ -5906,8 +5914,13 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(true);
 
+  useEffect(() => {
+    setIsLoading(false);
+  }, [occurrenceList]);
+
   // Fallback para toast se não for passado
   const showToast = toast || ((props: any) => console.log('Toast:', props));
+  const reloadData = fetchAllData ? fetchAllData : async () => {};
 
   // Form para nova ocorrência
   const occurrenceForm = useForm<z.infer<typeof occurrenceSchema>>({
@@ -5922,59 +5935,9 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       priority: "Média",
       photos: [],
       linkedRncId: "", // ✅ RNC vinculada
+      fiveWhys: {},
     },
   });
-
-  // ✅ FILTRAR RNCs ABERTAS PARA SELEÇÃO
-  const openRncs = useMemo(() => {
-    return reports.filter(rnc => rnc.status !== "Concluída");
-  }, [reports]);
-
-  // Mock data inicial (substituir pela busca real do Firestore)
-  useEffect(() => {
-    const loadMockData = () => {
-      const mockData: Occurrence[] = [
-        {
-          id: "1",
-          number: "RNC-2025-001",
-          type: "RNC",
-          origin: "Qualidade",
-          customerName: "Haver Engenharia",
-          status: "Em Análise",
-          openingDate: new Date("2025-01-03"),
-          deadline: new Date("2025-01-10"),
-          description: "Material fora de especificação - espessura da chapa incorreta conforme desenho técnico",
-          responsibleAnalyst: "João Silva",
-          itemName: "Chapa ASTM A36",
-          itemCode: "P0001",
-          orderNumber: "OS-2025-001",
-          priority: "Alta",
-          linkedRncId: "rnc-1", // ✅ Vinculado a uma RNC existente
-        },
-        {
-          id: "2", 
-          number: "AE-2025-001",
-          type: "Atraso de Entrega",
-          origin: "Planejamento",
-          customerName: "Sandvik",
-          status: "Em Execução",
-          openingDate: new Date("2025-01-01"),
-          deadline: new Date("2025-01-09"),
-          description: "Atraso na entrega do conjunto mecânico devido a problemas de fornecimento de componentes críticos",
-          responsibleAnalyst: "Maria Santos",
-          itemName: "Conjunto Mecânico",
-          itemCode: "P0021",
-          orderNumber: "OS-2025-002",
-          priority: "Crítica",
-        }
-      ];
-      setOccurrences(mockData);
-      setIsLoading(false);
-    };
-
-    // Simular delay de carregamento
-    setTimeout(loadMockData, 500);
-  }, []);
 
   // ✅ FUNÇÃO PARA CRIAR PLANO DE AÇÃO BASEADO EM RNC EXISTENTE
   const handleCreateFromRnc = (rnc: any) => {
@@ -5992,13 +5955,14 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       orderId: rnc.orderId,
       itemId: rnc.item?.id,
       customerName: rnc.customerName,
+      fiveWhys: {},
     });
     setIsFormOpen(true);
   };
 
   // ===== HANDLERS =====
   const filteredOccurrences = useMemo(() => {
-    return occurrences.filter(occ => {
+    return occurrenceList.filter(occ => {
       const matchesSearch = searchQuery === "" || 
         occ.number.toLowerCase().includes(searchQuery.toLowerCase()) ||
         occ.customerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -6010,22 +5974,32 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       
       return matchesSearch && matchesStatus && matchesType;
     });
-  }, [occurrences, searchQuery, statusFilter, typeFilter]);
+  }, [occurrenceList, searchQuery, statusFilter, typeFilter]);
 
   // Dashboard stats
+  const rncsWithoutPlan = useMemo(() => {
+    const linkedRncIds = new Set(
+      occurrenceList
+        .map((occ) => occ.linkedRncId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    );
+
+    return reports.filter((rnc) => rnc.status !== "Concluída" && !linkedRncIds.has(rnc.id)).length;
+  }, [occurrenceList, reports]);
+
   const dashboardStats = useMemo(() => {
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
     
-    const thisMonthOccurrences = occurrences.filter(occ => {
+    const thisMonthOccurrences = occurrenceList.filter(occ => {
       const occDate = occ.openingDate;
       return occDate.getMonth() === currentMonth && occDate.getFullYear() === currentYear;
     });
 
     const rncCount = thisMonthOccurrences.filter(occ => occ.type === "RNC").length;
     const delayCount = thisMonthOccurrences.filter(occ => occ.type === "Atraso de Entrega").length;
-    const openOccurrences = occurrences.filter(occ => occ.status !== "Concluída").length;
-    const criticalCount = occurrences.filter(occ => occ.priority === "Crítica" && occ.status !== "Concluída").length;
+    const openOccurrences = occurrenceList.filter(occ => occ.status !== "Concluída").length;
+    const criticalCount = occurrenceList.filter(occ => occ.priority === "Crítica" && occ.status !== "Concluída").length;
 
     return {
       totalThisMonth: thisMonthOccurrences.length,
@@ -6034,8 +6008,9 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       openOccurrences,
       criticalCount,
       avgResolutionTime: 5, // Mock
+      rncsWithoutPlan,
     };
-  }, [occurrences]);
+  }, [occurrenceList, rncsWithoutPlan]);
 
   // ===== HANDLERS =====
   
@@ -6051,6 +6026,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       priority: "Média",
       photos: [],
       linkedRncId: "",
+      fiveWhys: {},
     });
     setIsFormOpen(true);
   };
@@ -6061,6 +6037,14 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       ...occurrence,
       openingDate: new Date(occurrence.openingDate),
       deadline: occurrence.deadline ? new Date(occurrence.deadline) : undefined,
+      fiveWhys: {
+        why1: occurrence.fiveWhys?.why1 || "",
+        why2: occurrence.fiveWhys?.why2 || "",
+        why3: occurrence.fiveWhys?.why3 || "",
+        why4: occurrence.fiveWhys?.why4 || "",
+        why5: occurrence.fiveWhys?.why5 || "",
+        rootCause: occurrence.fiveWhys?.rootCause || "",
+      },
     });
     setIsFormOpen(true);
   };
@@ -6074,12 +6058,14 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
     if (!occurrenceToDelete) return;
     
     try {
-      setOccurrences(prev => prev.filter(occ => occ.id !== occurrenceToDelete.id));
-      showToast({ title: "Ocorrência excluída com sucesso!" });
+      await deleteDoc(doc(db, "companies", "mecald", "actionPlans", occurrenceToDelete.id));
+      setIsLoading(true);
+      await reloadData();
+      showToast({ title: "Plano de ação excluído com sucesso!" });
       setIsDeleteDialogOpen(false);
       setOccurrenceToDelete(null);
     } catch (error) {
-      showToast({ variant: "destructive", title: "Erro ao excluir ocorrência" });
+      showToast({ variant: "destructive", title: "Erro ao excluir plano de ação" });
     }
   };
 
@@ -6090,39 +6076,39 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
 
   const onSubmitOccurrence = async (values: z.infer<typeof occurrenceSchema>) => {
     try {
-      console.log("Dados do formulário:", values);
-      
+      const dataToSave = {
+        ...values,
+        openingDate: Timestamp.fromDate(values.openingDate),
+        deadline: values.deadline ? Timestamp.fromDate(values.deadline) : null,
+        updatedAt: Timestamp.now(),
+        createdBy: user?.uid || "system",
+      };
+
       if (selectedOccurrence) {
-        // Atualizar ocorrência existente
-        const updatedOccurrence: Occurrence = {
-          ...selectedOccurrence,
-          ...values,
-          id: selectedOccurrence.id,
-          number: selectedOccurrence.number,
-        };
-        
-        setOccurrences(prev => prev.map(occ => 
-          occ.id === selectedOccurrence.id ? updatedOccurrence : occ
-        ));
-        
-        showToast({ title: "Ocorrência atualizada com sucesso!" });
+        await updateDoc(
+          doc(db, "companies", "mecald", "actionPlans", selectedOccurrence.id),
+          dataToSave
+        );
+        showToast({ title: "Plano de ação atualizado com sucesso!" });
       } else {
-        // Criar nova ocorrência
-        const newOccurrence: Occurrence = {
-          ...values,
-          id: Date.now().toString(),
-          number: `${values.type === "RNC" ? "PA-RNC" : "PA-AE"}-2025-${String(occurrences.length + 1).padStart(3, '0')}`,
-        };
-        
-        setOccurrences(prev => [newOccurrence, ...prev]);
-        showToast({ title: "Plano de ação criado com sucesso!" });
+        await addDoc(
+          collection(db, "companies", "mecald", "actionPlans"),
+          {
+            ...dataToSave,
+            number: `PA-${Date.now().toString().slice(-6)}`,
+            createdAt: Timestamp.now(),
+          }
+        );
+        showToast({ title: "Plano de ação salvo com sucesso!" });
       }
-      
+
+      setIsLoading(true);
+      await reloadData();
       setIsFormOpen(false);
       setSelectedOccurrence(null);
     } catch (error) {
       console.error("Erro ao salvar:", error);
-      showToast({ variant: "destructive", title: "Erro ao salvar plano de ação" });
+      showToast({ variant: "destructive", title: "Erro ao salvar" });
     }
   };
 
@@ -6161,6 +6147,9 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{dashboardStats.rncCount}</div>
             <p className="text-xs text-muted-foreground">Planos para RNCs</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Sem plano: {dashboardStats.rncsWithoutPlan}
+            </p>
           </CardContent>
         </Card>
 
@@ -6197,64 +6186,6 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
           </CardContent>
         </Card>
       </div>
-
-      {/* ✅ NOVA SEÇÃO: RNCs ABERTAS PARA PLANO DE AÇÃO */}
-      {openRncs.length > 0 && (
-        <Card className="border-orange-200 bg-orange-50">
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <div>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-orange-600" />
-                  RNCs Aguardando Plano de Ação
-                </CardTitle>
-                <CardDescription>
-                  {openRncs.length} não conformidade(s) aberta(s) que podem precisar de plano de ação
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {openRncs.slice(0, 3).map((rnc) => (
-                <div key={rnc.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-orange-200">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="destructive" className="text-xs">RNC</Badge>
-                      <span className="font-medium text-sm">{rnc.orderNumber || 'N/A'}</span>
-                      <Badge variant={getStatusVariant(rnc.status)} className="text-xs">
-                        {rnc.status}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      <strong>{rnc.customerName}:</strong> {rnc.description}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Aberta em {format(rnc.date, 'dd/MM/yyyy')} - {rnc.item?.description}
-                    </p>
-                  </div>
-                  <Button 
-                    size="sm" 
-                    onClick={() => handleCreateFromRnc(rnc)}
-                    className="ml-4"
-                  >
-                    <Plus className="h-4 w-4 mr-1" />
-                    Criar Plano
-                  </Button>
-                </div>
-              ))}
-              
-              {openRncs.length > 3 && (
-                <div className="text-center pt-2">
-                  <Button variant="outline" size="sm">
-                    Ver todas as {openRncs.length} RNCs abertas
-                  </Button>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Filtros e Tabela Principal */}
       <Card>
@@ -6920,6 +6851,51 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                   </FormItem>
                 )} />
 
+                {/* Análise dos 5 Porquês */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Análise de Causa Raiz - 5 Porquês</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <FormField
+                        key={num}
+                        control={form.control}
+                        name={`fiveWhys.why${num}`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Por quê {num}?</FormLabel>
+                            <FormControl>
+                              <Textarea
+                                placeholder={`Responda por que o problema ${num === 1 ? 'ocorreu' : 'anterior aconteceu'}...`}
+                                {...field}
+                                value={field.value || ''}
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    ))}
+
+                    <FormField
+                      control={form.control}
+                      name="fiveWhys.rootCause"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Causa Raiz Identificada</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              placeholder="Com base na análise, qual é a causa raiz do problema?"
+                              {...field}
+                              value={field.value || ''}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  </CardContent>
+                </Card>
+
                 {/* Upload de Fotos */}
                 <Card>
                   <CardHeader>
@@ -7133,11 +7109,28 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-8 text-muted-foreground">
-                  <BrainCircuit className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p className="font-medium">Análise de causa raiz não iniciada</p>
-                  <p className="text-sm">Use o método dos 5 Porquês para identificar a causa raiz do problema</p>
-                </div>
+                {occurrence.fiveWhys ? (
+                  <div className="space-y-4">
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <div key={num} className="border-l-2 border-blue-200 pl-4">
+                        <Label className="text-sm font-medium">Por quê {num}?</Label>
+                        <p className="mt-1 text-sm">
+                          {(occurrence.fiveWhys as any)[`why${num}`] || "Não preenchido"}
+                        </p>
+                      </div>
+                    ))}
+                    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                      <Label className="text-sm font-medium">Causa Raiz Identificada:</Label>
+                      <p className="mt-1">{occurrence.fiveWhys.rootCause || "Não definida"}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <BrainCircuit className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="font-medium">Análise de causa raiz não iniciada</p>
+                    <p className="text-sm">Use o método dos 5 Porquês para identificar a causa raiz do problema</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
