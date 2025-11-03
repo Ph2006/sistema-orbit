@@ -216,28 +216,6 @@ const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
   return count;
 };
 
-const getNextBusinessDay = (fromDate) => {
-  console.log('🔍 Buscando próximo dia útil a partir de:', fromDate);
-  let nextDay = new Date(fromDate);
-  do {
-    nextDay.setDate(nextDay.getDate() + 1);
-    console.log('🔍 Testando dia:', nextDay, 'É dia útil?', isBusinessDay(nextDay));
-  } while (!isBusinessDay(nextDay));
-  console.log('✅ Próximo dia útil encontrado:', nextDay);
-  return nextDay;
-};
-
-const getPreviousBusinessDay = (fromDate) => {
-  console.log('🔍 Buscando dia útil anterior a partir de:', fromDate);
-  let prevDay = new Date(fromDate);
-  do {
-    prevDay.setDate(prevDay.getDate() - 1);
-    console.log('🔍 Testando dia:', prevDay, 'É dia útil?', isBusinessDay(prevDay));
-  } while (!isBusinessDay(prevDay));
-  console.log('✅ Dia útil anterior encontrado:', prevDay);
-  return prevDay;
-};
-
 // Componente para exibir informações de dias úteis
 interface BusinessDayInfoProps {
   startDate: Date | null;
