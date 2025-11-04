@@ -6228,6 +6228,261 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
     }
   };
 
+  // ===== FUNÇÃO DE EXPORTAÇÃO DE PLANO DE AÇÃO PARA PDF =====
+  const handleActionPlanPDF = async (occurrence: Occurrence) => {
+    showToast({ title: "Gerando PDF do Plano de Ação..." });
+    
+    try {
+      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      const companySnap = await getDoc(companyRef);
+      const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
+      
+      const docPdf = new jsPDF();
+      const pageWidth = docPdf.internal.pageSize.width;
+      const pageHeight = docPdf.internal.pageSize.height;
+      let y = 15;
+
+      // ===== CABEÇALHO =====
+      if (companyData.logo?.preview) {
+        try {
+          docPdf.addImage(companyData.logo.preview, 'PNG', 15, y, 30, 15);
+        } catch (e) {
+          console.error("Erro ao adicionar logo:", e);
+        }
+      }
+      
+      docPdf.setFontSize(18).setFont(undefined, 'bold');
+      docPdf.text('PLANO DE AÇÃO', pageWidth / 2, y + 8, { align: 'center' });
+      docPdf.setFontSize(12).setFont(undefined, 'normal');
+      docPdf.text(`Nº ${occurrence.number}`, pageWidth / 2, y + 16, { align: 'center' });
+      y += 30;
+
+      // ===== INFORMAÇÕES GERAIS =====
+      autoTable(docPdf, {
+        startY: y,
+        theme: 'grid',
+        head: [['INFORMAÇÕES GERAIS']],
+        body: [
+          ['Tipo', occurrence.type],
+          ['Origem/Setor', occurrence.origin],
+          ['Status', occurrence.status],
+          ['Prioridade', occurrence.priority || 'Média'],
+          ['Data de Abertura', format(occurrence.openingDate, 'dd/MM/yyyy')],
+          ['Prazo', occurrence.deadline ? format(occurrence.deadline, 'dd/MM/yyyy') : 'Não definido'],
+          ['Responsável pela Análise', occurrence.responsibleAnalyst],
+          ['Cliente', occurrence.customerName || 'N/A'],
+          ['Pedido', occurrence.orderNumber || 'N/A'],
+          ['Item', occurrence.itemName ? `${occurrence.itemName}${occurrence.itemCode ? ` (${occurrence.itemCode})` : ''}` : 'N/A'],
+        ],
+        headStyles: { fillColor: [41, 128, 185], fontSize: 12, fontStyle: 'bold' },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+        styles: { fontSize: 10 },
+      });
+      y = (docPdf as any).lastAutoTable.finalY + 10;
+
+      // ===== RNC VINCULADA =====
+      if (occurrence.linkedRncId) {
+        const linkedRnc = reports.find(r => r.id === occurrence.linkedRncId);
+        if (linkedRnc) {
+          if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+          
+          autoTable(docPdf, {
+            startY: y,
+            theme: 'grid',
+            head: [['RNC VINCULADA']],
+            body: [
+              ['Número RNC', linkedRnc.number || 'N/A'],
+              ['Status RNC', linkedRnc.status],
+              ['Data da RNC', format(linkedRnc.date, 'dd/MM/yyyy')],
+              ['Cliente', linkedRnc.customerName],
+              ['Descrição', linkedRnc.description],
+            ],
+            headStyles: { fillColor: [231, 76, 60], fontSize: 11, fontStyle: 'bold' },
+            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+            styles: { fontSize: 9 },
+          });
+          y = (docPdf as any).lastAutoTable.finalY + 10;
+        }
+      }
+
+      // ===== DESCRIÇÃO =====
+      if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+      docPdf.setFontSize(12).setFont(undefined, 'bold');
+      docPdf.text('DESCRIÇÃO DO PROBLEMA', 15, y);
+      y += 7;
+      
+      const splitDescription = docPdf.splitTextToSize(occurrence.description, pageWidth - 30);
+      docPdf.setFontSize(10).setFont(undefined, 'normal');
+      docPdf.text(splitDescription, 15, y);
+      y += (splitDescription.length * 5) + 10;
+
+      // ===== ANÁLISE DOS 5 PORQUÊS =====
+      if (occurrence.fiveWhys && (occurrence.fiveWhys.why1 || occurrence.fiveWhys.rootCause)) {
+        if (y > pageHeight - 100) { docPdf.addPage(); y = 20; }
+        
+        docPdf.setFontSize(12).setFont(undefined, 'bold');
+        docPdf.text('ANÁLISE DE CAUSA RAIZ - MÉTODO DOS 5 PORQUÊS', 15, y);
+        y += 10;
+
+        const fiveWhysData: any[] = [];
+        for (let i = 1; i <= 5; i++) {
+          const why = (occurrence.fiveWhys as any)[`why${i}`];
+          const answer = (occurrence.fiveWhys as any)[`answer${i}`];
+          
+          if (why || answer) {
+            fiveWhysData.push([
+              `${i}`,
+              why || 'Não preenchido',
+              answer || 'Não preenchido'
+            ]);
+          }
+        }
+
+        if (fiveWhysData.length > 0) {
+          autoTable(docPdf, {
+            startY: y,
+            head: [['#', 'Pergunta', 'Resposta']],
+            body: fiveWhysData,
+            headStyles: { fillColor: [52, 152, 219] },
+            columnStyles: { 
+              0: { cellWidth: 20 },
+              1: { cellWidth: 60 },
+              2: { cellWidth: 'auto' }
+            },
+            styles: { fontSize: 9 },
+          });
+          y = (docPdf as any).lastAutoTable.finalY + 10;
+        }
+
+        // Causa Raiz
+        if (occurrence.fiveWhys.rootCause) {
+          if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+          
+          autoTable(docPdf, {
+            startY: y,
+            theme: 'grid',
+            head: [['CAUSA RAIZ IDENTIFICADA']],
+            body: [[occurrence.fiveWhys.rootCause]],
+            headStyles: { fillColor: [52, 152, 219], fontSize: 11, fontStyle: 'bold' },
+            styles: { fontSize: 10 },
+          });
+          y = (docPdf as any).lastAutoTable.finalY + 10;
+        }
+      }
+
+      // ===== PLANOS DE CONTENÇÃO E ELIMINAÇÃO =====
+      if (occurrence.fiveWhys?.containmentPlan || occurrence.fiveWhys?.eliminationPlan) {
+        if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+        
+        const plansData: any[] = [];
+        
+        if (occurrence.fiveWhys.containmentPlan) {
+          plansData.push(['Plano de Contenção (Ação Imediata)', occurrence.fiveWhys.containmentPlan]);
+        }
+        
+        if (occurrence.fiveWhys.eliminationPlan) {
+          plansData.push(['Plano de Eliminação da Causa Raiz', occurrence.fiveWhys.eliminationPlan]);
+        }
+
+        autoTable(docPdf, {
+          startY: y,
+          theme: 'grid',
+          head: [['PLANOS DE AÇÃO']],
+          body: plansData,
+          headStyles: { fillColor: [46, 204, 113], fontSize: 11, fontStyle: 'bold' },
+          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 } },
+          styles: { fontSize: 10 },
+        });
+        y = (docPdf as any).lastAutoTable.finalY + 10;
+      }
+
+      // ===== PLANO DE AÇÃO (ITENS) =====
+      if (occurrence.actionPlan && occurrence.actionPlan.length > 0) {
+        if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
+        
+        docPdf.setFontSize(12).setFont(undefined, 'bold');
+        docPdf.text('ITENS DO PLANO DE AÇÃO', 15, y);
+        y += 7;
+
+        const actionPlanData = occurrence.actionPlan.map((item, idx) => [
+          (idx + 1).toString(),
+          item.description,
+          item.responsible,
+          format(item.deadline, 'dd/MM/yyyy'),
+          item.status || 'Pendente'
+        ]);
+
+        autoTable(docPdf, {
+          startY: y,
+          head: [['#', 'Ação', 'Responsável', 'Prazo', 'Status']],
+          body: actionPlanData,
+          headStyles: { fillColor: [142, 68, 173] },
+          columnStyles: { 
+            0: { cellWidth: 10 },
+            1: { cellWidth: 80 },
+            2: { cellWidth: 40 },
+            3: { cellWidth: 25 },
+            4: { cellWidth: 25 }
+          },
+          styles: { fontSize: 9 },
+        });
+        y = (docPdf as any).lastAutoTable.finalY + 10;
+      }
+
+      // ===== FOTOS =====
+      if (occurrence.photos && occurrence.photos.length > 0) {
+        docPdf.addPage();
+        y = 20;
+        
+        docPdf.setFontSize(12).setFont(undefined, 'bold');
+        docPdf.text('REGISTRO FOTOGRÁFICO', 15, y);
+        y += 10;
+
+        const photoWidth = (pageWidth - 45) / 2;
+        const photoHeight = photoWidth * (3 / 4);
+        let x = 15;
+
+        for (let i = 0; i < occurrence.photos.length; i++) {
+          const photo = occurrence.photos[i];
+          
+          if (y + photoHeight > pageHeight - 30) {
+            docPdf.addPage();
+            y = 20;
+            x = 15;
+          }
+
+          try {
+            docPdf.addImage(photo, 'JPEG', x, y, photoWidth, photoHeight);
+            docPdf.setFontSize(8).setFont(undefined, 'normal');
+            docPdf.text(`Foto ${i + 1}`, x + photoWidth / 2, y + photoHeight + 5, { align: 'center' });
+          } catch (e) {
+            docPdf.setFontSize(8);
+            docPdf.text(`Erro ao carregar foto ${i + 1}`, x, y + 10);
+          }
+
+          x = (x === 15) ? (15 + photoWidth + 15) : 15;
+          if (x === 15) y += photoHeight + 15;
+        }
+      }
+
+      // ===== RODAPÉ =====
+      const pageCount = docPdf.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        docPdf.setPage(i);
+        docPdf.setFontSize(8).setFont(undefined, 'normal');
+        docPdf.text('PA-MEC-202501.REV0', 15, pageHeight - 10);
+        docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
+      }
+
+      docPdf.save(`PlanoDeAcao_${occurrence.number}_${format(new Date(), 'ddMMyyyy')}.pdf`);
+      showToast({ title: "PDF gerado com sucesso!" });
+      
+    } catch (error) {
+      console.error("Erro ao gerar PDF:", error);
+      showToast({ variant: "destructive", title: "Erro ao gerar PDF do Plano de Ação" });
+    }
+  };
+
   const getPriorityColor = (priority?: string) => {
     switch (priority) {
       case "Crítica": return "text-red-600 bg-red-100";
@@ -6451,7 +6706,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
                               Editar
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleActionPlanPDF(occurrence)}>
                               <FileDown className="mr-2 h-4 w-4" />
                               Exportar PDF
                             </DropdownMenuItem>
@@ -6506,6 +6761,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
         occurrence={selectedOccurrence}
         onEdit={handleEditOccurrence}
         reports={reports}
+        onExportPDF={handleActionPlanPDF}
       />
 
       {/* Dialog de Confirmação de Exclusão */}
@@ -7410,7 +7666,7 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
   );
 }
 
-function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, reports = [] }: any) {
+function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, reports = [], onExportPDF }: any) {
   if (!occurrence) return null;
 
   const getPriorityColor = (priority?: string) => {
@@ -7448,13 +7704,13 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
               </DialogDescription>
             </div>
             <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => onExportPDF && onExportPDF(occurrence)}>
+                <FileDown className="h-4 w-4 mr-1" />
+                PDF
+              </Button>
               <Button variant="outline" size="sm" onClick={() => onEdit(occurrence)}>
                 <Pencil className="h-4 w-4 mr-1" />
                 Editar
-              </Button>
-              <Button variant="outline" size="sm">
-                <FileDown className="h-4 w-4 mr-1" />
-                PDF
               </Button>
             </div>
           </div>
