@@ -46,7 +46,6 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
-import { getNextBusinessDay, getPreviousBusinessDay } from './utils/businessDays'; // ajuste o caminho conforme necessário
 
 const productionStageSchema = z.object({
     stageName: z.string(),
@@ -214,6 +213,24 @@ const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
     currentDate = addDays(currentDate, 1);
   }
   return count;
+};
+
+// Função para obter o próximo dia útil
+const getNextBusinessDay = (date: Date): Date => {
+  let nextDay = addDays(date, 1);
+  while (!isBusinessDay(nextDay)) {
+    nextDay = addDays(nextDay, 1);
+  }
+  return nextDay;
+};
+
+// Função para obter o dia útil anterior
+const getPreviousBusinessDay = (date: Date): Date => {
+  let prevDay = addDays(date, -1);
+  while (!isBusinessDay(prevDay)) {
+    prevDay = addDays(prevDay, -1);
+  }
+  return prevDay;
 };
 
 // Componente para exibir informações de dias úteis
