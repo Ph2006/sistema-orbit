@@ -6261,7 +6261,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       autoTable(docPdf, {
         startY: y,
         theme: 'grid',
-        head: [['INFORMAÇÕES GERAIS']],
+        head: [['INFORMAÇÕES GERAIS', '']],
         body: [
           ['Tipo', occurrence.type],
           ['Origem/Setor', occurrence.origin],
@@ -6272,10 +6272,18 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
           ['Responsável pela Análise', occurrence.responsibleAnalyst],
           ['Cliente', occurrence.customerName || 'N/A'],
           ['Pedido', occurrence.orderNumber || 'N/A'],
-          ['Item', occurrence.itemName ? `${occurrence.itemName}${occurrence.itemCode ? ` (${occurrence.itemCode})` : ''}` : 'N/A'],
+          ['Item', occurrence.itemName ? `${occurrence.itemName} (${occurrence.itemCode})` : 'N/A'],
         ],
-        headStyles: { fillColor: [41, 128, 185], fontSize: 12, fontStyle: 'bold' },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+        headStyles: { 
+          fillColor: [41, 128, 185], 
+          fontSize: 12, 
+          fontStyle: 'bold',
+          halign: 'left'
+        },
+        columnStyles: { 
+          0: { fontStyle: 'bold', cellWidth: 60, fillColor: [240, 240, 240] },
+          1: { cellWidth: 'auto' }
+        },
         styles: { fontSize: 10 },
       });
       y = (docPdf as any).lastAutoTable.finalY + 10;
@@ -6289,7 +6297,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
           autoTable(docPdf, {
             startY: y,
             theme: 'grid',
-            head: [['RNC VINCULADA']],
+            head: [['RNC VINCULADA', '']],
             body: [
               ['Número RNC', linkedRnc.number || 'N/A'],
               ['Status RNC', linkedRnc.status],
@@ -6297,8 +6305,16 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
               ['Cliente', linkedRnc.customerName],
               ['Descrição', linkedRnc.description],
             ],
-            headStyles: { fillColor: [231, 76, 60], fontSize: 11, fontStyle: 'bold' },
-            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+            headStyles: { 
+              fillColor: [231, 76, 60], 
+              fontSize: 11, 
+              fontStyle: 'bold',
+              halign: 'left'
+            },
+            columnStyles: { 
+              0: { fontStyle: 'bold', cellWidth: 50, fillColor: [255, 235, 235] },
+              1: { cellWidth: 'auto' }
+            },
             styles: { fontSize: 9 },
           });
           y = (docPdf as any).lastAutoTable.finalY + 10;
@@ -6341,11 +6357,11 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
         if (fiveWhysData.length > 0) {
           autoTable(docPdf, {
             startY: y,
-            head: [['#', 'Pergunta', 'Resposta']],
+            head: [['#', 'Por quê?', 'Resposta']],
             body: fiveWhysData,
-            headStyles: { fillColor: [52, 152, 219] },
+            headStyles: { fillColor: [52, 152, 219], fontSize: 10, fontStyle: 'bold' },
             columnStyles: { 
-              0: { cellWidth: 20 },
+              0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
               1: { cellWidth: 60 },
               2: { cellWidth: 'auto' }
             },
@@ -6363,7 +6379,12 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
             theme: 'grid',
             head: [['CAUSA RAIZ IDENTIFICADA']],
             body: [[occurrence.fiveWhys.rootCause]],
-            headStyles: { fillColor: [52, 152, 219], fontSize: 11, fontStyle: 'bold' },
+            headStyles: { 
+              fillColor: [52, 152, 219], 
+              fontSize: 11, 
+              fontStyle: 'bold',
+              halign: 'left'
+            },
             styles: { fontSize: 10 },
           });
           y = (docPdf as any).lastAutoTable.finalY + 10;
@@ -6372,28 +6393,43 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
 
       // ===== PLANOS DE CONTENÇÃO E ELIMINAÇÃO =====
       if (occurrence.fiveWhys?.containmentPlan || occurrence.fiveWhys?.eliminationPlan) {
-        if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
-        
-        const plansData: any[] = [];
+        if (y > pageHeight - 80) { docPdf.addPage(); y = 20; }
         
         if (occurrence.fiveWhys.containmentPlan) {
-          plansData.push(['Plano de Contenção (Ação Imediata)', occurrence.fiveWhys.containmentPlan]);
+          autoTable(docPdf, {
+            startY: y,
+            theme: 'grid',
+            head: [['PLANO DE CONTENÇÃO (Ação Imediata)']],
+            body: [[occurrence.fiveWhys.containmentPlan]],
+            headStyles: { 
+              fillColor: [230, 126, 34], 
+              fontSize: 11, 
+              fontStyle: 'bold',
+              halign: 'left'
+            },
+            styles: { fontSize: 10 },
+          });
+          y = (docPdf as any).lastAutoTable.finalY + 5;
         }
         
         if (occurrence.fiveWhys.eliminationPlan) {
-          plansData.push(['Plano de Eliminação da Causa Raiz', occurrence.fiveWhys.eliminationPlan]);
+          if (y > pageHeight - 40) { docPdf.addPage(); y = 20; }
+          
+          autoTable(docPdf, {
+            startY: y,
+            theme: 'grid',
+            head: [['PLANO DE ELIMINAÇÃO DA CAUSA RAIZ']],
+            body: [[occurrence.fiveWhys.eliminationPlan]],
+            headStyles: { 
+              fillColor: [46, 204, 113], 
+              fontSize: 11, 
+              fontStyle: 'bold',
+              halign: 'left'
+            },
+            styles: { fontSize: 10 },
+          });
+          y = (docPdf as any).lastAutoTable.finalY + 10;
         }
-
-        autoTable(docPdf, {
-          startY: y,
-          theme: 'grid',
-          head: [['PLANOS DE AÇÃO']],
-          body: plansData,
-          headStyles: { fillColor: [46, 204, 113], fontSize: 11, fontStyle: 'bold' },
-          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 } },
-          styles: { fontSize: 10 },
-        });
-        y = (docPdf as any).lastAutoTable.finalY + 10;
       }
 
       // ===== PLANO DE AÇÃO (ITENS) =====
@@ -6416,13 +6452,13 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
           startY: y,
           head: [['#', 'Ação', 'Responsável', 'Prazo', 'Status']],
           body: actionPlanData,
-          headStyles: { fillColor: [142, 68, 173] },
+          headStyles: { fillColor: [142, 68, 173], fontSize: 10, fontStyle: 'bold' },
           columnStyles: { 
-            0: { cellWidth: 10 },
+            0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
             1: { cellWidth: 80 },
-            2: { cellWidth: 40 },
-            3: { cellWidth: 25 },
-            4: { cellWidth: 25 }
+            2: { cellWidth: 35 },
+            3: { cellWidth: 25, halign: 'center' },
+            4: { cellWidth: 25, halign: 'center' }
           },
           styles: { fontSize: 9 },
         });
