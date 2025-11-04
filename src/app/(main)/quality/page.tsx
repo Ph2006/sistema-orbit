@@ -6120,14 +6120,55 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
 
   const onSubmitOccurrence = async (values: z.infer<typeof occurrenceSchema>) => {
     try {
+      // ✅ FUNÇÃO HELPER PARA LIMPAR UNDEFINED
+      const cleanObject = (obj: any): any => {
+        if (obj === null || obj === undefined) return null;
+        if (Array.isArray(obj)) {
+          return obj.map(cleanObject).filter(item => item !== null && item !== undefined);
+        }
+        if (obj instanceof Date) return obj;
+        if (obj && typeof obj.toDate === 'function') return obj; // Firestore Timestamp
+        if (typeof obj === 'object') {
+          const cleaned: any = {};
+          Object.keys(obj).forEach(key => {
+            const value = obj[key];
+            if (value !== undefined) {
+              const cleanedValue = cleanObject(value);
+              if (cleanedValue !== null && cleanedValue !== undefined) {
+                cleaned[key] = cleanedValue;
+              }
+            }
+          });
+          return Object.keys(cleaned).length > 0 ? cleaned : null;
+        }
+        return obj;
+      };
+
       // ✅ CONVERTER DOCUMENTOS PARA O FORMATO CORRETO DO FIRESTORE
-      const documentsToSave = values.documents?.map(doc => ({
-        name: doc.name,
-        type: doc.type,
-        data: doc.data,
-        size: doc.size,
-        uploadedAt: Timestamp.fromDate(doc.uploadedAt), // ✅ CONVERTER Date para Timestamp
-      })) || [];
+      const documentsToSave = (values.documents || []).map(doc => ({
+        name: doc.name || '',
+        type: doc.type || '',
+        data: doc.data || '',
+        size: doc.size || 0,
+        uploadedAt: Timestamp.fromDate(doc.uploadedAt),
+      }));
+
+      // ✅ LIMPAR FIVE WHYS DE CAMPOS UNDEFINED
+      const cleanedFiveWhys = values.fiveWhys ? cleanObject({
+        why1: values.fiveWhys.why1,
+        answer1: values.fiveWhys.answer1,
+        why2: values.fiveWhys.why2,
+        answer2: values.fiveWhys.answer2,
+        why3: values.fiveWhys.why3,
+        answer3: values.fiveWhys.answer3,
+        why4: values.fiveWhys.why4,
+        answer4: values.fiveWhys.answer4,
+        why5: values.fiveWhys.why5,
+        answer5: values.fiveWhys.answer5,
+        rootCause: values.fiveWhys.rootCause,
+        containmentPlan: values.fiveWhys.containmentPlan,
+        eliminationPlan: values.fiveWhys.eliminationPlan,
+      }) : null;
 
       const dataToSave = {
         type: values.type,
@@ -6144,25 +6185,28 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
         priority: values.priority || "Média",
         linkedRncId: values.linkedRncId || null,
         responsibleActionPlan: values.responsibleActionPlan || null,
-        fiveWhys: values.fiveWhys || {},
+        fiveWhys: cleanedFiveWhys, // ✅ USAR FIVE WHYS LIMPO
         actionPlan: values.actionPlan || [],
         photos: values.photos || [],
-        documents: documentsToSave, // ✅ USAR DOCUMENTOS CONVERTIDOS
+        documents: documentsToSave,
         updatedAt: Timestamp.now(),
         createdBy: user?.uid || "system",
       };
 
+      // ✅ REMOVER TODOS OS CAMPOS NULL/UNDEFINED DO OBJETO FINAL
+      const finalData = cleanObject(dataToSave);
+
       if (selectedOccurrence) {
         await updateDoc(
           doc(db, "companies", "mecald", "actionPlans", selectedOccurrence.id),
-          dataToSave
+          finalData
         );
         showToast({ title: "Plano de ação atualizado com sucesso!" });
       } else {
         await addDoc(
           collection(db, "companies", "mecald", "actionPlans"),
           {
-            ...dataToSave,
+            ...finalData,
             number: `PA-${Date.now().toString().slice(-6)}`,
             createdAt: Timestamp.now(),
           }
@@ -6176,7 +6220,11 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       setSelectedOccurrence(null);
     } catch (error) {
       console.error("Erro ao salvar:", error);
-      showToast({ variant: "destructive", title: "Erro ao salvar plano de ação" });
+      showToast({ 
+        variant: "destructive", 
+        title: "Erro ao salvar plano de ação",
+        description: error instanceof Error ? error.message : "Erro desconhecido"
+      });
     }
   };
 
