@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
@@ -2185,6 +2185,41 @@ export default function OrdersPage() {
         });
         setPackingSlipQuantities(newQuantities);
     };
+
+    // Função para gerar e salvar número sequencial do romaneio
+    const getNextPackingSlipNumber = async (): Promise<string> => {
+        try {
+            const counterRef = doc(db, "companies", "mecald", "settings", "counters");
+            const counterSnap = await getDoc(counterRef);
+            
+            let currentNumber = 1;
+            
+            if (counterSnap.exists()) {
+                currentNumber = (counterSnap.data().packingSlipNumber || 0) + 1;
+            }
+            
+            // Atualizar o contador no Firestore
+            await updateDoc(counterRef, {
+                packingSlipNumber: currentNumber,
+                lastPackingSlipDate: Timestamp.now()
+            }).catch(async (error) => {
+                // Se o documento não existe, criar
+                if (error.code === 'not-found') {
+                    await setDoc(counterRef, {
+                        packingSlipNumber: currentNumber,
+                        lastPackingSlipDate: Timestamp.now()
+                    });
+                }
+            });
+            
+            // Formatar com zeros à esquerda (ex: 000001)
+            return currentNumber.toString().padStart(6, '0');
+        } catch (error) {
+            console.error("Erro ao gerar número do romaneio:", error);
+            // Fallback: usar timestamp se houver erro
+            return Date.now().toString().slice(-6);
+        }
+    };
     
     const handleGeneratePackingSlip = async () => {
         if (!selectedOrder || selectedItems.size === 0) return;
@@ -2195,6 +2230,9 @@ export default function OrdersPage() {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const docSnap = await getDoc(companyRef);
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            // Gerar número sequencial do romaneio
+            const packingSlipNumber = await getNextPackingSlipNumber();
             
             // Filtrar itens selecionados e usar quantidades customizadas
             const itemsToInclude = selectedOrder.items
@@ -2246,20 +2284,39 @@ export default function OrdersPage() {
             yPos = 55;
             docPdf.setFontSize(14).setFont('helvetica', 'bold');
             docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 10;
+
+            // Número do Romaneio centralizado e destacado
+            docPdf.setFontSize(10).setFont('helvetica', 'bold');
+            docPdf.setTextColor(37, 99, 235); // Cor azul
+            docPdf.text(`Romaneio Nº ${packingSlipNumber}`, pageWidth / 2, yPos, { align: 'center' });
+            docPdf.setTextColor(0, 0, 0); // Voltar para preto
             yPos += 15;
 
-            docPdf.setFontSize(11).setFont('helvetica', 'normal');
-            docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
-            docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 7;
+            // Informações do pedido em grid
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
 
+            // Linha 1: Pedido e Data de Emissão
+            docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
+            docPdf.text(`Data Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 6;
+
+            // Linha 2: Cliente e OS
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
             docPdf.text(`OS: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
-            yPos += 7;
+            yPos += 6;
 
-            if (selectedOrder.projectName) {
-                docPdf.text(`Projeto: ${selectedOrder.projectName}`, 15, yPos);
-                yPos += 7;
+            // Linha 3: Projeto (se houver) e Data de Entrega
+            if (selectedOrder.projectName || selectedOrder.deliveryDate) {
+                if (selectedOrder.projectName) {
+                    docPdf.text(`Projeto: ${selectedOrder.projectName}`, 15, yPos);
+                }
+                if (selectedOrder.deliveryDate) {
+                    docPdf.setFont('helvetica', 'bold');
+                    docPdf.text(`Data Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+                    docPdf.setFont('helvetica', 'normal');
+                }
+                yPos += 6;
             }
 
             yPos += 8;
@@ -2314,7 +2371,12 @@ export default function OrdersPage() {
             docPdf.text('Data:', 15, footerStartY + 8);
             docPdf.line(28, footerStartY + 8, 85, footerStartY + 8);
 
-            docPdf.save(`Romaneio_${selectedOrder.quotationNumber}.pdf`);
+            docPdf.save(`Romaneio_${packingSlipNumber}_Pedido_${selectedOrder.quotationNumber}.pdf`);
+            
+            toast({
+                title: "Romaneio gerado com sucesso!",
+                description: `Romaneio Nº ${packingSlipNumber} foi criado e baixado.`,
+            });
             
             // Fechar o dialog após gerar
             setIsPackingSlipDialogOpen(false);
