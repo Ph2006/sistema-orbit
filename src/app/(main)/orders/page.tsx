@@ -505,6 +505,8 @@ export default function OrdersPage() {
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [packingSlipQuantities, setPackingSlipQuantities] = useState<Map<string, number>>(new Map());
+    const [isPackingSlipDialogOpen, setIsPackingSlipDialogOpen] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
@@ -2155,25 +2157,51 @@ export default function OrdersPage() {
             setSelectedItems(new Set());
         }
     };
+
+    const resetPackingSlipQuantities = () => {
+        if (!selectedOrder) return;
+        const newQuantities = new Map<string, number>();
+        selectedOrder.items.forEach(item => {
+            if (selectedItems.has(item.id!)) {
+                newQuantities.set(item.id!, item.quantity);
+            }
+        });
+        setPackingSlipQuantities(newQuantities);
+    };
     
     const handleGeneratePackingSlip = async () => {
         if (!selectedOrder || selectedItems.size === 0) return;
-    
+
         toast({ title: "Gerando Romaneio...", description: "Por favor, aguarde." });
-    
+
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const docSnap = await getDoc(companyRef);
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
             
-            const itemsToInclude = selectedOrder.items.filter(item => selectedItems.has(item.id!));
-            const totalWeightOfSelection = calculateTotalWeight(itemsToInclude);
+            // Filtrar itens selecionados e usar quantidades customizadas
+            const itemsToInclude = selectedOrder.items
+                .filter(item => selectedItems.has(item.id!))
+                .map(item => {
+                    const selectedQty = packingSlipQuantities.get(item.id!) || item.quantity;
+                    return {
+                        ...item,
+                        displayQuantity: selectedQty // Quantidade a ser exibida no romaneio
+                    };
+                });
+            
+            // Calcular peso total baseado nas quantidades selecionadas
+            const totalWeightOfSelection = itemsToInclude.reduce((acc, item) => {
+                const qty = Number(item.displayQuantity) || 0;
+                const unitWeight = Number(item.unitWeight) || 0;
+                return acc + (qty * unitWeight);
+            }, 0);
             
             const docPdf = new jsPDF();
             const pageWidth = docPdf.internal.pageSize.width;
             const pageHeight = docPdf.internal.pageSize.height;
             let yPos = 15;
-    
+
             if (companyData.logo?.preview) {
                 try {
                     docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
@@ -2188,11 +2216,11 @@ export default function OrdersPage() {
             docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
             textY += 6;
             
-            docPdf.setFontSize(8).setFont('helvetica', 'normal');  // Reduzido de 9 para 8
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
             if (companyData.endereco) {
                 const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
                 docPdf.text(addressLines, textX, textY);
-                textY += (addressLines.length * 3.5);  // Reduzido de 4 para 3.5
+                textY += (addressLines.length * 3.5);
             }
             if (companyData.cnpj) {
                 docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
@@ -2202,8 +2230,7 @@ export default function OrdersPage() {
             docPdf.setFontSize(14).setFont('helvetica', 'bold');
             docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
-    
-            // Informações do pedido
+
             docPdf.setFontSize(11).setFont('helvetica', 'normal');
             docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
             docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
@@ -2213,21 +2240,22 @@ export default function OrdersPage() {
             docPdf.text(`OS: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
             yPos += 7;
 
-            // ADICIONAR PROJETO DO CLIENTE
             if (selectedOrder.projectName) {
                 docPdf.text(`Projeto: ${selectedOrder.projectName}`, 15, yPos);
                 yPos += 7;
             }
 
-            yPos += 8; // Espaço extra antes dos dados do item
-    
+            yPos += 8;
+
+            // Criar corpo da tabela com quantidades selecionadas
             const tableBody = itemsToInclude.map(item => {
-                const itemTotalWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                const selectedQty = Number(item.displayQuantity) || 0;
+                const itemTotalWeight = selectedQty * (Number(item.unitWeight) || 0);
                 return [
                     item.itemNumber || '-',
                     item.code || '-',
                     item.description,
-                    item.quantity.toString(),
+                    selectedQty.toString(), // Usar quantidade selecionada
                     (Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
                     itemTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
                 ];
@@ -2248,7 +2276,7 @@ export default function OrdersPage() {
                     5: { cellWidth: 28, halign: 'center' },
                 }
             });
-    
+
             let finalY = (docPdf as any).lastAutoTable.finalY;
             const footerStartY = pageHeight - 35;
 
@@ -2256,20 +2284,23 @@ export default function OrdersPage() {
                 docPdf.addPage();
                 finalY = 15;
             }
-    
-            docPdf.setFontSize(11).setFont('helvetica', 'bold');  // Reduzido de 12 para 11
+
+            docPdf.setFontSize(11).setFont('helvetica', 'bold');
             docPdf.text(
                 `Peso Total dos Itens: ${totalWeightOfSelection.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, 
-                pageWidth - 15, finalY + 12, { align: 'right' }  // Reduzido de 15 para 12
+                pageWidth - 15, finalY + 12, { align: 'right' }
             );
 
-            docPdf.setFontSize(9).setFont('helvetica', 'normal');  // Reduzido de 10 para 9
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
             docPdf.text('Recebido por:', 15, footerStartY);
             docPdf.line(40, footerStartY, 120, footerStartY);
-            docPdf.text('Data:', 15, footerStartY + 8);  // Reduzido de 10 para 8
+            docPdf.text('Data:', 15, footerStartY + 8);
             docPdf.line(28, footerStartY + 8, 85, footerStartY + 8);
-    
+
             docPdf.save(`Romaneio_${selectedOrder.quotationNumber}.pdf`);
+            
+            // Fechar o dialog após gerar
+            setIsPackingSlipDialogOpen(false);
             
         } catch (error) {
             console.error("Error generating packing slip:", error);
@@ -3820,12 +3851,18 @@ export default function OrdersPage() {
     };
 
     // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
-    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent }) => (
+    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent, resetPackingSlipQuantities, setIsPackingSlipDialogOpen }) => (
         <SheetFooter className="flex-shrink-0 pt-4 border-t">
             <div className="flex items-center justify-between w-full gap-4 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
                     {selectedItems.size > 0 && (
-                        <Button onClick={handleGeneratePackingSlip} variant="outline">
+                        <Button 
+                            onClick={() => {
+                                resetPackingSlipQuantities();
+                                setIsPackingSlipDialogOpen(true);
+                            }} 
+                            variant="outline"
+                        >
                             <ReceiptText className="mr-2 h-4 w-4" />
                             Gerar Romaneio ({selectedItems.size} {selectedItems.size === 1 ? 'item' : 'itens'})
                         </Button>
@@ -5401,6 +5438,8 @@ return (
               setIsEditing={setIsEditing}
               handleDeleteClick={handleDeleteClick}
               onDataBookSent={handleDataBookSent}
+              resetPackingSlipQuantities={resetPackingSlipQuantities}
+              setIsPackingSlipDialogOpen={setIsPackingSlipDialogOpen}
             />
           </div>
         )}
@@ -5726,6 +5765,122 @@ return (
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    {/* Dialog para selecionar quantidades do romaneio */}
+    <Dialog open={isPackingSlipDialogOpen} onOpenChange={setIsPackingSlipDialogOpen}>
+        <DialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+                <DialogTitle>Selecionar Quantidades para o Romaneio</DialogTitle>
+                <DialogDescription>
+                    Ajuste a quantidade de peças de cada item que será incluída no romaneio. O peso será calculado automaticamente.
+                </DialogDescription>
+            </DialogHeader>
+            
+            <div className="py-4">
+                <ScrollArea className="h-[400px] pr-4">
+                    <div className="space-y-4">
+                        {selectedOrder && selectedOrder.items
+                            .filter(item => selectedItems.has(item.id!))
+                            .map((item) => {
+                                const selectedQty = packingSlipQuantities.get(item.id!) || item.quantity;
+                                const itemWeight = (Number(selectedQty) || 0) * (Number(item.unitWeight) || 0);
+                                
+                                return (
+                                    <Card key={item.id} className="p-4">
+                                        <div className="space-y-3">
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1">
+                                                    <h4 className="font-medium">{item.description}</h4>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Código: {item.code || 'N/A'} | Item PC: {item.itemNumber || 'N/A'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-4 gap-4">
+                                                <div>
+                                                    <Label className="text-xs text-muted-foreground">Qtd. Total</Label>
+                                                    <p className="font-medium">{item.quantity}</p>
+                                                </div>
+                                                <div>
+                                                    <Label className="text-xs text-muted-foreground">Peso Unit.</Label>
+                                                    <p className="font-medium">
+                                                        {(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <Label htmlFor={`qty-${item.id}`} className="text-xs text-muted-foreground">
+                                                        Qtd. Romaneio *
+                                                    </Label>
+                                                    <Input
+                                                        id={`qty-${item.id}`}
+                                                        type="number"
+                                                        min="1"
+                                                        max={item.quantity}
+                                                        value={selectedQty}
+                                                        onChange={(e) => {
+                                                            const newQty = Math.min(
+                                                                Math.max(1, Number(e.target.value) || 1),
+                                                                item.quantity
+                                                            );
+                                                            setPackingSlipQuantities(prev => {
+                                                                const newMap = new Map(prev);
+                                                                newMap.set(item.id!, newQty);
+                                                                return newMap;
+                                                            });
+                                                        }}
+                                                        className="h-8"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <Label className="text-xs text-muted-foreground">Peso Total</Label>
+                                                    <p className="font-bold text-primary">
+                                                        {itemWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
+                                            {selectedQty < item.quantity && (
+                                                <div className="flex items-center gap-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
+                                                    <AlertTriangle className="h-3 w-3" />
+                                                    <span>
+                                                        Romaneio parcial: {selectedQty} de {item.quantity} peças ({((selectedQty / item.quantity) * 100).toFixed(0)}%)
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </Card>
+                                );
+                            })}
+                    </div>
+                </ScrollArea>
+            </div>
+            
+            <div className="border-t pt-4">
+                <div className="flex items-center justify-between mb-4">
+                    <span className="text-sm font-medium">Peso Total do Romaneio:</span>
+                    <span className="text-lg font-bold text-primary">
+                        {selectedOrder && Array.from(selectedItems).reduce((total, itemId) => {
+                            const item = selectedOrder.items.find(i => i.id === itemId);
+                            if (!item) return total;
+                            const qty = packingSlipQuantities.get(itemId) || item.quantity;
+                            return total + (qty * (Number(item.unitWeight) || 0));
+                        }, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                    </span>
+                </div>
+            </div>
+            
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setIsPackingSlipDialogOpen(false)}>
+                    Cancelar
+                </Button>
+                <Button onClick={handleGeneratePackingSlip}>
+                    <ReceiptText className="mr-2 h-4 w-4" />
+                    Gerar Romaneio
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
         </div>
     );
 }
