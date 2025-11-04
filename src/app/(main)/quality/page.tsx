@@ -275,7 +275,14 @@ const occurrenceSchema = z.object({
   responsibleActionPlan: z.string().optional(), // ✅ NOVO CAMPO
   fiveWhys: fiveWhysSchema.optional(),
   actionPlan: z.array(actionPlanItemSchema).optional(),
-  photos: z.array(z.string()).optional(),
+  photos: z.array(z.string()).optional(), // ✅ Fotos em base64
+  documents: z.array(z.object({ // ✅ NOVO: Documentos anexados
+    name: z.string(),
+    type: z.string(),
+    data: z.string(), // base64
+    size: z.number(),
+    uploadedAt: z.date(),
+  })).optional(),
   createdBy: z.string().optional(),
   createdAt: z.date().optional(),
   updatedAt: z.date().optional(),
@@ -602,6 +609,13 @@ type Occurrence = z.infer<typeof occurrenceSchema> & {
   itemCode?: string,
   linkedRncId?: string,
   responsibleActionPlan?: string, // ✅ NOVO CAMPO
+  documents?: Array<{
+    name: string;
+    type: string;
+    data: string;
+    size: number;
+    uploadedAt: Date;
+  }>;
 };
 type OrderInfo = { id: string; number: string; customerId: string; customerName: string, projectName?: string, items: { id: string, description: string, code?: string, quantity?: number }[] };
 type Calibration = z.infer<typeof calibrationSchema> & { id: string };
@@ -999,11 +1013,18 @@ export default function QualityPage() {
           }
         }
         
+        // ✅ CONVERTER uploadedAt dos documentos
+        const documents = (data.documents || []).map((docItem: any) => ({
+          ...docItem,
+          uploadedAt: convertFirestoreDate(docItem.uploadedAt),
+        }));
+        
         return {
           id: doc.id,
           ...data,
           openingDate,
           deadline,
+          documents, // ✅ DOCUMENTOS COM DATAS CONVERTIDAS
           orderNumber: order?.number || 'N/A',
           itemName: item?.description || 'N/A',
           itemCode: item?.code || 'N/A',
@@ -6032,6 +6053,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       responsibleAnalyst: "",
       priority: "Média",
       photos: [],
+      documents: [],
       linkedRncId: "",
       fiveWhys: {},
     });
@@ -6044,6 +6066,14 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       ...occurrence,
       openingDate: new Date(occurrence.openingDate),
       deadline: occurrence.deadline ? new Date(occurrence.deadline) : undefined,
+      documents: occurrence.documents?.map(doc => ({
+        ...doc,
+        uploadedAt: doc.uploadedAt && typeof doc.uploadedAt.toDate === 'function' 
+          ? doc.uploadedAt.toDate() 
+          : doc.uploadedAt instanceof Date 
+            ? doc.uploadedAt 
+            : new Date(doc.uploadedAt),
+      })),
       fiveWhys: {
         why1: occurrence.fiveWhys?.why1 || "",
         answer1: occurrence.fiveWhys?.answer1 || "",
@@ -6090,10 +6120,34 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
 
   const onSubmitOccurrence = async (values: z.infer<typeof occurrenceSchema>) => {
     try {
+      // ✅ CONVERTER DOCUMENTOS PARA O FORMATO CORRETO DO FIRESTORE
+      const documentsToSave = values.documents?.map(doc => ({
+        name: doc.name,
+        type: doc.type,
+        data: doc.data,
+        size: doc.size,
+        uploadedAt: Timestamp.fromDate(doc.uploadedAt), // ✅ CONVERTER Date para Timestamp
+      })) || [];
+
       const dataToSave = {
-        ...values,
+        type: values.type,
+        origin: values.origin,
+        orderId: values.orderId || null,
+        itemId: values.itemId || null,
+        customerId: values.customerId || null,
+        customerName: values.customerName || null,
+        status: values.status,
         openingDate: Timestamp.fromDate(values.openingDate),
         deadline: values.deadline ? Timestamp.fromDate(values.deadline) : null,
+        description: values.description,
+        responsibleAnalyst: values.responsibleAnalyst,
+        priority: values.priority || "Média",
+        linkedRncId: values.linkedRncId || null,
+        responsibleActionPlan: values.responsibleActionPlan || null,
+        fiveWhys: values.fiveWhys || {},
+        actionPlan: values.actionPlan || [],
+        photos: values.photos || [],
+        documents: documentsToSave, // ✅ USAR DOCUMENTOS CONVERTIDOS
         updatedAt: Timestamp.now(),
         createdBy: user?.uid || "system",
       };
@@ -6122,7 +6176,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       setSelectedOccurrence(null);
     } catch (error) {
       console.error("Erro ao salvar:", error);
-      showToast({ variant: "destructive", title: "Erro ao salvar" });
+      showToast({ variant: "destructive", title: "Erro ao salvar plano de ação" });
     }
   };
 
@@ -6444,6 +6498,7 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
   teamMembers?: any[];
   reports?: any[]; // ✅ RNCs disponíveis
 }) {
+  const { toast } = useToast();
   const watchedOrderId = form.watch("orderId");
   const watchedLinkedRncId = form.watch("linkedRncId");
   const watchedType = form.watch("type");
@@ -6937,8 +6992,8 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                         name="fiveWhys.rootCause"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="flex items-center gap-2 font-semibold">
-                              <AlertCircle className="h-5 w-5 text-blue-600" />
+                            <FormLabel className="flex items-center gap-2 font-semibold text-blue-900">
+                              <AlertCircle className="h-5 w-5 text-blue-700" />
                               Causa Raiz Identificada
                             </FormLabel>
                             <FormControl>
@@ -6946,10 +7001,10 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                                 placeholder="Com base na análise dos 5 porquês, qual é a causa raiz do problema?"
                                 {...field}
                                 value={field.value || ''}
-                                className="min-h-[100px] bg-white"
+                                className="min-h-[100px] bg-white border-blue-200 focus:border-blue-400 text-gray-900 placeholder:text-gray-500"
                               />
                             </FormControl>
-                            <FormDescription>
+                            <FormDescription className="text-blue-800">
                               A causa raiz é o motivo fundamental que, se eliminado, evitará a recorrência do problema.
                             </FormDescription>
                           </FormItem>
@@ -6964,8 +7019,8 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                         name="fiveWhys.containmentPlan"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="flex items-center gap-2 font-semibold">
-                              <ShieldCheck className="h-5 w-5 text-orange-600" />
+                            <FormLabel className="flex items-center gap-2 font-semibold text-orange-900">
+                              <ShieldCheck className="h-5 w-5 text-orange-700" />
                               Plano de Contenção (Ação Imediata)
                             </FormLabel>
                             <FormControl>
@@ -6973,10 +7028,10 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                                 placeholder="Descreva as ações imediatas para conter o problema e evitar que ele se espalhe ou piore..."
                                 {...field}
                                 value={field.value || ''}
-                                className="min-h-[100px] bg-white"
+                                className="min-h-[100px] bg-white border-orange-200 focus:border-orange-400 text-gray-900 placeholder:text-gray-500"
                               />
                             </FormControl>
-                            <FormDescription>
+                            <FormDescription className="text-orange-800">
                               Ações de curto prazo para controlar o impacto do problema enquanto a causa raiz é eliminada.
                             </FormDescription>
                           </FormItem>
@@ -6991,8 +7046,8 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                         name="fiveWhys.eliminationPlan"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel className="flex items-center gap-2 font-semibold">
-                              <CheckCircle className="h-5 w-5 text-green-600" />
+                            <FormLabel className="flex items-center gap-2 font-semibold text-green-900">
+                              <CheckCircle className="h-5 w-5 text-green-700" />
                               Plano de Eliminação da Causa Raiz
                             </FormLabel>
                             <FormControl>
@@ -7000,10 +7055,10 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                                 placeholder="Descreva as ações definitivas que serão implementadas para eliminar a causa raiz e prevenir recorrência..."
                                 {...field}
                                 value={field.value || ''}
-                                className="min-h-[100px] bg-white"
+                                className="min-h-[100px] bg-white border-green-200 focus:border-green-400 text-gray-900 placeholder:text-gray-500"
                               />
                             </FormControl>
-                            <FormDescription>
+                            <FormDescription className="text-green-800">
                               Ações de longo prazo para eliminar permanentemente a causa raiz identificada.
                             </FormDescription>
                           </FormItem>
@@ -7013,20 +7068,279 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                   </CardContent>
                 </Card>
 
-                {/* Upload de Fotos */}
+                {/* Upload de Fotos e Documentos - VERSÃO FUNCIONAL */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Evidências e Anexos</CardTitle>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-blue-500" />
+                      Evidências e Anexos
+                    </CardTitle>
                     <CardDescription>
-                      Anexe documentos, fotos ou evidências relacionadas ao plano de ação
+                      Anexe fotos e documentos relacionados ao plano de ação (máximo 6 fotos + 5 documentos)
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <div className="text-center py-4 border-2 border-dashed border-gray-300 rounded-lg">
-                      <p className="text-sm text-muted-foreground">
-                        Upload de anexos será implementado em breve
-                      </p>
+                  <CardContent className="space-y-6">
+                    
+                    {/* Upload de Fotos */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium">Registro Fotográfico</Label>
+                        <Badge variant="secondary">
+                          {form.watch("photos")?.length || 0}/6 fotos
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex items-center justify-center w-full">
+                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                          <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                            <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                              <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                            </svg>
+                            <p className="mb-2 text-sm text-gray-500">
+                              <span className="font-semibold">Clique para selecionar fotos</span> ou arraste
+                            </p>
+                            <p className="text-xs text-gray-500">PNG, JPG, JPEG (máx. 5MB cada)</p>
+                          </div>
+                          <Input 
+                            type="file" 
+                            multiple 
+                            accept="image/jpeg,image/jpg,image/png" 
+                            onChange={async (e) => {
+                              const files = e.target.files;
+                              if (!files) return;
+                              
+                              const currentPhotos = form.getValues("photos") || [];
+                              
+                              if (currentPhotos.length + files.length > 6) {
+                                toast({
+                                  title: "Muitas fotos",
+                                  description: `Máximo de 6 fotos. Você tem ${currentPhotos.length} e tentou adicionar ${files.length}.`,
+                                  variant: "destructive",
+                                });
+                                return;
+                              }
+                              
+                              try {
+                                const compressedPhotos = await Promise.all(
+                                  Array.from(files).map(async (file) => {
+                                    if (file.size > 5 * 1024 * 1024) {
+                                      toast({
+                                        title: "Arquivo muito grande",
+                                        description: `${file.name} excede 5MB.`,
+                                        variant: "destructive",
+                                      });
+                                      return null;
+                                    }
+                                    return await compressImageForFirestore(file);
+                                  })
+                                );
+                                
+                                const validPhotos = compressedPhotos.filter(p => p !== null) as string[];
+                                form.setValue("photos", [...currentPhotos, ...validPhotos]);
+                                
+                                toast({
+                                  title: "Fotos adicionadas",
+                                  description: `${validPhotos.length} foto(s) processada(s).`,
+                                });
+                              } catch (error) {
+                                toast({
+                                  title: "Erro ao processar fotos",
+                                  variant: "destructive",
+                                });
+                              }
+                              
+                              e.target.value = '';
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      {/* Grid de Fotos */}
+                      {form.watch("photos") && form.watch("photos").length > 0 && (
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          {form.watch("photos").map((photo: string, index: number) => (
+                            <div key={index} className="relative group">
+                              <div className="relative overflow-hidden rounded-lg border">
+                                <Image 
+                                  src={photo} 
+                                  alt={`Foto ${index + 1}`} 
+                                  width={200} 
+                                  height={200} 
+                                  className="object-cover w-full aspect-square transition-transform group-hover:scale-105" 
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+                                <Button 
+                                  type="button" 
+                                  size="icon" 
+                                  variant="destructive" 
+                                  className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => {
+                                    const photos = form.getValues("photos") || [];
+                                    form.setValue("photos", photos.filter((_, i) => i !== index));
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              <p className="text-xs text-center mt-1 text-muted-foreground">
+                                Foto {index + 1}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
+
+                    {/* Separador */}
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                        <span className="w-full border-t" />
+                      </div>
+                      <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-background px-2 text-muted-foreground">
+                          Documentos
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Upload de Documentos */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium">Documentos Anexos</Label>
+                        <Badge variant="secondary">
+                          {form.watch("documents")?.length || 0}/5 documentos
+                        </Badge>
+                      </div>
+                      
+                      <div className="flex items-center justify-center w-full">
+                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors">
+                          <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                            <FileText className="w-8 h-8 mb-4 text-gray-500" />
+                            <p className="mb-2 text-sm text-gray-500">
+                              <span className="font-semibold">Clique para selecionar documentos</span>
+                            </p>
+                            <p className="text-xs text-gray-500">PDF, DOC, DOCX, XLS, XLSX (máx. 10MB cada)</p>
+                          </div>
+                          <Input 
+                            type="file" 
+                            multiple 
+                            accept=".pdf,.doc,.docx,.xls,.xlsx" 
+                            onChange={async (e) => {
+                              const files = e.target.files;
+                              if (!files) return;
+                              
+                              const currentDocs = form.getValues("documents") || [];
+                              
+                              if (currentDocs.length + files.length > 5) {
+                                toast({
+                                  title: "Muitos documentos",
+                                  description: `Máximo de 5 documentos. Você tem ${currentDocs.length} e tentou adicionar ${files.length}.`,
+                                  variant: "destructive",
+                                });
+                                return;
+                              }
+                              
+                              try {
+                                const processedDocs = await Promise.all(
+                                  Array.from(files).map(async (file) => {
+                                    if (file.size > 10 * 1024 * 1024) {
+                                      toast({
+                                        title: "Arquivo muito grande",
+                                        description: `${file.name} excede 10MB.`,
+                                        variant: "destructive",
+                                      });
+                                      return null;
+                                    }
+                                    
+                                    return new Promise<any>((resolve) => {
+                                      const reader = new FileReader();
+                                      reader.onload = (e) => {
+                                        resolve({
+                                          name: file.name,
+                                          type: file.type,
+                                          data: e.target?.result as string,
+                                          size: file.size,
+                                          uploadedAt: new Date(),
+                                        });
+                                      };
+                                      reader.readAsDataURL(file);
+                                    });
+                                  })
+                                );
+                                
+                                const validDocs = processedDocs.filter(d => d !== null);
+                                form.setValue("documents", [...currentDocs, ...validDocs]);
+                                
+                                toast({
+                                  title: "Documentos adicionados",
+                                  description: `${validDocs.length} documento(s) anexado(s).`,
+                                });
+                              } catch (error) {
+                                toast({
+                                  title: "Erro ao processar documentos",
+                                  variant: "destructive",
+                                });
+                              }
+                              
+                              e.target.value = '';
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      {/* Lista de Documentos */}
+                      {form.watch("documents") && form.watch("documents").length > 0 && (
+                        <div className="space-y-2">
+                          {form.watch("documents").map((doc: any, index: number) => (
+                            <div 
+                              key={index} 
+                              className="flex items-center justify-between p-3 border rounded-lg bg-white hover:bg-gray-50 transition-colors"
+                            >
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <FileText className="h-8 w-8 text-blue-500 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{doc.name}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {(doc.size / 1024).toFixed(1)} KB
+                                  </p>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  const docs = form.getValues("documents") || [];
+                                  form.setValue("documents", docs.filter((_, i) => i !== index));
+                                }}
+                                className="flex-shrink-0"
+                              >
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Indicador de Tamanho Total */}
+                    {(form.watch("photos")?.length > 0 || form.watch("documents")?.length > 0) && (
+                      <div className="mt-4 p-3 bg-muted rounded-lg">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">Tamanho total estimado:</span>
+                          <span className="font-mono font-medium">
+                            {(() => {
+                              const photosSize = (form.watch("photos") || []).reduce((acc, p) => acc + (p.length * 0.75), 0);
+                              const docsSize = (form.watch("documents") || []).reduce((acc, d) => acc + d.size, 0);
+                              return ((photosSize + docsSize) / 1024).toFixed(1);
+                            })()} KB
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
                   </CardContent>
                 </Card>
 
@@ -7265,10 +7579,10 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
                     {occurrence.fiveWhys.rootCause && (
                       <div className="mt-6 p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
                         <div className="flex items-center gap-2 mb-3">
-                          <AlertCircle className="h-5 w-5 text-blue-600" />
-                          <Label className="text-sm font-semibold">Causa Raiz Identificada</Label>
+                          <AlertCircle className="h-5 w-5 text-blue-700" />
+                          <Label className="text-sm font-semibold text-blue-900">Causa Raiz Identificada</Label>
                         </div>
-                        <p className="text-sm leading-relaxed">{occurrence.fiveWhys.rootCause}</p>
+                        <p className="text-sm leading-relaxed text-gray-900">{occurrence.fiveWhys.rootCause}</p>
                       </div>
                     )}
 
@@ -7276,10 +7590,10 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
                     {occurrence.fiveWhys.containmentPlan && (
                       <div className="mt-4 p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
                         <div className="flex items-center gap-2 mb-3">
-                          <ShieldCheck className="h-5 w-5 text-orange-600" />
-                          <Label className="text-sm font-semibold">Plano de Contenção</Label>
+                          <ShieldCheck className="h-5 w-5 text-orange-700" />
+                          <Label className="text-sm font-semibold text-orange-900">Plano de Contenção</Label>
                         </div>
-                        <p className="text-sm leading-relaxed">{occurrence.fiveWhys.containmentPlan}</p>
+                        <p className="text-sm leading-relaxed text-gray-900">{occurrence.fiveWhys.containmentPlan}</p>
                       </div>
                     )}
 
@@ -7287,10 +7601,10 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
                     {occurrence.fiveWhys.eliminationPlan && (
                       <div className="mt-4 p-4 bg-green-50 rounded-lg border-2 border-green-200">
                         <div className="flex items-center gap-2 mb-3">
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                          <Label className="text-sm font-semibold">Plano de Eliminação da Causa Raiz</Label>
+                          <CheckCircle className="h-5 w-5 text-green-700" />
+                          <Label className="text-sm font-semibold text-green-900">Plano de Eliminação da Causa Raiz</Label>
                         </div>
-                        <p className="text-sm leading-relaxed">{occurrence.fiveWhys.eliminationPlan}</p>
+                        <p className="text-sm leading-relaxed text-gray-900">{occurrence.fiveWhys.eliminationPlan}</p>
                       </div>
                     )}
                   </div>
@@ -7324,6 +7638,96 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
                   <p className="font-medium">Nenhuma ação definida ainda</p>
                   <p className="text-sm">Defina ações corretivas e preventivas para resolver a ocorrência</p>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Evidências e Anexos */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-blue-500" />
+                  Evidências e Anexos
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                
+                {/* Fotos */}
+                {occurrence.photos && occurrence.photos.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium">Registro Fotográfico ({occurrence.photos.length})</Label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {occurrence.photos.map((photo: string, index: number) => (
+                        <div key={index} className="relative group">
+                          <div className="relative overflow-hidden rounded-lg border">
+                            <Image 
+                              src={photo} 
+                              alt={`Foto ${index + 1}`} 
+                              width={200} 
+                              height={200} 
+                              className="object-cover w-full aspect-square cursor-pointer transition-transform hover:scale-105"
+                              onClick={() => window.open(photo, '_blank')}
+                            />
+                          </div>
+                          <p className="text-xs text-center mt-1 text-muted-foreground">
+                            Foto {index + 1}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Documentos */}
+                {occurrence.documents && occurrence.documents.length > 0 && (
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium">Documentos Anexos ({occurrence.documents.length})</Label>
+                    <div className="space-y-2">
+                      {occurrence.documents.map((doc: any, index: number) => {
+                        const uploadedDate = doc.uploadedAt && typeof doc.uploadedAt.toDate === 'function' 
+                          ? doc.uploadedAt.toDate() 
+                          : doc.uploadedAt instanceof Date 
+                            ? doc.uploadedAt 
+                            : new Date(doc.uploadedAt);
+                        
+                        return (
+                          <div 
+                            key={index} 
+                            className="flex items-center justify-between p-3 border rounded-lg bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+                            onClick={() => {
+                              // Download do documento
+                              const link = document.createElement('a');
+                              link.href = doc.data;
+                              link.download = doc.name;
+                              link.click();
+                            }}
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <FileText className="h-8 w-8 text-blue-500 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{doc.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {(doc.size / 1024).toFixed(1)} KB • {format(uploadedDate, 'dd/MM/yyyy HH:mm')}
+                                </p>
+                              </div>
+                            </div>
+                            <FileDown className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Nenhum anexo */}
+                {(!occurrence.photos || occurrence.photos.length === 0) && 
+                 (!occurrence.documents || occurrence.documents.length === 0) && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="font-medium">Nenhum anexo disponível</p>
+                    <p className="text-sm">Adicione fotos ou documentos ao editar o plano de ação</p>
+                  </div>
+                )}
+
               </CardContent>
             </Card>
 
