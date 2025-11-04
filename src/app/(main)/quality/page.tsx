@@ -218,11 +218,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 // Definições auxiliares
 const fiveWhysSchema = z.object({
   why1: z.string().optional(),
+  answer1: z.string().optional(), // ✅ NOVA: Resposta ao porquê 1
   why2: z.string().optional(),
+  answer2: z.string().optional(), // ✅ NOVA: Resposta ao porquê 2
   why3: z.string().optional(),
+  answer3: z.string().optional(), // ✅ NOVA: Resposta ao porquê 3
   why4: z.string().optional(),
+  answer4: z.string().optional(), // ✅ NOVA: Resposta ao porquê 4
   why5: z.string().optional(),
+  answer5: z.string().optional(), // ✅ NOVA: Resposta ao porquê 5
   rootCause: z.string().optional(),
+  containmentPlan: z.string().optional(), // ✅ NOVO: Plano de contenção
+  eliminationPlan: z.string().optional(), // ✅ NOVO: Plano de eliminação
 });
 
 const actionPlanItemSchema = z.object({
@@ -6039,11 +6046,18 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
       deadline: occurrence.deadline ? new Date(occurrence.deadline) : undefined,
       fiveWhys: {
         why1: occurrence.fiveWhys?.why1 || "",
+        answer1: occurrence.fiveWhys?.answer1 || "",
         why2: occurrence.fiveWhys?.why2 || "",
+        answer2: occurrence.fiveWhys?.answer2 || "",
         why3: occurrence.fiveWhys?.why3 || "",
+        answer3: occurrence.fiveWhys?.answer3 || "",
         why4: occurrence.fiveWhys?.why4 || "",
+        answer4: occurrence.fiveWhys?.answer4 || "",
         why5: occurrence.fiveWhys?.why5 || "",
+        answer5: occurrence.fiveWhys?.answer5 || "",
         rootCause: occurrence.fiveWhys?.rootCause || "",
+        containmentPlan: occurrence.fiveWhys?.containmentPlan || "",
+        eliminationPlan: occurrence.fiveWhys?.eliminationPlan || "",
       },
     });
     setIsFormOpen(true);
@@ -6851,48 +6865,151 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
                   </FormItem>
                 )} />
 
-                {/* Análise dos 5 Porquês */}
+                {/* Análise dos 5 Porquês - VERSÃO MELHORADA */}
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Análise de Causa Raiz - 5 Porquês</CardTitle>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <BrainCircuit className="h-5 w-5 text-blue-500" />
+                      Análise de Causa Raiz - 5 Porquês
+                    </CardTitle>
+                    <CardDescription>
+                      Use este método para identificar a causa raiz do problema através de perguntas consecutivas
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
+                  <CardContent className="space-y-6">
                     {[1, 2, 3, 4, 5].map((num) => (
+                      <div key={num} className="border-l-4 border-blue-200 pl-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="font-mono">
+                            {num}
+                          </Badge>
+                          <h4 className="font-semibold text-sm">Por quê {num}?</h4>
+                        </div>
+                        
+                        {/* Pergunta */}
+                        <FormField
+                          control={form.control}
+                          name={`fiveWhys.why${num}`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs text-muted-foreground">
+                                Pergunta {num}
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder={`Por que ${num === 1 ? 'o problema ocorreu' : 'isso aconteceu'}?`}
+                                  {...field}
+                                  value={field.value || ''}
+                                  className="font-medium"
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        {/* Resposta */}
+                        <FormField
+                          control={form.control}
+                          name={`fiveWhys.answer${num}`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs text-muted-foreground">
+                                Resposta {num}
+                              </FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  placeholder={`Descreva a resposta para o porquê ${num}...`}
+                                  {...field}
+                                  value={field.value || ''}
+                                  className="min-h-[80px]"
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    ))}
+
+                    {/* Causa Raiz Identificada */}
+                    <div className="mt-6 p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
                       <FormField
-                        key={num}
                         control={form.control}
-                        name={`fiveWhys.why${num}`}
+                        name="fiveWhys.rootCause"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Por quê {num}?</FormLabel>
+                            <FormLabel className="flex items-center gap-2 font-semibold">
+                              <AlertCircle className="h-5 w-5 text-blue-600" />
+                              Causa Raiz Identificada
+                            </FormLabel>
                             <FormControl>
                               <Textarea
-                                placeholder={`Responda por que o problema ${num === 1 ? 'ocorreu' : 'anterior aconteceu'}...`}
+                                placeholder="Com base na análise dos 5 porquês, qual é a causa raiz do problema?"
                                 {...field}
                                 value={field.value || ''}
+                                className="min-h-[100px] bg-white"
                               />
                             </FormControl>
+                            <FormDescription>
+                              A causa raiz é o motivo fundamental que, se eliminado, evitará a recorrência do problema.
+                            </FormDescription>
                           </FormItem>
                         )}
                       />
-                    ))}
+                    </div>
 
-                    <FormField
-                      control={form.control}
-                      name="fiveWhys.rootCause"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Causa Raiz Identificada</FormLabel>
-                          <FormControl>
-                            <Textarea
-                              placeholder="Com base na análise, qual é a causa raiz do problema?"
-                              {...field}
-                              value={field.value || ''}
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
+                    {/* Plano de Contenção */}
+                    <div className="mt-4 p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                      <FormField
+                        control={form.control}
+                        name="fiveWhys.containmentPlan"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="flex items-center gap-2 font-semibold">
+                              <ShieldCheck className="h-5 w-5 text-orange-600" />
+                              Plano de Contenção (Ação Imediata)
+                            </FormLabel>
+                            <FormControl>
+                              <Textarea
+                                placeholder="Descreva as ações imediatas para conter o problema e evitar que ele se espalhe ou piore..."
+                                {...field}
+                                value={field.value || ''}
+                                className="min-h-[100px] bg-white"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Ações de curto prazo para controlar o impacto do problema enquanto a causa raiz é eliminada.
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    {/* Plano de Eliminação */}
+                    <div className="mt-4 p-4 bg-green-50 rounded-lg border-2 border-green-200">
+                      <FormField
+                        control={form.control}
+                        name="fiveWhys.eliminationPlan"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="flex items-center gap-2 font-semibold">
+                              <CheckCircle className="h-5 w-5 text-green-600" />
+                              Plano de Eliminação da Causa Raiz
+                            </FormLabel>
+                            <FormControl>
+                              <Textarea
+                                placeholder="Descreva as ações definitivas que serão implementadas para eliminar a causa raiz e prevenir recorrência..."
+                                {...field}
+                                value={field.value || ''}
+                                className="min-h-[100px] bg-white"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Ações de longo prazo para eliminar permanentemente a causa raiz identificada.
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -7094,7 +7211,7 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
               </Card>
             )}
 
-            {/* Análise dos 5 Porquês */}
+            {/* Análise dos 5 Porquês - VERSÃO MELHORADA */}
             <Card>
               <CardHeader>
                 <div className="flex justify-between items-center">
@@ -7102,27 +7219,80 @@ function OccurrenceDetailDialog({ open, onOpenChange, occurrence, onEdit, report
                     <BrainCircuit className="h-5 w-5 text-blue-500" />
                     Análise de Causa - Método dos 5 Porquês
                   </CardTitle>
-                  <Button variant="outline" size="sm">
-                    <PlusCircle className="h-4 w-4 mr-1" />
-                    Iniciar Análise
-                  </Button>
+                  {!occurrence.fiveWhys?.rootCause && (
+                    <Button variant="outline" size="sm" onClick={() => onEdit(occurrence)}>
+                      <PlusCircle className="h-4 w-4 mr-1" />
+                      Iniciar Análise
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
-                {occurrence.fiveWhys ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3, 4, 5].map((num) => (
-                      <div key={num} className="border-l-2 border-blue-200 pl-4">
-                        <Label className="text-sm font-medium">Por quê {num}?</Label>
-                        <p className="mt-1 text-sm">
-                          {(occurrence.fiveWhys as any)[`why${num}`] || "Não preenchido"}
-                        </p>
+                {occurrence.fiveWhys && (occurrence.fiveWhys.why1 || occurrence.fiveWhys.rootCause) ? (
+                  <div className="space-y-6">
+                    {/* Perguntas e Respostas */}
+                    {[1, 2, 3, 4, 5].map((num) => {
+                      const whyField = (occurrence.fiveWhys as any)[`why${num}`];
+                      const answerField = (occurrence.fiveWhys as any)[`answer${num}`];
+                      
+                      if (!whyField && !answerField) return null;
+                      
+                      return (
+                        <div key={num} className="border-l-4 border-blue-200 pl-4 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono">{num}</Badge>
+                            <Label className="text-sm font-semibold">Por quê {num}?</Label>
+                          </div>
+                          
+                          {whyField && (
+                            <div>
+                              <p className="text-sm font-medium text-muted-foreground">Pergunta:</p>
+                              <p className="text-sm mt-1">{whyField}</p>
+                            </div>
+                          )}
+                          
+                          {answerField && (
+                            <div className="mt-2 p-3 bg-muted rounded-lg">
+                              <p className="text-sm font-medium text-muted-foreground mb-1">Resposta:</p>
+                              <p className="text-sm leading-relaxed">{answerField}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Causa Raiz */}
+                    {occurrence.fiveWhys.rootCause && (
+                      <div className="mt-6 p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <AlertCircle className="h-5 w-5 text-blue-600" />
+                          <Label className="text-sm font-semibold">Causa Raiz Identificada</Label>
+                        </div>
+                        <p className="text-sm leading-relaxed">{occurrence.fiveWhys.rootCause}</p>
                       </div>
-                    ))}
-                    <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                      <Label className="text-sm font-medium">Causa Raiz Identificada:</Label>
-                      <p className="mt-1">{occurrence.fiveWhys.rootCause || "Não definida"}</p>
-                    </div>
+                    )}
+
+                    {/* Plano de Contenção */}
+                    {occurrence.fiveWhys.containmentPlan && (
+                      <div className="mt-4 p-4 bg-orange-50 rounded-lg border-2 border-orange-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <ShieldCheck className="h-5 w-5 text-orange-600" />
+                          <Label className="text-sm font-semibold">Plano de Contenção</Label>
+                        </div>
+                        <p className="text-sm leading-relaxed">{occurrence.fiveWhys.containmentPlan}</p>
+                      </div>
+                    )}
+
+                    {/* Plano de Eliminação */}
+                    {occurrence.fiveWhys.eliminationPlan && (
+                      <div className="mt-4 p-4 bg-green-50 rounded-lg border-2 border-green-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <Label className="text-sm font-semibold">Plano de Eliminação da Causa Raiz</Label>
+                        </div>
+                        <p className="text-sm leading-relaxed">{occurrence.fiveWhys.eliminationPlan}</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
