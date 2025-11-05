@@ -503,61 +503,43 @@ export default function DashboardPage() {
             };
           }
 
-          let totalProducedWeight = 0;
-          let totalToProduceWeight = 0;
-          let totalShippedItems = 0;
-          let totalOnTimeItems = 0;
-          
-          const monthlyProductionMap = new Map<string, number>();
-          const customerDataMap = new Map<string, { deliveredWeight: number; ncCount: number; onTimeItems: number; totalItems: number }>();
+          // ✅ MAPAS SEPARADOS PARA CADA MÉTRICA
+          const monthlyDeliveredMap = new Map<string, number>(); // Peso ENTREGUE (shippingDate)
+          const customerDataMap = new Map<string, { 
+            deliveredWeight: number; 
+            ncCount: number; 
+            onTimeItems: number; 
+            totalItems: number 
+          }>();
+
+          let totalProducedWeight = 0;  // Total produzido (100% concluído)
+          let totalToProduceWeight = 0;  // Total a produzir (todos os itens)
+          let totalShippedItems = 0;     // Itens embarcados
+          let totalOnTimeItems = 0;      // Itens no prazo
 
           ordersSnapshot.forEach(doc => {
             const order = doc.data();
-            
-            // ✅ ADICIONAR LOGS PARA SANDVIK
-            if (order.customer?.name?.includes('Sandvik')) {
-              console.log('🔍 PEDIDO SANDVIK ENCONTRADO:', {
-                orderId: doc.id,
-                quotationNumber: order.quotationNumber,
-                status: order.status,
-                itemsCount: order.items?.length,
-                items: order.items?.map(item => ({
-                  description: item.description,
-                  quantity: item.quantity,
-                  unitWeight: item.unitWeight,
-                  hasShippingDate: !!item.shippingDate,
-                  shippingDate: item.shippingDate
-                }))
-              });
-            }
             
             const rawCustomerName = order.customer?.name || order.customerName || "Desconhecido";
             const customerName = formatCustomerName(rawCustomerName);
             
             if (!customerDataMap.has(customerName)) {
-                customerDataMap.set(customerName, { deliveredWeight: 0, ncCount: 0, onTimeItems: 0, totalItems: 0 });
+              customerDataMap.set(customerName, { 
+                deliveredWeight: 0, 
+                ncCount: 0, 
+                onTimeItems: 0, 
+                totalItems: 0 
+              });
             }
             const customerEntry = customerDataMap.get(customerName)!;
 
             if (order.items && Array.isArray(order.items)) {
               order.items.forEach((item: any) => {
-                // ✅ CALCULAR O PESO CORRETAMENTE
+                // ✅ CALCULAR MÉTRICAS CORRETAMENTE
                 const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
                 totalToProduceWeight += itemWeight;
 
-                // ✅ LOG PARA DEBUG (REMOVER DEPOIS)
-                if (customerName.includes('Sandvik')) {
-                  console.log('🔍 [SANDVIK] Item:', {
-                    description: item.description,
-                    quantity: item.quantity,
-                    unitWeight: item.unitWeight,
-                    calculatedWeight: itemWeight,
-                    hasShippingDate: !!item.shippingDate,
-                    shippingDate: item.shippingDate
-                  });
-                }
-
-                // ✅ VERIFICAR SE ITEM ESTÁ 100% CONCLUÍDO
+                // ✅ 1. PESO PRODUZIDO (100% concluído)
                 const isItemCompleted = item.productionPlan?.length > 0
                   ? item.productionPlan.every((p: any) => p.status === 'Concluído')
                   : false;
@@ -566,48 +548,45 @@ export default function DashboardPage() {
                   totalProducedWeight += itemWeight;
                 }
 
-                // ✅ NOVA LÓGICA: SÓ CONTA COMO "ENTREGUE" SE:
-                // 1. Item tem shippingDate (foi embarcado)
-                // 2. Item está 100% concluído (todas etapas finalizadas)
-                // 3. Pedido está com status "Concluído"
-                if (item.shippingDate && isItemCompleted && order.status === 'Concluído') {
+                // ✅ 2. PESO ENTREGUE POR MÊS (baseado em shippingDate + item concluído)
+                if (item.shippingDate && isItemCompleted) {
                   const shippingDate = safeParseDate(item.shippingDate);
-
                   if (shippingDate) {
-                    totalShippedItems++;
-                    customerEntry.totalItems++;
-
-                    // ✅ AGORA SIM: Adicionar peso ao cliente
-                    customerEntry.deliveredWeight += itemWeight;
-
-                    // ✅ LOG PARA CONFIRMAR (REMOVER DEPOIS)
-                    if (customerName.includes('Sandvik')) {
-                      console.log('✅ [SANDVIK] Adicionando peso:', {
-                        itemWeight,
-                        totalAcumulado: customerEntry.deliveredWeight,
-                        orderStatus: order.status,
-                        isItemCompleted,
-                        shippingDate: item.shippingDate
-                      });
-                    }
-
-                    // Adicionar ao mapa mensal
                     const monthKey = safeFormatMonth(shippingDate);
                     if (monthKey) {
-                      monthlyProductionMap.set(monthKey, (monthlyProductionMap.get(monthKey) || 0) + itemWeight);
+                      monthlyDeliveredMap.set(
+                        monthKey, 
+                        (monthlyDeliveredMap.get(monthKey) || 0) + itemWeight
+                      );
                     }
+                  }
+                }
 
-                    // Verificar se entregou no prazo
-                    const itemDeliveryDate = safeParseDate(item.itemDeliveryDate);
+                // ✅ 3. PESO ENTREGUE POR CLIENTE (apenas pedidos CONCLUÍDOS)
+                // SÓ CONTA SE O PEDIDO ESTIVER CONCLUÍDO
+                if (order.status === 'Concluído') {
+                  // Só conta se item tem shippingDate E está 100% concluído
+                  if (item.shippingDate && isItemCompleted) {
+                    const shippingDate = safeParseDate(item.shippingDate);
                     
-                    if (itemDeliveryDate) {
-                      const sDate = new Date(shippingDate);
-                      sDate.setHours(0, 0, 0, 0);
-                      const dDate = new Date(itemDeliveryDate);
-                      dDate.setHours(0, 0, 0, 0);
-                      if (sDate <= dDate) {
-                        totalOnTimeItems++;
-                        customerEntry.onTimeItems++;
+                    if (shippingDate) {
+                      totalShippedItems++;
+                      customerEntry.totalItems++;
+                      customerEntry.deliveredWeight += itemWeight;
+
+                      // Verificar se entregou no prazo
+                      const itemDeliveryDate = safeParseDate(item.itemDeliveryDate);
+                      
+                      if (itemDeliveryDate) {
+                        const sDate = new Date(shippingDate);
+                        sDate.setHours(0, 0, 0, 0);
+                        const dDate = new Date(itemDeliveryDate);
+                        dDate.setHours(0, 0, 0, 0);
+                        
+                        if (sDate <= dDate) {
+                          totalOnTimeItems++;
+                          customerEntry.onTimeItems++;
+                        }
                       }
                     }
                   }
@@ -616,69 +595,47 @@ export default function DashboardPage() {
             }
           });
 
-          // ✅ ADICIONAR DEPOIS DE PROCESSAR TODOS OS PEDIDOS
-          console.log('📊 ========================================');
-          console.log('📊 VERIFICAÇÃO FINAL - DADOS POR CLIENTE');
-          console.log('📊 ========================================');
-          customerDataMap.forEach((data, customerName) => {
-            console.log(`\n👤 ${customerName}:`);
-            console.log(`   Peso Entregue: ${data.deliveredWeight.toFixed(2)} kg`);
-            console.log(`   Itens Contados: ${data.totalItems}`);
-            console.log(`   Itens no Prazo: ${data.onTimeItems}`);
-            console.log(`   NCs: ${data.ncCount}`);
-          });
-          console.log('\n📊 ========================================\n');
-
+          // ✅ PROCESSAR NCs (não-conformidades)
           const qualityReports = qualitySnapshot.docs.map(doc => doc.data());
+            
           qualityReports.forEach(report => {
-              if (report.customerName) {
-                const formattedCustomerName = formatCustomerName(report.customerName);
-                const customerEntry = customerDataMap.get(formattedCustomerName);
-                if(customerEntry) {
-                    customerEntry.ncCount++;
-                }
+            if (report.customerName) {
+              const formattedCustomerName = formatCustomerName(report.customerName);
+              const customerEntry = customerDataMap.get(formattedCustomerName);
+              if(customerEntry) {
+                customerEntry.ncCount++;
               }
+            }
           });
 
+          // ✅ CALCULAR TAXAS
           const onTimeDeliveryRate = totalShippedItems > 0 ? (totalOnTimeItems / totalShippedItems) * 100 : 100;
           const geralNcRate = totalShippedItems > 0 ? (qualityReports.length / totalShippedItems) * 100 : 0;
           const internalNcRate = totalShippedItems > 0 ? (qualityReports.filter(r => r.type === "Interna").length / totalShippedItems) * 100 : 0;
 
-          const sortedMonthlyEntries = Array.from(monthlyProductionMap.entries())
+          // ✅ PRODUÇÃO MENSAL (últimos 6 meses)
+          const sortedMonthlyEntries = Array.from(monthlyDeliveredMap.entries())
             .sort(([a], [b]) => a.localeCompare(b));
           
           const monthlyProduction = sortedMonthlyEntries.map(([monthKey, weight]) => {
-              try {
-                const [year, month] = monthKey.split('-');
-                const date = new Date(parseInt(year), parseInt(month) - 1, 15);
-                
-                if (isValid(date)) {
-                  return {
-                      month: format(date, 'MMM', { locale: ptBR }),
-                      weight,
-                  };
-                } else {
-                  console.warn('Data inválida para monthKey:', monthKey);
-                  return {
-                      month: monthKey,
-                      weight,
-                  };
-                }
-              } catch (error) {
-                console.warn('Erro ao processar monthKey:', monthKey, error);
+            try {
+              const [year, month] = monthKey.split('-');
+              const date = new Date(parseInt(year), parseInt(month) - 1, 15);
+              
+              if (isValid(date)) {
                 return {
-                    month: monthKey,
-                    weight,
+                  month: format(date, 'MMM', { locale: ptBR }),
+                  weight,
                 };
+              } else {
+                return { month: monthKey, weight };
               }
+            } catch (error) {
+              return { month: monthKey, weight };
+            }
           }).slice(-6);
           
-          // ✅ ADICIONAR LOGS DE RESUMO POR CLIENTE
-          console.log('📊 RESUMO POR CLIENTE:');
-          customerDataMap.forEach((data, name) => {
-            console.log(`  ${name}: ${data.deliveredWeight.toFixed(2)} kg (${data.totalItems} itens)`);
-          });
-          
+          // ✅ ANÁLISE POR CLIENTE
           const customerAnalysis = Array.from(customerDataMap.entries())
             .map(([name, data]) => ({ 
               name, 
@@ -686,6 +643,28 @@ export default function DashboardPage() {
               ...data 
             }))
             .sort((a, b) => b.deliveredWeight - a.deliveredWeight);
+
+          // ✅ LOG FINAL DE VERIFICAÇÃO
+          console.log('📊 ========================================');
+          console.log('📊 RELATÓRIO FINAL - DADOS CORRETOS');
+          console.log('📊 ========================================');
+          console.log(`\n📦 TOTAIS:`);
+          console.log(`   Peso Total a Produzir: ${totalToProduceWeight.toFixed(2)} kg`);
+          console.log(`   Peso Total Produzido (100%): ${totalProducedWeight.toFixed(2)} kg`);
+          console.log(`   Taxa de Produção: ${((totalProducedWeight / totalToProduceWeight) * 100).toFixed(2)}%`);
+          console.log(`\n🚚 ENTREGAS:`);
+          console.log(`   Itens Embarcados: ${totalShippedItems}`);
+          console.log(`   Itens no Prazo: ${totalOnTimeItems}`);
+          console.log(`   Taxa no Prazo: ${onTimeDeliveryRate.toFixed(2)}%`);
+          console.log(`\n👥 CLIENTES (Top 5):`);
+          customerAnalysis.slice(0, 5).forEach((customer, i) => {
+            console.log(`   ${i + 1}. ${customer.name}: ${customer.deliveredWeight.toFixed(2)} kg`);
+          });
+          console.log(`\n📅 PRODUÇÃO MENSAL (últimos 6 meses):`);
+          monthlyProduction.forEach(m => {
+            console.log(`   ${m.month}: ${m.weight.toFixed(2)} kg`);
+          });
+          console.log('\n📊 ========================================\n');
 
           setData({
             totalProducedWeight,
