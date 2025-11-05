@@ -557,31 +557,37 @@ export default function DashboardPage() {
                   });
                 }
 
-                // ✅ VERIFICAR SE ITEM ESTÁ PRODUZIDO (para taxa de produção)
+                // ✅ VERIFICAR SE ITEM ESTÁ 100% CONCLUÍDO
                 const isItemCompleted = item.productionPlan?.length > 0
                   ? item.productionPlan.every((p: any) => p.status === 'Concluído')
-                  : !!item.shippingDate;
+                  : false;
 
                 if (isItemCompleted) {
                   totalProducedWeight += itemWeight;
                 }
 
-                // ✅ PROCESSAR APENAS ITENS COM DATA DE EMBARQUE
-                if (item.shippingDate) {
+                // ✅ NOVA LÓGICA: SÓ CONTA COMO "ENTREGUE" SE:
+                // 1. Item tem shippingDate (foi embarcado)
+                // 2. Item está 100% concluído (todas etapas finalizadas)
+                // 3. Pedido está com status "Concluído"
+                if (item.shippingDate && isItemCompleted && order.status === 'Concluído') {
                   const shippingDate = safeParseDate(item.shippingDate);
 
                   if (shippingDate) {
                     totalShippedItems++;
                     customerEntry.totalItems++;
 
-                    // ✅ ADICIONAR PESO AO CLIENTE - GARANTIR QUE SEJA ADICIONADO!
+                    // ✅ AGORA SIM: Adicionar peso ao cliente
                     customerEntry.deliveredWeight += itemWeight;
 
                     // ✅ LOG PARA CONFIRMAR (REMOVER DEPOIS)
                     if (customerName.includes('Sandvik')) {
                       console.log('✅ [SANDVIK] Adicionando peso:', {
                         itemWeight,
-                        totalAcumulado: customerEntry.deliveredWeight
+                        totalAcumulado: customerEntry.deliveredWeight,
+                        orderStatus: order.status,
+                        isItemCompleted,
+                        shippingDate: item.shippingDate
                       });
                     }
 
@@ -616,8 +622,8 @@ export default function DashboardPage() {
           console.log('📊 ========================================');
           customerDataMap.forEach((data, customerName) => {
             console.log(`\n👤 ${customerName}:`);
-            console.log(`   Peso Total Entregue: ${data.deliveredWeight.toFixed(2)} kg`);
-            console.log(`   Total de Itens: ${data.totalItems}`);
+            console.log(`   Peso Entregue: ${data.deliveredWeight.toFixed(2)} kg`);
+            console.log(`   Itens Contados: ${data.totalItems}`);
             console.log(`   Itens no Prazo: ${data.onTimeItems}`);
             console.log(`   NCs: ${data.ncCount}`);
           });
