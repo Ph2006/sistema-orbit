@@ -561,6 +561,7 @@ export default function OrdersPage() {
     const [customerFilter, setCustomerFilter] = useState<string>("all");
     const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
     const [dataBookFilter, setDataBookFilter] = useState<string>("all");
+    const [monthFilter, setMonthFilter] = useState<string>("all");
     
     // View states
     const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
@@ -1192,6 +1193,27 @@ export default function OrdersPage() {
         return Array.from(statuses);
     }, [orders]);
 
+    // Adicione esta função para gerar lista de meses disponíveis
+    const availableMonths = useMemo(() => {
+        const months = new Set<string>();
+        orders.forEach(order => {
+            if (order.deliveryDate) {
+                const monthKey = format(order.deliveryDate, 'yyyy-MM');
+                months.add(monthKey);
+            }
+        });
+        
+        // Converter para array e ordenar
+        return Array.from(months).sort().map(monthKey => {
+            const [year, month] = monthKey.split('-');
+            const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+            return {
+                value: monthKey,
+                label: date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+            };
+        });
+    }, [orders]);
+
     const filteredOrders = useMemo(() => {
         const filtered = orders.filter(order => {
             const query = searchQuery.toLowerCase();
@@ -1211,6 +1233,17 @@ export default function OrdersPage() {
             const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
             const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
             
+            // NOVO FILTRO DE MÊS
+            let monthMatch = true;
+            if (monthFilter !== 'all') {
+                if (order.deliveryDate) {
+                    const orderMonth = format(order.deliveryDate, 'yyyy-MM');
+                    monthMatch = orderMonth === monthFilter;
+                } else {
+                    monthMatch = false;
+                }
+            }
+            
             // NOVO FILTRO DE DATA BOOK
             let dataBookMatch = true;
             if (dataBookFilter === 'pendente') {
@@ -1219,7 +1252,7 @@ export default function OrdersPage() {
                 dataBookMatch = order.dataBookSent === true;
             }
 
-            return textMatch && statusMatch && customerMatch && dateMatch && dataBookMatch;
+            return textMatch && statusMatch && customerMatch && dateMatch && monthMatch && dataBookMatch;
         });
 
         return filtered.sort((a, b) => {
@@ -1241,7 +1274,34 @@ export default function OrdersPage() {
 
             return b.createdAt.getTime() - a.createdAt.getTime();
         });
-    }, [orders, searchQuery, statusFilter, customerFilter, dateFilter, dataBookFilter]);
+    }, [orders, searchQuery, statusFilter, customerFilter, dateFilter, monthFilter, dataBookFilter]);
+    
+    // Adicione esta função para calcular o peso total do mês filtrado
+    const monthWeightStats = useMemo(() => {
+        if (monthFilter === 'all') {
+            return null;
+        }
+        
+        const monthOrders = filteredOrders.filter(order => {
+            if (!order.deliveryDate) return false;
+            const orderMonth = format(order.deliveryDate, 'yyyy-MM');
+            return orderMonth === monthFilter;
+        });
+        
+        const totalWeight = monthOrders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        const completedWeight = monthOrders
+            .filter(order => order.status === 'Concluído')
+            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        const pendingWeight = totalWeight - completedWeight;
+        
+        return {
+            totalOrders: monthOrders.length,
+            totalWeight,
+            completedWeight,
+            pendingWeight,
+            completedPercentage: totalWeight > 0 ? (completedWeight / totalWeight) * 100 : 0
+        };
+    }, [filteredOrders, monthFilter]);
     
     const watchedItems = form.watch("items");
     const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
@@ -1252,9 +1312,10 @@ export default function OrdersPage() {
         setCustomerFilter("all");
         setDateFilter(undefined);
         setDataBookFilter("all");
+        setMonthFilter("all");
     };
 
-    const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter || dataBookFilter !== 'all';
+    const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter || dataBookFilter !== 'all' || monthFilter !== 'all';
 
     // Organiza os pedidos por data de entrega para visualização em calendário
     const ordersByDate = useMemo(() => {
@@ -4403,6 +4464,21 @@ return (
                             </SelectContent>
                         </Select>
 
+                        {/* NOVO FILTRO DE MÊS */}
+                        <Select value={monthFilter} onValueChange={setMonthFilter}>
+                            <SelectTrigger className="w-[240px]">
+                                <SelectValue placeholder="Mês de Entrega" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos os Meses</SelectItem>
+                                {availableMonths.map(month => (
+                                    <SelectItem key={month.value} value={month.value}>
+                                        {month.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
                         {/* NOVO FILTRO PARA DATA BOOK */}
                         <Select value={dataBookFilter} onValueChange={setDataBookFilter}>
                             <SelectTrigger className="w-[200px]">
@@ -4453,6 +4529,81 @@ return (
                             </Button>
                         )}
                     </div>
+                    
+                    {/* CARD DE ESTATÍSTICAS DO MÊS SELECIONADO */}
+                    {monthWeightStats && (
+                        <div className="mt-4 pt-4 border-t">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="p-2 bg-blue-100 rounded-full">
+                                        <Package className="h-5 w-5 text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Total de Pedidos</p>
+                                        <p className="text-lg font-bold text-blue-700">{monthWeightStats.totalOrders}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                                    <div className="p-2 bg-purple-100 rounded-full">
+                                        <Weight className="h-5 w-5 text-purple-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Peso Total</p>
+                                        <p className="text-lg font-bold text-purple-700">
+                                            {monthWeightStats.totalWeight.toLocaleString('pt-BR', { 
+                                                minimumFractionDigits: 2, 
+                                                maximumFractionDigits: 2 
+                                            })} kg
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                                    <div className="p-2 bg-green-100 rounded-full">
+                                        <CheckCircle className="h-5 w-5 text-green-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Peso Concluído</p>
+                                        <p className="text-lg font-bold text-green-700">
+                                            {monthWeightStats.completedWeight.toLocaleString('pt-BR', { 
+                                                minimumFractionDigits: 2, 
+                                                maximumFractionDigits: 2 
+                                            })} kg
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                                    <div className="p-2 bg-orange-100 rounded-full">
+                                        <Hourglass className="h-5 w-5 text-orange-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Peso Pendente</p>
+                                        <p className="text-lg font-bold text-orange-700">
+                                            {monthWeightStats.pendingWeight.toLocaleString('pt-BR', { 
+                                                minimumFractionDigits: 2, 
+                                                maximumFractionDigits: 2 
+                                            })} kg
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* Barra de progresso do mês */}
+                            <div className="mt-4">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-medium text-muted-foreground">
+                                        Progresso de Conclusão do Mês
+                                    </span>
+                                    <span className="text-sm font-bold text-primary">
+                                        {monthWeightStats.completedPercentage.toFixed(1)}%
+                                    </span>
+                                </div>
+                                <Progress value={monthWeightStats.completedPercentage} className="h-3" />
+                            </div>
+                        </div>
+                    )}
                 </Card>
 
                 {viewMode === 'list' ? (
