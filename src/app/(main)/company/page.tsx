@@ -480,9 +480,7 @@ export default function CompanyPage() {
     });
   };
 
-  // Função para exportar recursos em PDF com cabeçalho da empresa
-  const exportResourcesToPDF = async () => {
-    // Buscar dados da empresa
+  const exportOvertimeToPDF = async (overtime: OvertimeRelease) => {
     let companyData = null;
     try {
       const companyRef = doc(db, "companies", "mecald", "settings", "company");
@@ -494,13 +492,17 @@ export default function CompanyPage() {
       console.error("Error fetching company data for PDF:", error);
     }
 
-    // Criar conteúdo HTML para o PDF
+    const os = orderServices.find(o => o.id === overtime.osNumber);
+    const selectedResourcesList = resources.filter(r => overtime.resources.includes(r.id));
+    const selectedLeadersList = teamMembers.filter(m => overtime.teamLeaders.includes(m.id));
+    const hours = calculateOvertimeHours(overtime.startTime, overtime.endTime);
+
     const htmlContent = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
-        <title>Lista de Recursos Produtivos - Tarefas Diárias</title>
+        <title>Liberação de Horas Extras</title>
         <style>
           body {
             font-family: Arial, sans-serif;
@@ -509,7 +511,6 @@ export default function CompanyPage() {
             font-size: 12px;
             color: #333;
           }
-          
           .header {
             display: flex;
             align-items: center;
@@ -518,24 +519,18 @@ export default function CompanyPage() {
             padding-bottom: 20px;
             border-bottom: 2px solid #e5e7eb;
           }
-          
-          .company-info {
-            flex: 1;
-          }
-          
+          .company-info { flex: 1; }
           .company-name {
             font-size: 24px;
             font-weight: bold;
             color: #1f2937;
             margin-bottom: 5px;
           }
-          
           .company-details {
             font-size: 11px;
             color: #6b7280;
             line-height: 1.4;
           }
-          
           .logo-section {
             width: 80px;
             height: 80px;
@@ -544,117 +539,86 @@ export default function CompanyPage() {
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 10px;
-            color: #9ca3af;
           }
-          
           .report-title {
             text-align: center;
             margin: 30px 0;
+            padding: 20px;
+            background: #fef3c7;
+            border-radius: 8px;
+            border: 2px solid #f59e0b;
           }
-          
           .report-title h1 {
-            font-size: 20px;
+            font-size: 22px;
             font-weight: bold;
-            color: #1f2937;
+            color: #92400e;
             margin: 0 0 5px 0;
           }
-          
-          .report-date {
-            font-size: 11px;
-            color: #6b7280;
-          }
-          
-          .stats-grid {
+          .info-grid {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 15px;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
             margin: 20px 0;
           }
-          
-          .stat-card {
+          .info-card {
             background: #f9fafb;
             padding: 15px;
             border-radius: 8px;
-            text-align: center;
-            border-left: 4px solid #e5e7eb;
+            border-left: 4px solid #3b82f6;
           }
-          
-          .stat-card.available { border-left-color: #10b981; }
-          .stat-card.occupied { border-left-color: #f59e0b; }
-          .stat-card.maintenance { border-left-color: #ef4444; }
-          .stat-card.absent { border-left-color: #f97316; }
-          .stat-card.idle { border-left-color: #3b82f6; }
-          
-          .stat-number {
-            font-size: 18px;
+          .info-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            color: #1f2937;
             font-weight: bold;
-            margin-bottom: 5px;
           }
-          
-          .stat-label {
-            font-size: 10px;
-            color: #6b7280;
-            text-transform: uppercase;
+          .info-card p {
+            margin: 5px 0;
+            font-size: 11px;
+            color: #4b5563;
           }
-          
-          .table-container {
-            margin-top: 20px;
-          }
-          
+          .label { font-weight: bold; color: #1f2937; }
           table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 10px;
+            margin: 20px 0;
           }
-          
           th, td {
             border: 1px solid #e5e7eb;
-            padding: 8px;
+            padding: 10px;
             text-align: left;
-            font-size: 10px;
+            font-size: 11px;
           }
-          
           th {
-            background-color: #f9fafb;
+            background-color: #f3f4f6;
             font-weight: bold;
             color: #374151;
           }
-          
-          .task-column {
-            width: 150px;
-            background-color: #fef9e7;
-          }
-          
-          .time-column {
-            width: 80px;
-            background-color: #fef9e7;
-          }
-          
-          .responsible-column {
-            width: 100px;
-            background-color: #fef9e7;
-          }
-          
-          .observations-column {
-            width: 120px;
-            background-color: #fef9e7;
-          }
-          
-          .status-badge {
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 9px;
+          .section-title {
+            font-size: 14px;
             font-weight: bold;
+            color: #1f2937;
+            margin: 30px 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e5e7eb;
           }
-          
-          .status-disponivel { background-color: #d1fae5; color: #065f46; }
-          .status-ocupado { background-color: #fef3c7; color: #92400e; }
-          .status-manutencao { background-color: #fee2e2; color: #991b1b; }
-          .status-ausente { background-color: #fed7aa; color: #9a3412; }
-          .status-ferias { background-color: #dbeafe; color: #1e40af; }
-          .status-inativo { background-color: #f3f4f6; color: #374151; }
-          
+          .approval-section {
+            margin-top: 60px;
+            padding: 20px;
+            background: #f0fdf4;
+            border: 2px solid #10b981;
+            border-radius: 8px;
+          }
+          .signature-box {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #374151;
+          }
+          .signature-box p {
+            margin: 5px 0;
+            font-size: 11px;
+            text-align: center;
+          }
           .footer {
             margin-top: 40px;
             text-align: center;
@@ -663,49 +627,16 @@ export default function CompanyPage() {
             border-top: 1px solid #e5e7eb;
             padding-top: 20px;
           }
-          
-          .instructions {
-            background-color: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-          }
-          
-          .instructions h3 {
-            margin: 0 0 10px 0;
-            font-size: 12px;
-            color: #1e40af;
-          }
-          
-          .instructions ul {
-            margin: 0;
-            padding-left: 20px;
-            font-size: 10px;
-            color: #1e40af;
-          }
-          
-          .instructions li {
-            margin-bottom: 5px;
-          }
-          
-          @media print {
-            body { margin: 0; }
-            .header { margin-bottom: 20px; }
-          }
         </style>
       </head>
       <body>
-        <!-- Cabeçalho da Empresa -->
         <div class="header">
           <div class="company-info">
             <div class="company-name">${companyData?.nomeFantasia || 'Nome da Empresa'}</div>
             <div class="company-details">
               ${companyData?.cnpj ? `CNPJ: ${companyData.cnpj}<br>` : ''}
-              ${companyData?.inscricaoEstadual ? `I.E.: ${companyData.inscricaoEstadual}<br>` : ''}
               ${companyData?.email ? `E-mail: ${companyData.email}<br>` : ''}
-              ${companyData?.celular ? `Telefone: ${companyData.celular}<br>` : ''}
-              ${companyData?.endereco ? `${companyData.endereco}` : ''}
+              ${companyData?.celular ? `Telefone: ${companyData.celular}` : ''}
             </div>
           </div>
           <div class="logo-section">
@@ -716,132 +647,107 @@ export default function CompanyPage() {
           </div>
         </div>
         
-        <!-- Título do Relatório -->
         <div class="report-title">
-          <h1>Lista de Recursos Produtivos - Tarefas Diárias</h1>
-          <div class="report-date">Gerado em: ${new Date().toLocaleDateString('pt-BR', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          })}</div>
+          <h1>🕐 AUTORIZAÇÃO DE HORAS EXTRAS</h1>
+          <div style="font-size: 12px; color: #92400e; font-weight: bold;">Documento Oficial de Liberação</div>
         </div>
         
-        <!-- Dashboard de Estatísticas -->
-        <div class="stats-grid">
-          <div class="stat-card available">
-            <div class="stat-number" style="color: #10b981;">${stats.available}</div>
-            <div class="stat-label">Disponíveis</div>
+        <div class="info-grid">
+          <div class="info-card">
+            <h3>📋 Informações da Ordem de Serviço</h3>
+            <p><span class="label">Número da OS:</span> ${os?.numeroOS || 'N/A'}</p>
+            <p><span class="label">Cliente:</span> ${os?.nomeCliente || 'N/A'}</p>
           </div>
-          <div class="stat-card occupied">
-            <div class="stat-number" style="color: #f59e0b;">${stats.occupied}</div>
-            <div class="stat-label">Ocupados</div>
-          </div>
-          <div class="stat-card maintenance">
-            <div class="stat-number" style="color: #ef4444;">${stats.maintenance}</div>
-            <div class="stat-label">Manutenção</div>
-          </div>
-          <div class="stat-card absent">
-            <div class="stat-number" style="color: #f97316;">${stats.absent + stats.vacation}</div>
-            <div class="stat-label">Ausentes/Férias</div>
-          </div>
-          <div class="stat-card idle">
-            <div class="stat-number" style="color: #3b82f6;">${Math.round(stats.idleRate)}%</div>
-            <div class="stat-label">Taxa Ociosidade</div>
+          
+          <div class="info-card" style="border-left-color: #f59e0b;">
+            <h3>📅 Informações de Data e Horário</h3>
+            <p><span class="label">Data:</span> ${new Date(overtime.date).toLocaleDateString('pt-BR')}</p>
+            <p><span class="label">Entrada:</span> ${overtime.startTime}</p>
+            <p><span class="label">Saída:</span> ${overtime.endTime}</p>
+            <p><span class="label">Total:</span> <strong>${hours} horas</strong></p>
           </div>
         </div>
         
-        <!-- Instruções -->
-        <div class="instructions">
-          <h3>📋 Instruções para Preenchimento</h3>
-          <ul>
-            <li><strong>Tarefa Diária:</strong> Descreva a atividade específica planejada para cada recurso</li>
-            <li><strong>Horários:</strong> Defina início e término das atividades</li>
-            <li><strong>Responsável:</strong> Indique quem será responsável pela execução</li>
-            <li><strong>Observações:</strong> Anote informações relevantes, impedimentos ou observações</li>
-          </ul>
-        </div>
-        
-        <!-- Tabela de Recursos -->
-        <div class="table-container">
-          <table>
-            <thead>
+        <h2 class="section-title">👷 Recursos Alocados (${selectedResourcesList.length})</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Nome</th>
+              <th>Tipo</th>
+              <th>Capacidade</th>
+              <th>Localização</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${selectedResourcesList.map(r => `
               <tr>
-                <th style="width: 120px;">Recurso</th>
-                <th style="width: 80px;">Tipo</th>
-                <th style="width: 60px;">Status</th>
-                <th style="width: 40px;">Cap.</th>
-                <th style="width: 80px;">Localização</th>
-                <th class="task-column">Tarefa Diária Planejada</th>
-                <th class="time-column">Início</th>
-                <th class="time-column">Término</th>
-                <th class="responsible-column">Responsável</th>
-                <th class="observations-column">Observações</th>
+                <td><strong>${r.name}</strong></td>
+                <td>${r.type === 'mao_de_obra' ? 'Mão de Obra' : r.type}</td>
+                <td>${r.capacity}</td>
+                <td>${r.location || '-'}</td>
               </tr>
-            </thead>
-            <tbody>
-              ${resources.map(resource => `
-                <tr>
-                  <td style="font-weight: bold;">${resource.name}</td>
-                  <td>${resource.type === 'mao_de_obra' ? 'Mão de Obra' : 
-                       resource.type.charAt(0).toUpperCase() + resource.type.slice(1)}</td>
-                  <td>
-                    <span class="status-badge status-${resource.status}">
-                      ${resource.status === 'disponivel' ? 'Disponível' :
-                        resource.status === 'ocupado' ? 'Ocupado' :
-                        resource.status === 'manutencao' ? 'Manutenção' :
-                        resource.status === 'ausente' ? 'Ausente' :
-                        resource.status === 'ferias' ? 'Férias' :
-                        resource.status === 'inativo' ? 'Inativo' : resource.status}
-                    </span>
-                  </td>
-                  <td style="text-align: center;">${resource.capacity}</td>
-                  <td>${resource.location || '-'}</td>
-                  <td class="task-column" style="border-right: 2px solid #fbbf24;"></td>
-                  <td class="time-column"></td>
-                  <td class="time-column"></td>
-                  <td class="responsible-column"></td>
-                  <td class="observations-column"></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+            `).join('')}
+          </tbody>
+        </table>
+        
+        <h2 class="section-title">👥 Líderes Responsáveis (${selectedLeadersList.length})</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Nome</th>
+              <th>Cargo</th>
+              <th>E-mail</th>
+              <th>Telefone</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${selectedLeadersList.map(l => `
+              <tr>
+                <td><strong>${l.name}</strong></td>
+                <td>${l.position}</td>
+                <td>${l.email}</td>
+                <td>${l.phone}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        
+        ${overtime.observations ? `
+          <h2 class="section-title">📝 Observações</h2>
+          <div class="info-card">
+            <p>${overtime.observations}</p>
+          </div>
+        ` : ''}
+        
+        <div class="approval-section">
+          <h3 style="margin: 0 0 20px 0; font-size: 14px; color: #065f46; font-weight: bold;">✅ APROVAÇÃO DO GERENTE</h3>
+          <p style="margin: 0 0 10px 0; font-size: 11px;">
+            Eu, na qualidade de gestor responsável, <strong>AUTORIZO</strong> a realização das horas extras descritas neste documento.
+          </p>
+          <div class="signature-box">
+            <p>_______________________________________</p>
+            <p><strong>Assinatura do Gerente Responsável</strong></p>
+            <p>Nome: _________________________________</p>
+            <p>Data: _____ / _____ / _________</p>
+          </div>
         </div>
         
-        <!-- Rodapé -->
         <div class="footer">
-          <p>Este documento foi gerado automaticamente pelo sistema de gestão de recursos produtivos.</p>
-          <p>Para dúvidas ou sugestões, entre em contato: ${companyData?.email || 'contato@empresa.com'}</p>
+          <p><strong>Gerado em ${new Date().toLocaleString('pt-BR')}</strong></p>
+          <p>Para dúvidas: ${companyData?.email || 'contato@empresa.com'}</p>
         </div>
       </body>
       </html>
     `;
 
-    // Criar e abrir nova janela para impressão/PDF
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(htmlContent);
       printWindow.document.close();
-      
-      // Aguardar carregamento e imprimir
       printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-        }, 500);
+        setTimeout(() => printWindow.print(), 500);
       };
-      
-      toast({
-        title: "PDF sendo gerado!",
-        description: "Uma nova janela foi aberta para geração do PDF. Use Ctrl+P ou Cmd+P para salvar.",
-      });
-    } else {
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar PDF",
-        description: "Não foi possível abrir a janela de impressão. Verifique se pop-ups estão habilitados.",
-      });
+      toast({ title: "PDF sendo gerado!", description: "Uma nova janela foi aberta para geração do PDF." });
     }
   };
 
@@ -940,6 +846,38 @@ export default function CompanyPage() {
     }
   };
 
+  const onOvertimeSubmit = async (values: OvertimeRelease) => {
+    const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
+    const overtimeData = { 
+      ...values, 
+      resources: selectedResources,
+      teamLeaders: selectedLeaders,
+      createdAt: new Date(),
+      updatedAt: new Date() 
+    };
+
+    try {
+        if (selectedOvertime) {
+            const updatedReleases = overtimeReleases.map(o => o.id === selectedOvertime.id ? overtimeData : o);
+            await updateDoc(overtimeRef, { releases: updatedReleases });
+            toast({ title: "Liberação atualizada!", description: "Os dados da liberação de horas extras foram atualizados." });
+        } else {
+            const newRelease = { ...overtimeData, id: Date.now().toString() };
+            await updateDoc(overtimeRef, { releases: arrayUnion(newRelease) });
+            toast({ title: "Liberação criada!", description: "Nova liberação de horas extras criada com sucesso." });
+        }
+        overtimeForm.reset();
+        setIsOvertimeFormOpen(false);
+        setSelectedOvertime(null);
+        setSelectedResources([]);
+        setSelectedLeaders([]);
+        await fetchOvertimeData();
+    } catch (error) {
+        console.error("Error saving overtime:", error);
+        toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar a liberação de horas extras." });
+    }
+  };
+
   // Handlers de ações
   const handleAddMemberClick = () => {
     setSelectedMember(null);
@@ -1022,6 +960,75 @@ export default function CompanyPage() {
     } catch (error) {
         console.error("Error deleting resource:", error);
         toast({ variant: "destructive", title: "Erro ao remover", description: "Não foi possível remover o recurso." });
+    }
+  };
+
+  const handleAddOvertimeClick = () => {
+    setSelectedOvertime(null);
+    setSelectedResources([]);
+    setSelectedLeaders([]);
+    overtimeForm.reset({ 
+        id: "", 
+        osNumber: "", 
+        date: "", 
+        startTime: "", 
+        endTime: "", 
+        resources: [],
+        teamLeaders: [],
+        observations: "",
+        status: "pendente"
+    });
+    setIsOvertimeFormOpen(true);
+  };
+
+  const handleEditOvertimeClick = (overtime: OvertimeRelease) => {
+    setSelectedOvertime(overtime);
+    setSelectedResources(overtime.resources);
+    setSelectedLeaders(overtime.teamLeaders);
+    overtimeForm.reset(overtime);
+    setIsOvertimeFormOpen(true);
+  };
+
+  const handleDeleteOvertimeClick = (overtime: OvertimeRelease) => {
+    setOvertimeToDelete(overtime);
+    setIsOvertimeDeleteAlertOpen(true);
+  };
+
+  const handleApproveOvertime = async (overtime: OvertimeRelease) => {
+    const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
+    try {
+        const updatedRelease = { 
+          ...overtime, 
+          status: "aprovado" as const,
+          approvedBy: user?.email || "Gerente",
+          approvedAt: new Date(),
+          updatedAt: new Date()
+        };
+        const updatedReleases = overtimeReleases.map(o => o.id === overtime.id ? updatedRelease : o);
+        await updateDoc(overtimeRef, { releases: updatedReleases });
+        toast({ title: "Liberação aprovada!", description: "A liberação de horas extras foi aprovada com sucesso." });
+        await fetchOvertimeData();
+    } catch (error) {
+        console.error("Error approving overtime:", error);
+        toast({ variant: "destructive", title: "Erro ao aprovar", description: "Não foi possível aprovar a liberação." });
+    }
+  };
+
+  const handleConfirmDeleteOvertime = async () => {
+    if (!overtimeToDelete) return;
+    const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
+    try {
+        const overtimeToRemove = overtimeReleases.find(o => o.id === overtimeToDelete.id);
+        if (overtimeToRemove) {
+            await updateDoc(overtimeRef, { releases: arrayRemove(overtimeToRemove) });
+            toast({ title: "Liberação removida!", description: "A liberação de horas extras foi removida." });
+        }
+        setOvertimeToDelete(null);
+        setIsOvertimeDeleteAlertOpen(false);
+        await fetchOvertimeData();
+    } catch (error) {
+        console.error("Error deleting overtime:", error);
+        toast({ variant: "destructive", title: "Erro ao remover", description: "Não foi possível remover a liberação." });
     }
   };
 
@@ -1559,6 +1566,163 @@ export default function CompanyPage() {
               </Card>
             </div>
           </TabsContent>
+
+          {/* ABA HORAS EXTRAS - NOVA */}
+          <TabsContent value="overtime">
+            <div className="space-y-6">
+              {/* Cards de Resumo */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Total de Liberações</CardTitle>
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{overtimeReleases.length}</div>
+                    <p className="text-xs text-muted-foreground">liberações cadastradas</p>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Pendentes de Aprovação</CardTitle>
+                    <AlertCircle className="h-4 w-4 text-yellow-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-yellow-600">
+                      {overtimeReleases.filter(o => o.status === 'pendente').length}
+                    </div>
+                    <p className="text-xs text-muted-foreground">aguardando aprovação</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Aprovadas</CardTitle>
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-green-600">
+                      {overtimeReleases.filter(o => o.status === 'aprovado').length}
+                    </div>
+                    <p className="text-xs text-muted-foreground">liberações aprovadas</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Tabela de Liberações */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Liberações de Horas Extras</CardTitle>
+                    <CardDescription>Gerencie as autorizações de horas extras da sua equipe.</CardDescription>
+                  </div>
+                  <Button onClick={handleAddOvertimeClick}>
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Nova Liberação
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {isOvertimeLoading ? (
+                    <div className="space-y-4">
+                      <Skeleton className="h-10 w-full" />
+                      <Skeleton className="h-10 w-full" />
+                      <Skeleton className="h-10 w-full" />
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>OS</TableHead>
+                          <TableHead>Data</TableHead>
+                          <TableHead>Horário</TableHead>
+                          <TableHead>Horas</TableHead>
+                          <TableHead>Recursos</TableHead>
+                          <TableHead>Líderes</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Ações</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {overtimeReleases.length > 0 ? (
+                          overtimeReleases.map((overtime) => {
+                            const os = orderServices.find(o => o.id === overtime.osNumber);
+                            const hours = calculateOvertimeHours(overtime.startTime, overtime.endTime);
+                            return (
+                              <TableRow key={overtime.id}>
+                                <TableCell className="font-medium">
+                                  {os?.numeroOS || 'N/A'}
+                                  <div className="text-xs text-muted-foreground">{os?.nomeCliente}</div>
+                                </TableCell>
+                                <TableCell>{new Date(overtime.date).toLocaleDateString('pt-BR')}</TableCell>
+                                <TableCell>
+                                  <div className="text-xs">
+                                    <div>{overtime.startTime} - {overtime.endTime}</div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-bold">{hours}h</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">{overtime.resources.length} recursos</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">{overtime.teamLeaders.length} líderes</Badge>
+                                </TableCell>
+                                <TableCell>{getOvertimeStatusBadge(overtime.status)}</TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    {overtime.status === 'pendente' && (
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="text-green-600 hover:text-green-700"
+                                        onClick={() => handleApproveOvertime(overtime)}
+                                        title="Aprovar"
+                                      >
+                                        <CheckCircle className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                    <Button 
+                                      variant="ghost" 
+                                      size="icon"
+                                      onClick={() => exportOvertimeToPDF(overtime)}
+                                      title="Exportar PDF"
+                                    >
+                                      <FileText className="h-4 w-4" />
+                                    </Button>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="icon" 
+                                      onClick={() => handleEditOvertimeClick(overtime)}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="icon" 
+                                      className="text-destructive hover:text-destructive" 
+                                      onClick={() => handleDeleteOvertimeClick(overtime)}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={8} className="text-center h-24">
+                              Nenhuma liberação de horas extras cadastrada.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -1851,6 +2015,227 @@ export default function CompanyPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmDeleteResource} className="bg-destructive hover:bg-destructive/90">
+              Sim, excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dialog para Horas Extras */}
+      <Dialog open={isOvertimeFormOpen} onOpenChange={setIsOvertimeFormOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedOvertime ? "Editar Liberação de Horas Extras" : "Nova Liberação de Horas Extras"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedOvertime 
+                ? "Atualize os dados da liberação de horas extras." 
+                : "Preencha as informações para criar uma nova liberação de horas extras."}
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...overtimeForm}>
+            <form onSubmit={overtimeForm.handleSubmit(onOvertimeSubmit)} className="space-y-6">
+              {/* Informações Básicas */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField 
+                  control={overtimeForm.control} 
+                  name="osNumber" 
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Ordem de Serviço</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione uma OS" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {orderServices.map((os) => (
+                            <SelectItem key={os.id} value={os.id}>
+                              {os.numeroOS} - {os.nomeCliente}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} 
+                />
+                
+                <FormField 
+                  control={overtimeForm.control} 
+                  name="date" 
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Data</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} 
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField 
+                  control={overtimeForm.control} 
+                  name="startTime" 
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Horário de Entrada</FormLabel>
+                      <FormControl>
+                        <Input type="time" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} 
+                />
+                
+                <FormField 
+                  control={overtimeForm.control} 
+                  name="endTime" 
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Horário de Saída</FormLabel>
+                      <FormControl>
+                        <Input type="time" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} 
+                />
+              </div>
+
+              {/* Seleção de Recursos */}
+              <div className="space-y-3">
+                <FormLabel>Recursos Alocados *</FormLabel>
+                <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
+                  {resources.filter(r => r.type === 'mao_de_obra').length > 0 ? (
+                    resources.filter(r => r.type === 'mao_de_obra').map((resource) => (
+                      <div key={resource.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`resource-${resource.id}`}
+                          checked={selectedResources.includes(resource.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedResources([...selectedResources, resource.id]);
+                            } else {
+                              setSelectedResources(selectedResources.filter(id => id !== resource.id));
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`resource-${resource.id}`}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                        >
+                          {resource.name}
+                          <span className="text-xs text-muted-foreground ml-2">
+                            ({resource.status})
+                          </span>
+                        </label>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Nenhum recurso de mão de obra disponível.</p>
+                  )}
+                </div>
+                {selectedResources.length === 0 && (
+                  <p className="text-sm text-destructive">Selecione pelo menos um recurso.</p>
+                )}
+              </div>
+
+              {/* Seleção de Líderes */}
+              <div className="space-y-3">
+                <FormLabel>Líderes Responsáveis *</FormLabel>
+                <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
+                  {teamMembers.length > 0 ? (
+                    teamMembers.map((member) => (
+                      <div key={member.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`leader-${member.id}`}
+                          checked={selectedLeaders.includes(member.id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedLeaders([...selectedLeaders, member.id]);
+                            } else {
+                              setSelectedLeaders(selectedLeaders.filter(id => id !== member.id));
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor={`leader-${member.id}`}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                        >
+                          {member.name}
+                          <span className="text-xs text-muted-foreground ml-2">
+                            ({member.position})
+                          </span>
+                        </label>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Nenhum membro da equipe disponível.</p>
+                  )}
+                </div>
+                {selectedLeaders.length === 0 && (
+                  <p className="text-sm text-destructive">Selecione pelo menos um líder.</p>
+                )}
+              </div>
+
+              {/* Observações */}
+              <FormField 
+                control={overtimeForm.control} 
+                name="observations" 
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Observações (Opcional)</FormLabel>
+                    <FormControl>
+                      <Textarea 
+                        placeholder="Informações adicionais sobre a liberação de horas extras..."
+                        className="min-h-[100px]"
+                        {...field} 
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} 
+              />
+
+              <DialogFooter>
+                <Button 
+                  type="submit" 
+                  disabled={overtimeForm.formState.isSubmitting || selectedResources.length === 0 || selectedLeaders.length === 0}
+                >
+                  {overtimeForm.formState.isSubmitting ? "Salvando..." : "Salvar Liberação"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Alert Dialog para Exclusão de Horas Extras */}
+      <AlertDialog open={isOvertimeDeleteAlertOpen} onOpenChange={setIsOvertimeDeleteAlertOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Isso excluirá permanentemente a liberação de horas extras 
+              {overtimeToDelete && (
+                <span className="font-bold">
+                  {' '}da OS {orderServices.find(o => o.id === overtimeToDelete.osNumber)?.numeroOS}
+                </span>
+              )}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDeleteOvertime} 
+              className="bg-destructive hover:bg-destructive/90"
+            >
               Sim, excluir
             </AlertDialogAction>
           </AlertDialogFooter>
