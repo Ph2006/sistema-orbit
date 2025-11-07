@@ -3569,6 +3569,350 @@ export default function OrdersPage() {
         }
     };
 
+    const handleGenerateMonthlyReport = async () => {
+        if (monthFilter === 'all') {
+            toast({
+                variant: "destructive",
+                title: "Selecione um mês",
+                description: "Por favor, selecione um mês específico para gerar o relatório.",
+            });
+            return;
+        }
+
+        if (!monthWeightStats || monthWeightStats.totalOrders === 0) {
+            toast({
+                variant: "destructive",
+                title: "Nenhum dado para exportar",
+                description: "Não há pedidos para o mês selecionado.",
+            });
+            return;
+        }
+
+        toast({ title: "Gerando Relatório Mensal...", description: "Por favor, aguarde." });
+
+        try {
+            // Buscar dados da empresa
+            let companyData: CompanyData = {};
+            try {
+                const companyRef = doc(db, "companies", "mecald", "settings", "company");
+                const docSnap = await getDoc(companyRef);
+                companyData = docSnap.exists() ? (docSnap.data() as CompanyData) : {};
+            } catch (error) {
+                console.warn("Não foi possível carregar dados da empresa:", error);
+            }
+
+            // Criar o PDF
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let yPos = 15;
+
+            // Header com logo e dados da empresa
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.warn("Erro ao adicionar logo:", e);
+                }
+            }
+
+            let textX = 65;
+            let textY = yPos;
+            docPdf.setFontSize(18).setFont('helvetica', 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+            textY += 6;
+            
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+                docPdf.text(addressLines, textX, textY);
+                textY += addressLines.length * 4;
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+                textY += 4;
+            }
+            if (companyData.email) {
+                docPdf.text(`Email: ${companyData.email}`, textX, textY);
+                textY += 4;
+            }
+            if (companyData.celular) {
+                docPdf.text(`Telefone: ${companyData.celular}`, textX, textY);
+            }
+
+            yPos = 55;
+
+            // Título do documento
+            const selectedMonth = availableMonths.find(m => m.value === monthFilter);
+            const monthName = selectedMonth ? selectedMonth.label : monthFilter;
+            
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text('RELATÓRIO MENSAL DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 8;
+            
+            docPdf.setFontSize(14).setFont('helvetica', 'normal');
+            docPdf.setTextColor(37, 99, 235);
+            docPdf.text(monthName.toUpperCase(), pageWidth / 2, yPos, { align: 'center' });
+            docPdf.setTextColor(0, 0, 0);
+            yPos += 15;
+
+            const monthOrders = filteredOrders.filter(order => {
+                if (!order.deliveryDate) return false;
+                const orderMonth = format(order.deliveryDate, 'yyyy-MM');
+                return orderMonth === monthFilter;
+            });
+
+            // Box com resumo executivo
+            const boxX = 15;
+            const boxWidth = pageWidth - 30;
+            const boxHeight = 35;
+            
+            docPdf.setFillColor(240, 248, 255);
+            docPdf.rect(boxX, yPos, boxWidth, boxHeight, 'F');
+            docPdf.setDrawColor(37, 99, 235);
+            docPdf.setLineWidth(0.5);
+            docPdf.rect(boxX, yPos, boxWidth, boxHeight, 'S');
+            
+            yPos += 8;
+            docPdf.setFontSize(11).setFont('helvetica', 'bold');
+            docPdf.text('RESUMO EXECUTIVO', boxX + 5, yPos);
+            yPos += 8;
+            
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            
+            const col1X = boxX + 5;
+            const col2X = boxX + boxWidth / 2;
+            
+            docPdf.text(`Total de Pedidos: ${monthWeightStats.totalOrders}`, col1X, yPos);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, col2X, yPos);
+            yPos += 5;
+            
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text(`Peso Total: ${monthWeightStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col1X, yPos);
+            docPdf.setFont('helvetica', 'normal');
+            yPos += 5;
+            
+            docPdf.setTextColor(21, 128, 61);
+            docPdf.text(`✓ Concluído: ${monthWeightStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col1X, yPos);
+            docPdf.setTextColor(234, 88, 12);
+            docPdf.text(`⧗ Pendente: ${monthWeightStats.pendingWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col2X, yPos);
+            docPdf.setTextColor(0, 0, 0);
+            yPos += 5;
+            
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text(`Taxa de Conclusão: ${monthWeightStats.completedPercentage.toFixed(1)}%`, col1X, yPos);
+            docPdf.setFont('helvetica', 'normal');
+            
+            yPos += 20;
+
+            // Agrupamento por status
+            const ordersByStatus = {
+                'Concluído': monthOrders.filter(o => o.status === 'Concluído'),
+                'Em Produção': monthOrders.filter(o => o.status === 'Em Produção'),
+                'Aguardando Produção': monthOrders.filter(o => o.status === 'Aguardando Produção'),
+                'Pronto para Entrega': monthOrders.filter(o => o.status === 'Pronto para Entrega'),
+                'Atrasado': monthOrders.filter(o => o.status === 'Atrasado'),
+            } as const;
+
+            // Estatísticas por status
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('DISTRIBUIÇÃO POR STATUS', 15, yPos);
+            yPos += 10;
+
+            const totalWeight = monthWeightStats.totalWeight || 0;
+            const statusData = Object.entries(ordersByStatus)
+                .filter(([_, orders]) => orders.length > 0)
+                .map(([status, orders]) => {
+                    const weight = orders.reduce((acc, o) => acc + (o.totalWeight || 0), 0);
+                    const percentage = totalWeight > 0 ? ((weight / totalWeight) * 100).toFixed(1) : '0.0';
+                    return [
+                        status,
+                        orders.length.toString(),
+                        `${weight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
+                        `${percentage}%`
+                    ];
+                });
+
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Status', 'Qtd. Pedidos', 'Peso Total', '% do Total']],
+                body: statusData,
+                styles: { fontSize: 9, cellPadding: 3 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 10, fontStyle: 'bold' },
+                columnStyles: {
+                    0: { cellWidth: 60 },
+                    1: { cellWidth: 35, halign: 'center' },
+                    2: { cellWidth: 45, halign: 'right' },
+                    3: { cellWidth: 35, halign: 'center' },
+                },
+                margin: { left: 15, right: 15 }
+            });
+
+            yPos = (docPdf as any).lastAutoTable.finalY + 15;
+
+            if (yPos + 60 > pageHeight - 20) {
+                docPdf.addPage();
+                yPos = 20;
+            }
+
+            // Tabela detalhada dos pedidos
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('DETALHAMENTO DOS PEDIDOS', 15, yPos);
+            yPos += 10;
+
+            const tableBody = monthOrders.map(order => (
+                [
+                    order.quotationNumber || 'N/A',
+                    order.customer?.name || 'N/A',
+                    order.projectName || '-',
+                    order.deliveryDate ? format(order.deliveryDate, 'dd/MM/yy') : 'A definir',
+                    order.items.length.toString(),
+                    (order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                    order.status
+                ]
+            ));
+
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Pedido', 'Cliente', 'Projeto', 'Entrega', 'Itens', 'Peso (kg)', 'Status']],
+                body: tableBody,
+                styles: { fontSize: 7, cellPadding: 2 },
+                headStyles: { 
+                    fillColor: [37, 99, 235], 
+                    fontSize: 8, 
+                    fontStyle: 'bold',
+                    halign: 'center'
+                },
+                columnStyles: {
+                    0: { cellWidth: 22, halign: 'center' },
+                    1: { cellWidth: 40 },
+                    2: { cellWidth: 35 },
+                    3: { cellWidth: 20, halign: 'center' },
+                    4: { cellWidth: 15, halign: 'center' },
+                    5: { cellWidth: 25, halign: 'right' },
+                    6: { cellWidth: 28, halign: 'center' },
+                },
+                margin: { left: 15, right: 15 },
+                didParseCell: (data) => {
+                    if (data.column.index === 6 && data.section === 'body') {
+                        const status = data.cell.raw as string;
+                        if (status === 'Concluído') {
+                            data.cell.styles.fillColor = [220, 252, 231];
+                            data.cell.styles.textColor = [21, 128, 61];
+                            data.cell.styles.fontStyle = 'bold';
+                        } else if (status === 'Em Produção') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                            data.cell.styles.textColor = [37, 99, 235];
+                        } else if (status === 'Atrasado') {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                            data.cell.styles.textColor = [185, 28, 28];
+                            data.cell.styles.fontStyle = 'bold';
+                        } else if (status === 'Pronto para Entrega') {
+                            data.cell.styles.fillColor = [187, 247, 208];
+                            data.cell.styles.textColor = [22, 101, 52];
+                        }
+                    }
+                }
+            });
+
+            const finalY = (docPdf as any).lastAutoTable.finalY + 10;
+
+            if (finalY + 60 > pageHeight - 20) {
+                docPdf.addPage();
+                yPos = 20;
+            } else {
+                yPos = finalY + 5;
+            }
+
+            // Análise por cliente
+            const ordersByCustomer = new Map<string, { orders: Order[]; totalWeight: number }>();
+            monthOrders.forEach(order => {
+                const customerName = order.customer?.name || 'Não informado';
+                if (!ordersByCustomer.has(customerName)) {
+                    ordersByCustomer.set(customerName, { orders: [], totalWeight: 0 });
+                }
+                const customerData = ordersByCustomer.get(customerName)!;
+                customerData.orders.push(order);
+                customerData.totalWeight += order.totalWeight || 0;
+            });
+
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('ANÁLISE POR CLIENTE', 15, yPos);
+            yPos += 10;
+
+            const customerData = Array.from(ordersByCustomer.entries())
+                .sort((a, b) => b[1].totalWeight - a[1].totalWeight)
+                .map(([customer, data]) => {
+                    const percentage = totalWeight > 0 ? ((data.totalWeight / totalWeight) * 100).toFixed(1) : '0.0';
+                    return [
+                        customer,
+                        data.orders.length.toString(),
+                        `${data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
+                        `${percentage}%`
+                    ];
+                });
+
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Cliente', 'Qtd. Pedidos', 'Peso Total', '% do Total']],
+                body: customerData,
+                styles: { fontSize: 9, cellPadding: 3 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 10, fontStyle: 'bold' },
+                columnStyles: {
+                    0: { cellWidth: 80 },
+                    1: { cellWidth: 35, halign: 'center' },
+                    2: { cellWidth: 45, halign: 'right' },
+                    3: { cellWidth: 25, halign: 'center' },
+                },
+                margin: { left: 15, right: 15 }
+            });
+
+            const finalTableY = (docPdf as any).lastAutoTable.finalY + 10;
+            
+            if (finalTableY + 20 < pageHeight - 20) {
+                docPdf.setFontSize(8).setFont('helvetica', 'italic');
+                docPdf.setTextColor(100, 100, 100);
+                docPdf.text(
+                    `Relatório gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    finalTableY,
+                    { align: 'center' }
+                );
+                
+                docPdf.text(
+                    `Total de ${monthWeightStats.totalOrders} pedido(s) | ${monthWeightStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
+                    pageWidth / 2,
+                    finalTableY + 5,
+                    { align: 'center' }
+                );
+            }
+
+            const [year, month] = monthFilter.split('-');
+            const monthNames = [
+                'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+            ];
+            const monthNameFile = monthNames[parseInt(month, 10) - 1] || month;
+            const timestamp = format(new Date(), 'yyyyMMdd_HHmm');
+            const filename = `Relatorio_Mensal_${monthNameFile}_${year}_${timestamp}.pdf`;
+            
+            docPdf.save(filename);
+            
+            toast({
+                title: "✅ Relatório Gerado com Sucesso!",
+                description: `O arquivo "${filename}" foi baixado com todas as estatísticas do mês.`,
+            });
+
+        } catch (error) {
+            console.error("Erro completo ao gerar relatório mensal:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao Gerar Relatório",
+                description: `Falha na geração: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            });
+        }
+    };
+
     // FUNÇÃO AUXILIAR MELHORADA para debug
     const logProgressState = (context: string, plan: ProductionStage[]) => {
         console.log(`📊 ${context}:`, plan.map(stage => ({
@@ -4528,6 +4872,16 @@ return (
                                 Limpar Filtros
                             </Button>
                         )}
+
+                        {monthFilter !== 'all' && monthWeightStats && (
+                            <Button 
+                                onClick={handleGenerateMonthlyReport}
+                                className="ml-auto bg-green-600 hover:bg-green-700 text-white"
+                            >
+                                <FileText className="mr-2 h-4 w-4" />
+                                Exportar Relatório Mensal
+                            </Button>
+                        )}
                     </div>
                     
                     {/* CARD DE ESTATÍSTICAS DO MÊS SELECIONADO */}
@@ -4601,6 +4955,17 @@ return (
                                     </span>
                                 </div>
                                 <Progress value={monthWeightStats.completedPercentage} className="h-3" />
+                            </div>
+
+                            <div className="mt-4 flex justify-center">
+                                <Button 
+                                    onClick={handleGenerateMonthlyReport}
+                                    size="lg"
+                                    className="bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg transition-all duration-200"
+                                >
+                                    <FileText className="mr-2 h-5 w-5" />
+                                    Exportar Relatório Completo do Mês
+                                </Button>
                             </div>
                         </div>
                     )}
