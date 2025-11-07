@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import Image from "next/image";
@@ -68,7 +68,6 @@ const resourceSchema = z.object({
 
 const overtimeSchema = z.object({
     id: z.string(),
-    osNumber: z.string().optional().or(z.literal("")),
     date: z.string().min(1, { message: "A data é obrigatória." }),
     startTime: z.string().min(1, { message: "O horário de entrada é obrigatório." }),
     endTime: z.string().min(1, { message: "O horário de saída é obrigatório." }),
@@ -87,13 +86,6 @@ type CompanyData = z.infer<typeof companySchema> & { logo?: { preview?: string }
 type TeamMember = z.infer<typeof teamMemberSchema>;
 type Resource = z.infer<typeof resourceSchema>;
 type OvertimeRelease = z.infer<typeof overtimeSchema>;
-
-interface OrderService {
-  id: string;
-  numeroOS: string;
-  nomeCliente: string;
-  status?: string;
-}
 
 export default function CompanyPage() {
   // Estados gerais
@@ -125,7 +117,6 @@ export default function CompanyPage() {
   const [isOvertimeDeleteAlertOpen, setIsOvertimeDeleteAlertOpen] = useState(false);
   const [selectedOvertime, setSelectedOvertime] = useState<OvertimeRelease | null>(null);
   const [overtimeToDelete, setOvertimeToDelete] = useState<OvertimeRelease | null>(null);
-  const [orderServices, setOrderServices] = useState<OrderService[]>([]);
   const [selectedResources, setSelectedResources] = useState<string[]>([]);
   const [selectedLeaders, setSelectedLeaders] = useState<string[]>([]);
 
@@ -180,7 +171,6 @@ export default function CompanyPage() {
     resolver: zodResolver(overtimeSchema),
     defaultValues: {
         id: "",
-        osNumber: "",
         date: "",
         startTime: "",
         endTime: "",
@@ -287,27 +277,6 @@ export default function CompanyPage() {
     }
   };
 
-  const fetchOrderServices = async () => {
-    if (!user) return;
-    try {
-        const osCollection = collection(db, "companies", "mecald", "ordersOfService");
-        const querySnapshot = await getDocs(osCollection);
-        const osList: OrderService[] = [];
-        querySnapshot.forEach((doc) => {
-            const data = doc.data();
-            osList.push({
-                id: doc.id,
-                numeroOS: data.numeroOS || "",
-                nomeCliente: data.nomeCliente || "",
-                status: data.status || "",
-            });
-        });
-        setOrderServices(osList);
-    } catch (error) {
-        console.error("Error fetching order services:", error);
-    }
-  };
-
   // useEffect
   useEffect(() => {
     if (!authLoading && user) {
@@ -315,7 +284,6 @@ export default function CompanyPage() {
       fetchTeamData();
       fetchResourcesData();
       fetchOvertimeData();
-      fetchOrderServices();
     }
   }, [user, authLoading]);
 
@@ -851,7 +819,6 @@ export default function CompanyPage() {
       console.error("Error fetching company data for PDF:", error);
     }
 
-    const os = orderServices.find(o => o.id === overtime.osNumber);
     const selectedResourcesList = resources.filter(r => overtime.resources.includes(r.id));
     const selectedLeadersList = teamMembers.filter(m => overtime.teamLeaders.includes(m.id));
     const hours = calculateOvertimeHours(overtime.startTime, overtime.endTime);
@@ -1012,23 +979,17 @@ export default function CompanyPage() {
         </div>
         
         <div class="info-grid">
-          <div class="info-card">
-            <h3>📋 Informações ${os ? 'da Ordem de Serviço' : 'do Trabalho'}</h3>
-            ${os ? `
-              <p><span class="label">Número da OS:</span> ${os.numeroOS}</p>
-              <p><span class="label">Cliente:</span> ${os.nomeCliente}</p>
-            ` : `
-              <p><span class="label">Referência:</span> Sem OS vinculada</p>
-              <p style="font-size: 10px; color: #6b7280;">Verifique as observações para mais detalhes</p>
-            `}
-          </div>
-          
           <div class="info-card" style="border-left-color: #f59e0b;">
             <h3>📅 Informações de Data e Horário</h3>
             <p><span class="label">Data:</span> ${new Date(overtime.date).toLocaleDateString('pt-BR')}</p>
-            <p><span class="label">Entrada:</span> ${overtime.startTime}</p>
-            <p><span class="label">Saída:</span> ${overtime.endTime}</p>
-            <p><span class="label">Total:</span> <strong>${hours} horas</strong></p>
+            <p><span class="label">Horário de Entrada:</span> ${overtime.startTime}</p>
+            <p><span class="label">Horário de Saída:</span> ${overtime.endTime}</p>
+            <p><span class="label">Total de Horas:</span> <strong>${hours} horas</strong></p>
+          </div>
+
+          <div class="info-card" style="border-left-color: #6b7280;">
+            <h3>📝 Observações</h3>
+            <p style="font-size: 11px;">${overtime.observations || 'Sem observações adicionais'}</p>
           </div>
         </div>
         
@@ -1075,13 +1036,6 @@ export default function CompanyPage() {
             `).join('')}
           </tbody>
         </table>
-        
-        ${overtime.observations ? `
-          <h2 class="section-title">📝 Observações</h2>
-          <div class="info-card">
-            <p>${overtime.observations}</p>
-          </div>
-        ` : ''}
         
         <div class="approval-section">
           <h3 style="margin: 0 0 20px 0; font-size: 14px; color: #065f46; font-weight: bold;">✅ APROVAÇÃO DO GERENTE</h3>
@@ -1215,34 +1169,78 @@ export default function CompanyPage() {
   };
 
   const onOvertimeSubmit = async (values: OvertimeRelease) => {
+    if (selectedResources.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Recursos obrigatórios",
+        description: "Selecione pelo menos um recurso."
+      });
+      return;
+    }
+
+    if (selectedLeaders.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Líderes obrigatórios",
+        description: "Selecione pelo menos um líder."
+      });
+      return;
+    }
+
     const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
-    const overtimeData = { 
-      ...values, 
+    const overtimeData: OvertimeRelease & { createdAt?: Date } = {
+      ...values,
       resources: selectedResources,
       teamLeaders: selectedLeaders,
-      createdAt: new Date(),
-      updatedAt: new Date() 
+      updatedAt: new Date(),
     };
 
     try {
-        if (selectedOvertime) {
-            const updatedReleases = overtimeReleases.map(o => o.id === selectedOvertime.id ? overtimeData : o);
-            await updateDoc(overtimeRef, { releases: updatedReleases });
-            toast({ title: "Liberação atualizada!", description: "Os dados da liberação de horas extras foram atualizados." });
+      if (selectedOvertime) {
+        overtimeData.createdAt = selectedOvertime.createdAt;
+        const updatedReleases = overtimeReleases.map(o =>
+          o.id === selectedOvertime.id ? overtimeData : o
+        );
+        await setDoc(overtimeRef, { releases: updatedReleases }, { merge: true });
+        toast({
+          title: "Liberação atualizada!",
+          description: "Os dados da liberação de horas extras foram atualizados."
+        });
+      } else {
+        const newRelease = {
+          ...overtimeData,
+          id: Date.now().toString(),
+          createdAt: new Date(),
+        };
+
+        const docSnap = await getDoc(overtimeRef);
+        if (!docSnap.exists()) {
+          await setDoc(overtimeRef, { releases: [newRelease] });
         } else {
-            const newRelease = { ...overtimeData, id: Date.now().toString() };
-            await updateDoc(overtimeRef, { releases: arrayUnion(newRelease) });
-            toast({ title: "Liberação criada!", description: "Nova liberação de horas extras criada com sucesso." });
+          await updateDoc(overtimeRef, {
+            releases: arrayUnion(newRelease),
+          });
         }
-        overtimeForm.reset();
-        setIsOvertimeFormOpen(false);
-        setSelectedOvertime(null);
-        setSelectedResources([]);
-        setSelectedLeaders([]);
-        await fetchOvertimeData();
+
+        toast({
+          title: "Liberação criada!",
+          description: "Nova liberação de horas extras criada com sucesso."
+        });
+      }
+
+      overtimeForm.reset();
+      setIsOvertimeFormOpen(false);
+      setSelectedOvertime(null);
+      setSelectedResources([]);
+      setSelectedLeaders([]);
+      await fetchOvertimeData();
     } catch (error) {
-        console.error("Error saving overtime:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar a liberação de horas extras." });
+      console.error("Error saving overtime:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar",
+        description: "Não foi possível salvar a liberação de horas extras."
+      });
     }
   };
 
@@ -1336,8 +1334,7 @@ export default function CompanyPage() {
     setSelectedResources([]);
     setSelectedLeaders([]);
     overtimeForm.reset({ 
-        id: "", 
-        osNumber: "", 
+        id: "",
         date: "", 
         startTime: "", 
         endTime: "", 
@@ -2001,7 +1998,6 @@ export default function CompanyPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>OS</TableHead>
                           <TableHead>Data</TableHead>
                           <TableHead>Horário</TableHead>
                           <TableHead>Horas</TableHead>
@@ -2014,16 +2010,9 @@ export default function CompanyPage() {
                       <TableBody>
                         {overtimeReleases.length > 0 ? (
                           overtimeReleases.map((overtime) => {
-                            const os = orderServices.find(o => o.id === overtime.osNumber);
                             const hours = calculateOvertimeHours(overtime.startTime, overtime.endTime);
                             return (
                               <TableRow key={overtime.id}>
-                                <TableCell className="font-medium">
-                                  {os?.numeroOS || 'Sem OS'}
-                                  <div className="text-xs text-muted-foreground">
-                                    {os?.nomeCliente || 'Informação nas observações'}
-                                  </div>
-                                </TableCell>
                                 <TableCell>{new Date(overtime.date).toLocaleDateString('pt-BR')}</TableCell>
                                 <TableCell>
                                   <div className="text-xs">
@@ -2081,7 +2070,7 @@ export default function CompanyPage() {
                           })
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={8} className="text-center h-24">
+                            <TableCell colSpan={7} className="text-center h-24">
                               Nenhuma liberação de horas extras cadastrada.
                             </TableCell>
                           </TableRow>
@@ -2407,32 +2396,7 @@ export default function CompanyPage() {
           <Form {...overtimeForm}>
             <form onSubmit={overtimeForm.handleSubmit(onOvertimeSubmit)} className="space-y-6">
               {/* Informações Básicas */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField 
-                  control={overtimeForm.control} 
-                  name="osNumber" 
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Ordem de Serviço (Opcional)</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione uma OS ou deixe em branco" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {orderServices.map((os) => (
-                            <SelectItem key={os.id} value={os.id}>
-                              {os.numeroOS} - {os.nomeCliente}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )} 
-                />
-                
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField 
                   control={overtimeForm.control} 
                   name="date" 
@@ -2446,9 +2410,7 @@ export default function CompanyPage() {
                     </FormItem>
                   )} 
                 />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
                 <FormField 
                   control={overtimeForm.control} 
                   name="startTime" 
@@ -2462,7 +2424,7 @@ export default function CompanyPage() {
                     </FormItem>
                   )} 
                 />
-                
+
                 <FormField 
                   control={overtimeForm.control} 
                   name="endTime" 
@@ -2592,12 +2554,7 @@ export default function CompanyPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente a liberação de horas extras 
-              {overtimeToDelete && (
-                <span className="font-bold">
-                  {' '}da OS {orderServices.find(o => o.id === overtimeToDelete.osNumber)?.numeroOS}
-                </span>
-              )}.
+              Esta ação não pode ser desfeita. Isso excluirá permanentemente a liberação de horas extras selecionada.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
