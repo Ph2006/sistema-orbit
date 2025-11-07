@@ -480,6 +480,365 @@ export default function CompanyPage() {
     });
   };
 
+  // Função para exportar recursos em PDF com cabeçalho da empresa
+  const exportResourcesToPDF = async () => {
+    // Buscar dados da empresa
+    let companyData = null;
+    try {
+      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      const docSnap = await getDoc(companyRef);
+      if (docSnap.exists()) {
+        companyData = docSnap.data();
+      }
+    } catch (error) {
+      console.error("Error fetching company data for PDF:", error);
+    }
+
+    const stats = getResourceStats();
+
+    // Criar conteúdo HTML para o PDF
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Lista de Recursos Produtivos - Tarefas Diárias</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            font-size: 12px;
+            color: #333;
+          }
+          
+          .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e5e7eb;
+          }
+          
+          .company-info {
+            flex: 1;
+          }
+          
+          .company-name {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 5px;
+          }
+          
+          .company-details {
+            font-size: 11px;
+            color: #6b7280;
+            line-height: 1.4;
+          }
+          
+          .logo-section {
+            width: 80px;
+            height: 80px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: #9ca3af;
+          }
+          
+          .report-title {
+            text-align: center;
+            margin: 30px 0;
+          }
+          
+          .report-title h1 {
+            font-size: 20px;
+            font-weight: bold;
+            color: #1f2937;
+            margin: 0 0 5px 0;
+          }
+          
+          .report-date {
+            font-size: 11px;
+            color: #6b7280;
+          }
+          
+          .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+          }
+          
+          .stat-card {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border-left: 4px solid #e5e7eb;
+          }
+          
+          .stat-card.available { border-left-color: #10b981; }
+          .stat-card.occupied { border-left-color: #f59e0b; }
+          .stat-card.maintenance { border-left-color: #ef4444; }
+          .stat-card.absent { border-left-color: #f97316; }
+          .stat-card.idle { border-left-color: #3b82f6; }
+          
+          .stat-number {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+          }
+          
+          .stat-label {
+            font-size: 10px;
+            color: #6b7280;
+            text-transform: uppercase;
+          }
+          
+          .table-container {
+            margin-top: 20px;
+          }
+          
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+          }
+          
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            text-align: left;
+            font-size: 10px;
+          }
+          
+          th {
+            background-color: #f9fafb;
+            font-weight: bold;
+            color: #374151;
+          }
+          
+          .task-column {
+            width: 150px;
+            background-color: #fef9e7;
+          }
+          
+          .time-column {
+            width: 80px;
+            background-color: #fef9e7;
+          }
+          
+          .responsible-column {
+            width: 100px;
+            background-color: #fef9e7;
+          }
+          
+          .observations-column {
+            width: 120px;
+            background-color: #fef9e7;
+          }
+          
+          .status-badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: bold;
+          }
+          
+          .status-disponivel { background-color: #d1fae5; color: #065f46; }
+          .status-ocupado { background-color: #fef3c7; color: #92400e; }
+          .status-manutencao { background-color: #fee2e2; color: #991b1b; }
+          .status-ausente { background-color: #fed7aa; color: #9a3412; }
+          .status-ferias { background-color: #dbeafe; color: #1e40af; }
+          .status-inativo { background-color: #f3f4f6; color: #374151; }
+          
+          .footer {
+            margin-top: 40px;
+            text-align: center;
+            font-size: 10px;
+            color: #9ca3af;
+            border-top: 1px solid #e5e7eb;
+            padding-top: 20px;
+          }
+          
+          .instructions {
+            background-color: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+          }
+          
+          .instructions h3 {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            color: #1e40af;
+          }
+          
+          .instructions ul {
+            margin: 0;
+            padding-left: 20px;
+            font-size: 10px;
+            color: #1e40af;
+          }
+          
+          .instructions li {
+            margin-bottom: 5px;
+          }
+          
+          @media print {
+            body { margin: 0; }
+            .header { margin-bottom: 20px; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="company-info">
+            <div class="company-name">${companyData?.nomeFantasia || 'Nome da Empresa'}</div>
+            <div class="company-details">
+              ${companyData?.cnpj ? `CNPJ: ${companyData.cnpj}<br>` : ''}
+              ${companyData?.inscricaoEstadual ? `I.E.: ${companyData.inscricaoEstadual}<br>` : ''}
+              ${companyData?.email ? `E-mail: ${companyData.email}<br>` : ''}
+              ${companyData?.celular ? `Telefone: ${companyData.celular}<br>` : ''}
+              ${companyData?.endereco ? `${companyData.endereco}` : ''}
+            </div>
+          </div>
+          <div class="logo-section">
+            ${companyData?.logo?.preview ? 
+              `<img src="${companyData.logo.preview}" alt="Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">` : 
+              'LOGO'
+            }
+          </div>
+        </div>
+        
+        <div class="report-title">
+          <h1>Lista de Recursos Produtivos - Tarefas Diárias</h1>
+          <div class="report-date">Gerado em: ${new Date().toLocaleDateString('pt-BR', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })}</div>
+        </div>
+        
+        <div class="stats-grid">
+          <div class="stat-card available">
+            <div class="stat-number" style="color: #10b981;">${stats.available}</div>
+            <div class="stat-label">Disponíveis</div>
+          </div>
+          <div class="stat-card occupied">
+            <div class="stat-number" style="color: #f59e0b;">${stats.occupied}</div>
+            <div class="stat-label">Ocupados</div>
+          </div>
+          <div class="stat-card maintenance">
+            <div class="stat-number" style="color: #ef4444;">${stats.maintenance}</div>
+            <div class="stat-label">Manutenção</div>
+          </div>
+          <div class="stat-card absent">
+            <div class="stat-number" style="color: #f97316;">${stats.absent + stats.vacation}</div>
+            <div class="stat-label">Ausentes/Férias</div>
+          </div>
+          <div class="stat-card idle">
+            <div class="stat-number" style="color: #3b82f6;">${Math.round(stats.idleRate)}%</div>
+            <div class="stat-label">Taxa Ociosidade</div>
+          </div>
+        </div>
+        
+        <div class="instructions">
+          <h3>📋 Instruções para Preenchimento</h3>
+          <ul>
+            <li><strong>Tarefa Diária:</strong> Descreva a atividade específica planejada para cada recurso</li>
+            <li><strong>Horários:</strong> Defina início e término das atividades</li>
+            <li><strong>Responsável:</strong> Indique quem será responsável pela execução</li>
+            <li><strong>Observações:</strong> Anote informações relevantes, impedimentos ou observações</li>
+          </ul>
+        </div>
+        
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 120px;">Recurso</th>
+                <th style="width: 80px;">Tipo</th>
+                <th style="width: 60px;">Status</th>
+                <th style="width: 40px;">Cap.</th>
+                <th style="width: 80px;">Localização</th>
+                <th class="task-column">Tarefa Diária Planejada</th>
+                <th class="time-column">Início</th>
+                <th class="time-column">Término</th>
+                <th class="responsible-column">Responsável</th>
+                <th class="observations-column">Observações</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${resources.map(resource => `
+                <tr>
+                  <td style="font-weight: bold;">${resource.name}</td>
+                  <td>${resource.type === 'mao_de_obra' ? 'Mão de Obra' : 
+                       resource.type.charAt(0).toUpperCase() + resource.type.slice(1)}</td>
+                  <td>
+                    <span class="status-badge status-${resource.status}">
+                      ${resource.status === 'disponivel' ? 'Disponível' :
+                        resource.status === 'ocupado' ? 'Ocupado' :
+                        resource.status === 'manutencao' ? 'Manutenção' :
+                        resource.status === 'ausente' ? 'Ausente' :
+                        resource.status === 'ferias' ? 'Férias' :
+                        resource.status === 'inativo' ? 'Inativo' : resource.status}
+                    </span>
+                  </td>
+                  <td style="text-align: center;">${resource.capacity}</td>
+                  <td>${resource.location || '-'}</td>
+                  <td class="task-column" style="border-right: 2px solid #fbbf24;"></td>
+                  <td class="time-column"></td>
+                  <td class="time-column"></td>
+                  <td class="responsible-column"></td>
+                  <td class="observations-column"></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="footer">
+          <p>Este documento foi gerado automaticamente pelo sistema de gestão de recursos produtivos.</p>
+          <p>Para dúvidas ou sugestões, entre em contato: ${companyData?.email || 'contato@empresa.com'}</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Criar e abrir nova janela para impressão/PDF
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      // Aguardar carregamento e imprimir
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
+      };
+      toast({
+        title: "PDF sendo gerado!",
+        description: "Uma nova janela foi aberta para geração do PDF. Use Ctrl+P ou Cmd+P para salvar.",
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar PDF",
+        description: "Não foi possível abrir a janela de impressão. Verifique se pop-ups estão habilitados.",
+      });
+    }
+  };
+
   const exportOvertimeToPDF = async (overtime: OvertimeRelease) => {
     let companyData = null;
     try {
@@ -740,12 +1099,16 @@ export default function CompanyPage() {
       </html>
     `;
 
+    // Criar e abrir nova janela para impressão/PDF
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(htmlContent);
       printWindow.document.close();
+      // Aguardar carregamento e imprimir
       printWindow.onload = () => {
-        setTimeout(() => printWindow.print(), 500);
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
       };
       toast({ title: "PDF sendo gerado!", description: "Uma nova janela foi aberta para geração do PDF." });
     }
