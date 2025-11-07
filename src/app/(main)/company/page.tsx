@@ -4,11 +4,11 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import Image from "next/image";
-import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText, Clock, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Schemas
 const companySchema = z.object({
@@ -65,10 +66,34 @@ const resourceSchema = z.object({
     updatedAt: z.any().optional(),
 });
 
+const overtimeSchema = z.object({
+    id: z.string(),
+    osNumber: z.string().min(1, { message: "Selecione uma OS." }),
+    date: z.string().min(1, { message: "A data é obrigatória." }),
+    startTime: z.string().min(1, { message: "O horário de entrada é obrigatório." }),
+    endTime: z.string().min(1, { message: "O horário de saída é obrigatório." }),
+    resources: z.array(z.string()).min(1, { message: "Selecione pelo menos um recurso." }),
+    teamLeaders: z.array(z.string()).min(1, { message: "Selecione pelo menos um líder." }),
+    observations: z.string().optional(),
+    approvedBy: z.string().optional(),
+    approvedAt: z.any().optional(),
+    status: z.enum(["pendente", "aprovado", "rejeitado"]).default("pendente"),
+    createdAt: z.any().optional(),
+    updatedAt: z.any().optional(),
+});
+
 // Types
 type CompanyData = z.infer<typeof companySchema> & { logo?: { preview?: string } };
 type TeamMember = z.infer<typeof teamMemberSchema>;
 type Resource = z.infer<typeof resourceSchema>;
+type OvertimeRelease = z.infer<typeof overtimeSchema>;
+
+interface OrderService {
+  id: string;
+  numeroOS: string;
+  nomeCliente: string;
+  status?: string;
+}
 
 export default function CompanyPage() {
   // Estados gerais
@@ -92,6 +117,17 @@ export default function CompanyPage() {
   const [isResourceDeleteAlertOpen, setIsResourceDeleteAlertOpen] = useState(false);
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [resourceToDelete, setResourceToDelete] = useState<Resource | null>(null);
+
+  // Estados de horas extras
+  const [isOvertimeLoading, setIsOvertimeLoading] = useState(true);
+  const [overtimeReleases, setOvertimeReleases] = useState<OvertimeRelease[]>([]);
+  const [isOvertimeFormOpen, setIsOvertimeFormOpen] = useState(false);
+  const [isOvertimeDeleteAlertOpen, setIsOvertimeDeleteAlertOpen] = useState(false);
+  const [selectedOvertime, setSelectedOvertime] = useState<OvertimeRelease | null>(null);
+  const [overtimeToDelete, setOvertimeToDelete] = useState<OvertimeRelease | null>(null);
+  const [orderServices, setOrderServices] = useState<OrderService[]>([]);
+  const [selectedResources, setSelectedResources] = useState<string[]>([]);
+  const [selectedLeaders, setSelectedLeaders] = useState<string[]>([]);
 
   // Forms
   const companyForm = useForm<z.infer<typeof companySchema>>({
@@ -137,6 +173,21 @@ export default function CompanyPage() {
         absenceStartDate: "",
         absenceEndDate: "",
         absenceReason: "",
+    }
+  });
+
+  const overtimeForm = useForm<OvertimeRelease>({
+    resolver: zodResolver(overtimeSchema),
+    defaultValues: {
+        id: "",
+        osNumber: "",
+        date: "",
+        startTime: "",
+        endTime: "",
+        resources: [],
+        teamLeaders: [],
+        observations: "",
+        status: "pendente",
     }
   });
 
@@ -215,12 +266,56 @@ export default function CompanyPage() {
     }
   };
 
+  const fetchOvertimeData = async () => {
+    if (!user) return;
+    setIsOvertimeLoading(true);
+    try {
+        const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
+        const docSnap = await getDoc(overtimeRef);
+        if (docSnap.exists()) {
+            setOvertimeReleases(docSnap.data().releases || []);
+        }
+    } catch (error) {
+        console.error("Error fetching overtime data:", error);
+        toast({
+            variant: "destructive",
+            title: "Erro ao buscar horas extras",
+            description: "Ocorreu um erro ao carregar as liberações de horas extras.",
+        });
+    } finally {
+        setIsOvertimeLoading(false);
+    }
+  };
+
+  const fetchOrderServices = async () => {
+    if (!user) return;
+    try {
+        const osCollection = collection(db, "companies", "mecald", "ordersOfService");
+        const querySnapshot = await getDocs(osCollection);
+        const osList: OrderService[] = [];
+        querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            osList.push({
+                id: doc.id,
+                numeroOS: data.numeroOS || "",
+                nomeCliente: data.nomeCliente || "",
+                status: data.status || "",
+            });
+        });
+        setOrderServices(osList);
+    } catch (error) {
+        console.error("Error fetching order services:", error);
+    }
+  };
+
   // useEffect
   useEffect(() => {
     if (!authLoading && user) {
       fetchCompanyData();
       fetchTeamData();
       fetchResourcesData();
+      fetchOvertimeData();
+      fetchOrderServices();
     }
   }, [user, authLoading]);
 
@@ -270,6 +365,36 @@ export default function CompanyPage() {
         {labels[status as keyof typeof labels]}
       </Badge>
     );
+  };
+
+  const getOvertimeStatusBadge = (status: string) => {
+    const variants = {
+      pendente: "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
+      aprovado: "bg-green-100 text-green-800 hover:bg-green-100",
+      rejeitado: "bg-red-100 text-red-800 hover:bg-red-100"
+    };
+    
+    const labels = {
+      pendente: "Pendente",
+      aprovado: "Aprovado",
+      rejeitado: "Rejeitado"
+    };
+
+    return (
+      <Badge className={variants[status as keyof typeof variants]}>
+        {labels[status as keyof typeof labels]}
+      </Badge>
+    );
+  };
+
+  const calculateOvertimeHours = (startTime: string, endTime: string) => {
+    if (!startTime || !endTime) return 0;
+    const [startHour, startMinute] = startTime.split(':').map(Number);
+    const [endHour, endMinute] = endTime.split(':').map(Number);
+    const startMinutes = startHour * 60 + startMinute;
+    const endMinutes = endHour * 60 + endMinute;
+    const diffMinutes = endMinutes - startMinutes;
+    return (diffMinutes / 60).toFixed(2);
   };
 
   const getResourceStats = () => {
@@ -919,6 +1044,10 @@ export default function CompanyPage() {
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
             <TabsTrigger value="team">Equipe</TabsTrigger>
             <TabsTrigger value="resources">Recursos Produtivos</TabsTrigger>
+            <TabsTrigger value="overtime">
+              <Clock className="h-4 w-4 mr-2" />
+              Horas Extras
+            </TabsTrigger>
           </TabsList>
 
           {/* ABA EMPRESA */}
