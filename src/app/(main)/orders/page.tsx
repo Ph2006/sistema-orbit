@@ -1282,26 +1282,43 @@ export default function OrdersPage() {
             return null;
         }
         
-        const monthOrders = filteredOrders.filter(order => {
-            if (!order.deliveryDate) return false;
-            const orderMonth = format(order.deliveryDate, 'yyyy-MM');
-            return orderMonth === monthFilter;
+        let totalWeight = 0;
+        let completedWeight = 0;
+        const orderSet = new Set<string>();
+        
+        orders.forEach(order => {
+            order.items.forEach(item => {
+                const itemDeliveryDate = item.itemDeliveryDate || order.deliveryDate;
+                if (!itemDeliveryDate) return;
+
+                const itemMonth = format(itemDeliveryDate, 'yyyy-MM');
+                if (itemMonth !== monthFilter) return;
+
+                const quantity = Number(item.quantity) || 0;
+                const unitWeight = Number(item.unitWeight) || 0;
+                const itemWeight = quantity * unitWeight;
+
+                totalWeight += itemWeight;
+
+                const itemProgress = calculateItemProgress(item);
+                if (itemProgress === 100) {
+                    completedWeight += itemWeight;
+                }
+
+                orderSet.add(order.id);
+            });
         });
         
-        const totalWeight = monthOrders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
-        const completedWeight = monthOrders
-            .filter(order => order.status === 'Concluído')
-            .reduce((acc, order) => acc + (order.totalWeight || 0), 0);
         const pendingWeight = totalWeight - completedWeight;
         
         return {
-            totalOrders: monthOrders.length,
+            totalOrders: orderSet.size,
             totalWeight,
             completedWeight,
             pendingWeight,
             completedPercentage: totalWeight > 0 ? (completedWeight / totalWeight) * 100 : 0
         };
-    }, [filteredOrders, monthFilter]);
+    }, [orders, monthFilter]);
     
     const watchedItems = form.watch("items");
     const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
@@ -1336,34 +1353,60 @@ export default function OrdersPage() {
 
     // Organiza os pedidos por mês para visualização Kanban - CORRIGIDO
     const ordersByMonth = useMemo(() => {
-        const grouped = new Map<string, { orders: Order[], totalWeight: number }>();
+        const grouped = new Map<string, {
+            orders: Order[];
+            totalWeight: number;
+            itemsByOrder: Map<string, OrderItem[]>;
+        }>();
         const completedOrders: Order[] = [];
         let completedWeight = 0;
-        
+
         filteredOrders.forEach(order => {
             if (order.status === 'Concluído') {
                 completedOrders.push(order);
                 completedWeight += order.totalWeight || 0;
-            } else if (order.deliveryDate) {
-                // CORREÇÃO: Usar format corretamente para evitar problemas de timezone
-                const monthKey = format(order.deliveryDate, 'yyyy-MM');
-                
-                if (!grouped.has(monthKey)) {
-                    grouped.set(monthKey, { orders: [], totalWeight: 0 });
-                }
-                
-                const monthData = grouped.get(monthKey)!;
-                monthData.orders.push(order);
-                monthData.totalWeight += order.totalWeight || 0;
+                return;
             }
+
+            order.items.forEach(item => {
+                const itemDeliveryDate = item.itemDeliveryDate || order.deliveryDate;
+                if (!itemDeliveryDate) return;
+
+                const monthKey = format(itemDeliveryDate, 'yyyy-MM');
+
+                if (!grouped.has(monthKey)) {
+                    grouped.set(monthKey, {
+                        orders: [],
+                        totalWeight: 0,
+                        itemsByOrder: new Map()
+                    });
+                }
+
+                const monthData = grouped.get(monthKey)!;
+
+                if (!monthData.orders.find(o => o.id === order.id)) {
+                    monthData.orders.push(order);
+                }
+
+                if (!monthData.itemsByOrder.has(order.id)) {
+                    monthData.itemsByOrder.set(order.id, []);
+                }
+                monthData.itemsByOrder.get(order.id)!.push(item);
+
+                const quantity = Number(item.quantity) || 0;
+                const unitWeight = Number(item.unitWeight) || 0;
+                monthData.totalWeight += quantity * unitWeight;
+            });
         });
 
-        // Ordena as chaves por data (mês mais antigo primeiro)
         const sortedEntries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
-        
+
         return {
             monthColumns: sortedEntries,
-            completed: { orders: completedOrders, totalWeight: completedWeight }
+            completed: {
+                orders: completedOrders,
+                totalWeight: completedWeight
+            }
         };
     }, [filteredOrders]);
 
@@ -1395,8 +1438,12 @@ export default function OrdersPage() {
     const KanbanView = () => {
         const allColumns = [
             ...ordersByMonth.monthColumns,
-            ['completed', { orders: ordersByMonth.completed.orders, totalWeight: ordersByMonth.completed.totalWeight }]
-        ];
+            ['completed', {
+                orders: ordersByMonth.completed.orders,
+                totalWeight: ordersByMonth.completed.totalWeight,
+                itemsByOrder: new Map<string, OrderItem[]>()
+            }]
+        ] as Array<[string, { orders: Order[]; totalWeight: number; itemsByOrder?: Map<string, OrderItem[]> }]>;
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
@@ -1522,6 +1569,11 @@ export default function OrdersPage() {
                                                     })} kg
                                                 </span>
                                             </div>
+                                            {!isCompleted && (
+                                                <p className="text-xs mt-1 text-muted-foreground">
+                                                    Peso dos itens com entrega neste mês
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
 
@@ -1538,7 +1590,23 @@ export default function OrdersPage() {
                                         {monthData.orders.map(order => {
                                             const statusProps = getStatusProps(order.status);
                                             const orderProgress = calculateOrderProgress(order);
-                                            
+
+                                            let monthSpecificWeight = 0;
+                                            let monthSpecificItems = 0;
+
+                                            if (!isCompleted && monthData.itemsByOrder) {
+                                                const itemsInMonth = monthData.itemsByOrder.get(order.id) || [];
+                                                monthSpecificWeight = itemsInMonth.reduce((acc, item) => {
+                                                    const quantity = Number(item.quantity) || 0;
+                                                    const unitWeight = Number(item.unitWeight) || 0;
+                                                    return acc + (quantity * unitWeight);
+                                                }, 0);
+                                                monthSpecificItems = itemsInMonth.length;
+                                            } else {
+                                                monthSpecificWeight = order.totalWeight || 0;
+                                                monthSpecificItems = order.items.length;
+                                            }
+
                                             return (
                                                 <Card 
                                                     key={order.id} 
@@ -1590,24 +1658,28 @@ export default function OrdersPage() {
                                                         {/* Dados importantes */}
                                                         <div className="grid grid-cols-2 gap-2 text-xs">
                                                             <div>
-                                                                <span className="text-muted-foreground">Peso:</span>
+                                                                <span className="text-muted-foreground">
+                                                                    {isCompleted ? 'Peso Total:' : 'Peso no Mês:'}
+                                                                </span>
                                                                 <p className="font-medium">
-                                                                    {(order.totalWeight || 0).toLocaleString('pt-BR', { 
+                                                                    {monthSpecificWeight.toLocaleString('pt-BR', { 
                                                                         minimumFractionDigits: 1, 
                                                                         maximumFractionDigits: 1 
                                                                     })} kg
                                                                 </p>
                                                             </div>
                                                             <div>
-                                                                <span className="text-muted-foreground">Itens:</span>
-                                                                <p className="font-medium">{order.items.length}</p>
+                                                                <span className="text-muted-foreground">
+                                                                    {isCompleted ? 'Todos Itens:' : 'Itens no Mês:'}
+                                                                </span>
+                                                                <p className="font-medium">{monthSpecificItems}</p>
                                                             </div>
                                                         </div>
 
                                                         {/* Data de entrega */}
                                                         {order.deliveryDate && (
                                                             <div className="text-xs">
-                                                                <span className="text-muted-foreground">Entrega:</span>
+                                                                <span className="text-muted-foreground">Entrega Geral:</span>
                                                                 <p className="font-medium">
                                                                     {format(order.deliveryDate, "dd/MM/yyyy")}
                                                                 </p>
