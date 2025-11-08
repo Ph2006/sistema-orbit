@@ -71,8 +71,8 @@ const overtimeSchema = z.object({
     date: z.string().min(1, { message: "A data é obrigatória." }),
     startTime: z.string().min(1, { message: "O horário de entrada é obrigatório." }),
     endTime: z.string().min(1, { message: "O horário de saída é obrigatório." }),
-    resources: z.array(z.string()).min(1, { message: "Selecione pelo menos um recurso." }),
-    teamLeaders: z.array(z.string()).min(1, { message: "Selecione pelo menos um líder." }),
+    resources: z.array(z.string()).optional(),
+    teamLeaders: z.array(z.string()).optional(),
     observations: z.string().optional(),
     approvedBy: z.string().optional(),
     approvedAt: z.any().optional(),
@@ -1169,6 +1169,9 @@ export default function CompanyPage() {
   };
 
   const onOvertimeSubmit = async (values: OvertimeRelease) => {
+    overtimeForm.setValue("resources", selectedResources);
+    overtimeForm.setValue("teamLeaders", selectedLeaders);
+
     if (selectedResources.length === 0) {
       toast({
         variant: "destructive",
@@ -1213,10 +1216,13 @@ export default function CompanyPage() {
       } else {
         // CRIANDO nova liberação
         const newRelease = {
-          ...values,
           id: Date.now().toString(),
+          date: values.date,
+          startTime: values.startTime,
+          endTime: values.endTime,
           resources: selectedResources,
           teamLeaders: selectedLeaders,
+          observations: values.observations || "",
           status: "pendente" as const,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -1237,7 +1243,16 @@ export default function CompanyPage() {
         });
       }
 
-      overtimeForm.reset();
+      overtimeForm.reset({
+        id: "",
+        date: "",
+        startTime: "",
+        endTime: "",
+        resources: [],
+        teamLeaders: [],
+        observations: "",
+        status: "pendente",
+      });
       setIsOvertimeFormOpen(false);
       setSelectedOvertime(null);
       setSelectedResources([]);
@@ -1249,7 +1264,7 @@ export default function CompanyPage() {
       toast({
         variant: "destructive",
         title: "Erro ao salvar",
-        description: "Não foi possível salvar a liberação de horas extras."
+        description: error instanceof Error ? error.message : "Não foi possível salvar a liberação de horas extras."
       });
     }
   };
