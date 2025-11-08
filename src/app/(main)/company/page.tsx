@@ -1188,38 +1188,47 @@ export default function CompanyPage() {
     }
 
     const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
-    const overtimeData: OvertimeRelease & { createdAt?: Date } = {
-      ...values,
-      resources: selectedResources,
-      teamLeaders: selectedLeaders,
-      updatedAt: new Date(),
-    };
 
     try {
       if (selectedOvertime) {
-        overtimeData.createdAt = selectedOvertime.createdAt;
+        // EDITANDO liberação existente
+        const overtimeData = {
+          ...values,
+          resources: selectedResources,
+          teamLeaders: selectedLeaders,
+          createdAt: selectedOvertime.createdAt,
+          updatedAt: new Date(),
+        };
+
         const updatedReleases = overtimeReleases.map(o =>
           o.id === selectedOvertime.id ? overtimeData : o
         );
+
         await setDoc(overtimeRef, { releases: updatedReleases }, { merge: true });
+
         toast({
           title: "Liberação atualizada!",
           description: "Os dados da liberação de horas extras foram atualizados."
         });
       } else {
+        // CRIANDO nova liberação
         const newRelease = {
-          ...overtimeData,
+          ...values,
           id: Date.now().toString(),
+          resources: selectedResources,
+          teamLeaders: selectedLeaders,
+          status: "pendente" as const,
           createdAt: new Date(),
+          updatedAt: new Date(),
         };
 
         const docSnap = await getDoc(overtimeRef);
+
         if (!docSnap.exists()) {
           await setDoc(overtimeRef, { releases: [newRelease] });
         } else {
-          await updateDoc(overtimeRef, {
-            releases: arrayUnion(newRelease),
-          });
+          const currentReleases = docSnap.data().releases || [];
+          await setDoc(overtimeRef, { releases: [...currentReleases, newRelease] }, { merge: true });
         }
 
         toast({
@@ -1233,6 +1242,7 @@ export default function CompanyPage() {
       setSelectedOvertime(null);
       setSelectedResources([]);
       setSelectedLeaders([]);
+
       await fetchOvertimeData();
     } catch (error) {
       console.error("Error saving overtime:", error);
