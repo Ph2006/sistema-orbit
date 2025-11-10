@@ -1239,6 +1239,19 @@ export default function MaterialsPage() {
         }));
     }, [cuttingPlansList, orders]);
 
+    const filteredCuttingPlanFolders = useMemo(() => {
+        if (!searchQuery || !searchQuery.trim()) return cuttingPlanFolders;
+        
+        const query = searchQuery.toLowerCase().trim();
+        
+        return cuttingPlanFolders.filter(folder => {
+            return (
+                (folder.order.internalOS && folder.order.internalOS.toLowerCase().includes(query)) ||
+                (folder.order.customerName && folder.order.customerName.toLowerCase().includes(query))
+            );
+        });
+    }, [cuttingPlanFolders, searchQuery]);
+
     const overdueItems = useMemo(() => {
         return requisitions.flatMap(req => 
             req.items
@@ -1790,7 +1803,7 @@ return (
                                                     />
                                                 </div>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                    {cuttingPlanFolders.map(folder => (
+{filteredCuttingPlanFolders.map(folder => (
                                                         <Card 
                                                             key={folder.orderId}
                                                             className="cursor-pointer hover:shadow-md transition-shadow"
@@ -1818,7 +1831,7 @@ return (
                                                             </CardContent>
                                                         </Card>
                                                     ))}
-                                                    {cuttingPlanFolders.length === 0 && (
+{filteredCuttingPlanFolders.length === 0 && (
                                                         <div className="col-span-full text-center py-8">
                                                             <p className="text-gray-500">Nenhuma OS com planos de corte encontrada.</p>
                                                         </div>
