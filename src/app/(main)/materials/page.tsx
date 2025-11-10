@@ -1159,7 +1159,24 @@ export default function MaterialsPage() {
     };
     
     // Filters & Memoized values
-    const filteredRequisitions = useMemo(() => requisitions.filter(r => searchQuery === "" || r.requisitionNumber?.toLowerCase().includes(searchQuery.toLowerCase()) || r.requestedBy?.toLowerCase().includes(searchQuery.toLowerCase()) || r.status.toLowerCase().includes(searchQuery.toLowerCase()) || r.items.some(i => i.description.toLowerCase().includes(searchQuery.toLowerCase()))), [requisitions, searchQuery]);
+    const filteredRequisitions = useMemo(() => {
+        if (!searchQuery || !searchQuery.trim()) return requisitions;
+        
+        const query = searchQuery.toLowerCase().trim();
+        
+        return requisitions.filter(r => {
+            const order = orders.find(o => o.id === r.orderId);
+            
+            return (
+                (r.requisitionNumber && r.requisitionNumber.toLowerCase().includes(query)) ||
+                (r.requestedBy && r.requestedBy.toLowerCase().includes(query)) ||
+                (r.status && r.status.toLowerCase().includes(query)) ||
+                (order?.internalOS && order.internalOS.toLowerCase().includes(query)) ||
+                (r.customer?.name && r.customer.name.toLowerCase().includes(query)) ||
+                r.items.some(i => i.description && i.description.toLowerCase().includes(query))
+            );
+        });
+    }, [requisitions, searchQuery, orders]);
     
     const filteredCuttingPlans = useMemo(() => {
         let filtered = cuttingPlansList;
@@ -1173,16 +1190,16 @@ export default function MaterialsPage() {
             }
         }
         
-        // Apply search filter
-        if (searchQuery) {
-            const query = searchQuery.toLowerCase();
+        // Apply search filter - CORREÇÃO AQUI
+        if (searchQuery && searchQuery.trim()) {
+            const query = searchQuery.toLowerCase().trim();
             filtered = filtered.filter(p => {
                 const order = orders.find(o => o.id === p.orderId);
                 return (
-                    p.planNumber?.toLowerCase().includes(query) ||
-                    order?.internalOS?.toLowerCase().includes(query) ||
-                    p.materialDescription?.toLowerCase().includes(query) ||
-                    p.customer?.name?.toLowerCase().includes(query)
+                    (p.planNumber && p.planNumber.toLowerCase().includes(query)) ||
+                    (order?.internalOS && order.internalOS.toLowerCase().includes(query)) ||
+                    (p.materialDescription && p.materialDescription.toLowerCase().includes(query)) ||
+                    (p.customer?.name && p.customer.name.toLowerCase().includes(query))
                 );
             });
         }
