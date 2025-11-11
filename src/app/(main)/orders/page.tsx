@@ -1368,31 +1368,34 @@ export default function OrdersPage() {
                 return;
             }
 
+            // CORREÇÃO: Usar apenas a data de entrega do pedido, não dos itens
+            if (!order.deliveryDate) return;
+
+            const monthKey = format(order.deliveryDate, 'yyyy-MM');
+
+            if (!grouped.has(monthKey)) {
+                grouped.set(monthKey, {
+                    orders: [],
+                    totalWeight: 0,
+                    itemsByOrder: new Map()
+                });
+            }
+
+            const monthData = grouped.get(monthKey)!;
+
+            // Adicionar pedido apenas uma vez
+            if (!monthData.orders.find(o => o.id === order.id)) {
+                monthData.orders.push(order);
+            }
+
+            // Adicionar TODOS os itens do pedido para esta coluna
+            if (!monthData.itemsByOrder.has(order.id)) {
+                monthData.itemsByOrder.set(order.id, []);
+            }
+
+            // Adicionar todos os itens do pedido
             order.items.forEach(item => {
-                const itemDeliveryDate = item.itemDeliveryDate || order.deliveryDate;
-                if (!itemDeliveryDate) return;
-
-                const monthKey = format(itemDeliveryDate, 'yyyy-MM');
-
-                if (!grouped.has(monthKey)) {
-                    grouped.set(monthKey, {
-                        orders: [],
-                        totalWeight: 0,
-                        itemsByOrder: new Map()
-                    });
-                }
-
-                const monthData = grouped.get(monthKey)!;
-
-                if (!monthData.orders.find(o => o.id === order.id)) {
-                    monthData.orders.push(order);
-                }
-
-                if (!monthData.itemsByOrder.has(order.id)) {
-                    monthData.itemsByOrder.set(order.id, []);
-                }
                 monthData.itemsByOrder.get(order.id)!.push(item);
-
                 const quantity = Number(item.quantity) || 0;
                 const unitWeight = Number(item.unitWeight) || 0;
                 monthData.totalWeight += quantity * unitWeight;
@@ -1591,21 +1594,9 @@ export default function OrdersPage() {
                                             const statusProps = getStatusProps(order.status);
                                             const orderProgress = calculateOrderProgress(order);
 
-                                            let monthSpecificWeight = 0;
-                                            let monthSpecificItems = 0;
-
-                                            if (!isCompleted && monthData.itemsByOrder) {
-                                                const itemsInMonth = monthData.itemsByOrder.get(order.id) || [];
-                                                monthSpecificWeight = itemsInMonth.reduce((acc, item) => {
-                                                    const quantity = Number(item.quantity) || 0;
-                                                    const unitWeight = Number(item.unitWeight) || 0;
-                                                    return acc + (quantity * unitWeight);
-                                                }, 0);
-                                                monthSpecificItems = itemsInMonth.length;
-                                            } else {
-                                                monthSpecificWeight = order.totalWeight || 0;
-                                                monthSpecificItems = order.items.length;
-                                            }
+                                            // CORREÇÃO: Sempre mostrar peso total e todos os itens do pedido
+                                            const monthSpecificWeight = order.totalWeight || 0;
+                                            const monthSpecificItems = order.items.length;
 
                                             return (
                                                 <Card 
@@ -1659,7 +1650,7 @@ export default function OrdersPage() {
                                                         <div className="grid grid-cols-2 gap-2 text-xs">
                                                             <div>
                                                                 <span className="text-muted-foreground">
-                                                                    {isCompleted ? 'Peso Total:' : 'Peso no Mês:'}
+                                                                    Peso Total:
                                                                 </span>
                                                                 <p className="font-medium">
                                                                     {monthSpecificWeight.toLocaleString('pt-BR', { 
@@ -1670,7 +1661,7 @@ export default function OrdersPage() {
                                                             </div>
                                                             <div>
                                                                 <span className="text-muted-foreground">
-                                                                    {isCompleted ? 'Todos Itens:' : 'Itens no Mês:'}
+                                                                    Total de Itens:
                                                                 </span>
                                                                 <p className="font-medium">{monthSpecificItems}</p>
                                                             </div>
