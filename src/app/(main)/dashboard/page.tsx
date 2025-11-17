@@ -169,7 +169,7 @@ function ImprovedMonthlyProductionChart({ data, companyCapacity }: {
   );
 
   const currentMonth = new Date().getMonth();
-  const currentMonthName = format(new Date(), 'MMM', { locale: ptBR });
+  const currentMonthName = format(new Date(), 'MMM/yy', { locale: ptBR });
   const currentMonthData = data.find(d => d.month === currentMonthName);
   
   // Calcular métricas de performance
@@ -189,7 +189,7 @@ function ImprovedMonthlyProductionChart({ data, companyCapacity }: {
           Produção Mensal (Peso Entregue)
         </CardTitle>
         <CardDescription>
-          Análise de produção com metas e capacidade instalada dos últimos 6 meses
+          Análise de produção com metas e capacidade instalada - Histórico completo
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -224,11 +224,17 @@ function ImprovedMonthlyProductionChart({ data, companyCapacity }: {
 
           {/* Gráfico */}
           <div className="space-y-4">
-            <div className="text-sm font-medium text-muted-foreground">
-              PESO ENTREGUE POR MÊS (KG)
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-muted-foreground">
+                PESO ENTREGUE POR MÊS (KG)
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {data.length} mês{data.length !== 1 ? 'es' : ''} registrado{data.length !== 1 ? 's' : ''}
+              </div>
             </div>
             
-            <div className="space-y-3">
+            {/* ✅ ADICIONAR SCROLL SE TIVER MUITOS MESES */}
+            <div className={`space-y-3 ${data.length > 12 ? 'max-h-[500px] overflow-y-auto pr-2' : ''}`}>
               {data.map((item, index) => {
                 const percentage = maxValue > 0 ? (item.weight / maxValue) * 100 : 0;
                 const isCurrentMonth = item.month === currentMonthName;
@@ -657,7 +663,7 @@ export default function DashboardPage() {
             }
           });
 
-          // ✅ PRODUÇÃO MENSAL (últimos 6 meses)
+          // ✅ PRODUÇÃO MENSAL (histórico completo)
           const sortedMonthlyEntries = Array.from(monthlyDeliveredMap.entries())
             .sort(([a], [b]) => a.localeCompare(b));
           
@@ -668,7 +674,7 @@ export default function DashboardPage() {
               
               if (isValid(date)) {
                 return {
-                  month: format(date, 'MMM', { locale: ptBR }),
+                  month: format(date, 'MMM/yy', { locale: ptBR }),
                   weight,
                 };
               } else {
@@ -677,7 +683,7 @@ export default function DashboardPage() {
             } catch (error) {
               return { month: monthKey, weight };
             }
-          }).slice(-6);
+          });
           
           // ✅ ANÁLISE POR CLIENTE
           const customerAnalysis = Array.from(customerDataMap.entries())
@@ -841,13 +847,15 @@ export default function DashboardPage() {
 
       // Título
       docPdf.setFontSize(16).setFont('helvetica', 'bold');
-      docPdf.text('RELATÓRIO DE PRODUÇÃO MENSAL', pageWidth / 2, yPos, { align: 'center' });
+      docPdf.text('RELATÓRIO DE PRODUÇÃO - HISTÓRICO COMPLETO', pageWidth / 2, yPos, { align: 'center' });
       yPos += 15;
 
-      // Resumo Executivo
+      // ✅ USAR monthlyProduction COMPLETO (sem slice)
       const avgProduction = data.monthlyProduction.length > 0 
         ? data.monthlyProduction.reduce((acc, m) => acc + m.weight, 0) / data.monthlyProduction.length 
         : 0;
+      
+      const totalProduction = data.monthlyProduction.reduce((acc, m) => acc + m.weight, 0);
       
       docPdf.setFontSize(12).setFont('helvetica', 'bold');
       docPdf.text('RESUMO EXECUTIVO', 15, yPos);
@@ -858,14 +866,22 @@ export default function DashboardPage() {
         docPdf.text(`Período Analisado: ${data.monthlyProduction[0]?.month} a ${data.monthlyProduction[data.monthlyProduction.length - 1]?.month}`, 15, yPos);
         yPos += 6;
       }
+      docPdf.text(`Total de Meses: ${data.monthlyProduction.length}`, 15, yPos);
+      yPos += 6;
+      docPdf.text(`Produção Total: ${totalProduction.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, 15, yPos);
+      yPos += 6;
       docPdf.text(`Média Mensal de Produção: ${avgProduction.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, 15, yPos);
       yPos += 6;
       
       if (data.companyCapacity.metaMensal) {
         const metaAchievement = (avgProduction / data.companyCapacity.metaMensal) * 100;
+        const mesesAcimaMeta = data.monthlyProduction.filter(m => m.weight >= data.companyCapacity.metaMensal!).length;
+        
         docPdf.text(`Meta Mensal: ${data.companyCapacity.metaMensal.toLocaleString('pt-BR')} kg`, 15, yPos);
         yPos += 6;
-        docPdf.text(`Atingimento da Meta: ${metaAchievement.toFixed(1)}%`, 15, yPos);
+        docPdf.text(`Atingimento Médio da Meta: ${metaAchievement.toFixed(1)}%`, 15, yPos);
+        yPos += 6;
+        docPdf.text(`Meses que Atingiram a Meta: ${mesesAcimaMeta} de ${data.monthlyProduction.length} (${((mesesAcimaMeta / data.monthlyProduction.length) * 100).toFixed(1)}%)`, 15, yPos);
         yPos += 6;
       }
       
@@ -873,13 +889,13 @@ export default function DashboardPage() {
         const capacityUtilization = (avgProduction / data.companyCapacity.capacidadeInstalada) * 100;
         docPdf.text(`Capacidade Instalada: ${data.companyCapacity.capacidadeInstalada.toLocaleString('pt-BR')} kg`, 15, yPos);
         yPos += 6;
-        docPdf.text(`Utilização da Capacidade: ${capacityUtilization.toFixed(1)}%`, 15, yPos);
+        docPdf.text(`Utilização Média da Capacidade: ${capacityUtilization.toFixed(1)}%`, 15, yPos);
         yPos += 6;
       }
       
       yPos += 10;
 
-      // Tabela de produção mensal
+      // Tabela de produção mensal - TODOS OS MESES
       docPdf.setFontSize(12).setFont('helvetica', 'bold');
       docPdf.text('PRODUÇÃO MENSAL DETALHADA', 15, yPos);
       yPos += 10;
@@ -889,23 +905,63 @@ export default function DashboardPage() {
           ? ((m.weight / data.companyCapacity.metaMensal) * 100).toFixed(1) 
           : '-';
         
+        const capacityPercentage = data.companyCapacity.capacidadeInstalada
+          ? ((m.weight / data.companyCapacity.capacidadeInstalada) * 100).toFixed(1)
+          : '-';
+        
         return [
           m.month,
           `${m.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
           `${metaPercentage}%`,
-          data.companyCapacity.metaMensal && m.weight >= data.companyCapacity.metaMensal ? 'Atingida' : 'Não atingida'
+          `${capacityPercentage}%`,
+          m.weight >= (data.companyCapacity.metaMensal || Infinity) ? '✓ Atingida' : '✗ Não atingida'
         ];
       });
 
       autoTable(docPdf, {
         startY: yPos,
-        head: [['Mês', 'Peso Entregue', '% da Meta', 'Status']],
+        head: [['Mês', 'Peso Entregue', '% da Meta', '% Capacidade', 'Status']],
         body: tableData,
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [37, 99, 235] },
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { 
+          fillColor: [37, 99, 235],
+          fontSize: 9,
+          fontStyle: 'bold'
+        },
+        columnStyles: {
+          0: { cellWidth: 30 },
+          1: { cellWidth: 40, halign: 'right' },
+          2: { cellWidth: 30, halign: 'center' },
+          3: { cellWidth: 35, halign: 'center' },
+          4: { cellWidth: 40, halign: 'center' },
+        },
+        didParseCell: (data) => {
+          // Colorir status
+          if (data.column.index === 4 && data.section === 'body') {
+            const status = data.cell.raw as string;
+            if (status.includes('✓')) {
+              data.cell.styles.fillColor = [220, 252, 231];
+              data.cell.styles.textColor = [21, 128, 61];
+              data.cell.styles.fontStyle = 'bold';
+            } else {
+              data.cell.styles.fillColor = [254, 226, 226];
+              data.cell.styles.textColor = [185, 28, 28];
+            }
+          }
+        }
       });
 
-      const filename = `Relatorio_Producao_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
+      // Rodapé
+      const finalY = (docPdf as any).lastAutoTable.finalY + 10;
+      docPdf.setFontSize(8).setFont('helvetica', 'italic');
+      docPdf.text(
+        `Relatório gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+        pageWidth / 2,
+        finalY,
+        { align: 'center' }
+      );
+
+      const filename = `Relatorio_Producao_Completo_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
       docPdf.save(filename);
       
       toast({ title: "✅ Relatório Gerado!", description: filename });
@@ -967,7 +1023,7 @@ export default function DashboardPage() {
               className="bg-green-600 hover:bg-green-700 text-white"
             >
               <FileText className="mr-2 h-4 w-4" />
-              Exportar Relatório Mensal Completo
+              Exportar Relatório Completo
             </Button>
           </div>
         )}
