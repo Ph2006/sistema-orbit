@@ -1174,34 +1174,96 @@ export default function QuotationsPage() {
                 approvalRate: 0, 
                 valueApprovalRate: 0,
                 issuedValue: 0, 
-                approvedValue: 0, 
-                totalCount: 0 
+                approvedValue: 0,
+                rejectedValue: 0,
+                pendingValue: 0,
+                informativeValue: 0,
+                totalCount: 0,
+                totalWeight: 0,
+                approvedWeight: 0,
+                rejectedWeight: 0,
+                pendingWeight: 0,
+                informativeWeight: 0,
+                informativeCount: 0,
+                rejectedCount: 0,
+                pendingCount: 0
             };
         }
 
-        // Excluir orçamentos informativos E expirados das estatísticas
-        const relevantQuotations = quotations.filter(q => 
-            q.status !== "Informativo" && q.status !== "Expirado"
-        );
+        // Separar orçamentos informativos
+        const informativeQuotations = quotations.filter(q => q.status === "Informativo");
+        
+        // Orçamentos válidos para análise (excluindo informativos)
+        const relevantQuotations = quotations.filter(q => q.status !== "Informativo");
+        
+        // Orçamentos aprovados (Aprovado + Pedido Gerado)
         const approvedQuotations = relevantQuotations.filter(q => 
             q.status === "Aprovado" || q.status === "Pedido Gerado"
         );
+        
+        // Orçamentos reprovados (Reprovado + Expirado)
+        const rejectedQuotations = relevantQuotations.filter(q => 
+            q.status === "Reprovado" || q.status === "Expirado"
+        );
+        
+        // Orçamentos pendentes (Aguardando Aprovação + Enviado)
+        const pendingQuotations = relevantQuotations.filter(q => 
+            q.status === "Aguardando Aprovação" || q.status === "Enviado"
+        );
 
+        // Função auxiliar para calcular peso total de um orçamento
+        const calculateTotalWeight = (items: any[]) => {
+            return items.reduce((acc, item) => {
+                const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                return acc + itemWeight;
+            }, 0);
+        };
+
+        // Contagens
         const totalCount = relevantQuotations.length;
         const approvedCount = approvedQuotations.length;
+        const rejectedCount = rejectedQuotations.length;
+        const pendingCount = pendingQuotations.length;
+        const informativeCount = informativeQuotations.length;
+        
+        // Taxa de aprovação (apenas orçamentos relevantes)
         const approvalRate = totalCount > 0 ? (approvedCount / totalCount) * 100 : 0;
 
+        // Valores
         const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
         const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
+        const rejectedValue = rejectedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
+        const pendingValue = pendingQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
+        const informativeValue = informativeQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
         
+        // Pesos
+        const totalWeight = relevantQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
+        const approvedWeight = approvedQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
+        const rejectedWeight = rejectedQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
+        const pendingWeight = pendingQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
+        const informativeWeight = informativeQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
+        
+        // Taxa de aprovação por valor
         const valueApprovalRate = issuedValue > 0 ? (approvedValue / issuedValue) * 100 : 0;
 
         return { 
             approvalRate, 
             valueApprovalRate,
             issuedValue, 
-            approvedValue, 
-            totalCount 
+            approvedValue,
+            rejectedValue,
+            pendingValue,
+            informativeValue,
+            totalCount,
+            totalWeight,
+            approvedWeight,
+            rejectedWeight,
+            pendingWeight,
+            informativeWeight,
+            informativeCount,
+            approvedCount,
+            rejectedCount,
+            pendingCount
         };
     }, [quotations]);
 
@@ -1280,25 +1342,53 @@ export default function QuotationsPage() {
                         title="Taxa de Aprovação"
                         value={`${dashboardStats.approvalRate.toFixed(1)}%`}
                         icon={Percent}
-                        description={`Baseado em ${dashboardStats.totalCount} orçamentos válidos`}
+                        description={`${dashboardStats.approvedCount} aprovados de ${dashboardStats.totalCount} orçamentos válidos`}
                     />
                     <StatCard
                         title="Taxa de Aprovação por Valor"
                         value={`${dashboardStats.valueApprovalRate.toFixed(1)}%`}
                         icon={DollarSign}
-                        description="Percentual do valor emitido que foi aprovado"
+                        description={`R$ ${dashboardStats.approvedValue.toLocaleString('pt-BR')} de R$ ${dashboardStats.issuedValue.toLocaleString('pt-BR')}`}
                     />
                     <StatCard
                         title="Valor Emitido (Total)"
                         value={dashboardStats.issuedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         icon={FileText}
-                        description="Soma de todos os orçamentos válidos"
+                        description={`${dashboardStats.totalCount} orçamentos válidos | ${dashboardStats.totalWeight.toFixed(2)} kg`}
                     />
                     <StatCard
                         title="Valor Aprovado"
                         value={dashboardStats.approvedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         icon={Check}
-                        description="Soma de todos os orçamentos aprovados"
+                        description={`${dashboardStats.approvedCount} orçamentos | ${dashboardStats.approvedWeight.toFixed(2)} kg`}
+                    />
+                </div>
+
+                {/* Cards adicionais com mais detalhes */}
+                <div className="mb-4 grid gap-4 md:grid-cols-4">
+                    <StatCard
+                        title="Orçamentos Informativos"
+                        value={`${dashboardStats.informativeCount}`}
+                        icon={FileText}
+                        description={`Valor: ${dashboardStats.informativeValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | ${dashboardStats.informativeWeight.toFixed(2)} kg`}
+                    />
+                    <StatCard
+                        title="Orçamentos Pendentes"
+                        value={`${dashboardStats.pendingCount}`}
+                        icon={Percent}
+                        description={`Valor: ${dashboardStats.pendingValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | ${dashboardStats.pendingWeight.toFixed(2)} kg`}
+                    />
+                    <StatCard
+                        title="Orçamentos Não Aceitos"
+                        value={`${dashboardStats.rejectedCount}`}
+                        icon={Percent}
+                        description={`Valor: ${dashboardStats.rejectedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | ${dashboardStats.rejectedWeight.toFixed(2)} kg`}
+                    />
+                    <StatCard
+                        title="Total Geral"
+                        value={`${quotations.length} orçamentos`}
+                        icon={FileText}
+                        description={`Incluindo ${dashboardStats.informativeCount} informativos`}
                     />
                 </div>
 
