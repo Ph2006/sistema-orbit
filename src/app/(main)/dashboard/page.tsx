@@ -6,12 +6,16 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { BarChart, Package, Percent, Truck, Wrench, AlertTriangle, CheckCircle, Scale, TrendingUp, Users } from "lucide-react";
+import { BarChart, Package, Percent, Truck, Wrench, AlertTriangle, CheckCircle, Scale, TrendingUp, Users, FileText } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { CustomerAnalysis } from "@/components/dashboard/production-status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 interface MonthlyData {
   month: string;
@@ -368,6 +372,10 @@ function ImprovedCustomerAnalysis({ data }: { data: CustomerData[] }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <span>Exibindo apenas pedidos com status "Concluído"</span>
+        </div>
         {/* Top 5 Clientes por Peso */}
         <div>
           <h4 className="text-sm font-semibold mb-3 text-muted-foreground">
@@ -481,6 +489,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (user && !authLoading) {
@@ -548,11 +557,14 @@ export default function DashboardPage() {
                   totalProducedWeight += itemWeight;
                 }
 
-                // ✅ 2. PESO ENTREGUE POR MÊS (baseado em shippingDate + item concluído)
-                if (item.shippingDate && isItemCompleted) {
-                  const shippingDate = safeParseDate(item.shippingDate);
-                  if (shippingDate) {
-                    const monthKey = safeFormatMonth(shippingDate);
+                // ✅ 2. PESO ENTREGUE POR MÊS (APENAS PEDIDOS CONCLUÍDOS)
+                // REGRA: Só conta se o PEDIDO inteiro está com status "Concluído"
+                if (order.status === 'Concluído' && isItemCompleted) {
+                  // Usar data específica do item ou data geral do pedido
+                  const effectiveDate = safeParseDate(item.itemDeliveryDate) || safeParseDate(order.deliveryDate);
+                  
+                  if (effectiveDate) {
+                    const monthKey = safeFormatMonth(effectiveDate);
                     if (monthKey) {
                       monthlyDeliveredMap.set(
                         monthKey, 
@@ -562,31 +574,32 @@ export default function DashboardPage() {
                   }
                 }
 
-                // ✅ 3. PESO ENTREGUE POR CLIENTE (apenas pedidos CONCLUÍDOS)
-                // SÓ CONTA SE O PEDIDO ESTIVER CONCLUÍDO
-                if (order.status === 'Concluído') {
-                  // Só conta se item tem shippingDate E está 100% concluído
-                  if (item.shippingDate && isItemCompleted) {
+                // ✅ 3. PESO ENTREGUE POR CLIENTE (APENAS PEDIDOS CONCLUÍDOS)
+                // REGRA: Só conta se o PEDIDO inteiro está com status "Concluído"
+                if (order.status === 'Concluído' && isItemCompleted) {
+                  // Considerar como entregue se tem data de entrega e está concluído
+                  const effectiveDate = safeParseDate(item.itemDeliveryDate) || safeParseDate(order.deliveryDate);
+                  
+                  if (effectiveDate) {
+                    totalShippedItems++;
+                    customerEntry.totalItems++;
+                    customerEntry.deliveredWeight += itemWeight;
+
+                    // Verificar se entregou no prazo
+                    const itemDeliveryDate = safeParseDate(item.itemDeliveryDate) || safeParseDate(order.deliveryDate);
                     const shippingDate = safeParseDate(item.shippingDate);
                     
-                    if (shippingDate) {
-                      totalShippedItems++;
-                      customerEntry.totalItems++;
-                      customerEntry.deliveredWeight += itemWeight;
-
-                      // Verificar se entregou no prazo
-                      const itemDeliveryDate = safeParseDate(item.itemDeliveryDate);
+                    if (itemDeliveryDate) {
+                      const dDate = new Date(itemDeliveryDate);
+                      dDate.setHours(0, 0, 0, 0);
                       
-                      if (itemDeliveryDate) {
-                        const sDate = new Date(shippingDate);
-                        sDate.setHours(0, 0, 0, 0);
-                        const dDate = new Date(itemDeliveryDate);
-                        dDate.setHours(0, 0, 0, 0);
-                        
-                        if (sDate <= dDate) {
-                          totalOnTimeItems++;
-                          customerEntry.onTimeItems++;
-                        }
+                      // Se tem shippingDate, usar para comparar, senão usar effectiveDate
+                      const compareDate = shippingDate ? new Date(shippingDate) : new Date(effectiveDate);
+                      compareDate.setHours(0, 0, 0, 0);
+                      
+                      if (compareDate <= dDate) {
+                        totalOnTimeItems++;
+                        customerEntry.onTimeItems++;
                       }
                     }
                   }
@@ -612,6 +625,37 @@ export default function DashboardPage() {
           const onTimeDeliveryRate = totalShippedItems > 0 ? (totalOnTimeItems / totalShippedItems) * 100 : 100;
           const geralNcRate = totalShippedItems > 0 ? (qualityReports.length / totalShippedItems) * 100 : 0;
           const internalNcRate = totalShippedItems > 0 ? (qualityReports.filter(r => r.type === "Interna").length / totalShippedItems) * 100 : 0;
+
+          // ✅ GARANTIR QUE TODOS OS MESES COM PEDIDOS APAREÇAM
+          const allMonthsWithOrders = new Set<string>();
+
+          ordersSnapshot.forEach(doc => {
+            const data = doc.data();
+            const deliveryDate = safeParseDate(data.deliveryDate);
+            
+            if (deliveryDate) {
+              const monthKey = safeFormatMonth(deliveryDate);
+              if (monthKey) allMonthsWithOrders.add(monthKey);
+            }
+            
+            // Também verificar datas específicas dos itens
+            if (data.items && Array.isArray(data.items)) {
+              data.items.forEach((item: any) => {
+                const itemDate = safeParseDate(item.itemDeliveryDate);
+                if (itemDate) {
+                  const monthKey = safeFormatMonth(itemDate);
+                  if (monthKey) allMonthsWithOrders.add(monthKey);
+                }
+              });
+            }
+          });
+
+          // Preencher meses sem entregas com peso zero
+          Array.from(allMonthsWithOrders).forEach(monthKey => {
+            if (!monthlyDeliveredMap.has(monthKey)) {
+              monthlyDeliveredMap.set(monthKey, 0);
+            }
+          });
 
           // ✅ PRODUÇÃO MENSAL (últimos 6 meses)
           const sortedMonthlyEntries = Array.from(monthlyDeliveredMap.entries())
@@ -666,6 +710,69 @@ export default function DashboardPage() {
           });
           console.log('\n📊 ========================================\n');
 
+          // 📊 LOG DETALHADO - Verificar peso por cliente (apenas pedidos concluídos)
+          console.log('\n📊 ========================================');
+          console.log('📊 VERIFICAÇÃO: PESO POR CLIENTE (PEDIDOS CONCLUÍDOS)');
+          console.log('📊 ========================================');
+
+          const customerDebugMap = new Map<string, { 
+            totalWeight: number; 
+            pedidosConcluidos: number;
+            totalPedidos: number;
+          }>();
+
+          ordersSnapshot.forEach(doc => {
+            const order = doc.data();
+            const customerName = formatCustomerName(
+              order.customer?.name || order.customerName || "Desconhecido"
+            );
+            
+            if (!customerDebugMap.has(customerName)) {
+              customerDebugMap.set(customerName, {
+                totalWeight: 0,
+                pedidosConcluidos: 0,
+                totalPedidos: 0
+              });
+            }
+            
+            const debugEntry = customerDebugMap.get(customerName)!;
+            debugEntry.totalPedidos++;
+            
+            // Só conta peso se pedido está CONCLUÍDO
+            if (order.status === 'Concluído') {
+              debugEntry.pedidosConcluidos++;
+              
+              if (order.items && Array.isArray(order.items)) {
+                order.items.forEach((item: any) => {
+                  const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                  
+                  // Verificar se item está 100% concluído
+                  const isItemCompleted = item.productionPlan?.length > 0
+                    ? item.productionPlan.every((p: any) => p.status === 'Concluído')
+                    : false;
+                  
+                  if (isItemCompleted) {
+                    debugEntry.totalWeight += itemWeight;
+                  }
+                });
+              }
+            }
+          });
+
+          // Mostrar Top 10
+          const top10Debug = Array.from(customerDebugMap.entries())
+            .sort((a, b) => b[1].totalWeight - a[1].totalWeight)
+            .slice(0, 10);
+
+          top10Debug.forEach(([name, data], index) => {
+            console.log(`\n${index + 1}. ${name}:`);
+            console.log(`   ├─ Peso Total (Pedidos Concluídos): ${data.totalWeight.toFixed(2)} kg`);
+            console.log(`   ├─ Pedidos Concluídos: ${data.pedidosConcluidos}`);
+            console.log(`   └─ Total de Pedidos: ${data.totalPedidos}`);
+          });
+
+          console.log('\n📊 ========================================\n');
+
           setData({
             totalProducedWeight,
             totalToProduceWeight,
@@ -706,6 +813,107 @@ export default function DashboardPage() {
   }
 
   const productionRate = data.totalToProduceWeight > 0 ? (data.totalProducedWeight / data.totalToProduceWeight) * 100 : 0;
+
+  const handleExportMonthlyReport = async () => {
+    toast({ title: "Gerando Relatório...", description: "Por favor, aguarde." });
+
+    try {
+      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      const docSnap = await getDoc(companyRef);
+      const companyData: any = docSnap.exists() ? docSnap.data() : {};
+      
+      const docPdf = new jsPDF();
+      const pageWidth = docPdf.internal.pageSize.width;
+      let yPos = 15;
+
+      // Logo e cabeçalho
+      if (companyData.logo?.preview) {
+        try {
+          docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20);
+        } catch (e) {
+          console.warn("Erro ao adicionar logo:", e);
+        }
+      }
+
+      docPdf.setFontSize(18).setFont('helvetica', 'bold');
+      docPdf.text(companyData.nomeFantasia || 'Relatório de Produção', 65, yPos + 5);
+      yPos = 45;
+
+      // Título
+      docPdf.setFontSize(16).setFont('helvetica', 'bold');
+      docPdf.text('RELATÓRIO DE PRODUÇÃO MENSAL', pageWidth / 2, yPos, { align: 'center' });
+      yPos += 15;
+
+      // Resumo Executivo
+      const avgProduction = data.monthlyProduction.length > 0 
+        ? data.monthlyProduction.reduce((acc, m) => acc + m.weight, 0) / data.monthlyProduction.length 
+        : 0;
+      
+      docPdf.setFontSize(12).setFont('helvetica', 'bold');
+      docPdf.text('RESUMO EXECUTIVO', 15, yPos);
+      yPos += 8;
+      
+      docPdf.setFontSize(10).setFont('helvetica', 'normal');
+      if (data.monthlyProduction.length > 0) {
+        docPdf.text(`Período Analisado: ${data.monthlyProduction[0]?.month} a ${data.monthlyProduction[data.monthlyProduction.length - 1]?.month}`, 15, yPos);
+        yPos += 6;
+      }
+      docPdf.text(`Média Mensal de Produção: ${avgProduction.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, 15, yPos);
+      yPos += 6;
+      
+      if (data.companyCapacity.metaMensal) {
+        const metaAchievement = (avgProduction / data.companyCapacity.metaMensal) * 100;
+        docPdf.text(`Meta Mensal: ${data.companyCapacity.metaMensal.toLocaleString('pt-BR')} kg`, 15, yPos);
+        yPos += 6;
+        docPdf.text(`Atingimento da Meta: ${metaAchievement.toFixed(1)}%`, 15, yPos);
+        yPos += 6;
+      }
+      
+      if (data.companyCapacity.capacidadeInstalada) {
+        const capacityUtilization = (avgProduction / data.companyCapacity.capacidadeInstalada) * 100;
+        docPdf.text(`Capacidade Instalada: ${data.companyCapacity.capacidadeInstalada.toLocaleString('pt-BR')} kg`, 15, yPos);
+        yPos += 6;
+        docPdf.text(`Utilização da Capacidade: ${capacityUtilization.toFixed(1)}%`, 15, yPos);
+        yPos += 6;
+      }
+      
+      yPos += 10;
+
+      // Tabela de produção mensal
+      docPdf.setFontSize(12).setFont('helvetica', 'bold');
+      docPdf.text('PRODUÇÃO MENSAL DETALHADA', 15, yPos);
+      yPos += 10;
+
+      const tableData = data.monthlyProduction.map(m => {
+        const metaPercentage = data.companyCapacity.metaMensal 
+          ? ((m.weight / data.companyCapacity.metaMensal) * 100).toFixed(1) 
+          : '-';
+        
+        return [
+          m.month,
+          `${m.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
+          `${metaPercentage}%`,
+          data.companyCapacity.metaMensal && m.weight >= data.companyCapacity.metaMensal ? 'Atingida' : 'Não atingida'
+        ];
+      });
+
+      autoTable(docPdf, {
+        startY: yPos,
+        head: [['Mês', 'Peso Entregue', '% da Meta', 'Status']],
+        body: tableData,
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [37, 99, 235] },
+      });
+
+      const filename = `Relatorio_Producao_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
+      docPdf.save(filename);
+      
+      toast({ title: "✅ Relatório Gerado!", description: filename });
+    } catch (error) {
+      console.error("Erro ao gerar relatório:", error);
+      toast({ variant: "destructive", title: "Erro", description: "Falha ao gerar relatório" });
+    }
+  };
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
@@ -752,6 +960,17 @@ export default function DashboardPage() {
             description="Falhas detectadas internamente"
           />
         </div>
+        {data.monthlyProduction.length > 0 && (
+          <div className="flex justify-end">
+            <Button 
+              onClick={handleExportMonthlyReport}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Exportar Relatório Mensal Completo
+            </Button>
+          </div>
+        )}
       </section>
       
       {/* Charts Section */}
