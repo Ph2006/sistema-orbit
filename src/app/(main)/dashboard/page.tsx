@@ -20,6 +20,8 @@ import autoTable from "jspdf-autotable";
 interface MonthlyData {
   month: string;
   weight: number;
+  completedWeight?: number;
+  completedPercentage?: number;
 }
 
 interface CustomerData {
@@ -186,10 +188,10 @@ function ImprovedMonthlyProductionChart({ data, companyCapacity }: {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <BarChart className="h-5 w-5" />
-          Produção Mensal (Peso Entregue)
+          Peso Total por Mês de Entrega
         </CardTitle>
         <CardDescription>
-          Análise de produção com metas e capacidade instalada - Histórico completo
+          Peso total de itens com entrega prevista para cada mês (todos os status) - Histórico completo
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -226,7 +228,7 @@ function ImprovedMonthlyProductionChart({ data, companyCapacity }: {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="text-sm font-medium text-muted-foreground">
-                PESO ENTREGUE POR MÊS (KG)
+                PESO TOTAL POR MÊS DE ENTREGA (KG)
               </div>
               <div className="text-xs text-muted-foreground">
                 {data.length} mês{data.length !== 1 ? 'es' : ''} registrado{data.length !== 1 ? 's' : ''}
@@ -259,6 +261,12 @@ function ImprovedMonthlyProductionChart({ data, companyCapacity }: {
                         {companyCapacity.metaMensal && (
                           <div className="text-xs text-muted-foreground">
                             {((item.weight / companyCapacity.metaMensal) * 100).toFixed(0)}% da meta
+                          </div>
+                        )}
+                        {/* ✅ ADICIONAR indicador de conclusão */}
+                        {item.completedPercentage !== undefined && (
+                          <div className="text-xs text-green-600">
+                            {item.completedPercentage.toFixed(0)}% concluído
                           </div>
                         )}
                       </div>
@@ -357,6 +365,27 @@ function ImprovedMonthlyProductionChart({ data, companyCapacity }: {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+        
+        {/* Nota explicativa */}
+        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-blue-100 rounded-full flex-shrink-0">
+              <BarChart className="h-4 w-4 text-blue-600" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-semibold text-blue-900 mb-1">
+                Sobre este gráfico
+              </h4>
+              <p className="text-xs text-blue-700">
+                Este gráfico mostra o <strong>peso total de todos os itens</strong> com entrega prevista para cada mês, 
+                independente do status do pedido (Em Produção, Concluído, etc.).
+              </p>
+              <p className="text-xs text-blue-600 mt-2">
+                💡 Os valores são idênticos aos exibidos no Kanban quando filtrado por mês.
+              </p>
+            </div>
           </div>
         </div>
       </CardContent>
@@ -519,7 +548,8 @@ export default function DashboardPage() {
           }
 
           // ✅ MAPAS SEPARADOS PARA CADA MÉTRICA
-          const monthlyDeliveredMap = new Map<string, number>(); // Peso ENTREGUE (shippingDate)
+          const monthlyDeliveredMap = new Map<string, number>(); // Peso TOTAL por mês
+          const monthlyCompletedMap = new Map<string, number>(); // Peso CONCLUÍDO por mês
           const customerDataMap = new Map<string, { 
             deliveredWeight: number; 
             ncCount: number; 
@@ -563,18 +593,24 @@ export default function DashboardPage() {
                   totalProducedWeight += itemWeight;
                 }
 
-                // ✅ 2. PESO ENTREGUE POR MÊS (APENAS PEDIDOS CONCLUÍDOS)
-                // REGRA: Só conta se o PEDIDO inteiro está com status "Concluído"
-                if (order.status === 'Concluído' && isItemCompleted) {
-                  // Usar data específica do item ou data geral do pedido
-                  const effectiveDate = safeParseDate(item.itemDeliveryDate) || safeParseDate(order.deliveryDate);
-                  
-                  if (effectiveDate) {
-                    const monthKey = safeFormatMonth(effectiveDate);
-                    if (monthKey) {
-                      monthlyDeliveredMap.set(
-                        monthKey, 
-                        (monthlyDeliveredMap.get(monthKey) || 0) + itemWeight
+                // ✅ 2. PESO TOTAL POR MÊS (IGUAL AO KANBAN)
+                // REGRA: Conta TODOS os itens que têm data de entrega definida, 
+                // independente do status do pedido ou progresso do item
+                const effectiveDate = safeParseDate(item.itemDeliveryDate) || safeParseDate(order.deliveryDate);
+
+                if (effectiveDate) {
+                  const monthKey = safeFormatMonth(effectiveDate);
+                  if (monthKey) {
+                    monthlyDeliveredMap.set(
+                      monthKey, 
+                      (monthlyDeliveredMap.get(monthKey) || 0) + itemWeight
+                    );
+                    
+                    // Calcular peso concluído para este mês
+                    if (isItemCompleted && order.status === 'Concluído') {
+                      monthlyCompletedMap.set(
+                        monthKey,
+                        (monthlyCompletedMap.get(monthKey) || 0) + itemWeight
                       );
                     }
                   }
@@ -673,15 +709,35 @@ export default function DashboardPage() {
               const date = new Date(parseInt(year), parseInt(month) - 1, 15);
               
               if (isValid(date)) {
+                const monthFormatted = format(date, 'MMM/yy', { locale: ptBR });
+                const completedWeight = monthlyCompletedMap.get(monthKey) || 0;
+                const completedPercentage = weight > 0 ? (completedWeight / weight) * 100 : 0;
+                
                 return {
-                  month: format(date, 'MMM/yy', { locale: ptBR }),
+                  month: monthFormatted,
                   weight,
+                  completedWeight,
+                  completedPercentage,
                 };
               } else {
-                return { month: monthKey, weight };
+                const completedWeight = monthlyCompletedMap.get(monthKey) || 0;
+                const completedPercentage = weight > 0 ? (completedWeight / weight) * 100 : 0;
+                return { 
+                  month: monthKey, 
+                  weight,
+                  completedWeight,
+                  completedPercentage,
+                };
               }
             } catch (error) {
-              return { month: monthKey, weight };
+              const completedWeight = monthlyCompletedMap.get(monthKey) || 0;
+              const completedPercentage = weight > 0 ? (completedWeight / weight) * 100 : 0;
+              return { 
+                month: monthKey, 
+                weight,
+                completedWeight,
+                completedPercentage,
+              };
             }
           });
           
@@ -694,26 +750,72 @@ export default function DashboardPage() {
             }))
             .sort((a, b) => b.deliveredWeight - a.deliveredWeight);
 
-          // ✅ LOG FINAL DE VERIFICAÇÃO
+          // 📊 LOG FINAL DE VERIFICAÇÃO (ALINHADO COM KANBAN)
           console.log('📊 ========================================');
-          console.log('📊 RELATÓRIO FINAL - DADOS CORRETOS');
+          console.log('📊 RELATÓRIO FINAL - PESO POR MÊS (IGUAL KANBAN)');
           console.log('📊 ========================================');
-          console.log(`\n📦 TOTAIS:`);
-          console.log(`   Peso Total a Produzir: ${totalToProduceWeight.toFixed(2)} kg`);
-          console.log(`   Peso Total Produzido (100%): ${totalProducedWeight.toFixed(2)} kg`);
-          console.log(`   Taxa de Produção: ${((totalProducedWeight / totalToProduceWeight) * 100).toFixed(2)}%`);
-          console.log(`\n🚚 ENTREGAS:`);
-          console.log(`   Itens Embarcados: ${totalShippedItems}`);
-          console.log(`   Itens no Prazo: ${totalOnTimeItems}`);
-          console.log(`   Taxa no Prazo: ${onTimeDeliveryRate.toFixed(2)}%`);
-          console.log(`\n👥 CLIENTES (Top 5):`);
-          customerAnalysis.slice(0, 5).forEach((customer, i) => {
-            console.log(`   ${i + 1}. ${customer.name}: ${customer.deliveredWeight.toFixed(2)} kg`);
-          });
-          console.log(`\n📅 PRODUÇÃO MENSAL (últimos 6 meses):`);
+
+          console.log(`\n📅 PRODUÇÃO MENSAL (últimos ${monthlyProduction.length} meses):`);
           monthlyProduction.forEach(m => {
-            console.log(`   ${m.month}: ${m.weight.toFixed(2)} kg`);
+            console.log(`   ${m.month}: ${m.weight.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} kg`);
           });
+
+          // Calcular totais por mês para comparação
+          const monthDebugMap = new Map<string, { total: number; completed: number; pending: number }>();
+
+          ordersSnapshot.forEach(doc => {
+            const order = doc.data();
+            if (order.items && Array.isArray(order.items)) {
+              order.items.forEach((item: any) => {
+                const effectiveDate = safeParseDate(item.itemDeliveryDate) || safeParseDate(order.deliveryDate);
+                if (!effectiveDate) return;
+                
+                const monthKey = safeFormatMonth(effectiveDate);
+                if (!monthKey) return;
+                
+                const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
+                
+                if (!monthDebugMap.has(monthKey)) {
+                  monthDebugMap.set(monthKey, { total: 0, completed: 0, pending: 0 });
+                }
+                
+                const monthData = monthDebugMap.get(monthKey)!;
+                monthData.total += itemWeight;
+                
+                const isItemCompleted = item.productionPlan?.length > 0
+                  ? item.productionPlan.every((p: any) => p.status === 'Concluído')
+                  : false;
+                
+                if (isItemCompleted && order.status === 'Concluído') {
+                  monthData.completed += itemWeight;
+                } else {
+                  monthData.pending += itemWeight;
+                }
+              });
+            }
+          });
+
+          console.log('\n📊 DETALHAMENTO POR MÊS:');
+          Array.from(monthDebugMap.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .forEach(([monthKey, data]) => {
+              try {
+                const [year, month] = monthKey.split('-');
+                const date = new Date(parseInt(year), parseInt(month) - 1, 15);
+                const monthFormatted = isValid(date) ? format(date, 'MMM/yy', { locale: ptBR }) : monthKey;
+                
+                console.log(`\n${monthFormatted}:`);
+                console.log(`   Total: ${data.total.toFixed(2)} kg`);
+                console.log(`   Concluído: ${data.completed.toFixed(2)} kg (${((data.completed / data.total) * 100).toFixed(1)}%)`);
+                console.log(`   Pendente: ${data.pending.toFixed(2)} kg (${((data.pending / data.total) * 100).toFixed(1)}%)`);
+              } catch (error) {
+                console.log(`\n${monthKey}:`);
+                console.log(`   Total: ${data.total.toFixed(2)} kg`);
+                console.log(`   Concluído: ${data.completed.toFixed(2)} kg (${((data.completed / data.total) * 100).toFixed(1)}%)`);
+                console.log(`   Pendente: ${data.pending.toFixed(2)} kg (${((data.pending / data.total) * 100).toFixed(1)}%)`);
+              }
+            });
+
           console.log('\n📊 ========================================\n');
 
           // 📊 LOG DETALHADO - Verificar peso por cliente (apenas pedidos concluídos)
