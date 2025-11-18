@@ -11,6 +11,7 @@ import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIco
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import jsPDF from 'jspdf';
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -2488,82 +2489,230 @@ export default function ProductsPage() {
                                             variant="outline"
                                             size="sm"
                                             onClick={() => {
-                                                // Exportar relatório
-                                                const doc = `
-MECALD - RELATÓRIO DE PRECIFICAÇÃO
-Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-
-========================================
-PRODUTO
-========================================
-Código: ${pricingCalculation.productCode}
-Descrição: ${pricingCalculation.productDescription}
-Peso: ${pricingCalculation.productWeight} kg
-
-========================================
-COMPOSIÇÃO DE MATERIAIS
-========================================
-${pricingCalculation.materialCosts.map(m => 
-    `${m.materialDescription}\n  ${m.weightKg} kg × R$ ${m.pricePerKg.toFixed(2)}/kg = R$ ${m.totalCost.toFixed(2)}`
-).join('\n')}
-
-Subtotal Materiais: R$ ${pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0).toFixed(2)}
-
-========================================
-CUSTOS DE PRODUÇÃO POR ETAPA
-========================================
-${pricingCalculation.stageCosts.map(s =>
-    `${s.stageName}\n  R$ ${s.costPerDay.toFixed(2)}/kg × ${pricingCalculation.productWeight} kg = R$ ${s.totalCost.toFixed(2)}`
-).join('\n')}
-
-Subtotal Etapas: R$ ${pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0).toFixed(2)}
-
-========================================
-OUTROS CUSTOS
-========================================
-Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}
-
-Insumos e Consumíveis:
-  Custo base: R$ ${pricingCalculation.consumablesCost.toFixed(2)}
-  Margem (10%): R$ ${(pricingCalculation.consumablesCost * 0.10).toFixed(2)}
-  Total: R$ ${pricingCalculation.consumablesWithMargin.toFixed(2)}
-
-========================================
-RESUMO FINANCEIRO
-========================================
-Custo Total: R$ ${pricingCalculation.totalCost.toFixed(2)}
-Margem de Lucro (${pricingCalculation.profitMargin}%): R$ ${pricingCalculation.profitValue.toFixed(2)}
-──────────────────────────────────────
-PREÇO FINAL: R$ ${pricingCalculation.finalPrice.toFixed(2)}
-PREÇO POR KG: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg
-══════════════════════════════════════
-
-COMPOSIÇÃO DO PREÇO FINAL:
-- Materiais: R$ ${pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0).toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0) / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
-- Etapas de Produção: R$ ${pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0).toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
-- Usinagem: R$ ${pricingCalculation.machiningCost.toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.machiningCost / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
-- Insumos c/ margem: R$ ${pricingCalculation.consumablesWithMargin.toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.consumablesWithMargin / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
-- Lucro: R$ ${pricingCalculation.profitValue.toFixed(2)} (${pricingCalculation.profitMargin}%)
-                                                `;
+                                                const doc = new jsPDF();
                                                 
-                                                const blob = new Blob([doc], { type: 'text/plain' });
-                                                const url = URL.createObjectURL(blob);
-                                                const link = document.createElement('a');
-                                                link.href = url;
-                                                link.download = `precificacao-${pricingCalculation.productCode}-${format(new Date(), 'yyyyMMdd-HHmm')}.txt`;
-                                                document.body.appendChild(link);
-                                                link.click();
-                                                document.body.removeChild(link);
-                                                URL.revokeObjectURL(url);
+                                                // Configurações
+                                                const pageWidth = doc.internal.pageSize.getWidth();
+                                                const pageHeight = doc.internal.pageSize.getHeight();
+                                                const margin = 20;
+                                                let yPosition = margin;
+                                                const lineHeight = 7;
+                                                
+                                                // Função auxiliar para adicionar texto
+                                                const addText = (text: string, fontSize: number = 10, isBold: boolean = false, align: 'left' | 'center' | 'right' = 'left') => {
+                                                    doc.setFontSize(fontSize);
+                                                    doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+                                                    
+                                                    if (align === 'center') {
+                                                        doc.text(text, pageWidth / 2, yPosition, { align: 'center' });
+                                                    } else if (align === 'right') {
+                                                        doc.text(text, pageWidth - margin, yPosition, { align: 'right' });
+                                                    } else {
+                                                        doc.text(text, margin, yPosition);
+                                                    }
+                                                    
+                                                    yPosition += lineHeight;
+                                                };
+                                                
+                                                // Função para adicionar linha horizontal
+                                                const addLine = () => {
+                                                    doc.setDrawColor(200, 200, 200);
+                                                    doc.line(margin, yPosition, pageWidth - margin, yPosition);
+                                                    yPosition += lineHeight;
+                                                };
+                                                
+                                                // Função para verificar quebra de página
+                                                const checkPageBreak = (spaceNeeded: number = 20) => {
+                                                    if (yPosition + spaceNeeded > pageHeight - margin) {
+                                                        doc.addPage();
+                                                        yPosition = margin;
+                                                        return true;
+                                                    }
+                                                    return false;
+                                                };
+                                                
+                                                // Função para adicionar seção com título
+                                                const addSection = (title: string) => {
+                                                    checkPageBreak(15);
+                                                    yPosition += 3;
+                                                    doc.setFillColor(37, 99, 235); // Azul
+                                                    doc.rect(margin, yPosition - 5, pageWidth - (2 * margin), 8, 'F');
+                                                    doc.setTextColor(255, 255, 255);
+                                                    addText(title, 11, true);
+                                                    doc.setTextColor(0, 0, 0);
+                                                    yPosition += 2;
+                                                };
+                                                
+                                                // CABEÇALHO
+                                                doc.setFillColor(37, 99, 235);
+                                                doc.rect(0, 0, pageWidth, 40, 'F');
+                                                doc.setTextColor(255, 255, 255);
+                                                doc.setFontSize(20);
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.text('MECALD', pageWidth / 2, 15, { align: 'center' });
+                                                doc.setFontSize(14);
+                                                doc.text('RELATÓRIO DE PRECIFICAÇÃO', pageWidth / 2, 25, { align: 'center' });
+                                                doc.setFontSize(9);
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, pageWidth / 2, 32, { align: 'center' });
+                                                
+                                                yPosition = 50;
+                                                doc.setTextColor(0, 0, 0);
+                                                
+                                                // DADOS DO PRODUTO
+                                                addSection('DADOS DO PRODUTO');
+                                                addText(`Código: ${pricingCalculation.productCode}`, 10, true);
+                                                addText(`Descrição: ${pricingCalculation.productDescription}`, 10);
+                                                addText(`Peso: ${pricingCalculation.productWeight} kg`, 10);
+                                                
+                                                // COMPOSIÇÃO DE MATERIAIS
+                                                addSection('COMPOSIÇÃO DE MATERIAIS');
+                                                pricingCalculation.materialCosts.forEach((m, index) => {
+                                                    checkPageBreak();
+                                                    addText(`${index + 1}. ${m.materialDescription}`, 9);
+                                                    addText(`   ${m.weightKg} kg × R$ ${m.pricePerKg.toFixed(2)}/kg = R$ ${m.totalCost.toFixed(2)}`, 9);
+                                                });
+                                                yPosition += 2;
+                                                doc.setFont('helvetica', 'bold');
+                                                const materialTotal = pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0);
+                                                addText(`Subtotal Materiais: R$ ${materialTotal.toFixed(2)}`, 10, true, 'right');
+                                                doc.setFont('helvetica', 'normal');
+                                                
+                                                // CUSTOS DE PRODUÇÃO
+                                                addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
+                                                pricingCalculation.stageCosts.forEach((s, index) => {
+                                                    checkPageBreak();
+                                                    addText(`${index + 1}. ${s.stageName}`, 9);
+                                                    addText(`   R$ ${s.costPerDay.toFixed(2)}/kg × ${pricingCalculation.productWeight} kg = R$ ${s.totalCost.toFixed(2)}`, 9);
+                                                });
+                                                yPosition += 2;
+                                                const stageTotal = pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0);
+                                                addText(`Subtotal Etapas: R$ ${stageTotal.toFixed(2)}`, 10, true, 'right');
+                                                
+                                                // OUTROS CUSTOS
+                                                addSection('OUTROS CUSTOS');
+                                                if (pricingCalculation.machiningCost > 0) {
+                                                    addText(`Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
+                                                }
+                                                if (pricingCalculation.consumablesWithMargin > 0) {
+                                                    addText(`Insumos e Consumíveis:`, 9, true);
+                                                    addText(`   Custo base: R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
+                                                    addText(`   Margem (10%): R$ ${(pricingCalculation.consumablesCost * 0.10).toFixed(2)}`, 9);
+                                                    addText(`   Total: R$ ${pricingCalculation.consumablesWithMargin.toFixed(2)}`, 9, true);
+                                                }
+                                                
+                                                // RESUMO FINANCEIRO
+                                                checkPageBreak(40);
+                                                addSection('RESUMO FINANCEIRO');
+                                                
+                                                // Box com resultado final
+                                                yPosition += 3;
+                                                const boxY = yPosition;
+                                                doc.setFillColor(240, 240, 240);
+                                                doc.roundedRect(margin, boxY, pageWidth - (2 * margin), 35, 3, 3, 'F');
+                                                
+                                                yPosition = boxY + 8;
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.text(`Custo Total:`, margin + 5, yPosition);
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.text(`R$ ${pricingCalculation.totalCost.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                
+                                                yPosition = boxY + 16;
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.setTextColor(22, 163, 74); // Verde
+                                                doc.text(`Margem de Lucro (${pricingCalculation.profitMargin}%):`, margin + 5, yPosition);
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.text(`R$ ${pricingCalculation.profitValue.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                doc.setTextColor(0, 0, 0);
+                                                
+                                                yPosition = boxY + 26;
+                                                doc.setDrawColor(37, 99, 235);
+                                                doc.setLineWidth(0.5);
+                                                doc.line(margin + 5, yPosition - 2, pageWidth - margin - 5, yPosition - 2);
+                                                
+                                                yPosition = boxY + 32;
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.setFontSize(14);
+                                                doc.setTextColor(37, 99, 235);
+                                                doc.text('PREÇO FINAL:', margin + 5, yPosition);
+                                                doc.text(`R$ ${pricingCalculation.finalPrice.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                
+                                                yPosition += 8;
+                                                doc.setFontSize(10);
+                                                doc.setTextColor(100, 100, 100);
+                                                doc.text(`Preço por kg: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                doc.setTextColor(0, 0, 0);
+                                                
+                                                // COMPOSIÇÃO PERCENTUAL
+                                                yPosition += 10;
+                                                checkPageBreak(50);
+                                                addSection('COMPOSIÇÃO DO PREÇO FINAL');
+                                                
+                                                const percentages = [
+                                                    { label: 'Materiais', value: materialTotal, color: [59, 130, 246] },
+                                                    { label: 'Etapas de Produção', value: stageTotal, color: [16, 185, 129] },
+                                                    { label: 'Usinagem', value: pricingCalculation.machiningCost, color: [245, 158, 11] },
+                                                    { label: 'Insumos c/ margem', value: pricingCalculation.consumablesWithMargin, color: [139, 92, 246] },
+                                                    { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] }
+                                                ].filter(item => item.value > 0);
+                                                
+                                                percentages.forEach((item, index) => {
+                                                    checkPageBreak();
+                                                    const percentage = ((item.value / pricingCalculation.finalPrice) * 100).toFixed(1);
+                                                    
+                                                    // Bolinha colorida
+                                                    doc.setFillColor(item.color[0], item.color[1], item.color[2]);
+                                                    doc.circle(margin + 2, yPosition - 2, 2, 'F');
+                                                    
+                                                    // Texto
+                                                    doc.setFont('helvetica', 'normal');
+                                                    doc.text(`${item.label}:`, margin + 8, yPosition);
+                                                    
+                                                    // Valor e percentual
+                                                    doc.setFont('helvetica', 'bold');
+                                                    const valueText = `R$ ${item.value.toFixed(2)} (${percentage}%)`;
+                                                    doc.text(valueText, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                    
+                                                    yPosition += lineHeight;
+                                                });
+                                                
+                                                // Observação importante
+                                                yPosition += 5;
+                                                checkPageBreak(15);
+                                                doc.setFillColor(255, 243, 205);
+                                                doc.roundedRect(margin, yPosition, pageWidth - (2 * margin), 15, 2, 2, 'F');
+                                                doc.setFontSize(9);
+                                                doc.setTextColor(133, 77, 14);
+                                                yPosition += 5;
+                                                doc.text('⚠️ IMPORTANTE:', margin + 5, yPosition);
+                                                yPosition += 5;
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.text('Este é o preço SEM impostos. Lembre-se de adicionar os impostos aplicáveis', margin + 5, yPosition);
+                                                yPosition += 5;
+                                                doc.text('(ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.', margin + 5, yPosition);
+                                                
+                                                // RODAPÉ em todas as páginas
+                                                const totalPages = doc.internal.pages.length - 1;
+                                                for (let i = 1; i <= totalPages; i++) {
+                                                    doc.setPage(i);
+                                                    const footerY = pageHeight - 15;
+                                                    doc.setFontSize(8);
+                                                    doc.setTextColor(150, 150, 150);
+                                                    doc.text('MECALD - Indústria e Comércio', pageWidth / 2, footerY, { align: 'center' });
+                                                    doc.text(`Página ${i} de ${totalPages}`, pageWidth / 2, footerY + 5, { align: 'center' });
+                                                }
+                                                
+                                                // Salvar PDF
+                                                doc.save(`precificacao-${pricingCalculation.productCode}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`);
                                                 
                                                 toast({
-                                                    title: "Relatório exportado!",
+                                                    title: "PDF exportado!",
                                                     description: "O relatório de precificação foi baixado com sucesso."
                                                 });
                                             }}
                                         >
                                             <Download className="mr-2 h-3 w-3" />
-                                            Exportar
+                                            Exportar PDF
                                         </Button>
                                     )}
                                 </div>
