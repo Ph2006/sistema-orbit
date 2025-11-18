@@ -2144,28 +2144,91 @@ export default function ProductsPage() {
 
                                         <Separator />
 
-                                        {/* Adicionar Material */}
+                                        {/* Composição de Materiais */}
                                         <div>
-                                            <div className="flex items-center justify-between mb-3">
-                                                <h4 className="text-sm font-medium">Composição de Materiais</h4>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        // Abre dialog para adicionar material
-                                                        const materialId = prompt("Cole o ID do material ou deixe vazio para buscar:");
-                                                        if (materialId === null) return; // Cancelou
-                                                        
-                                                        // Por enquanto, vamos usar um select inline
-                                                    }}
-                                                >
-                                                    <PlusCircle className="mr-2 h-3 w-3" />
-                                                    Adicionar Material
-                                                </Button>
-                                            </div>
+                                            <h4 className="text-sm font-medium mb-3">Composição de Materiais</h4>
+                                            <p className="text-xs text-muted-foreground mb-3">
+                                                Selecione materiais na lista abaixo para adicionar à composição
+                                            </p>
 
                                             <div className="space-y-3">
+                                                {/* Seletor de material para adicionar */}
+                                                <div className="space-y-2">
+                                                    <Label className="text-xs text-muted-foreground">Selecione um material para adicionar:</Label>
+                                                    <Select
+                                                        value=""
+                                                        onValueChange={(materialId) => {
+                                                            const material = DEFAULT_MATERIALS.find(m => m.id === materialId);
+                                                            if (!material) return;
+                                                            
+                                                            // Verifica se o material já foi adicionado
+                                                            if (materialComposition.some(m => m.materialId === materialId)) {
+                                                                toast({
+                                                                    variant: "destructive",
+                                                                    title: "Material já adicionado",
+                                                                    description: "Este material já está na lista. Edite o peso existente."
+                                                                });
+                                                                return;
+                                                            }
+                                                            
+                                                            const newItem: MaterialCompositionItem = {
+                                                                id: Date.now().toString(),
+                                                                materialId: material.id,
+                                                                materialDescription: material.description,
+                                                                weightKg: 0,
+                                                                pricePerKg: material.pricePerKg,
+                                                                totalCost: 0
+                                                            };
+                                                            setMaterialComposition(prev => [...prev, newItem]);
+                                                            
+                                                            toast({
+                                                                title: "Material adicionado",
+                                                                description: "Agora defina o peso em kg deste material."
+                                                            });
+                                                        }}
+                                                    >
+                                                        <SelectTrigger>
+                                                            <SelectValue placeholder="Buscar e selecionar material..." />
+                                                        </SelectTrigger>
+                                                        <SelectContent className="max-h-[400px]">
+                                                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground sticky top-0 bg-background">
+                                                                💡 Dica: Role para ver todas as categorias
+                                                            </div>
+                                                            {MATERIAL_CATEGORIES.map(category => {
+                                                                const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
+                                                                if (categoryMaterials.length === 0) return null;
+                                                                
+                                                                return (
+                                                                    <div key={category}>
+                                                                        <div className="px-2 py-1.5 text-sm font-semibold text-primary sticky top-6 bg-background/95 backdrop-blur-sm">
+                                                                            {category}
+                                                                        </div>
+                                                                        {categoryMaterials.map(material => {
+                                                                            const isAdded = materialComposition.some(m => m.materialId === material.id);
+                                                                            return (
+                                                                                <SelectItem 
+                                                                                    key={material.id} 
+                                                                                    value={material.id}
+                                                                                    disabled={isAdded}
+                                                                                    className={isAdded ? "opacity-50" : ""}
+                                                                                >
+                                                                                    <div className="flex items-center justify-between w-full">
+                                                                                        <span className="truncate">{material.description}</span>
+                                                                                        <span className="text-xs text-muted-foreground ml-2 flex-shrink-0">
+                                                                                            R$ {material.pricePerKg.toFixed(2)}/kg
+                                                                                            {isAdded && " ✓"}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </SelectItem>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
                                                 {/* Lista de materiais adicionados */}
                                                 {materialComposition.length > 0 ? (
                                                     <div className="space-y-2 max-h-[400px] overflow-y-auto">
@@ -2244,86 +2307,9 @@ export default function ProductsPage() {
                                                     <div className="text-center py-8 text-sm text-muted-foreground border-2 border-dashed rounded-md">
                                                         <Package className="mx-auto h-8 w-8 mb-2 opacity-50" />
                                                         <p>Nenhum material adicionado</p>
-                                                        <p className="text-xs mt-1">Clique em "Adicionar Material" para começar</p>
+                                                        <p className="text-xs mt-1">Use o seletor acima para adicionar materiais</p>
                                                     </div>
                                                 )}
-
-                                                {/* Seletor de material para adicionar */}
-                                                <div className="space-y-2">
-                                                    <Label className="text-xs text-muted-foreground">Selecione um material para adicionar:</Label>
-                                                    <Select
-                                                        value=""
-                                                        onValueChange={(materialId) => {
-                                                            const material = DEFAULT_MATERIALS.find(m => m.id === materialId);
-                                                            if (!material) return;
-                                                            
-                                                            // Verifica se o material já foi adicionado
-                                                            if (materialComposition.some(m => m.materialId === materialId)) {
-                                                                toast({
-                                                                    variant: "destructive",
-                                                                    title: "Material já adicionado",
-                                                                    description: "Este material já está na lista. Edite o peso existente."
-                                                                });
-                                                                return;
-                                                            }
-                                                            
-                                                            const newItem: MaterialCompositionItem = {
-                                                                id: Date.now().toString(),
-                                                                materialId: material.id,
-                                                                materialDescription: material.description,
-                                                                weightKg: 0,
-                                                                pricePerKg: material.pricePerKg,
-                                                                totalCost: 0
-                                                            };
-                                                            setMaterialComposition(prev => [...prev, newItem]);
-                                                            
-                                                            toast({
-                                                                title: "Material adicionado",
-                                                                description: "Agora defina o peso em kg deste material."
-                                                            });
-                                                        }}
-                                                    >
-                                                        <SelectTrigger>
-                                                            <SelectValue placeholder="Buscar e selecionar material..." />
-                                                        </SelectTrigger>
-                                                        <SelectContent className="max-h-[400px]">
-                                                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground sticky top-0 bg-background">
-                                                                💡 Dica: Role para ver todas as categorias
-                                                            </div>
-                                                            {MATERIAL_CATEGORIES.map(category => {
-                                                                const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
-                                                                if (categoryMaterials.length === 0) return null;
-                                                                
-                                                                return (
-                                                                    <div key={category}>
-                                                                        <div className="px-2 py-1.5 text-sm font-semibold text-primary sticky top-6 bg-background/95 backdrop-blur-sm">
-                                                                            {category}
-                                                                        </div>
-                                                                        {categoryMaterials.map(material => {
-                                                                            const isAdded = materialComposition.some(m => m.materialId === material.id);
-                                                                            return (
-                                                                                <SelectItem 
-                                                                                    key={material.id} 
-                                                                                    value={material.id}
-                                                                                    disabled={isAdded}
-                                                                                    className={isAdded ? "opacity-50" : ""}
-                                                                                >
-                                                                                    <div className="flex items-center justify-between w-full">
-                                                                                        <span className="truncate">{material.description}</span>
-                                                                                        <span className="text-xs text-muted-foreground ml-2 flex-shrink-0">
-                                                                                            R$ {material.pricePerKg.toFixed(2)}/kg
-                                                                                            {isAdded && " ✓"}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                </SelectItem>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
                                             </div>
                                         </div>
 
