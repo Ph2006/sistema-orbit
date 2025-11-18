@@ -108,6 +108,8 @@ interface PricingCalculation {
   materialCosts: MaterialCompositionItem[];
   stageCosts: StageCostItem[];
   machiningCost: number;
+  consumablesCost: number;
+  consumablesWithMargin: number;
   totalCost: number;
   profitMargin: number;
   profitValue: number;
@@ -474,6 +476,7 @@ export default function ProductsPage() {
   const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
   const [profitMargin, setProfitMargin] = useState<number>(30); // percentual
   const [machiningHours, setMachiningHours] = useState<number>(0);
+  const [consumablesCost, setConsumablesCost] = useState<number>(0);
   const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
 
   // Função para simular carga de trabalho dos setores
@@ -1942,26 +1945,48 @@ export default function ProductsPage() {
                             <Separator />
 
                             <div>
-                                <h4 className="text-sm font-medium mb-3">Custo por Dia de Cada Etapa (R$/dia)</h4>
+                                <h4 className="text-sm font-medium mb-3">Custo por Kg de Cada Etapa (R$/kg)</h4>
+                                <p className="text-xs text-muted-foreground mb-3">
+                                    💡 Defina quanto custa cada etapa por quilograma do produto. O sistema multiplicará pelo peso total automaticamente.
+                                </p>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                     {manufacturingStages.map(stage => (
                                         <div key={stage}>
                                             <Label className="text-xs">{stage}</Label>
-                                            <Input
-                                                type="number"
-                                                placeholder="0.00"
-                                                value={stageCosts[stage] || ''}
-                                                onChange={(e) => setStageCosts(prev => ({
-                                                    ...prev,
-                                                    [stage]: Number(e.target.value)
-                                                }))}
-                                            />
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                                    R$
+                                                </span>
+                                                <Input
+                                                    type="number"
+                                                    step="0.01"
+                                                    placeholder="0.00"
+                                                    className="pl-8"
+                                                    value={stageCosts[stage] || ''}
+                                                    onChange={(e) => setStageCosts(prev => ({
+                                                        ...prev,
+                                                        [stage]: Number(e.target.value)
+                                                    }))}
+                                                />
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                                    /kg
+                                                </span>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-2">
-                                    💡 Dica: Considere mão de obra, energia, depreciação e overhead de cada setor
-                                </p>
+                                
+                                {/* Exemplo de cálculo */}
+                                <div className="mt-3 p-3 bg-muted rounded-md text-xs space-y-1">
+                                    <div className="font-medium">Exemplo de cálculo:</div>
+                                    <div className="text-muted-foreground">
+                                        Se "Listagem de matéria-prima" custa R$ 0,15/kg e o produto pesa 1000 kg:
+                                    </div>
+                                    <div className="font-mono">
+                                        Custo da etapa = 0,15 × 1.000 = <span className="font-bold text-primary">R$ 150,00</span>
+                                    </div>
+                                </div>
+                                
                                 <Button onClick={saveStageCosts} className="mt-3" variant="outline">
                                     Salvar Configurações
                                 </Button>
@@ -2013,6 +2038,7 @@ export default function ProductsPage() {
                                             setMaterialComposition([]);
                                             setPricingCalculation(null);
                                             setMachiningHours(0);
+                                            setConsumablesCost(0);
                                             toast({
                                                 title: "Produto selecionado",
                                                 description: `${product?.code} - ${product?.description}`
@@ -2322,6 +2348,45 @@ export default function ProductsPage() {
                                             </>
                                         )}
 
+                                        {/* Insumos (Consumíveis) */}
+                                        <Separator />
+                                        <div>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <Label>Insumos e Consumíveis (R$)</Label>
+                                                <Badge variant="secondary" className="text-xs">
+                                                    +10% margem automática
+                                                </Badge>
+                                            </div>
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                placeholder="0.00"
+                                                value={consumablesCost || ''}
+                                                onChange={(e) => setConsumablesCost(Number(e.target.value))}
+                                            />
+                                            <div className="mt-2 p-2 bg-muted rounded-md text-xs space-y-1">
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Custo base dos insumos:</span>
+                                                    <span className="font-mono">R$ {consumablesCost.toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Margem (10%):</span>
+                                                    <span className="font-mono text-green-600">
+                                                        + R$ {(consumablesCost * 0.10).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between font-medium border-t pt-1">
+                                                    <span>Total com margem:</span>
+                                                    <span className="font-mono text-primary">
+                                                        R$ {(consumablesCost * 1.10).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-2">
+                                                💡 <strong>Exemplos:</strong> Eletrodos, gases, discos de corte, lixas, consumíveis de soldagem, EPIs, etc.
+                                            </p>
+                                        </div>
+
                                         <Button 
                                             onClick={() => {
                                                 if (materialComposition.length === 0) {
@@ -2344,30 +2409,44 @@ export default function ProductsPage() {
                                                     return;
                                                 }
 
-                                                // Calcular custos por etapa
-                                                const stageCostItems: StageCostItem[] = (selectedProductForPricing.productionPlanTemplate || []).map(stage => ({
-                                                    stageName: stage.stageName,
-                                                    durationDays: stage.durationDays || 0,
-                                                    costPerDay: stageCosts[stage.stageName] || 0,
-                                                    totalCost: (stage.durationDays || 0) * (stageCosts[stage.stageName] || 0)
-                                                }));
+                                                const productWeight = selectedProductForPricing.unitWeight || 0;
+
+                                                // Calcular custos por etapa - AGORA MULTIPLICADO PELO PESO DO PRODUTO
+                                                const stageCostItems: StageCostItem[] = (selectedProductForPricing.productionPlanTemplate || []).map(stage => {
+                                                    const costPerKg = stageCosts[stage.stageName] || 0;
+                                                    const totalCost = costPerKg * productWeight;
+                                                    
+                                                    return {
+                                                        stageName: stage.stageName,
+                                                        durationDays: stage.durationDays || 0,
+                                                        costPerDay: costPerKg, // Agora representa custo por kg
+                                                        totalCost: totalCost
+                                                    };
+                                                });
 
                                                 const materialCostTotal = materialComposition.reduce((sum, m) => sum + m.totalCost, 0);
                                                 const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
                                                 const machiningCost = machiningHours * machineHourRate;
-                                                const totalCost = materialCostTotal + stageCostTotal + machiningCost;
+                                                
+                                                // Insumos com margem de 10%
+                                                const consumablesWithMargin = consumablesCost * 1.10;
+                                                
+                                                // Custo total agora inclui insumos com margem
+                                                const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesWithMargin;
                                                 const profitValue = totalCost * (profitMargin / 100);
                                                 const finalPrice = totalCost + profitValue;
-                                                const pricePerKg = finalPrice / (selectedProductForPricing.unitWeight || 1);
+                                                const pricePerKg = finalPrice / productWeight;
 
                                                 const calculation: PricingCalculation = {
                                                     productId: selectedProductForPricing.id,
                                                     productCode: selectedProductForPricing.code,
                                                     productDescription: selectedProductForPricing.description,
-                                                    productWeight: selectedProductForPricing.unitWeight || 0,
+                                                    productWeight: productWeight,
                                                     materialCosts: materialComposition,
                                                     stageCosts: stageCostItems,
                                                     machiningCost,
+                                                    consumablesCost: consumablesCost,
+                                                    consumablesWithMargin: consumablesWithMargin,
                                                     totalCost,
                                                     profitMargin,
                                                     profitValue,
@@ -2380,7 +2459,7 @@ export default function ProductsPage() {
                                                 
                                                 toast({
                                                     title: "Preço calculado!",
-                                                    description: `Preço final: R$ ${finalPrice.toFixed(2)}`
+                                                    description: `Preço final: R$ ${finalPrice.toFixed(2)} (R$ ${pricePerKg.toFixed(2)}/kg)`
                                                 });
                                             }} 
                                             className="w-full"
@@ -2434,7 +2513,7 @@ Subtotal Materiais: R$ ${pricingCalculation.materialCosts.reduce((s, m) => s + m
 CUSTOS DE PRODUÇÃO POR ETAPA
 ========================================
 ${pricingCalculation.stageCosts.map(s =>
-    `${s.stageName}: ${s.durationDays} dias × R$ ${s.costPerDay.toFixed(2)}/dia = R$ ${s.totalCost.toFixed(2)}`
+    `${s.stageName}\n  R$ ${s.costPerDay.toFixed(2)}/kg × ${pricingCalculation.productWeight} kg = R$ ${s.totalCost.toFixed(2)}`
 ).join('\n')}
 
 Subtotal Etapas: R$ ${pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0).toFixed(2)}
@@ -2442,7 +2521,12 @@ Subtotal Etapas: R$ ${pricingCalculation.stageCosts.reduce((s, st) => s + st.tot
 ========================================
 OUTROS CUSTOS
 ========================================
-Usinagem: R$ ${pricingCalculation.machiningCost.toFixed(2)}
+Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}
+
+Insumos e Consumíveis:
+  Custo base: R$ ${pricingCalculation.consumablesCost.toFixed(2)}
+  Margem (10%): R$ ${(pricingCalculation.consumablesCost * 0.10).toFixed(2)}
+  Total: R$ ${pricingCalculation.consumablesWithMargin.toFixed(2)}
 
 ========================================
 RESUMO FINANCEIRO
@@ -2453,6 +2537,13 @@ Margem de Lucro (${pricingCalculation.profitMargin}%): R$ ${pricingCalculation.p
 PREÇO FINAL: R$ ${pricingCalculation.finalPrice.toFixed(2)}
 PREÇO POR KG: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg
 ══════════════════════════════════════
+
+COMPOSIÇÃO DO PREÇO FINAL:
+- Materiais: R$ ${pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0).toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0) / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
+- Etapas de Produção: R$ ${pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0).toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
+- Usinagem: R$ ${pricingCalculation.machiningCost.toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.machiningCost / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
+- Insumos c/ margem: R$ ${pricingCalculation.consumablesWithMargin.toFixed(2)} (${pricingCalculation.finalPrice > 0 ? ((pricingCalculation.consumablesWithMargin / pricingCalculation.finalPrice) * 100).toFixed(1) : '0.0'}%)
+- Lucro: R$ ${pricingCalculation.profitValue.toFixed(2)} (${pricingCalculation.profitMargin}%)
                                                 `;
                                                 
                                                 const blob = new Blob([doc], { type: 'text/plain' });
@@ -2507,20 +2598,45 @@ PREÇO POR KG: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg
                                             <div className="space-y-1 text-sm">
                                                 {pricingCalculation.stageCosts.map(s => (
                                                     <div key={s.stageName} className="flex justify-between text-muted-foreground">
-                                                        <span>{s.stageName}</span>
+                                                        <span className="flex-1">
+                                                            {s.stageName}
+                                                            <span className="text-xs ml-1">
+                                                                (R$ {s.costPerDay.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
+                                                            </span>
+                                                        </span>
                                                         <span className="font-mono">R$ {s.totalCost.toFixed(2)}</span>
                                                     </div>
                                                 ))}
                                                 {pricingCalculation.machiningCost > 0 && (
                                                     <div className="flex justify-between text-muted-foreground">
-                                                        <span>Usinagem</span>
+                                                        <span className="flex-1">
+                                                            Usinagem
+                                                            <span className="text-xs ml-1">
+                                                                ({machiningHours}h × R$ {machineHourRate.toFixed(2)}/h)
+                                                            </span>
+                                                        </span>
                                                         <span className="font-mono">R$ {pricingCalculation.machiningCost.toFixed(2)}</span>
+                                                    </div>
+                                                )}
+                                                {pricingCalculation.consumablesWithMargin > 0 && (
+                                                    <div className="flex justify-between text-muted-foreground">
+                                                        <span className="flex-1">
+                                                            Insumos e Consumíveis
+                                                            <span className="text-xs ml-1 text-green-600">
+                                                                (R$ {pricingCalculation.consumablesCost.toFixed(2)} + 10%)
+                                                            </span>
+                                                        </span>
+                                                        <span className="font-mono">R$ {pricingCalculation.consumablesWithMargin.toFixed(2)}</span>
                                                     </div>
                                                 )}
                                                 <div className="flex justify-between font-medium pt-1 border-t">
                                                     <span>Subtotal Produção</span>
                                                     <span className="font-mono">
-                                                        R$ {(pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) + pricingCalculation.machiningCost).toFixed(2)}
+                                                        R$ {(
+                                                            pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) + 
+                                                            pricingCalculation.machiningCost + 
+                                                            pricingCalculation.consumablesWithMargin
+                                                        ).toFixed(2)}
                                                     </span>
                                                 </div>
                                             </div>
