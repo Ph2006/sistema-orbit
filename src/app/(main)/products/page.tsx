@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -474,6 +474,7 @@ export default function ProductsPage() {
   const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
   const [profitMargin, setProfitMargin] = useState<number>(30); // percentual
   const [machiningHours, setMachiningHours] = useState<number>(0);
+  const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
 
   // Função para simular carga de trabalho dos setores
   const simulateSectorWorkload = useCallback(() => {
@@ -1978,9 +1979,32 @@ export default function ProductsPage() {
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                {/* Seleção de Produto */}
-                                <div>
+                                {/* Seleção de Produto com busca integrada */}
+                                <div className="space-y-2">
                                     <Label>Produto</Label>
+                                    
+                                    {/* Campo de busca */}
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Digite o código ou nome do produto..."
+                                            value={pricingProductSearch}
+                                            onChange={(e) => setPricingProductSearch(e.target.value)}
+                                            className="pl-10"
+                                        />
+                                        {pricingProductSearch && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="absolute right-1 top-1/2 -translate-y-1/2 h-7"
+                                                onClick={() => setPricingProductSearch("")}
+                                            >
+                                                ✕
+                                            </Button>
+                                        )}
+                                    </div>
+                                    
+                                    {/* Select de produtos filtrados */}
                                     <Select 
                                         value={selectedProductForPricing?.id || ''} 
                                         onValueChange={(value) => {
@@ -1988,19 +2012,92 @@ export default function ProductsPage() {
                                             setSelectedProductForPricing(product || null);
                                             setMaterialComposition([]);
                                             setPricingCalculation(null);
+                                            setMachiningHours(0);
+                                            toast({
+                                                title: "Produto selecionado",
+                                                description: `${product?.code} - ${product?.description}`
+                                            });
                                         }}
                                     >
                                         <SelectTrigger>
-                                            <SelectValue placeholder="Selecione um produto" />
+                                            <SelectValue placeholder="Selecione um produto da lista" />
                                         </SelectTrigger>
-                                        <SelectContent>
-                                            {products.filter(p => p.unitWeight && p.unitWeight > 0).map(product => (
-                                                <SelectItem key={product.id} value={product.id}>
-                                                    {product.code} - {product.description} ({product.unitWeight}kg)
-                                                </SelectItem>
-                                            ))}
+                                        <SelectContent className="max-h-[350px]">
+                                            {(() => {
+                                                const filteredProducts = products
+                                                    .filter(p => p.unitWeight && p.unitWeight > 0)
+                                                    .filter(p => {
+                                                        if (!pricingProductSearch) return true;
+                                                        const query = pricingProductSearch.toLowerCase();
+                                                        return (
+                                                            p.code.toLowerCase().includes(query) ||
+                                                            p.description.toLowerCase().includes(query)
+                                                        );
+                                                    });
+
+                                                if (filteredProducts.length === 0) {
+                                                    return (
+                                                        <div className="p-6 text-center text-sm text-muted-foreground">
+                                                            {pricingProductSearch ? (
+                                                                <>
+                                                                    <Search className="mx-auto h-10 w-10 mb-3 opacity-30" />
+                                                                    <p className="font-medium">Nenhum produto encontrado</p>
+                                                                    <p className="text-xs mt-1">
+                                                                        Não há produtos com código ou descrição contendo "{pricingProductSearch}"
+                                                                    </p>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Package className="mx-auto h-10 w-10 mb-3 opacity-30" />
+                                                                    <p className="font-medium">Nenhum produto disponível</p>
+                                                                    <p className="text-xs mt-1">
+                                                                        Cadastre produtos com peso definido para usar a calculadora
+                                                                    </p>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                }
+
+                                                return filteredProducts.map(product => (
+                                                    <SelectItem key={product.id} value={product.id}>
+                                                        <div className="flex items-start gap-3 py-1">
+                                                            <div className="flex-shrink-0">
+                                                                <div className="font-mono text-xs font-bold bg-primary/10 text-primary px-2 py-0.5 rounded">
+                                                                    {product.code}
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-sm truncate">{product.description}</div>
+                                                                <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
+                                                                    <span>⚖️ {product.unitWeight}kg</span>
+                                                                    <span>•</span>
+                                                                    <span>⏱️ {calculateLeadTime(product)} dias</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </SelectItem>
+                                                ));
+                                            })()}
                                         </SelectContent>
                                     </Select>
+                                    
+                                    {/* Contador de resultados */}
+                                    {pricingProductSearch && (
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <span className="inline-flex items-center gap-1">
+                                                <span className="font-medium text-primary">
+                                                    {products.filter(p => 
+                                                        p.unitWeight && 
+                                                        p.unitWeight > 0 &&
+                                                        (p.code.toLowerCase().includes(pricingProductSearch.toLowerCase()) ||
+                                                         p.description.toLowerCase().includes(pricingProductSearch.toLowerCase()))
+                                                    ).length}
+                                                </span>
+                                                produto(s) encontrado(s)
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {selectedProductForPricing && (
@@ -2022,14 +2119,126 @@ export default function ProductsPage() {
 
                                         {/* Adicionar Material */}
                                         <div>
-                                            <h4 className="text-sm font-medium mb-3">Composição de Materiais</h4>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <h4 className="text-sm font-medium">Composição de Materiais</h4>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        // Abre dialog para adicionar material
+                                                        const materialId = prompt("Cole o ID do material ou deixe vazio para buscar:");
+                                                        if (materialId === null) return; // Cancelou
+                                                        
+                                                        // Por enquanto, vamos usar um select inline
+                                                    }}
+                                                >
+                                                    <PlusCircle className="mr-2 h-3 w-3" />
+                                                    Adicionar Material
+                                                </Button>
+                                            </div>
+
                                             <div className="space-y-3">
-                                                {/* Formulário para adicionar material */}
-                                                <div className="grid grid-cols-1 gap-2">
+                                                {/* Lista de materiais adicionados */}
+                                                {materialComposition.length > 0 ? (
+                                                    <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                                                        {materialComposition.map((item, index) => (
+                                                            <div key={item.id} className="flex items-start gap-2 p-3 border rounded-md bg-card">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="text-sm font-medium truncate">
+                                                                        {item.materialDescription}
+                                                                    </div>
+                                                                    <div className="text-xs text-muted-foreground mt-1">
+                                                                        R$ {item.pricePerKg.toFixed(2)}/kg
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2 mt-2">
+                                                                        <Input
+                                                                            type="number"
+                                                                            step="0.01"
+                                                                            placeholder="Peso (kg)"
+                                                                            className="h-8 text-sm"
+                                                                            value={item.weightKg || ''}
+                                                                            onChange={(e) => {
+                                                                                const weight = Number(e.target.value);
+                                                                                setMaterialComposition(prev => prev.map((m, i) => 
+                                                                                    i === index 
+                                                                                        ? { ...m, weightKg: weight, totalCost: weight * m.pricePerKg }
+                                                                                        : m
+                                                                                ));
+                                                                            }}
+                                                                        />
+                                                                        <div className="text-sm font-medium whitespace-nowrap">
+                                                                            = R$ {item.totalCost.toFixed(2)}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 flex-shrink-0"
+                                                                    onClick={() => setMaterialComposition(prev => prev.filter((_, i) => i !== index))}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
+
+                                                        {/* Resumo dos materiais */}
+                                                        <div className="p-3 bg-muted rounded-md space-y-1">
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="font-medium">Total de materiais:</span>
+                                                                <span>{materialComposition.length}</span>
+                                                            </div>
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="font-medium">Peso dos materiais:</span>
+                                                                <span className="font-mono">
+                                                                    {materialComposition.reduce((sum, m) => sum + m.weightKg, 0).toFixed(2)} kg
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="font-medium">Peso do produto:</span>
+                                                                <span className="font-mono">{selectedProductForPricing.unitWeight} kg</span>
+                                                            </div>
+                                                            <div className="flex justify-between text-sm font-bold border-t pt-1 mt-1">
+                                                                <span>Custo total materiais:</span>
+                                                                <span className="font-mono text-primary">
+                                                                    R$ {materialComposition.reduce((sum, m) => sum + m.totalCost, 0).toFixed(2)}
+                                                                </span>
+                                                            </div>
+                                                            {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)) > 0.1 && (
+                                                                <div className="flex items-center gap-1 text-xs text-yellow-600 pt-1 border-t">
+                                                                    <span>⚠️</span>
+                                                                    <span>Diferença de peso: {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)).toFixed(2)} kg</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-center py-8 text-sm text-muted-foreground border-2 border-dashed rounded-md">
+                                                        <Package className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                                                        <p>Nenhum material adicionado</p>
+                                                        <p className="text-xs mt-1">Clique em "Adicionar Material" para começar</p>
+                                                    </div>
+                                                )}
+
+                                                {/* Seletor de material para adicionar */}
+                                                <div className="space-y-2">
+                                                    <Label className="text-xs text-muted-foreground">Selecione um material para adicionar:</Label>
                                                     <Select
+                                                        value=""
                                                         onValueChange={(materialId) => {
                                                             const material = DEFAULT_MATERIALS.find(m => m.id === materialId);
                                                             if (!material) return;
+                                                            
+                                                            // Verifica se o material já foi adicionado
+                                                            if (materialComposition.some(m => m.materialId === materialId)) {
+                                                                toast({
+                                                                    variant: "destructive",
+                                                                    title: "Material já adicionado",
+                                                                    description: "Este material já está na lista. Edite o peso existente."
+                                                                });
+                                                                return;
+                                                            }
                                                             
                                                             const newItem: MaterialCompositionItem = {
                                                                 id: Date.now().toString(),
@@ -2040,89 +2249,54 @@ export default function ProductsPage() {
                                                                 totalCost: 0
                                                             };
                                                             setMaterialComposition(prev => [...prev, newItem]);
+                                                            
+                                                            toast({
+                                                                title: "Material adicionado",
+                                                                description: "Agora defina o peso em kg deste material."
+                                                            });
                                                         }}
                                                     >
                                                         <SelectTrigger>
-                                                            <SelectValue placeholder="Adicionar material" />
+                                                            <SelectValue placeholder="Buscar e selecionar material..." />
                                                         </SelectTrigger>
-                                                        <SelectContent>
-                                                            {MATERIAL_CATEGORIES.map(category => (
-                                                                <div key={category}>
-                                                                    <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground">
-                                                                        {category}
+                                                        <SelectContent className="max-h-[400px]">
+                                                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground sticky top-0 bg-background">
+                                                                💡 Dica: Role para ver todas as categorias
+                                                            </div>
+                                                            {MATERIAL_CATEGORIES.map(category => {
+                                                                const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
+                                                                if (categoryMaterials.length === 0) return null;
+                                                                
+                                                                return (
+                                                                    <div key={category}>
+                                                                        <div className="px-2 py-1.5 text-sm font-semibold text-primary sticky top-6 bg-background/95 backdrop-blur-sm">
+                                                                            {category}
+                                                                        </div>
+                                                                        {categoryMaterials.map(material => {
+                                                                            const isAdded = materialComposition.some(m => m.materialId === material.id);
+                                                                            return (
+                                                                                <SelectItem 
+                                                                                    key={material.id} 
+                                                                                    value={material.id}
+                                                                                    disabled={isAdded}
+                                                                                    className={isAdded ? "opacity-50" : ""}
+                                                                                >
+                                                                                    <div className="flex items-center justify-between w-full">
+                                                                                        <span className="truncate">{material.description}</span>
+                                                                                        <span className="text-xs text-muted-foreground ml-2 flex-shrink-0">
+                                                                                            R$ {material.pricePerKg.toFixed(2)}/kg
+                                                                                            {isAdded && " ✓"}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </SelectItem>
+                                                                            );
+                                                                        })}
                                                                     </div>
-                                                                    {DEFAULT_MATERIALS.filter(m => m.category === category).map(material => (
-                                                                        <SelectItem key={material.id} value={material.id}>
-                                                                            {material.description} - R$ {material.pricePerKg.toFixed(2)}/kg
-                                                                        </SelectItem>
-                                                                    ))}
-                                                                </div>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </SelectContent>
                                                     </Select>
                                                 </div>
-
-                                                {/* Lista de materiais adicionados */}
-                                                {materialComposition.length > 0 && (
-                                                    <div className="space-y-2 max-h-96 overflow-y-auto">
-                                                        {materialComposition.map((item, index) => (
-                                                            <div key={item.id} className="flex items-center gap-2 p-2 border rounded-md">
-                                                                <div className="flex-1 text-xs">
-                                                                    <div className="font-medium">{item.materialDescription}</div>
-                                                                    <div className="text-muted-foreground">
-                                                                        R$ {item.pricePerKg.toFixed(2)}/kg
-                                                                    </div>
-                                                                </div>
-                                                                <Input
-                                                                    type="number"
-                                                                    placeholder="Peso (kg)"
-                                                                    className="w-24 h-8 text-sm"
-                                                                    value={item.weightKg || ''}
-                                                                    onChange={(e) => {
-                                                                        const weight = Number(e.target.value);
-                                                                        setMaterialComposition(prev => prev.map((m, i) => 
-                                                                            i === index 
-                                                                                ? { ...m, weightKg: weight, totalCost: weight * m.pricePerKg }
-                                                                                : m
-                                                                        ));
-                                                                    }}
-                                                                />
-                                                                <div className="w-20 text-right text-xs font-medium">
-                                                                    R$ {item.totalCost.toFixed(2)}
-                                                                </div>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="h-8 w-8"
-                                                                    onClick={() => setMaterialComposition(prev => prev.filter((_, i) => i !== index))}
-                                                                >
-                                                                    <Trash2 className="h-3 w-3" />
-                                                                </Button>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-
-                                                {/* Verificação de peso */}
-                                                {materialComposition.length > 0 && (
-                                                    <div className="p-2 bg-muted rounded-md text-xs">
-                                                        <div className="flex justify-between">
-                                                            <span>Peso dos materiais:</span>
-                                                            <span className="font-medium">
-                                                                {materialComposition.reduce((sum, m) => sum + m.weightKg, 0).toFixed(2)} kg
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex justify-between">
-                                                            <span>Peso do produto:</span>
-                                                            <span className="font-medium">{selectedProductForPricing.unitWeight} kg</span>
-                                                        </div>
-                                                        {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)) > 0.1 && (
-                                                            <div className="text-yellow-600 mt-1">
-                                                                ⚠️ Diferença de peso detectada
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
                                             </div>
                                         </div>
 
@@ -2142,7 +2316,7 @@ export default function ProductsPage() {
                                                         onChange={(e) => setMachiningHours(Number(e.target.value))}
                                                     />
                                                     <p className="text-xs text-muted-foreground mt-1">
-                                                        Valor da hora: R$ {machineHourRate.toFixed(2)}
+                                                        Valor da hora: R$ {machineHourRate.toFixed(2)} = {machiningHours > 0 ? `R$ ${(machiningHours * machineHourRate).toFixed(2)}` : 'R$ 0,00'}
                                                     </p>
                                                 </div>
                                             </>
@@ -2155,6 +2329,17 @@ export default function ProductsPage() {
                                                         variant: "destructive",
                                                         title: "Adicione materiais",
                                                         description: "É necessário adicionar pelo menos um material à composição."
+                                                    });
+                                                    return;
+                                                }
+
+                                                // Verifica se todos os materiais têm peso definido
+                                                const materialsWithoutWeight = materialComposition.filter(m => !m.weightKg || m.weightKg <= 0);
+                                                if (materialsWithoutWeight.length > 0) {
+                                                    toast({
+                                                        variant: "destructive",
+                                                        title: "Defina o peso dos materiais",
+                                                        description: `${materialsWithoutWeight.length} material(is) sem peso definido.`
                                                     });
                                                     return;
                                                 }
@@ -2192,8 +2377,14 @@ export default function ProductsPage() {
                                                 };
 
                                                 setPricingCalculation(calculation);
+                                                
+                                                toast({
+                                                    title: "Preço calculado!",
+                                                    description: `Preço final: R$ ${finalPrice.toFixed(2)}`
+                                                });
                                             }} 
                                             className="w-full"
+                                            disabled={materialComposition.length === 0}
                                         >
                                             <Calculator className="mr-2 h-4 w-4" />
                                             Calcular Preço
