@@ -1,2596 +1,3239 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package } from "lucide-react";
 import { useAuth } from "../layout";
-import Image from "next/image";
-import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText, Clock, Users } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import jsPDF from 'jspdf';
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
-// Schemas
-const companySchema = z.object({
-  nomeFantasia: z.string().min(3, "O nome fantasia é obrigatório."),
-  cnpj: z.string().min(14, "O CNPJ deve ser válido."),
-  inscricaoEstadual: z.string().optional().or(z.literal("")),
-  email: z.string().email("O e-mail é inválido."),
-  celular: z.string().min(10, "O celular deve ser válido."),
-  endereco: z.string().min(10, "O endereço é obrigatório."),
-  website: z.string().url("O site deve ser uma URL válida.").optional().or(z.literal("")),
-  capacidadeInstalada: z.number().positive("A capacidade deve ser maior que 0.").optional(),
-  metaMensal: z.number().positive("A meta deve ser maior que 0.").optional(),
+const planStageSchema = z.object({
+  stageName: z.string(),
+  durationDays: z.coerce.number().min(0).optional(),
 });
 
-const teamMemberSchema = z.object({
-    id: z.string(),
-    name: z.string().min(3, { message: "O nome é obrigatório." }),
-    position: z.string().min(2, { message: "O cargo é obrigatório." }),
-    email: z.string().email({ message: "O e-mail é inválido." }),
-    phone: z.string().min(10, { message: "O telefone deve ser válido." }),
-    permission: z.enum(["admin", "user"], { required_error: "Selecione uma permissão." }),
-    updatedAt: z.any().optional(),
+const productSchema = z.object({
+  code: z.string().min(1, { message: "O código do produto é obrigatório." }),
+  description: z.string().min(3, { message: "A descrição é obrigatória." }),
+  unitPrice: z.coerce.number().min(0, { message: "O preço unitário deve ser um número positivo." }),
+  unitWeight: z.coerce.number().min(0).optional(),
+  productionPlanTemplate: z.array(planStageSchema).optional(),
 });
 
-const resourceSchema = z.object({
-    id: z.string(),
-    name: z.string().min(3, { message: "O nome do recurso é obrigatório." }),
-    type: z.enum(["maquina", "equipamento", "veiculo", "ferramenta", "espaco", "mao_de_obra"], { required_error: "Selecione um tipo." }),
-    description: z.string().optional(),
-    capacity: z.number().min(1, { message: "A capacidade deve ser maior que 0." }),
-    status: z.enum(["disponivel", "ocupado", "manutencao", "inativo", "ausente", "ferias"], { required_error: "Selecione um status." }),
-    location: z.string().optional(),
-    serialNumber: z.string().optional(),
-    acquisitionDate: z.string().optional(),
-    maintenanceDate: z.string().optional(),
-    absenceStartDate: z.string().optional(),
-    absenceEndDate: z.string().optional(),
-    absenceReason: z.string().optional(),
-    updatedAt: z.any().optional(),
-});
+type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
 
-const overtimeSchema = z.object({
-    id: z.string(),
-    date: z.string().min(1, { message: "A data é obrigatória." }),
-    startTime: z.string().min(1, { message: "O horário de entrada é obrigatório." }),
-    endTime: z.string().min(1, { message: "O horário de saída é obrigatório." }),
-    resources: z.array(z.string()).optional(),
-    teamLeaders: z.array(z.string()).optional(),
-    observations: z.string().optional(),
-    approvedBy: z.string().optional(),
-    approvedAt: z.any().optional(),
-    status: z.enum(["pendente", "aprovado", "rejeitado"]).default("pendente"),
-    createdAt: z.any().optional(),
-    updatedAt: z.any().optional(),
-});
+// Função para calcular o lead time total de um produto
+const calculateLeadTime = (product: Product): number => {
+  if (!product.productionPlanTemplate || product.productionPlanTemplate.length === 0) {
+    return 0;
+  }
+  
+  const totalDays = product.productionPlanTemplate.reduce((total, stage) => {
+    return total + (stage.durationDays || 0);
+  }, 0);
+  
+  return Math.round(totalDays); // Arredonda para número inteiro
+};
 
-// Types
-type CompanyData = z.infer<typeof companySchema> & { logo?: { preview?: string } };
-type TeamMember = z.infer<typeof teamMemberSchema>;
-type Resource = z.infer<typeof resourceSchema>;
-type OvertimeRelease = z.infer<typeof overtimeSchema>;
+// Função para obter badge de lead time com cor baseada na duração
+const getLeadTimeBadge = (leadTime: number) => {
+  if (leadTime === 0) {
+    return { variant: "outline" as const, text: "Não definido", color: "text-muted-foreground" };
+  } else if (leadTime <= 7) {
+    return { variant: "default" as const, text: `${leadTime} dias`, color: "bg-green-600 hover:bg-green-700" };
+  } else if (leadTime <= 21) {
+    return { variant: "secondary" as const, text: `${leadTime} dias`, color: "bg-yellow-600 hover:bg-yellow-700" };
+  } else {
+    return { variant: "destructive" as const, text: `${leadTime} dias`, color: "bg-red-600 hover:bg-red-700" };
+  }
+};
 
-export default function CompanyPage() {
-  // Estados gerais
+// Interfaces para calculadora de preços
+interface Material {
+  id: string;
+  category: string;
+  description: string;
+  pricePerKg: number;
+  unit: string;
+  specification?: string;
+}
+
+interface MaterialCompositionItem {
+  id: string;
+  materialId: string;
+  materialDescription: string;
+  weightKg: number;
+  pricePerKg: number;
+  totalCost: number;
+}
+
+interface StageCostItem {
+  stageName: string;
+  durationDays: number;
+  costPerDay: number;
+  totalCost: number;
+}
+
+interface PricingCalculation {
+  productId: string;
+  productCode: string;
+  productDescription: string;
+  productWeight: number;
+  materialCosts: MaterialCompositionItem[];
+  stageCosts: StageCostItem[];
+  machiningCost: number;
+  consumablesCost: number;
+  consumablesWithMargin: number;
+  totalCost: number;
+  profitMargin: number;
+  profitValue: number;
+  finalPrice: number;
+  pricePerKg: number;
+  createdAt: Date;
+}
+
+// Categorias e biblioteca de materiais
+const MATERIAL_CATEGORIES = [
+  "Chapas Grossas",
+  "Chapas Finas",
+  "Chapas Especiais", 
+  "Tubos com Costura",
+  "Tubos sem Costura",
+  "Tubos Especiais",
+  "Perfil U",
+  "Perfil I",
+  "Perfil L (Cantoneiras)",
+  "Perfil T",
+  "Perfil H",
+  "Perfil W",
+  "Barras Redondas",
+  "Barras Chatas",
+  "Barras Quadradas",
+  "Barras Sextavadas",
+  "Aço Inox 304",
+  "Aço Inox 316",
+  "Alumínio",
+  "Cobre",
+  "Bronze",
+  "Latão",
+  "Aço Carbono",
+  "Aço Liga",
+  "Consumíveis Soldagem",
+  "Parafusos e Fixadores",
+  "Eletrodos",
+  "Gases",
+  "Outros"
+];
+
+const DEFAULT_MATERIALS: Material[] = [
+  // Chapas ASTM A36
+  { id: "chapa-1-8-a36", category: "Chapas Grossas", description: 'Chapa 1/8" - ASTM A36', pricePerKg: 5.42, unit: "kg", specification: "ASTM A36" },
+  { id: "chapa-3-16-a36", category: "Chapas Grossas", description: 'Chapa 3/16" - ASTM A36', pricePerKg: 5.57, unit: "kg" },
+  { id: "chapa-1-4-a36", category: "Chapas Grossas", description: 'Chapa 1/4" - ASTM A36', pricePerKg: 7.35, unit: "kg" },
+  { id: "chapa-5-16-a36", category: "Chapas Grossas", description: 'Chapa 5/16" - ASTM A36', pricePerKg: 7.14, unit: "kg" },
+  { id: "chapa-3-8-a36", category: "Chapas Grossas", description: 'Chapa 3/8" - ASTM A36', pricePerKg: 6.76, unit: "kg" },
+  { id: "chapa-1-2-a36", category: "Chapas Grossas", description: 'Chapa 1/2" - ASTM A36', pricePerKg: 6.86, unit: "kg" },
+  { id: "chapa-3-4-a36", category: "Chapas Grossas", description: 'Chapa 3/4" - ASTM A36', pricePerKg: 6.96, unit: "kg" },
+  { id: "chapa-1-a36", category: "Chapas Grossas", description: 'Chapa 1" - ASTM A36', pricePerKg: 7.54, unit: "kg" },
+  { id: "chapa-2-a36", category: "Chapas Grossas", description: 'Chapa 2" - ASTM A36', pricePerKg: 11.29, unit: "kg" },
+  { id: "chapa-3-a36", category: "Chapas Grossas", description: 'Chapa 3" - ASTM A36', pricePerKg: 13.93, unit: "kg" },
+  
+  // Chapas A572
+  { id: "chapa-1-4-a572", category: "Chapas Grossas", description: 'Chapa 1/4" - ASTM A572', pricePerKg: 11.15, unit: "kg" },
+  { id: "chapa-5-16-a572", category: "Chapas Grossas", description: 'Chapa 5/16" - ASTM A572', pricePerKg: 7.98, unit: "kg" },
+  
+  // Chapas SAE 1020
+  { id: "chapa-2-sae1020", category: "Chapas Finas", description: 'Chapa 2" - SAE 1020', pricePerKg: 11.87, unit: "kg" },
+  
+  // Chapas SAE 1045
+  { id: "ch-3-16-sae1045", category: "Chapas Especiais", description: 'CH 3/16" - SAE 1045', pricePerKg: 19.10, unit: "kg" },
+  { id: "ch-1-4-sae1045", category: "Chapas Especiais", description: 'CH 1/4" - SAE 1045', pricePerKg: 11.77, unit: "kg" },
+  { id: "ch-1-2-sae1045", category: "Chapas Especiais", description: 'CH 1/2" - SAE 1045', pricePerKg: 12.90, unit: "kg" },
+  { id: "ch-1-sae1045", category: "Chapas Especiais", description: 'CH 1" - SAE 1045', pricePerKg: 10.84, unit: "kg" },
+  { id: "ch-2-sae1045", category: "Chapas Especiais", description: 'CH 2" - SAE 1045', pricePerKg: 11.92, unit: "kg" },
+  { id: "ch-3-sae1045", category: "Chapas Especiais", description: 'CH 3" - SAE 1045', pricePerKg: 13.93, unit: "kg" },
+  
+  // Perfis W
+  { id: "perfil-w-200x22", category: "Perfil W", description: "PERFIL W 200 X 22,5 KGM", pricePerKg: 7.91, unit: "kg" },
+  { id: "perfil-w-150x29", category: "Perfil W", description: "PERFIL W 150X29,3 KG-M", pricePerKg: 9.30, unit: "kg" },
+  { id: "perfil-w-250x89", category: "Perfil W", description: "Perfil W 250x89", pricePerKg: 8.29, unit: "kg" },
+  { id: "perfil-w-250x32", category: "Perfil W", description: "PERFIL W 250 X 32,7 KGM", pricePerKg: 8.70, unit: "kg" },
+  { id: "perfil-w-250x44", category: "Perfil W", description: "PERFIL W 250 X 44,8 KGM", pricePerKg: 8.98, unit: "kg" },
+  
+  // Vigas U
+  { id: "viga-u4x2", category: "Perfil U", description: 'Viga U 4" x 2"', pricePerKg: 7.87, unit: "kg" },
+  { id: "viga-u6x2", category: "Perfil U", description: 'Viga U 6" x 2"', pricePerKg: 7.87, unit: "kg" },
+  { id: "viga-u10x2", category: "Perfil U", description: 'Viga U 10" x 2"', pricePerKg: 9.88, unit: "kg" },
+  { id: "viga-u4x1", category: "Perfil U", description: 'Viga U 4" x 1"', pricePerKg: 7.95, unit: "kg" },
+  { id: "viga-u8x2", category: "Perfil U", description: 'Viga U 8" x 2"', pricePerKg: 9.55, unit: "kg" },
+  
+  // Barras Redondas
+  { id: "barra-red-5-8-1020", category: "Barras Redondas", description: 'Barra red 5/8" sae 1020', pricePerKg: 7.59, unit: "kg" },
+  { id: "barra-red-1-2-1020", category: "Barras Redondas", description: 'Barra red 1/2" sae 1020', pricePerKg: 7.25, unit: "kg" },
+  { id: "barra-red-1-1-2-1020", category: "Barras Redondas", description: 'Barra red 1 1/2" sae 1020', pricePerKg: 8.25, unit: "kg" },
+  { id: "barra-red-2-1020", category: "Barras Redondas", description: 'Barra red 2" tref sae 1020', pricePerKg: 12.90, unit: "kg" },
+  { id: "barra-red-1-1020", category: "Barras Redondas", description: 'Barra red 1" tref sae1020', pricePerKg: 12.90, unit: "kg" },
+  
+  // Chapas RAVUR 450
+  { id: "chapa-1-2-ravur450", category: "Chapas Especiais", description: 'Chapa 1/2" - RAVUR 450', pricePerKg: 22.00, unit: "kg" },
+  { id: "chapa-5-8-ravur450", category: "Chapas Especiais", description: 'Chapa 5/8" - RAVUR 450', pricePerKg: 22.50, unit: "kg" },
+  { id: "chapa-3-8-ravur450", category: "Chapas Especiais", description: 'Chapa 3/8" - RAVUR 450', pricePerKg: 22.00, unit: "kg" },
+  
+  // Barras Redondas 1045
+  { id: "barra-red-1-3-4-1045", category: "Barras Redondas", description: 'Barra Redonda 1.3/4" - SAE 1045', pricePerKg: 12.50, unit: "kg" },
+  { id: "barra-red-10-lam-norm-4140", category: "Barras Redondas", description: 'Barra redonda 10" laminado e normalizado - SAE 4140', pricePerKg: 25.64, unit: "kg" },
+  
+  // Barras Quad
+  { id: "barra-quad-3-8-1020", category: "Barras Quadradas", description: 'Barra Quad 3/8" - SAE 1020', pricePerKg: 7.70, unit: "kg" },
+  { id: "barra-quad-2-1-2-tref-1020", category: "Barras Quadradas", description: 'barra quad 2 1/2" tref - SAE 1020', pricePerKg: 11.20, unit: "kg" },
+  { id: "barra-quad-2-1045", category: "Barras Quadradas", description: 'BARRA QUADRADA 2" - SAE 1045', pricePerKg: 11.20, unit: "kg" },
+  
+  // Barras Chatas
+  { id: "barra-chata-2x1-4-1020", category: "Barras Chatas", description: 'Barra Chata 2" x 1/4" - SAE 1020', pricePerKg: 7.55, unit: "kg" },
+  { id: "barra-chata-5-8x1-8-1020", category: "Barras Chatas", description: 'Barra chata 5/8" x 1/8" - SAE 1020', pricePerKg: 8.75, unit: "kg" },
+  { id: "barra-chata-1x3-16-1020", category: "Barras Chatas", description: 'Barra chata 1" x 3/16" - SAE 1020', pricePerKg: 6.98, unit: "kg" },
+  { id: "barra-chata-2x1-8-4020", category: "Barras Chatas", description: 'Barra chata 2" x 1/8" - SAE 4020', pricePerKg: 7.65, unit: "kg" },
+  
+  // Cantoneiras
+  { id: "cant-3x5-16-1020", category: "Perfil L (Cantoneiras)", description: 'Cant 3" x 5/16" - SAE 1020', pricePerKg: 7.87, unit: "kg" },
+  { id: "cant-3x1-4-1020", category: "Perfil L (Cantoneiras)", description: 'Cant 3" x 1/4" - SAE 1020', pricePerKg: 7.34, unit: "kg" },
+  { id: "cant-4x1-2-1020", category: "Perfil L (Cantoneiras)", description: 'Cant 4" x 1/2" - SAE 1020', pricePerKg: 8.10, unit: "kg" },
+  { id: "cant-6x3-8-1020", category: "Perfil L (Cantoneiras)", description: 'cant 6" X 3/8" - SAE 1020', pricePerKg: 12.30, unit: "kg" },
+  { id: "cant-5x3-8-a572", category: "Perfil L (Cantoneiras)", description: 'Cant 5" X 3/8" - ASTM A572', pricePerKg: 8.80, unit: "kg" },
+  
+  // Tubos Schedule
+  { id: "tubo-3-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 3" SCH 40 ASTM A53', pricePerKg: 15.39, unit: "kg" },
+  { id: "tubo-4-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 4" SCH 40 ASTM A53', pricePerKg: 16.10, unit: "kg" },
+  { id: "tubo-6-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 6" SCH 40 ASTM A53', pricePerKg: 14.47, unit: "kg" },
+  { id: "tubo-8-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 8" SCH 40 ASTM A53', pricePerKg: 16.05, unit: "kg" },
+  { id: "tubo-3-sch160-a53", category: "Tubos sem Costura", description: 'TUBO 3 SCH 160 S/COST ASTM A53', pricePerKg: 33.61, unit: "kg" },
+  
+  // Tubos DIN
+  { id: "tubo-1-1-4-din2440", category: "Tubos com Costura", description: 'Tubo 1 1/4" DIN 2440', pricePerKg: 9.80, unit: "kg" },
+  { id: "tubo-3-din2440", category: "Tubos com Costura", description: 'Tubo 3" DIN 2440', pricePerKg: 9.24, unit: "kg" },
+  { id: "tubo-1-din2440", category: "Tubos com Costura", description: 'Tubo 1" DIN 2440', pricePerKg: 9.27, unit: "kg" },
+  { id: "tubo-2-din2440", category: "Tubos com Costura", description: 'Tubo 2" DIN 2440 ASTM A53', pricePerKg: 9.55, unit: "kg" },
+  
+  // Aço Inox 304
+  { id: "chapa-inox304-1mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 1mm", pricePerKg: 35.00, unit: "kg" },
+  { id: "chapa-inox304-2mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 2mm", pricePerKg: 34.50, unit: "kg" },
+  { id: "chapa-inox304-3mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 3mm", pricePerKg: 34.00, unit: "kg" },
+  { id: "tubo-inox304-1", category: "Aço Inox 304", description: 'Tubo Inox 304 - 1"', pricePerKg: 42.00, unit: "kg" },
+  { id: "tubo-inox304-2", category: "Aço Inox 304", description: 'Tubo Inox 304 - 2"', pricePerKg: 41.50, unit: "kg" },
+  
+  // Aço Inox 316
+  { id: "chapa-inox316-1mm", category: "Aço Inox 316", description: "Chapa Inox 316 - 1mm", pricePerKg: 48.00, unit: "kg" },
+  { id: "chapa-inox316-2mm", category: "Aço Inox 316", description: "Chapa Inox 316 - 2mm", pricePerKg: 47.50, unit: "kg" },
+  { id: "tubo-inox316-1", category: "Aço Inox 316", description: 'Tubo Inox 316 - 1"', pricePerKg: 55.00, unit: "kg" },
+  
+  // Alumínio
+  { id: "chapa-aluminio-1mm", category: "Alumínio", description: "Chapa Alumínio 1100 - 1mm", pricePerKg: 28.00, unit: "kg" },
+  { id: "chapa-aluminio-2mm", category: "Alumínio", description: "Chapa Alumínio 1100 - 2mm", pricePerKg: 27.50, unit: "kg" },
+  { id: "perfil-aluminio-u", category: "Alumínio", description: "Perfil Alumínio U 50x25mm", pricePerKg: 29.00, unit: "kg" },
+  { id: "tubo-aluminio-1", category: "Alumínio", description: 'Tubo Alumínio 1"', pricePerKg: 30.00, unit: "kg" },
+  
+  // Cobre e Ligas
+  { id: "barra-cobre-1", category: "Cobre", description: 'Barra Cobre 1"', pricePerKg: 65.00, unit: "kg" },
+  { id: "chapa-cobre-1mm", category: "Cobre", description: "Chapa Cobre 1mm", pricePerKg: 68.00, unit: "kg" },
+  { id: "barra-bronze-1", category: "Bronze", description: 'Barra Bronze 1"', pricePerKg: 55.00, unit: "kg" },
+  { id: "barra-latao-1", category: "Latão", description: 'Barra Latão 1"', pricePerKg: 48.00, unit: "kg" },
+  
+  // Consumíveis
+  { id: "eletrodo-e6013", category: "Eletrodos", description: "Eletrodo E6013 - 3,25mm", pricePerKg: 18.50, unit: "kg" },
+  { id: "eletrodo-e7018", category: "Eletrodos", description: "Eletrodo E7018 - 3,25mm", pricePerKg: 22.00, unit: "kg" },
+  { id: "arame-mig-er70s", category: "Consumíveis Soldagem", description: "Arame MIG ER70S-6", pricePerKg: 16.50, unit: "kg" },
+  { id: "arame-inox-308", category: "Consumíveis Soldagem", description: "Arame Inox 308L", pricePerKg: 85.00, unit: "kg" },
+  { id: "gas-argonio", category: "Gases", description: "Argônio Industrial", pricePerKg: 45.00, unit: "m³" },
+  { id: "gas-co2", category: "Gases", description: "CO2 Industrial", pricePerKg: 35.00, unit: "m³" },
+  
+  // Parafusos e Fixadores
+  { id: "parafuso-m10", category: "Parafusos e Fixadores", description: "Parafuso M10 - Zincado", pricePerKg: 25.00, unit: "kg" },
+  { id: "parafuso-m12", category: "Parafusos e Fixadores", description: "Parafuso M12 - Zincado", pricePerKg: 24.00, unit: "kg" },
+  { id: "porca-m10", category: "Parafusos e Fixadores", description: "Porca M10 - Zincada", pricePerKg: 22.00, unit: "kg" },
+  { id: "arruela-m10", category: "Parafusos e Fixadores", description: "Arruela M10 - Zincada", pricePerKg: 20.00, unit: "kg" },
+];
+
+// Função para exportar relatório em PDF usando canvas e jsPDF
+const exportCalculatorReportPDF = (
+  calculatorItems: Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productDescription: string;
+    quantity: number;
+    leadTime: number;
+    stages: Array<{ stageName: string; durationDays: number }>;
+  }>,
+  calculatorResults: {
+    isViable: boolean;
+    suggestedDate: Date;
+    analysis: Array<{
+      stageName: string;
+      originalDuration: number;
+      adjustedDuration: number;
+      workload: number;
+      bottleneck: boolean;
+    }>;
+    totalAdjustedLeadTime: number;
+    confidence: number;
+  } | null,
+  requestedDeliveryDate: Date
+) => {
+  if (calculatorItems.length === 0) {
+    return;
+  }
+
+  // Criar um elemento canvas para gerar o PDF
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // Configurações do PDF
+  const pageWidth = 595; // A4 width em pontos
+  const pageHeight = 842; // A4 height em pontos
+  const margin = 40;
+  const lineHeight = 20;
+  
+  canvas.width = pageWidth;
+  canvas.height = pageHeight;
+  
+  // Configurar fonte
+  ctx.fillStyle = '#000000';
+  ctx.font = '12px Arial';
+  
+  let currentY = margin;
+  
+  // Função auxiliar para adicionar texto
+  const addText = (text: string, x: number = margin, fontSize: number = 12, isBold: boolean = false) => {
+    ctx.font = `${isBold ? 'bold ' : ''}${fontSize}px Arial`;
+    ctx.fillText(text, x, currentY);
+    currentY += lineHeight * (fontSize / 12);
+  };
+  
+  // Função auxiliar para quebrar linha
+  const addLine = () => {
+    currentY += lineHeight / 2;
+  };
+
+  // Cabeçalho
+  addText('MECALD - RELATÓRIO DE ANÁLISE DE PRAZOS', margin, 16, true);
+  addText(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, margin, 10);
+  addLine();
+  
+  // Linha horizontal
+  ctx.beginPath();
+  ctx.moveTo(margin, currentY);
+  ctx.lineTo(pageWidth - margin, currentY);
+  ctx.stroke();
+  currentY += lineHeight;
+  
+  // Dados da solicitação
+  addText('DADOS DA SOLICITAÇÃO', margin, 14, true);
+  addText(`Data de entrega solicitada: ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}`);
+  addText(`Quantidade de itens: ${calculatorItems.length}`);
+  addLine();
+  
+  // Lista de produtos
+  addText('PRODUTOS ANALISADOS', margin, 14, true);
+  calculatorItems.forEach((item, index) => {
+    addText(`${index + 1}. ${item.productCode} - ${item.productDescription}`);
+    addText(`   Quantidade: ${item.quantity} | Lead time base: ${item.leadTime} dias`, margin + 20, 10);
+    if (item.stages.length > 0) {
+      addText('   Etapas:', margin + 20, 10);
+      item.stages.forEach(stage => {
+        addText(`     • ${stage.stageName}: ${stage.durationDays || 0} dias`, margin + 40, 9);
+      });
+    }
+  });
+  addLine();
+  
+  // Resultados da análise
+  if (calculatorResults) {
+    addText('RESULTADO DA ANÁLISE', margin, 14, true);
+    addText(`Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}`, margin, 12, true);
+    addText(`Confiança: ${calculatorResults.confidence}%`);
+    addText(`Data sugerida: ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`);
+    addText(`Lead time ajustado: ${calculatorResults.totalAdjustedLeadTime} dias`);
+    addLine();
+    
+    addText('ANÁLISE POR SETOR', margin, 14, true);
+    calculatorResults.analysis.forEach(analysis => {
+      addText(`• ${analysis.stageName}${analysis.bottleneck ? ' (GARGALO)' : ''}`, margin, 11, true);
+      addText(`  Tempo original: ${analysis.originalDuration} dias`, margin + 20, 10);
+      addText(`  Tempo ajustado: ${analysis.adjustedDuration} dias`, margin + 20, 10);
+      addText(`  Carga atual: ${Math.round(analysis.workload * 100)}%`, margin + 20, 10);
+    });
+    addLine();
+    
+    // Recomendações
+    addText('RECOMENDAÇÕES', margin, 14, true);
+    if (!calculatorResults.isViable) {
+      addText('• Prazo inviável para a data solicitada', margin, 11);
+      addText(`• Considere reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`, margin, 11);
+    }
+    if (calculatorResults.confidence < 70) {
+      addText('• Baixa confiança devido à alta carga dos setores', margin, 11);
+      addText('• Monitore de perto a execução', margin, 11);
+    }
+    if (calculatorResults.analysis.some(a => a.bottleneck)) {
+      addText('• Gargalos identificados - considere realocação de recursos', margin, 11);
+    }
+  }
+  
+  // Converter canvas para blob e fazer download
+  canvas.toBlob((blob) => {
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `relatorio-prazos-mecald-${format(new Date(), "yyyyMMdd-HHmm")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+  }, 'application/pdf');
+};
+
+export default function ProductsPage() {
+  const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const { user, loading: authLoading } = useAuth();
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
+  
+  const [manufacturingStages, setManufacturingStages] = useState<string[]>([]);
+  const [isLoadingStages, setIsLoadingStages] = useState(true);
+  const [newStageName, setNewStageName] = useState("");
+  const [activeTab, setActiveTab] = useState("catalog");
+
+  // Estados da calculadora de prazos
+  const [calculatorItems, setCalculatorItems] = useState<Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productDescription: string;
+    quantity: number;
+    leadTime: number;
+    stages: Array<{ stageName: string; durationDays: number }>;
+  }>>([]);
+  const [selectedProductForCalculator, setSelectedProductForCalculator] = useState<string>("");
+  const [calculatorQuantity, setCalculatorQuantity] = useState<number>(1);
+  const [requestedDeliveryDate, setRequestedDeliveryDate] = useState<Date>(
+    new Date(new Date().setDate(new Date().getDate() + 30))
+  );
+  const [calculatorResults, setCalculatorResults] = useState<{
+    isViable: boolean;
+    suggestedDate: Date;
+    analysis: Array<{
+      stageName: string;
+      originalDuration: number;
+      adjustedDuration: number;
+      workload: number;
+      bottleneck: boolean;
+    }>;
+    totalAdjustedLeadTime: number;
+    confidence: number;
+  } | null>(null);
+  
+  // Simulação de carga de trabalho por setor (em uma implementação real, isso viria do banco de dados)
+  const [sectorWorkload, setSectorWorkload] = useState<Record<string, number>>({});
+
+  // Estados da calculadora de preços
+  const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
+  const [machineHourRate, setMachineHourRate] = useState<number>(150); // R$/hora
+  const [selectedProductForPricing, setSelectedProductForPricing] = useState<Product | null>(null);
+  const [pricingCalculation, setPricingCalculation] = useState<PricingCalculation | null>(null);
+  const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
+  const [profitMargin, setProfitMargin] = useState<number>(30); // percentual
+  const [machiningHours, setMachiningHours] = useState<number>(0);
+  const [consumablesCost, setConsumablesCost] = useState<number>(0);
+  const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
+
+  // Função para simular carga de trabalho dos setores
+  const simulateSectorWorkload = useCallback(() => {
+    const workload: Record<string, number> = {};
+    manufacturingStages.forEach(stage => {
+      // Simula uma carga entre 0% e 95% para cada setor
+      workload[stage] = Math.random() * 0.95;
+    });
+    setSectorWorkload(workload);
+  }, [manufacturingStages]);
+
+  // Gera carga de trabalho inicial
+  useEffect(() => {
+    if (manufacturingStages.length > 0) {
+      simulateSectorWorkload();
+    }
+  }, [manufacturingStages, simulateSectorWorkload]);
+
+  const [isCopyPopoverOpen, setIsCopyPopoverOpen] = useState(false);
+  const [copyFromSearch, setCopyFromSearch] = useState("");
+
+  const [isEditStageDialogOpen, setIsEditStageDialogOpen] = useState(false);
+  const [stageToEdit, setStageToEdit] = useState<{ oldName: string; index: number } | null>(null);
+  const [newStageNameForEdit, setNewStageNameForEdit] = useState("");
+  
+  const [isDeleteStageDialogOpen, setIsDeleteStageDialogOpen] = useState(false);
+  const [stageToDeleteConfirmation, setStageToDeleteConfirmation] = useState<string | null>(null);
+
+  // Estados para drag and drop
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null);
+
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
 
-  // Estados da equipe
-  const [isTeamLoading, setIsTeamLoading] = useState(true);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [isTeamFormOpen, setIsTeamFormOpen] = useState(false);
-  const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
-  const [memberToDelete, setMemberToDelete] = useState<TeamMember | null>(null);
-
-  // Estados dos recursos
-  const [isResourcesLoading, setIsResourcesLoading] = useState(true);
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [isResourceFormOpen, setIsResourceFormOpen] = useState(false);
-  const [isResourceDeleteAlertOpen, setIsResourceDeleteAlertOpen] = useState(false);
-  const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
-  const [resourceToDelete, setResourceToDelete] = useState<Resource | null>(null);
-
-  // Estados de horas extras
-  const [isOvertimeLoading, setIsOvertimeLoading] = useState(true);
-  const [overtimeReleases, setOvertimeReleases] = useState<OvertimeRelease[]>([]);
-  const [isOvertimeFormOpen, setIsOvertimeFormOpen] = useState(false);
-  const [isOvertimeDeleteAlertOpen, setIsOvertimeDeleteAlertOpen] = useState(false);
-  const [selectedOvertime, setSelectedOvertime] = useState<OvertimeRelease | null>(null);
-  const [overtimeToDelete, setOvertimeToDelete] = useState<OvertimeRelease | null>(null);
-  const [selectedResources, setSelectedResources] = useState<string[]>([]);
-  const [selectedLeaders, setSelectedLeaders] = useState<string[]>([]);
-
-  // Forms
-  const companyForm = useForm<z.infer<typeof companySchema>>({
-    resolver: zodResolver(companySchema),
+  const form = useForm<z.infer<typeof productSchema>>({
+    resolver: zodResolver(productSchema),
     defaultValues: {
-      nomeFantasia: "",
-      cnpj: "",
-      inscricaoEstadual: "",
-      email: "",
-      celular: "",
-      endereco: "",
-      website: "",
-      capacidadeInstalada: undefined,
-      metaMensal: undefined,
+      code: "",
+      description: "",
+      unitPrice: 0,
+      unitWeight: 0,
+      productionPlanTemplate: [],
     },
   });
 
-  const teamForm = useForm<TeamMember>({
-    resolver: zodResolver(teamMemberSchema),
-    defaultValues: {
-        id: "",
-        name: "",
-        position: "",
-        email: "",
-        phone: "",
-        permission: "user",
-    }
-  });
+  const stagesDocRef = useMemo(() => doc(db, "companies", "mecald", "settings", "manufacturingStages"), []);
 
-  const resourceForm = useForm<Resource>({
-    resolver: zodResolver(resourceSchema),
-    defaultValues: {
-        id: "",
-        name: "",
-        type: "maquina",
-        description: "",
-        capacity: 1,
-        status: "disponivel",
-        location: "",
-        serialNumber: "",
-        acquisitionDate: "",
-        maintenanceDate: "",
-        absenceStartDate: "",
-        absenceEndDate: "",
-        absenceReason: "",
+  const fetchStages = useCallback(async () => {
+    setIsLoadingStages(true);
+    try {
+        const docSnap = await getDoc(stagesDocRef);
+        if (docSnap.exists() && Array.isArray(docSnap.data().stages)) {
+            setManufacturingStages(docSnap.data().stages);
+        } else {
+            setManufacturingStages([]);
+        }
+    } catch (error) {
+        console.error("Error fetching manufacturing stages:", error);
+        toast({ variant: "destructive", title: "Erro ao buscar etapas" });
+        setManufacturingStages([]);
+    } finally {
+        setIsLoadingStages(false);
     }
-  });
+  }, [stagesDocRef, toast]);
 
-  const overtimeForm = useForm<OvertimeRelease>({
-    resolver: zodResolver(overtimeSchema),
-    defaultValues: {
-        id: "",
-        date: "",
-        startTime: "",
-        endTime: "",
-        resources: [],
-        teamLeaders: [],
-        observations: "",
-        status: "pendente",
+  const handleAddStage = useCallback(async () => {
+    const stageToAdd = newStageName.trim();
+    if (!stageToAdd) {
+        toast({
+            variant: "destructive",
+            title: "Campo vazio",
+            description: "Por favor, digite o nome da etapa para adicionar.",
+        });
+        return;
     }
-  });
+    try {
+      await setDoc(stagesDocRef, {
+        stages: arrayUnion(stageToAdd)
+      }, { merge: true });
+      
+      setNewStageName("");
+      toast({ title: "Etapa adicionada!" });
+      await fetchStages();
+    } catch (error) {
+      console.error("Error adding stage:", error);
+      toast({ variant: "destructive", title: "Erro ao adicionar etapa" });
+    }
+  }, [newStageName, stagesDocRef, fetchStages, toast]);
 
-  // Funções de busca de dados
-  const fetchCompanyData = async () => {
-    if (!user) return;
+  const fetchProducts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
+      const querySnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
+      const productsList = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        const planTemplate = data.productionPlanTemplate || (data.manufacturingStages && Array.isArray(data.manufacturingStages)
+            ? data.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+            : []);
 
-      if (docSnap.exists()) {
-        const data = docSnap.data() as CompanyData;
-        companyForm.reset(data);
-        if (data.logo?.preview) {
-          setLogoPreview(data.logo.preview);
-        }
-      } else {
-        toast({
-          variant: "destructive",
-          title: "Documento não encontrado",
-          description: "Não foi possível encontrar os dados da empresa no Firestore.",
-        });
-      }
+        return {
+          id: doc.id,
+          ...(data as Omit<Product, 'id'>),
+          productionPlanTemplate: planTemplate,
+        };
+      });
+      setProducts(productsList);
     } catch (error) {
-      console.error("Error fetching company data:", error);
+      console.error("Error fetching products: ", error);
       toast({
         variant: "destructive",
-        title: "Erro ao buscar dados",
-        description: "Ocorreu um erro ao carregar as informações da empresa.",
+        title: "Erro ao buscar produtos",
+        description: "Ocorreu um erro ao carregar o catálogo de produtos.",
       });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
 
-  const fetchTeamData = async () => {
-    if (!user) return;
-    setIsTeamLoading(true);
-    try {
-        const teamRef = doc(db, "companies", "mecald", "settings", "team");
-        const docSnap = await getDoc(teamRef);
-        if (docSnap.exists()) {
-            setTeamMembers(docSnap.data().members || []);
-        }
-    } catch (error) {
-        console.error("Error fetching team data:", error);
-        toast({
-            variant: "destructive",
-            title: "Erro ao buscar equipe",
-            description: "Ocorreu um erro ao carregar os membros da equipe.",
-        });
-    } finally {
-        setIsTeamLoading(false);
-    }
-  };
-
-  const fetchResourcesData = async () => {
-    if (!user) return;
-    setIsResourcesLoading(true);
-    try {
-        const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-        const docSnap = await getDoc(resourcesRef);
-        if (docSnap.exists()) {
-            setResources(docSnap.data().resources || []);
-        }
-    } catch (error) {
-        console.error("Error fetching resources data:", error);
-        toast({
-            variant: "destructive",
-            title: "Erro ao buscar recursos",
-            description: "Ocorreu um erro ao carregar os recursos produtivos.",
-        });
-    } finally {
-        setIsResourcesLoading(false);
-    }
-  };
-
-  const fetchOvertimeData = async () => {
-    if (!user) return;
-    setIsOvertimeLoading(true);
-    try {
-        const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
-        const docSnap = await getDoc(overtimeRef);
-        if (docSnap.exists()) {
-            setOvertimeReleases(docSnap.data().releases || []);
-        }
-    } catch (error) {
-        console.error("Error fetching overtime data:", error);
-        toast({
-            variant: "destructive",
-            title: "Erro ao buscar horas extras",
-            description: "Ocorreu um erro ao carregar as liberações de horas extras.",
-        });
-    } finally {
-        setIsOvertimeLoading(false);
-    }
-  };
-
-  // useEffect
   useEffect(() => {
     if (!authLoading && user) {
-      fetchCompanyData();
-      fetchTeamData();
-      fetchResourcesData();
-      fetchOvertimeData();
+      fetchProducts();
+      fetchStages();
     }
-  }, [user, authLoading]);
-
-  // Funções auxiliares
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    const variants = {
-      disponivel: "bg-green-100 text-green-800 hover:bg-green-100",
-      ocupado: "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
-      manutencao: "bg-red-100 text-red-800 hover:bg-red-100",
-      inativo: "bg-gray-100 text-gray-800 hover:bg-gray-100",
-      ausente: "bg-orange-100 text-orange-800 hover:bg-orange-100",
-      ferias: "bg-blue-100 text-blue-800 hover:bg-blue-100"
-    };
+  }, [user, authLoading, fetchProducts, fetchStages]);
+  
+  const syncCatalog = useCallback(async () => {
+    setIsSyncing(true);
+    toast({ title: "Sincronizando...", description: "Buscando produtos em orçamentos e pedidos existentes." });
     
-    const labels = {
-      disponivel: "Disponível",
-      ocupado: "Ocupado",
-      manutencao: "Manutenção",
-      inativo: "Inativo",
-      ausente: "Ausente",
-      ferias: "Férias"
-    };
-
-    const icons = {
-      disponivel: <CheckCircle className="h-3 w-3 mr-1" />,
-      ocupado: <Activity className="h-3 w-3 mr-1" />,
-      manutencao: <Settings className="h-3 w-3 mr-1" />,
-      inativo: <AlertCircle className="h-3 w-3 mr-1" />,
-      ausente: <UserX className="h-3 w-3 mr-1" />,
-      ferias: <Calendar className="h-3 w-3 mr-1" />
-    };
-
-    return (
-      <Badge className={variants[status as keyof typeof variants]}>
-        {icons[status as keyof typeof icons]}
-        {labels[status as keyof typeof labels]}
-      </Badge>
-    );
-  };
-
-  const getOvertimeStatusBadge = (status: string) => {
-    const variants = {
-      pendente: "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
-      aprovado: "bg-green-100 text-green-800 hover:bg-green-100",
-      rejeitado: "bg-red-100 text-red-800 hover:bg-red-100"
-    };
-    
-    const labels = {
-      pendente: "Pendente",
-      aprovado: "Aprovado",
-      rejeitado: "Rejeitado"
-    };
-
-    return (
-      <Badge className={variants[status as keyof typeof variants]}>
-        {labels[status as keyof typeof labels]}
-      </Badge>
-    );
-  };
-
-  const calculateOvertimeHours = (startTime: string, endTime: string) => {
-    if (!startTime || !endTime) return 0;
-    const [startHour, startMinute] = startTime.split(':').map(Number);
-    const [endHour, endMinute] = endTime.split(':').map(Number);
-    const startMinutes = startHour * 60 + startMinute;
-    const endMinutes = endHour * 60 + endMinute;
-    const diffMinutes = endMinutes - startMinutes;
-    return (diffMinutes / 60).toFixed(2);
-  };
-
-  const getResourceStats = () => {
-    const total = resources.length;
-    const available = resources.filter(r => r.status === 'disponivel').length;
-    const occupied = resources.filter(r => r.status === 'ocupado').length;
-    const maintenance = resources.filter(r => r.status === 'manutencao').length;
-    const inactive = resources.filter(r => r.status === 'inativo').length;
-    const absent = resources.filter(r => r.status === 'ausente').length;
-    const vacation = resources.filter(r => r.status === 'ferias').length;
-    
-    // Recursos efetivamente disponíveis (não incluindo ausentes e férias no cálculo de ociosidade)
-    const activeResources = resources.filter(r => !['ausente', 'ferias', 'inativo'].includes(r.status)).length;
-    const idleRate = activeResources > 0 ? (available / activeResources) * 100 : 0;
-    
-    return { total, available, occupied, maintenance, inactive, absent, vacation, activeResources, idleRate };
-  };
-
-  // Função para exportar recursos com tarefas diárias
-  const exportResourcesWithTasks = () => {
-    // Criar cabeçalho da planilha
-    const headers = [
-      'Nome do Recurso',
-      'Tipo',
-      'Status',
-      'Capacidade',
-      'Localização',
-      'Número de Série',
-      'Tarefa Diária Planejada',
-      'Horário de Início',
-      'Horário de Término',
-      'Responsável',
-      'Observações'
-    ];
-
-    // Converter dados dos recursos
-    const csvData = resources.map(resource => [
-      resource.name,
-      resource.type === 'mao_de_obra' ? 'Mão de Obra' : 
-      resource.type.charAt(0).toUpperCase() + resource.type.slice(1),
-      resource.status === 'disponivel' ? 'Disponível' :
-      resource.status === 'ocupado' ? 'Ocupado' :
-      resource.status === 'manutencao' ? 'Manutenção' :
-      resource.status === 'ausente' ? 'Ausente' :
-      resource.status === 'ferias' ? 'Férias' :
-      resource.status === 'inativo' ? 'Inativo' : resource.status,
-      resource.capacity,
-      resource.location || '',
-      resource.serialNumber || '',
-      '', // Campo vazio para tarefa diária
-      '', // Campo vazio para horário início
-      '', // Campo vazio para horário término
-      '', // Campo vazio para responsável
-      ''  // Campo vazio para observações
-    ]);
-
-    // Combinar cabeçalho com dados
-    const allData = [headers, ...csvData];
-
-    // Converter para CSV
-    const csvContent = allData.map(row => 
-      row.map(cell => `"${cell}"`).join(',')
-    ).join('\n');
-
-    // Criar e fazer download do arquivo
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    
-    // Nome do arquivo com data atual
-    const today = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
-    link.setAttribute('download', `recursos-tarefas-diarias-${today}.csv`);
-    
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    toast({
-      title: "Exportação realizada!",
-      description: "Lista de recursos com campos para tarefas diárias foi baixada.",
-    });
-  };
-
-  // Função para exportar recursos em PDF com cabeçalho da empresa
-  const exportResourcesToPDF = async () => {
-    // Buscar dados da empresa
-    let companyData = null;
     try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      if (docSnap.exists()) {
-        companyData = docSnap.data();
-      }
-    } catch (error) {
-      console.error("Error fetching company data for PDF:", error);
-    }
+        const [quotationsSnapshot, ordersSnapshot] = await Promise.all([
+            getDocs(collection(db, "companies", "mecald", "quotations")),
+            getDocs(collection(db, "companies", "mecald", "orders"))
+        ]);
+        
+        const productsToSync = new Map<string, any>();
+        const skippedCodes: string[] = [];
 
-    const stats = getResourceStats();
+        const processDocumentItems = (doc: any) => {
+            const data = doc.data();
+            if (Array.isArray(data.items)) {
+                data.items.forEach((item: any) => {
+                    const productCodeRaw = item.code || item.product_code;
+                    if (productCodeRaw && typeof productCodeRaw === 'string' && productCodeRaw.trim() !== "") {
+                        const productCode = productCodeRaw.trim();
 
-    // Criar conteúdo HTML para o PDF
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Lista de Recursos Produtivos - Tarefas Diárias</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            font-size: 12px;
-            color: #333;
-          }
-          
-          .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #e5e7eb;
-          }
-          
-          .company-info {
-            flex: 1;
-          }
-          
-          .company-name {
-            font-size: 24px;
-            font-weight: bold;
-            color: #1f2937;
-            margin-bottom: 5px;
-          }
-          
-          .company-details {
-            font-size: 11px;
-            color: #6b7280;
-            line-height: 1.4;
-          }
-          
-          .logo-section {
-            width: 80px;
-            height: 80px;
-            background: #f3f4f6;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            color: #9ca3af;
-          }
-          
-          .report-title {
-            text-align: center;
-            margin: 30px 0;
-          }
-          
-          .report-title h1 {
-            font-size: 20px;
-            font-weight: bold;
-            color: #1f2937;
-            margin: 0 0 5px 0;
-          }
-          
-          .report-date {
-            font-size: 11px;
-            color: #6b7280;
-          }
-          
-          .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 15px;
-            margin: 20px 0;
-          }
-          
-          .stat-card {
-            background: #f9fafb;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            border-left: 4px solid #e5e7eb;
-          }
-          
-          .stat-card.available { border-left-color: #10b981; }
-          .stat-card.occupied { border-left-color: #f59e0b; }
-          .stat-card.maintenance { border-left-color: #ef4444; }
-          .stat-card.absent { border-left-color: #f97316; }
-          .stat-card.idle { border-left-color: #3b82f6; }
-          
-          .stat-number {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 5px;
-          }
-          
-          .stat-label {
-            font-size: 10px;
-            color: #6b7280;
-            text-transform: uppercase;
-          }
-          
-          .table-container {
-            margin-top: 20px;
-          }
-          
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-          }
-          
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: left;
-            font-size: 10px;
-          }
-          
-          th {
-            background-color: #f9fafb;
-            font-weight: bold;
-            color: #374151;
-          }
-          
-          .task-column {
-            width: 150px;
-            background-color: #fef9e7;
-          }
-          
-          .time-column {
-            width: 80px;
-            background-color: #fef9e7;
-          }
-          
-          .responsible-column {
-            width: 100px;
-            background-color: #fef9e7;
-          }
-          
-          .observations-column {
-            width: 120px;
-            background-color: #fef9e7;
-          }
-          
-          .status-badge {
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 9px;
-            font-weight: bold;
-          }
-          
-          .status-disponivel { background-color: #d1fae5; color: #065f46; }
-          .status-ocupado { background-color: #fef3c7; color: #92400e; }
-          .status-manutencao { background-color: #fee2e2; color: #991b1b; }
-          .status-ausente { background-color: #fed7aa; color: #9a3412; }
-          .status-ferias { background-color: #dbeafe; color: #1e40af; }
-          .status-inativo { background-color: #f3f4f6; color: #374151; }
-          
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            font-size: 10px;
-            color: #9ca3af;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 20px;
-          }
-          
-          .instructions {
-            background-color: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-          }
-          
-          .instructions h3 {
-            margin: 0 0 10px 0;
-            font-size: 12px;
-            color: #1e40af;
-          }
-          
-          .instructions ul {
-            margin: 0;
-            padding-left: 20px;
-            font-size: 10px;
-            color: #1e40af;
-          }
-          
-          .instructions li {
-            margin-bottom: 5px;
-          }
-          
-          @media print {
-            body { margin: 0; }
-            .header { margin-bottom: 20px; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="company-info">
-            <div class="company-name">${companyData?.nomeFantasia || 'Nome da Empresa'}</div>
-            <div class="company-details">
-              ${companyData?.cnpj ? `CNPJ: ${companyData.cnpj}<br>` : ''}
-              ${companyData?.inscricaoEstadual ? `I.E.: ${companyData.inscricaoEstadual}<br>` : ''}
-              ${companyData?.email ? `E-mail: ${companyData.email}<br>` : ''}
-              ${companyData?.celular ? `Telefone: ${companyData.celular}<br>` : ''}
-              ${companyData?.endereco ? `${companyData.endereco}` : ''}
-            </div>
-          </div>
-          <div class="logo-section">
-            ${companyData?.logo?.preview ? 
-              `<img src="${companyData.logo.preview}" alt="Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">` : 
-              'LOGO'
+                        if (productCode.includes('/') || productCode === '.' || productCode === '..') {
+                            if (!skippedCodes.includes(productCode)) {
+                                skippedCodes.push(productCode);
+                            }
+                            return; 
+                        }
+                        
+                        const existingData = productsToSync.get(productCode) || {};
+
+                        const productData = {
+                            code: productCode,
+                            description: item.description || existingData.description || "Sem descrição",
+                            unitPrice: Number(item.unitPrice) || existingData.unitPrice || 0,
+                            unitWeight: Number(item.unitWeight) || existingData.unitWeight || 0,
+                        };
+                        productsToSync.set(productCode, productData);
+                    }
+                });
             }
-          </div>
-        </div>
-        
-        <div class="report-title">
-          <h1>Lista de Recursos Produtivos - Tarefas Diárias</h1>
-          <div class="report-date">Gerado em: ${new Date().toLocaleDateString('pt-BR', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          })}</div>
-        </div>
-        
-        <div class="stats-grid">
-          <div class="stat-card available">
-            <div class="stat-number" style="color: #10b981;">${stats.available}</div>
-            <div class="stat-label">Disponíveis</div>
-          </div>
-          <div class="stat-card occupied">
-            <div class="stat-number" style="color: #f59e0b;">${stats.occupied}</div>
-            <div class="stat-label">Ocupados</div>
-          </div>
-          <div class="stat-card maintenance">
-            <div class="stat-number" style="color: #ef4444;">${stats.maintenance}</div>
-            <div class="stat-label">Manutenção</div>
-          </div>
-          <div class="stat-card absent">
-            <div class="stat-number" style="color: #f97316;">${stats.absent + stats.vacation}</div>
-            <div class="stat-label">Ausentes/Férias</div>
-          </div>
-          <div class="stat-card idle">
-            <div class="stat-number" style="color: #3b82f6;">${Math.round(stats.idleRate)}%</div>
-            <div class="stat-label">Taxa Ociosidade</div>
-          </div>
-        </div>
-        
-        <div class="instructions">
-          <h3>📋 Instruções para Preenchimento</h3>
-          <ul>
-            <li><strong>Tarefa Diária:</strong> Descreva a atividade específica planejada para cada recurso</li>
-            <li><strong>Horários:</strong> Defina início e término das atividades</li>
-            <li><strong>Responsável:</strong> Indique quem será responsável pela execução</li>
-            <li><strong>Observações:</strong> Anote informações relevantes, impedimentos ou observações</li>
-          </ul>
-        </div>
-        
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 120px;">Recurso</th>
-                <th style="width: 80px;">Tipo</th>
-                <th style="width: 60px;">Status</th>
-                <th style="width: 40px;">Cap.</th>
-                <th style="width: 80px;">Localização</th>
-                <th class="task-column">Tarefa Diária Planejada</th>
-                <th class="time-column">Início</th>
-                <th class="time-column">Término</th>
-                <th class="responsible-column">Responsável</th>
-                <th class="observations-column">Observações</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${resources.map(resource => `
-                <tr>
-                  <td style="font-weight: bold;">${resource.name}</td>
-                  <td>${resource.type === 'mao_de_obra' ? 'Mão de Obra' : 
-                       resource.type.charAt(0).toUpperCase() + resource.type.slice(1)}</td>
-                  <td>
-                    <span class="status-badge status-${resource.status}">
-                      ${resource.status === 'disponivel' ? 'Disponível' :
-                        resource.status === 'ocupado' ? 'Ocupado' :
-                        resource.status === 'manutencao' ? 'Manutenção' :
-                        resource.status === 'ausente' ? 'Ausente' :
-                        resource.status === 'ferias' ? 'Férias' :
-                        resource.status === 'inativo' ? 'Inativo' : resource.status}
-                    </span>
-                  </td>
-                  <td style="text-align: center;">${resource.capacity}</td>
-                  <td>${resource.location || '-'}</td>
-                  <td class="task-column" style="border-right: 2px solid #fbbf24;"></td>
-                  <td class="time-column"></td>
-                  <td class="time-column"></td>
-                  <td class="responsible-column"></td>
-                  <td class="observations-column"></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        
-        <div class="footer">
-          <p>Este documento foi gerado automaticamente pelo sistema de gestão de recursos produtivos.</p>
-          <p>Para dúvidas ou sugestões, entre em contato: ${companyData?.email || 'contato@empresa.com'}</p>
-        </div>
-      </body>
-      </html>
-    `;
+        };
 
-    // Criar e abrir nova janela para impressão/PDF
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      // Aguardar carregamento e imprimir
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-        }, 500);
-      };
-      toast({
-        title: "PDF sendo gerado!",
-        description: "Uma nova janela foi aberta para geração do PDF. Use Ctrl+P ou Cmd+P para salvar.",
-      });
-    } else {
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar PDF",
-        description: "Não foi possível abrir a janela de impressão. Verifique se pop-ups estão habilitados.",
-      });
-    }
-  };
-
-  const exportOvertimeToPDF = async (overtime: OvertimeRelease) => {
-    let companyData = null;
-    try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
-      const docSnap = await getDoc(companyRef);
-      if (docSnap.exists()) {
-        companyData = docSnap.data();
-      }
-    } catch (error) {
-      console.error("Error fetching company data for PDF:", error);
-    }
-
-    const selectedResourcesList = resources.filter(r => overtime.resources.includes(r.id));
-    const selectedLeadersList = teamMembers.filter(m => overtime.teamLeaders.includes(m.id));
-    const hours = calculateOvertimeHours(overtime.startTime, overtime.endTime);
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Liberação de Horas Extras</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            font-size: 12px;
-            color: #333;
-          }
-          .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #e5e7eb;
-          }
-          .company-info { flex: 1; }
-          .company-name {
-            font-size: 24px;
-            font-weight: bold;
-            color: #1f2937;
-            margin-bottom: 5px;
-          }
-          .company-details {
-            font-size: 11px;
-            color: #6b7280;
-            line-height: 1.4;
-          }
-          .logo-section {
-            width: 80px;
-            height: 80px;
-            background: #f3f4f6;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .report-title {
-            text-align: center;
-            margin: 30px 0;
-            padding: 20px;
-            background: #fef3c7;
-            border-radius: 8px;
-            border: 2px solid #f59e0b;
-          }
-          .report-title h1 {
-            font-size: 22px;
-            font-weight: bold;
-            color: #92400e;
-            margin: 0 0 5px 0;
-          }
-          .info-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
-            margin: 20px 0;
-          }
-          .info-card {
-            background: #f9fafb;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #3b82f6;
-          }
-          .info-card h3 {
-            margin: 0 0 10px 0;
-            font-size: 12px;
-            color: #1f2937;
-            font-weight: bold;
-          }
-          .info-card p {
-            margin: 5px 0;
-            font-size: 11px;
-            color: #4b5563;
-          }
-          .label { font-weight: bold; color: #1f2937; }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-          }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 10px;
-            text-align: left;
-            font-size: 11px;
-          }
-          th {
-            background-color: #f3f4f6;
-            font-weight: bold;
-            color: #374151;
-          }
-          .section-title {
-            font-size: 14px;
-            font-weight: bold;
-            color: #1f2937;
-            margin: 30px 0 15px 0;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #e5e7eb;
-          }
-          .approval-section {
-            margin-top: 60px;
-            padding: 20px;
-            background: #f0fdf4;
-            border: 2px solid #10b981;
-            border-radius: 8px;
-          }
-          .signature-box {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 2px solid #374151;
-          }
-          .signature-box p {
-            margin: 5px 0;
-            font-size: 11px;
-            text-align: center;
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            font-size: 10px;
-            color: #9ca3af;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 20px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="company-info">
-            <div class="company-name">${companyData?.nomeFantasia || 'Nome da Empresa'}</div>
-            <div class="company-details">
-              ${companyData?.cnpj ? `CNPJ: ${companyData.cnpj}<br>` : ''}
-              ${companyData?.email ? `E-mail: ${companyData.email}<br>` : ''}
-              ${companyData?.celular ? `Telefone: ${companyData.celular}` : ''}
-            </div>
-          </div>
-          <div class="logo-section">
-            ${companyData?.logo?.preview ? 
-              `<img src="${companyData.logo.preview}" alt="Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">` : 
-              'LOGO'
-            }
-          </div>
-        </div>
+        quotationsSnapshot.forEach(processDocumentItems);
+        ordersSnapshot.forEach(processDocumentItems);
         
-        <div class="report-title">
-          <h1>🕐 AUTORIZAÇÃO DE HORAS EXTRAS</h1>
-          <div style="font-size: 12px; color: #92400e; font-weight: bold;">Documento Oficial de Liberação</div>
-        </div>
-        
-        <div class="info-grid">
-          <div class="info-card" style="border-left-color: #f59e0b;">
-            <h3>📅 Informações de Data e Horário</h3>
-            <p><span class="label">Data:</span> ${new Date(overtime.date).toLocaleDateString('pt-BR')}</p>
-            <p><span class="label">Horário de Entrada:</span> ${overtime.startTime}</p>
-            <p><span class="label">Horário de Saída:</span> ${overtime.endTime}</p>
-            <p><span class="label">Total de Horas:</span> <strong>${hours} horas</strong></p>
-          </div>
+        if (productsToSync.size === 0 && skippedCodes.length === 0) {
+            toast({ title: "Nenhum produto novo encontrado", description: "Seu catálogo já parece estar atualizado." });
+            setIsSyncing(false);
+            return;
+        }
 
-          <div class="info-card" style="border-left-color: #6b7280;">
-            <h3>📝 Observações</h3>
-            <p style="font-size: 11px;">${overtime.observations || 'Sem observações adicionais'}</p>
-          </div>
-        </div>
-        
-        <h2 class="section-title">👷 Recursos Alocados (${selectedResourcesList.length})</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>Tipo</th>
-              <th>Capacidade</th>
-              <th>Localização</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${selectedResourcesList.map(r => `
-              <tr>
-                <td><strong>${r.name}</strong></td>
-                <td>${r.type === 'mao_de_obra' ? 'Mão de Obra' : r.type}</td>
-                <td>${r.capacity}</td>
-                <td>${r.location || '-'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        
-        <h2 class="section-title">👥 Líderes Responsáveis (${selectedLeadersList.length})</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>Cargo</th>
-              <th>E-mail</th>
-              <th>Telefone</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${selectedLeadersList.map(l => `
-              <tr>
-                <td><strong>${l.name}</strong></td>
-                <td>${l.position}</td>
-                <td>${l.email}</td>
-                <td>${l.phone}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        
-        <div class="approval-section">
-          <h3 style="margin: 0 0 20px 0; font-size: 14px; color: #065f46; font-weight: bold;">✅ APROVAÇÃO DO GERENTE</h3>
-          <p style="margin: 0 0 10px 0; font-size: 11px;">
-            Eu, na qualidade de gestor responsável, <strong>AUTORIZO</strong> a realização das horas extras descritas neste documento.
-          </p>
-          <div class="signature-box">
-            <p>_______________________________________</p>
-            <p><strong>Assinatura do Gerente Responsável</strong></p>
-            <p>Nome: _________________________________</p>
-            <p>Data: _____ / _____ / _________</p>
-          </div>
-        </div>
-        
-        <div class="footer">
-          <p><strong>Gerado em ${new Date().toLocaleString('pt-BR')}</strong></p>
-          <p>Para dúvidas: ${companyData?.email || 'contato@empresa.com'}</p>
-        </div>
-      </body>
-      </html>
-    `;
-
-    // Criar e abrir nova janela para impressão/PDF
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      // Aguardar carregamento e imprimir
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-        }, 500);
-      };
-      toast({ title: "PDF sendo gerado!", description: "Uma nova janela foi aberta para geração do PDF." });
-    }
-  };
-
-  // Funções de submit
-  const onCompanySubmit = async (values: z.infer<typeof companySchema>) => {
-    if (!user) {
-      toast({
-        variant: "destructive",
-        title: "Erro de Autenticação",
-        description: "Você precisa estar logado para salvar as alterações.",
-      });
-      return;
-    }
+        if (productsToSync.size > 0) {
+            const batch = writeBatch(db);
+            const productsCollectionRef = collection(db, "companies", "mecald", "products");
     
+            productsToSync.forEach((productData, productCode) => {
+                const productRef = doc(productsCollectionRef, productCode);
+                batch.set(productRef, { ...productData, updatedAt: Timestamp.now() }, { merge: true });
+            });
+    
+            await batch.commit();
+        }
+
+        let description = `${productsToSync.size} produtos foram adicionados ou atualizados.`;
+        if (skippedCodes.length > 0) {
+            description += ` ${skippedCodes.length} código(s) foram ignorados por conterem caracteres inválidos (ex: /).`
+        }
+
+        toast({ 
+            title: "Sincronização Concluída!", 
+            description: description,
+            duration: skippedCodes.length > 0 ? 8000 : 5000,
+        });
+        await fetchProducts();
+
+    } catch (error: any) {
+        console.error("Error syncing catalog: ", error);
+        let description = "Não foi possível sincronizar os produtos. Tente novamente.";
+        if (error.code === 'permission-denied') {
+            description = "Erro de permissão. Verifique as regras de segurança do seu Firestore.";
+        } else if (error.message && (error.message.includes('Document path') || error.message.includes('invalid'))) {
+            description = "Um ou mais produtos nos orçamentos ou pedidos possuem um código inválido. Corrija-os e tente novamente.";
+        }
+        toast({
+            variant: "destructive",
+            title: "Erro na Sincronização",
+            description: description,
+        });
+    } finally {
+        setIsSyncing(false);
+    }
+  }, [toast, fetchProducts]);
+
+  const onSubmit = async (values: z.infer<typeof productSchema>) => {
     try {
-      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        if (values.code.includes('/')) {
+            toast({
+                variant: "destructive",
+                title: "Código Inválido",
+                description: "O código do produto não pode conter o caractere '/'."
+            });
+            return;
+        }
+
+      const productRef = doc(db, "companies", "mecald", "products", values.code);
       
-      // Limpar campos vazios e converter números
-      const dataToSave = {
-        nomeFantasia: values.nomeFantasia,
-        cnpj: values.cnpj,
-        inscricaoEstadual: values.inscricaoEstadual || "",
-        email: values.email,
-        celular: values.celular,
-        endereco: values.endereco,
-        website: values.website || "",
-        capacidadeInstalada: values.capacidadeInstalada || null,
-        metaMensal: values.metaMensal || null,
-        logo: {
-          preview: logoPreview,
-        },
-        updatedAt: new Date(),
-      };
+      if (selectedProduct && selectedProduct.id !== values.code) {
+        await deleteDoc(doc(db, "companies", "mecald", "products", selectedProduct.id));
+      }
       
-      await setDoc(companyRef, dataToSave, { merge: true });
-      
+      await setDoc(productRef, values, { merge: true });
+
       toast({
-        title: "Dados atualizados!",
-        description: "As informações da empresa foram salvas com sucesso.",
+        title: selectedProduct ? "Produto atualizado!" : "Produto adicionado!",
+        description: `O produto "${values.description}" foi salvo com sucesso.`,
       });
+
+      form.reset();
+      setIsFormOpen(false);
+      setSelectedProduct(null);
+      await fetchProducts();
     } catch (error) {
-      console.error("Error saving company data: ", error);
+      console.error("Error saving product: ", error);
       toast({
         variant: "destructive",
-        title: "Erro ao salvar",
+        title: "Erro ao salvar produto",
         description: "Ocorreu um erro ao salvar os dados. Tente novamente.",
       });
     }
   };
-
-  const onTeamSubmit = async (values: TeamMember) => {
-    const teamRef = doc(db, "companies", "mecald", "settings", "team");
-    const memberData = { ...values, updatedAt: new Date() };
-
-    try {
-        if (selectedMember) {
-            const updatedMembers = teamMembers.map(m => m.id === selectedMember.id ? memberData : m);
-            await updateDoc(teamRef, { members: updatedMembers });
-            toast({ title: "Membro atualizado!", description: "Os dados do membro da equipe foram atualizados." });
-        } else {
-            const newMember = { ...memberData, id: Date.now().toString() };
-            await updateDoc(teamRef, { members: arrayUnion(newMember) });
-            toast({ title: "Membro adicionado!", description: "Novo membro adicionado à equipe." });
-        }
-        teamForm.reset();
-        setIsTeamFormOpen(false);
-        setSelectedMember(null);
-        await fetchTeamData();
-    } catch (error) {
-        console.error("Error saving team member:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar os dados do membro." });
+  
+  const handleAddClick = () => {
+    setSelectedProduct(null);
+    form.reset({ code: "", description: "", unitPrice: 0, unitWeight: 0, productionPlanTemplate: [] });
+    setIsFormOpen(true);
+  };
+  
+  const handleEditClick = (product: Product) => {
+    setSelectedProduct(product);
+    const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        : []);
+    form.reset({
+      ...product,
+      productionPlanTemplate: planTemplate
+    });
+    setIsFormOpen(true);
+  };
+  
+  const handleDuplicateClick = (product: Product) => {
+    // Gera um novo código baseado no original
+    const originalCode = product.code;
+    const duplicatedCode = `${originalCode}_COPIA`;
+    
+    // Verifica se já existe um produto com esse código
+    let finalCode = duplicatedCode;
+    let counter = 1;
+    while (products.some(p => p.code === finalCode)) {
+      finalCode = `${originalCode}_COPIA_${counter}`;
+      counter++;
     }
+    
+    setSelectedProduct(null); // Limpa a seleção para criar um novo produto
+    const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        : []);
+    
+    form.reset({
+      code: finalCode,
+      description: `${product.description} (Cópia)`,
+      unitPrice: product.unitPrice,
+      unitWeight: product.unitWeight || 0,
+      productionPlanTemplate: planTemplate
+    });
+    setIsFormOpen(true);
+    
+    toast({
+      title: "Produto duplicado!",
+      description: `Os dados de "${product.description}" foram copiados. Ajuste o código e descrição conforme necessário.`,
+    });
+  };
+  
+  const handleDeleteClick = (product: Product) => {
+    setProductToDelete(product);
+    setIsDeleteDialogOpen(true);
   };
 
-  const onResourceSubmit = async (values: Resource) => {
-    const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-    const resourceData = { ...values, updatedAt: new Date() };
-
+  const handleConfirmDelete = async () => {
+    if (!productToDelete) return;
     try {
-        if (selectedResource) {
-            const updatedResources = resources.map(r => r.id === selectedResource.id ? resourceData : r);
-            await updateDoc(resourcesRef, { resources: updatedResources });
-            toast({ title: "Recurso atualizado!", description: "Os dados do recurso foram atualizados." });
-        } else {
-            const newResource = { ...resourceData, id: Date.now().toString() };
-            await updateDoc(resourcesRef, { resources: arrayUnion(newResource) });
-            toast({ title: "Recurso adicionado!", description: "Novo recurso produtivo adicionado." });
-        }
-        resourceForm.reset();
-        setIsResourceFormOpen(false);
-        setSelectedResource(null);
-        await fetchResourcesData();
+      await deleteDoc(doc(db, "companies", "mecald", "products", productToDelete.id));
+      toast({ title: "Produto excluído!", description: "O produto foi removido do catálogo." });
+      setProductToDelete(null);
+      setIsDeleteDialogOpen(false);
+      await fetchProducts();
     } catch (error) {
-        console.error("Error saving resource:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível salvar os dados do recurso." });
+      console.error("Error deleting product: ", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao excluir",
+        description: "Não foi possível remover o produto. Tente novamente.",
+      });
     }
   };
+  
+  const filteredProducts = products.filter((product) => {
+    const query = searchQuery.toLowerCase();
+    return (
+      product.code.toLowerCase().includes(query) ||
+      product.description.toLowerCase().includes(query)
+    );
+  });
 
-  const onOvertimeSubmit = async (values: OvertimeRelease) => {
-    overtimeForm.setValue("resources", selectedResources);
-    overtimeForm.setValue("teamLeaders", selectedLeaders);
+  const filteredProductsForCopy = useMemo(() => {
+    const query = copyFromSearch.toLowerCase();
+    return products.filter(p => 
+        (p.description.toLowerCase().includes(query) || p.code.toLowerCase().includes(query)) &&
+        p.id !== selectedProduct?.id
+    );
+  }, [products, copyFromSearch, selectedProduct]);
 
-    if (selectedResources.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Recursos obrigatórios",
-        description: "Selecione pelo menos um recurso."
-      });
-      return;
+  const handleCopySteps = (productToCopyFrom: Product) => {
+    const stepsToCopy = productToCopyFrom.productionPlanTemplate || [];
+    form.setValue('productionPlanTemplate', stepsToCopy, {
+        shouldValidate: true,
+        shouldDirty: true,
+    });
+    toast({
+        title: "Etapas copiadas!",
+        description: `As etapas de "${productToCopyFrom.description}" foram aplicadas.`,
+    });
+    setIsCopyPopoverOpen(false);
+  };
+
+  // Funções de drag and drop para reordenar etapas
+  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.currentTarget.outerHTML);
+    
+    // Efeito visual sutil
+    setTimeout(() => {
+      if (e.currentTarget) {
+        e.currentTarget.style.opacity = '0.5';
+      }
+    }, 0);
+  }, []);
+
+  const handleDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget) {
+      e.currentTarget.style.opacity = '';
     }
+    setDraggedIndex(null);
+    setDraggedOverIndex(null);
+  }, []);
 
-    if (selectedLeaders.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Líderes obrigatórios",
-        description: "Selecione pelo menos um líder."
-      });
-      return;
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    
+    if (draggedIndex === null || draggedIndex === dropIndex) return;
+
+    const newStages = [...manufacturingStages];
+    const draggedItem = newStages[draggedIndex];
+    
+    // Remove o item da posição original
+    newStages.splice(draggedIndex, 1);
+    
+    // Insere na nova posição
+    const insertIndex = draggedIndex < dropIndex ? dropIndex - 1 : dropIndex;
+    newStages.splice(insertIndex, 0, draggedItem);
+    
+    try {
+      // Atualiza no Firebase
+      await updateDoc(stagesDocRef, { stages: newStages });
+      toast({ title: "Ordem das etapas atualizada!" });
+      await fetchStages(); 
+    } catch (error) {
+      console.error("Error reordering stages:", error);
+      toast({ variant: "destructive", title: "Erro ao reordenar etapas" });
     }
+  }, [draggedIndex, manufacturingStages, stagesDocRef, fetchStages, toast]);
 
-    const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
+  // Componente de item de etapa arrastável
+  const DraggableStageItem = ({ stage, index, onEdit, onDelete, isDragging }: {
+    stage: string;
+    index: number;
+    onEdit: (stage: string, index: number) => void;
+    onDelete: (stage: string) => void;
+    isDragging: boolean;
+  }) => {
+    return (
+      <div
+        draggable
+        onDragStart={(e) => handleDragStart(e, index)}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDrop={(e) => handleDrop(e, index)}
+        className={`flex items-center justify-between rounded-md border p-3 cursor-move transition-all duration-200 ${
+          isDragging 
+            ? 'opacity-50 scale-95 border-primary bg-primary/5' 
+            : 'hover:border-primary/50 hover:shadow-sm'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing" />
+          <span className="font-medium">{stage}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" onClick={() => onEdit(stage, index)}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-destructive hover:text-destructive" 
+            onClick={() => onDelete(stage)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const handleEditStageClick = (stageName: string, index: number) => {
+    setStageToEdit({ oldName: stageName, index });
+    setNewStageNameForEdit(stageName);
+    setIsEditStageDialogOpen(true);
+  };
+
+  const handleConfirmEditStage = async () => {
+    if (!stageToEdit || !newStageNameForEdit.trim()) return;
+
+    const oldName = stageToEdit.oldName;
+    const newName = newStageNameForEdit.trim();
+
+    if (oldName === newName) {
+        setIsEditStageDialogOpen(false);
+        return;
+    }
+    if (manufacturingStages.some((stage, index) => stage.toLowerCase() === newName.toLowerCase() && index !== stageToEdit.index)) {
+        toast({ variant: "destructive", title: "Nome duplicado", description: "Esta etapa já existe." });
+        return;
+    }
 
     try {
-      if (selectedOvertime) {
-        // EDITANDO liberação existente
-        const overtimeData = {
-          ...values,
-          resources: selectedResources,
-          teamLeaders: selectedLeaders,
-          createdAt: selectedOvertime.createdAt,
-          updatedAt: new Date(),
-        };
+        const batch = writeBatch(db);
+        const updatedStages = [...manufacturingStages];
+        updatedStages[stageToEdit.index] = newName;
+        batch.update(stagesDocRef, { stages: updatedStages });
 
-        const updatedReleases = overtimeReleases.map(o =>
-          o.id === selectedOvertime.id ? overtimeData : o
+        const productsToUpdate = products.filter(p =>
+            p.productionPlanTemplate?.some(stage => stage.stageName === oldName)
         );
 
-        await setDoc(overtimeRef, { releases: updatedReleases }, { merge: true });
-
-        toast({
-          title: "Liberação atualizada!",
-          description: "Os dados da liberação de horas extras foram atualizados."
-        });
-      } else {
-        // CRIANDO nova liberação
-        const newRelease = {
-          id: Date.now().toString(),
-          date: values.date,
-          startTime: values.startTime,
-          endTime: values.endTime,
-          resources: selectedResources,
-          teamLeaders: selectedLeaders,
-          observations: values.observations || "",
-          status: "pendente" as const,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-
-        const docSnap = await getDoc(overtimeRef);
-
-        if (!docSnap.exists()) {
-          await setDoc(overtimeRef, { releases: [newRelease] });
-        } else {
-          const currentReleases = docSnap.data().releases || [];
-          await setDoc(overtimeRef, { releases: [...currentReleases, newRelease] }, { merge: true });
+        for (const product of productsToUpdate) {
+            const productRef = doc(db, "companies", "mecald", "products", product.id);
+            const updatedPlan = product.productionPlanTemplate!.map(stage =>
+                stage.stageName === oldName ? { ...stage, stageName: newName } : stage
+            );
+            batch.update(productRef, { productionPlanTemplate: updatedPlan });
         }
 
-        toast({
-          title: "Liberação criada!",
-          description: "Nova liberação de horas extras criada com sucesso."
-        });
-      }
+        await batch.commit();
 
-      overtimeForm.reset({
-        id: "",
-        date: "",
-        startTime: "",
-        endTime: "",
-        resources: [],
-        teamLeaders: [],
-        observations: "",
-        status: "pendente",
-      });
-      setIsOvertimeFormOpen(false);
-      setSelectedOvertime(null);
-      setSelectedResources([]);
-      setSelectedLeaders([]);
+        toast({ title: "Etapa atualizada com sucesso!" });
+        setIsEditStageDialogOpen(false);
+        setStageToEdit(null);
+        setNewStageNameForEdit("");
+        await fetchStages();
+        await fetchProducts();
 
-      await fetchOvertimeData();
     } catch (error) {
-      console.error("Error saving overtime:", error);
+        console.error("Error editing stage:", error);
+        toast({ variant: "destructive", title: "Erro ao editar etapa" });
+    }
+  };
+  
+  const handleDeleteStageClick = (stageName: string) => {
+      setStageToDeleteConfirmation(stageName);
+      setIsDeleteStageDialogOpen(true);
+  };
+
+  const handleConfirmDeleteStage = async () => {
+    if (!stageToDeleteConfirmation) return;
+    
+    try {
+        const batch = writeBatch(db);
+        batch.update(stagesDocRef, { stages: arrayRemove(stageToDeleteConfirmation) });
+
+        const productsToUpdate = products.filter(p =>
+            p.productionPlanTemplate?.some(stage => stage.stageName === stageToDeleteConfirmation)
+        );
+
+        for (const product of productsToUpdate) {
+            const productRef = doc(db, "companies", "mecald", "products", product.id);
+            const updatedPlan = product.productionPlanTemplate!.filter(
+                stage => stage.stageName !== stageToDeleteConfirmation
+            );
+            batch.update(productRef, { productionPlanTemplate: updatedPlan });
+        }
+
+        await batch.commit();
+        toast({ title: "Etapa removida com sucesso!" });
+        setIsDeleteStageDialogOpen(false);
+        setStageToDeleteConfirmation(null);
+        await fetchStages();
+        await fetchProducts();
+    } catch (error) {
+        console.error("Error deleting stage:", error);
+        toast({ variant: "destructive", title: "Erro ao remover etapa" });
+    }
+  };
+
+  // Estatísticas do lead time para o dashboard
+  const leadTimeStats = useMemo(() => {
+    if (products.length === 0) return { avgLeadTime: 0, maxLeadTime: 0, productsWithLeadTime: 0 };
+    
+    const productsWithValidLeadTime = products.filter(p => calculateLeadTime(p) > 0);
+    const leadTimes = productsWithValidLeadTime.map(p => calculateLeadTime(p));
+    
+    const avgLeadTime = leadTimes.length > 0 ? leadTimes.reduce((sum, lt) => sum + lt, 0) / leadTimes.length : 0;
+    const maxLeadTime = leadTimes.length > 0 ? Math.max(...leadTimes) : 0;
+    
+    return {
+      avgLeadTime: Math.round(avgLeadTime * 10) / 10,
+      maxLeadTime: Math.round(maxLeadTime),
+      productsWithLeadTime: productsWithValidLeadTime.length
+    };
+  }, [products]);
+
+  // Função para adicionar item à calculadora
+  const addItemToCalculator = () => {
+    if (!selectedProductForCalculator || calculatorQuantity <= 0) {
       toast({
         variant: "destructive",
-        title: "Erro ao salvar",
-        description: error instanceof Error ? error.message : "Não foi possível salvar a liberação de horas extras."
+        title: "Dados inválidos",
+        description: "Selecione um produto e informe uma quantidade válida."
       });
+      return;
     }
+
+    const product = products.find(p => p.id === selectedProductForCalculator);
+    if (!product) return;
+
+    const newItem = {
+      id: Date.now().toString(),
+      productId: product.id,
+      productCode: product.code,
+      productDescription: product.description,
+      quantity: calculatorQuantity,
+      leadTime: calculateLeadTime(product),
+      stages: product.productionPlanTemplate || []
+    };
+
+    setCalculatorItems(prev => [...prev, newItem]);
+    setSelectedProductForCalculator("");
+    setCalculatorQuantity(1);
   };
 
-  // Handlers de ações
-  const handleAddMemberClick = () => {
-    setSelectedMember(null);
-    teamForm.reset({ id: "", name: "", position: "", email: "", phone: "", permission: "user" });
-    setIsTeamFormOpen(true);
+  // Função para remover item da calculadora
+  const removeItemFromCalculator = (id: string) => {
+    setCalculatorItems(prev => prev.filter(item => item.id !== id));
   };
 
-  const handleEditMemberClick = (member: TeamMember) => {
-    setSelectedMember(member);
-    teamForm.reset(member);
-    setIsTeamFormOpen(true);
-  };
+  // Algoritmo MELHORADO de cálculo de viabilidade - mais realista
+  const calculateFeasibility = () => {
+    if (calculatorItems.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Lista vazia",
+        description: "Adicione pelo menos um item para calcular."
+      });
+      return;
+    }
 
-  const handleDeleteMemberClick = (member: TeamMember) => {
-    setMemberToDelete(member);
-    setIsDeleteAlertOpen(true);
-  };
-
-  const handleAddResourceClick = () => {
-    setSelectedResource(null);
-    resourceForm.reset({ 
-        id: "", 
-        name: "", 
-        type: "maquina", 
-        description: "", 
-        capacity: 1, 
-        status: "disponivel", 
-        location: "", 
-        serialNumber: "", 
-        acquisitionDate: "", 
-        maintenanceDate: "",
-        absenceStartDate: "",
-        absenceEndDate: "",
-        absenceReason: ""
+    // Consolida todas as etapas de todos os itens (corrigido para considerar paralelismo)
+    const stageMaxDuration: Record<string, number> = {};
+    
+    calculatorItems.forEach(item => {
+      item.stages.forEach(stage => {
+        const stageDuration = (stage.durationDays || 0) * item.quantity;
+        stageMaxDuration[stage.stageName] = Math.max(
+          stageMaxDuration[stage.stageName] || 0,
+          stageDuration
+        );
+      });
     });
-    setIsResourceFormOpen(true);
-  };
 
-  const handleEditResourceClick = (resource: Resource) => {
-    setSelectedResource(resource);
-    resourceForm.reset(resource);
-    setIsResourceFormOpen(true);
-  };
-
-  const handleDeleteResourceClick = (resource: Resource) => {
-    setResourceToDelete(resource);
-    setIsResourceDeleteAlertOpen(true);
-  };
-
-  const handleConfirmDeleteMember = async () => {
-    if (!memberToDelete) return;
-    const teamRef = doc(db, "companies", "mecald", "settings", "team");
-    try {
-        const memberToRemove = teamMembers.find(m => m.id === memberToDelete.id);
-        if (memberToRemove) {
-            await updateDoc(teamRef, { members: arrayRemove(memberToRemove) });
-            toast({ title: "Membro removido!", description: "O membro foi removido da equipe." });
-        }
-        setMemberToDelete(null);
-        setIsDeleteAlertOpen(false);
-        await fetchTeamData();
-    } catch (error) {
-        console.error("Error deleting team member:", error);
-        toast({ variant: "destructive", title: "Erro ao remover", description: "Não foi possível remover o membro da equipe." });
-    }
-  };
-
-  const handleConfirmDeleteResource = async () => {
-    if (!resourceToDelete) return;
-    const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-    try {
-        const resourceToRemove = resources.find(r => r.id === resourceToDelete.id);
-        if (resourceToRemove) {
-            await updateDoc(resourcesRef, { resources: arrayRemove(resourceToRemove) });
-            toast({ title: "Recurso removido!", description: "O recurso foi removido." });
-        }
-        setResourceToDelete(null);
-        setIsResourceDeleteAlertOpen(false);
-        await fetchResourcesData();
-    } catch (error) {
-        console.error("Error deleting resource:", error);
-        toast({ variant: "destructive", title: "Erro ao remover", description: "Não foi possível remover o recurso." });
-    }
-  };
-
-  const handleAddOvertimeClick = () => {
-    setSelectedOvertime(null);
-    setSelectedResources([]);
-    setSelectedLeaders([]);
-    overtimeForm.reset({ 
-        id: "",
-        date: "", 
-        startTime: "", 
-        endTime: "", 
-        resources: [],
-        teamLeaders: [],
-        observations: "",
-        status: "pendente"
+    // NOVA LÓGICA: identifica o produto crítico (maior lead time individual)
+    const baseLeadTime = Math.max(...calculatorItems.map(item => {
+      return item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+    }));
+    const longestProductItem = calculatorItems.find(item => {
+      const itemLeadTime = item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+      return itemLeadTime === baseLeadTime;
     });
-    setIsOvertimeFormOpen(true);
-  };
 
-  const handleEditOvertimeClick = (overtime: OvertimeRelease) => {
-    setSelectedOvertime(overtime);
-    setSelectedResources(overtime.resources);
-    setSelectedLeaders(overtime.teamLeaders);
-    overtimeForm.reset(overtime);
-    setIsOvertimeFormOpen(true);
-  };
-
-  const handleDeleteOvertimeClick = (overtime: OvertimeRelease) => {
-    setOvertimeToDelete(overtime);
-    setIsOvertimeDeleteAlertOpen(true);
-  };
-
-  const handleApproveOvertime = async (overtime: OvertimeRelease) => {
-    const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
-    try {
-        const updatedRelease = { 
-          ...overtime, 
-          status: "aprovado" as const,
-          approvedBy: user?.email || "Gerente",
-          approvedAt: new Date(),
-          updatedAt: new Date()
-        };
-        const updatedReleases = overtimeReleases.map(o => o.id === overtime.id ? updatedRelease : o);
-        await updateDoc(overtimeRef, { releases: updatedReleases });
-        toast({ title: "Liberação aprovada!", description: "A liberação de horas extras foi aprovada com sucesso." });
-        await fetchOvertimeData();
-    } catch (error) {
-        console.error("Error approving overtime:", error);
-        toast({ variant: "destructive", title: "Erro ao aprovar", description: "Não foi possível aprovar a liberação." });
+    // Se não houver produto, aborta
+    if (!longestProductItem) {
+      toast({
+        variant: "destructive",
+        title: "Erro de cálculo",
+        description: "Não foi possível identificar o produto crítico."
+      });
+      return;
     }
-  };
 
-  const handleConfirmDeleteOvertime = async () => {
-    if (!overtimeToDelete) return;
-    const overtimeRef = doc(db, "companies", "mecald", "settings", "overtime");
-    try {
-        const overtimeToRemove = overtimeReleases.find(o => o.id === overtimeToDelete.id);
-        if (overtimeToRemove) {
-            await updateDoc(overtimeRef, { releases: arrayRemove(overtimeToRemove) });
-            toast({ title: "Liberação removida!", description: "A liberação de horas extras foi removida." });
-        }
-        setOvertimeToDelete(null);
-        setIsOvertimeDeleteAlertOpen(false);
-        await fetchOvertimeData();
-    } catch (error) {
-        console.error("Error deleting overtime:", error);
-        toast({ variant: "destructive", title: "Erro ao remover", description: "Não foi possível remover a liberação." });
+    // Analisa apenas as etapas do produto crítico
+    const analysis = longestProductItem.stages.map((stage) => {
+      const currentWorkload = sectorWorkload[stage.stageName] || 0;
+      let adjustmentFactor = 1;
+      let isBottleneck = false;
+      if (currentWorkload >= 0.9) {
+        adjustmentFactor = 2.5 + (currentWorkload - 0.9) * 10;
+        isBottleneck = true;
+      } else if (currentWorkload >= 0.8) {
+        adjustmentFactor = 1.8 + (currentWorkload - 0.8) * 7;
+        isBottleneck = true;
+      } else if (currentWorkload >= 0.7) {
+        adjustmentFactor = 1.3 + (currentWorkload - 0.7) * 5;
+        isBottleneck = currentWorkload >= 0.75;
+      } else if (currentWorkload >= 0.5) {
+        adjustmentFactor = 1.0 + (currentWorkload - 0.5) * 1.5;
+      } else {
+        adjustmentFactor = 0.8 + currentWorkload * 0.4;
+      }
+      const adjustedDuration = Math.ceil((stage.durationDays || 0) * adjustmentFactor);
+      return {
+        stageName: stage.stageName,
+        originalDuration: stage.durationDays || 0,
+        adjustedDuration,
+        workload: currentWorkload,
+        bottleneck: isBottleneck
+      };
+    });
+
+    // Lead time ajustado = soma das etapas do produto crítico com ajustes
+    let totalAdjustedLeadTime = analysis.reduce((sum, stage) => sum + stage.adjustedDuration, 0);
+
+    // Data sugerida baseada no lead time ajustado
+    const suggestedDate = new Date();
+    suggestedDate.setDate(suggestedDate.getDate() + totalAdjustedLeadTime);
+
+    // Verifica se é viável para a data solicitada
+    const daysUntilRequested = Math.ceil((requestedDeliveryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+    const isViable = daysUntilRequested >= totalAdjustedLeadTime;
+
+    // Calcula confiança de forma mais criteriosa
+    let confidence = 90;
+    const avgWorkload = analysis.reduce((sum, a) => sum + a.workload, 0) / analysis.length;
+    confidence -= avgWorkload * 60;
+    const bottleneckCount = analysis.filter(a => a.bottleneck).length;
+    confidence -= bottleneckCount * 25;
+    const timeMargin = (daysUntilRequested - totalAdjustedLeadTime) / totalAdjustedLeadTime;
+    if (timeMargin < 0) {
+      confidence -= 30;
+    } else if (timeMargin < 0.2) {
+      confidence -= 20;
+    } else if (timeMargin > 0.5) {
+      confidence += 10;
     }
+    confidence = Math.min(95, Math.max(5, Math.round(confidence)));
+
+    setCalculatorResults({
+      isViable,
+      suggestedDate,
+      analysis,
+      totalAdjustedLeadTime,
+      confidence
+    });
   };
 
-  // Variáveis calculadas
-  const stats = getResourceStats();
-  const isLoadingPage = isLoading || authLoading;
+  // Função para limpar a calculadora
+  const clearCalculator = () => {
+    setCalculatorItems([]);
+    setCalculatorResults(null);
+    setSelectedProductForCalculator("");
+    setCalculatorQuantity(1);
+  };
 
-  // Watch do status do recurso para mostrar/ocultar campos de ausência
-  const watchedStatus = resourceForm.watch("status");
+  // Função para exportar relatório em PDF melhorado
+  const handleExportReport = () => {
+    if (calculatorItems.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Lista vazia",
+        description: "Adicione produtos à análise antes de exportar o relatório."
+      });
+      return;
+    }
+
+    // Usar biblioteca HTML para PDF ao invés de canvas
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Relatório de Análise de Prazos - MECALD</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+            .company-logo { font-size: 24px; font-weight: bold; color: #2563eb; }
+            .report-title { font-size: 18px; margin: 10px 0; }
+            .report-date { font-size: 12px; color: #666; }
+            .section { margin: 20px 0; }
+            .section-title { font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; }
+            .item { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+            .result-box { padding: 20px; border: 2px solid #ddd; border-radius: 10px; text-align: center; margin: 20px 0; }
+            .viable { border-color: #16a34a; background-color: #f0fdf4; }
+            .not-viable { border-color: #dc2626; background-color: #fef2f2; }
+            .stage-analysis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+            .bottleneck { color: #dc2626; font-weight: bold; }
+            .recommendation { padding: 15px; margin: 10px 0; border-radius: 5px; }
+            .rec-danger { background-color: #fef2f2; border-left: 4px solid #dc2626; }
+            .rec-warning { background-color: #fffbeb; border-left: 4px solid #f59e0b; }
+            .rec-info { background-color: #eff6ff; border-left: 4px solid #3b82f6; }
+            table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f5f5f5; }
+            @media print { 
+              .no-print { display: none; } 
+              body { margin: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-logo">MECALD</div>
+            <div class="report-title">RELATÓRIO DE ANÁLISE DE VIABILIDADE DE PRAZOS</div>
+            <div class="report-date">Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">DADOS DA SOLICITAÇÃO</div>
+            <p><strong>Data de entrega solicitada:</strong> ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}</p>
+            <p><strong>Quantidade de itens analisados:</strong> ${calculatorItems.length}</p>
+            <p><strong>Lead time total estimado:</strong> ${calculatorResults?.totalAdjustedLeadTime || 0} dias</p>
+          </div>
+
+          <div class="section">
+            <div class="section-title">PRODUTOS ANALISADOS</div>
+            ${calculatorItems.map((item, index) => `
+              <div class="item">
+                <h4>${index + 1}. ${item.productCode} - ${item.productDescription}</h4>
+                <p><strong>Quantidade:</strong> ${item.quantity} | <strong>Lead time base:</strong> ${item.leadTime} dias</p>
+                ${item.stages.length > 0 ? `
+                  <p><strong>Etapas de produção:</strong></p>
+                  <ul>
+                    ${item.stages.map(stage => `<li>${stage.stageName}: ${stage.durationDays || 0} dias</li>`).join('')}
+                  </ul>
+                ` : '<p>Nenhuma etapa definida</p>'}
+              </div>
+            `).join('')}
+          </div>
+
+          ${calculatorResults ? `
+            <div class="section">
+              <div class="section-title">RESULTADO DA ANÁLISE</div>
+              <div class="result-box ${calculatorResults.isViable ? 'viable' : 'not-viable'}">
+                <h2>${calculatorResults.isViable ? '✓ PRAZO VIÁVEL' : '✗ PRAZO INVIÁVEL'}</h2>
+                <p><strong>Nível de confiança:</strong> ${calculatorResults.confidence}%</p>
+                <p><strong>Data sugerida para entrega:</strong> ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}</p>
+                <p><strong>Lead time ajustado:</strong> ${calculatorResults.totalAdjustedLeadTime} dias</p>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">ANÁLISE DETALHADA POR SETOR</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Setor/Etapa</th>
+                    <th>Tempo Original</th>
+                    <th>Tempo Ajustado</th>
+                    <th>Carga Atual</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${calculatorResults.analysis.map(analysis => `
+                    <tr>
+                      <td><strong>${analysis.stageName}</strong></td>
+                      <td>${analysis.originalDuration} dias</td>
+                      <td>${analysis.adjustedDuration} dias</td>
+                      <td>${Math.round(analysis.workload * 100)}%</td>
+                      <td class="${analysis.bottleneck ? 'bottleneck' : ''}">${analysis.bottleneck ? 'GARGALO' : 'Normal'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="section">
+              <div class="section-title">RECOMENDAÇÕES</div>
+              ${!calculatorResults.isViable ? `
+                <div class="recommendation rec-danger">
+                  <strong>⚠️ Prazo Inviável</strong><br>
+                  O prazo solicitado não pode ser cumprido com a capacidade atual. 
+                  Recomenda-se reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })} ou posterior.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.confidence < 70 ? `
+                <div class="recommendation rec-warning">
+                  <strong>⚠️ Baixa Confiança (${calculatorResults.confidence}%)</strong><br>
+                  A alta carga dos setores produtivos pode causar atrasos. 
+                  Recomenda-se monitoramento constante e planos de contingência.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.analysis.some(a => a.bottleneck) ? `
+                <div class="recommendation rec-warning">
+                  <strong>🚨 Gargalos Identificados</strong><br>
+                  Os seguintes setores estão operando próximo ao limite: 
+                  ${calculatorResults.analysis.filter(a => a.bottleneck).map(a => a.stageName).join(', ')}.<br>
+                  Considere: realocação de recursos, horas extras, terceirização ou renegociação de prazos.
+                </div>
+              ` : ''}
+              
+              ${calculatorResults.isViable && calculatorResults.confidence >= 70 ? `
+                <div class="recommendation rec-info">
+                  <strong>✅ Análise Positiva</strong><br>
+                  O prazo é viável com boa margem de segurança. 
+                  Mantenha o monitoramento regular do progresso.
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+
+          <div class="section" style="margin-top: 40px; font-size: 10px; color: #666; text-align: center;">
+            <p>Este relatório foi gerado automaticamente pelo sistema MECALD em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
+            <p>Para mais informações, entre em contato com o setor de planejamento.</p>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 1000);
+            }
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+
+    toast({
+      title: "Relatório gerado!",
+      description: "O relatório será aberto em uma nova janela para impressão/salvamento em PDF."
+    });
+  };
+
+  // Função auxiliar para buscar dados da empresa
+  const fetchCompanyDataForPDF = useCallback(async () => {
+    try {
+      const companyRef = doc(db, "companies", "mecald", "settings", "company");
+      const docSnap = await getDoc(companyRef);
+      if (docSnap.exists()) {
+        return docSnap.data();
+      }
+    } catch (error) {
+      console.error("Error fetching company data:", error);
+    }
+    return null;
+  }, []);
+
+  // Salvar custos de etapas no Firebase
+  const saveStageCosts = useCallback(async () => {
+    try {
+      const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
+      await setDoc(costsRef, { costs: stageCosts, machineHourRate }, { merge: true });
+      toast({ title: "Custos salvos com sucesso!" });
+    } catch (error) {
+      console.error("Error saving stage costs:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar custos" });
+    }
+  }, [stageCosts, machineHourRate, toast]);
+
+  // Carregar custos de etapas do Firebase
+  const loadStageCosts = useCallback(async () => {
+    try {
+      const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
+      const docSnap = await getDoc(costsRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setStageCosts(data.costs || {});
+        setMachineHourRate(data.machineHourRate || 150);
+      }
+    } catch (error) {
+      console.error("Error loading stage costs:", error);
+    }
+  }, []);
+
+  // Carregar ao iniciar
+  useEffect(() => {
+    if (!authLoading && user) {
+      loadStageCosts();
+    }
+  }, [user, authLoading, loadStageCosts]);
 
   return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="flex items-center justify-between space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight font-headline">Empresa e Equipe</h1>
+          <h1 className="text-3xl font-bold tracking-tight font-headline">Produtos e Etapas</h1>
+            <div className="flex items-center gap-2">
+                 <Button onClick={syncCatalog} variant="outline" disabled={isSyncing}>
+                    <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    {isSyncing ? "Sincronizando..." : "Sincronizar Catálogo"}
+                 </Button>
+                 <Button onClick={handleAddClick}>
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Adicionar Produto
+                 </Button>
+            </div>
         </div>
-        
-        <Tabs defaultValue="company" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
-            <TabsTrigger value="team">Equipe</TabsTrigger>
-            <TabsTrigger value="resources">Recursos Produtivos</TabsTrigger>
-            <TabsTrigger value="overtime">
-              <Clock className="h-4 w-4 mr-2" />
-              Horas Extras
-            </TabsTrigger>
-          </TabsList>
 
-          {/* ABA EMPRESA */}
-          <TabsContent value="company">
-            {isLoadingPage ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-4">
-                <div className="md:col-span-1 space-y-4">
-                  <Skeleton className="h-8 w-1/4" />
-                  <Skeleton className="aspect-square w-full rounded-md" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-                <div className="md:col-span-2">
-                  <Skeleton className="h-96 w-full" />
-                </div>
-              </div>
-            ) : (
-              <Form {...companyForm}>
-                <form onSubmit={companyForm.handleSubmit(onCompanySubmit)} className="space-y-8">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-1 flex flex-col items-center text-center">
-                      <h3 className="text-lg font-medium mb-4">Logotipo da Empresa</h3>
-                      <Card className="w-full max-w-xs aspect-square flex items-center justify-center overflow-hidden mb-4">
-                        <Image
-                          src={logoPreview || "https://placehold.co/300x300.png"}
-                          alt="Logotipo da empresa"
-                          width={300}
-                          height={300}
-                          className="object-contain"
-                          data-ai-hint="logo"
-                        />
-                      </Card>
-                      <FormControl>
-                        <Input 
-                          type="file" 
-                          accept="image/*" 
-                          onChange={handleFileChange} 
-                          className="cursor-pointer"
-                        />
-                      </FormControl>
-                    </div>
-
-                    <div className="lg:col-span-2">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Informações de Contato e Fiscais</CardTitle>
-                          <CardDescription>
-                            Mantenha os dados da sua empresa sempre atualizados.
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="grid gap-6">
-                          <FormField
-                            control={companyForm.control}
-                            name="nomeFantasia"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Nome Fantasia</FormLabel>
-                                <FormControl>
-                                  <Input placeholder="Nome comercial da empresa" {...field} value={field.value ?? ''} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <div className="grid md:grid-cols-2 gap-6">
-                            <FormField
-                              control={companyForm.control}
-                              name="cnpj"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>CNPJ</FormLabel>
-                                  <FormControl>
-                                    <Input placeholder="00.000.000/0000-00" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                            <FormField
-                              control={companyForm.control}
-                              name="inscricaoEstadual"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Inscrição Estadual</FormLabel>
-                                  <FormControl>
-                                    <Input placeholder="Opcional" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                          <div className="grid md:grid-cols-2 gap-6">
-                            <FormField
-                              control={companyForm.control}
-                              name="email"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>E-mail</FormLabel>
-                                  <FormControl>
-                                    <Input type="email" placeholder="contato@suaempresa.com" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                            <FormField
-                              control={companyForm.control}
-                              name="celular"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Celular / WhatsApp</FormLabel>
-                                  <FormControl>
-                                    <Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                          <FormField
-                            control={companyForm.control}
-                            name="website"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Website</FormLabel>
-                                <FormControl>
-                                  <Input type="url" placeholder="https://suaempresa.com" {...field} value={field.value ?? ''}/>
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <div className="grid md:grid-cols-2 gap-6">
-                            <FormField
-                              control={companyForm.control}
-                              name="capacidadeInstalada"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Capacidade Instalada Mensal (kg)</FormLabel>
-                                  <FormControl>
-                                    <Input 
-                                      type="number" 
-                                      min="0" 
-                                      step="0.01"
-                                      placeholder="Ex: 50000" 
-                                      {...field} 
-                                      value={field.value ?? ''} 
-                                      onChange={e => field.onChange(parseFloat(e.target.value) || undefined)}
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                  <p className="text-xs text-muted-foreground">
-                                    Capacidade máxima de produção mensal da empresa (em kg)
-                                  </p>
-                                </FormItem>
-                              )}
-                            />
-                            <FormField
-                              control={companyForm.control}
-                              name="metaMensal"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Meta Mensal de Produção (kg)</FormLabel>
-                                  <FormControl>
-                                    <Input 
-                                      type="number" 
-                                      min="0" 
-                                      step="0.01"
-                                      placeholder="Ex: 35000" 
-                                      {...field} 
-                                      value={field.value ?? ''} 
-                                      onChange={e => field.onChange(parseFloat(e.target.value) || undefined)}
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                  <p className="text-xs text-muted-foreground">
-                                    Meta de produção mensal que a empresa deseja atingir (em kg)
-                                  </p>
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-                          <FormField
-                            control={companyForm.control}
-                            name="endereco"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Endereço Completo</FormLabel>
-                                <FormControl>
-                                  <Textarea
-                                    placeholder="Rua, Número, Bairro, Cidade - Estado, CEP"
-                                    className="min-h-[100px]"
-                                    {...field}
-                                    value={field.value ?? ''}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
-                  <div className="flex justify-end pt-4">
-                    <Button type="submit" size="lg" disabled={companyForm.formState.isSubmitting}>
-                      {companyForm.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
-                    </Button>
-                  </div>
-                </form>
-              </Form>
-            )}
-          </TabsContent>
-
-          {/* ABA EQUIPE */}
-          <TabsContent value="team">
+        {/* Dashboard de Lead Time */}
+        {products.length > 0 && (
+          <div className="grid gap-4 md:grid-cols-3 mb-6">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Membros da Equipe</CardTitle>
-                  <CardDescription>Gerencie os membros da sua equipe e suas permissões de acesso.</CardDescription>
-                </div>
-                <Button onClick={handleAddMemberClick}>
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Adicionar Membro
-                </Button>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Lead Time Médio</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                {isTeamLoading ? (
-                  <div className="space-y-4">
-                    <Skeleton className="h-10 w-full" />
-                    <Skeleton className="h-10 w-full" />
-                    <Skeleton className="h-10 w-full" />
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Nome</TableHead>
-                        <TableHead>Cargo</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Telefone</TableHead>
-                        <TableHead>Permissão</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {teamMembers.length > 0 ? (
-                        teamMembers.map((member) => (
-                          <TableRow key={member.id}>
-                            <TableCell className="font-medium">{member.name}</TableCell>
-                            <TableCell>{member.position}</TableCell>
-                            <TableCell>{member.email}</TableCell>
-                            <TableCell>{member.phone}</TableCell>
-                            <TableCell className="capitalize">{member.permission}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <Button variant="ghost" size="icon" onClick={() => handleEditMemberClick(member)}>
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteMemberClick(member)}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={6} className="text-center h-24">Nenhum membro na equipe.</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                )}
+                <div className="text-2xl font-bold">{leadTimeStats.avgLeadTime} dias</div>
+                <p className="text-xs text-muted-foreground">
+                  Baseado em {leadTimeStats.productsWithLeadTime} produtos
+                </p>
               </CardContent>
             </Card>
-          </TabsContent>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Maior Lead Time</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{leadTimeStats.maxLeadTime} dias</div>
+                <p className="text-xs text-muted-foreground">
+                  Produto com maior tempo de produção
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Produtos com Lead Time</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{leadTimeStats.productsWithLeadTime}</div>
+                <p className="text-xs text-muted-foreground">
+                  De {products.length} produtos cadastrados
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
-          {/* ABA RECURSOS PRODUTIVOS */}
-          <TabsContent value="resources">
-            <div className="space-y-6">
-              {/* Dashboard de Ocupação Atualizado */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList>
+                <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
+                <TabsTrigger value="stages">Etapas de Produção</TabsTrigger>
+                <TabsTrigger value="calculator">Calculadora de Prazos</TabsTrigger>
+                <TabsTrigger value="pricing">
+                    <Calculator className="mr-2 h-4 w-4" />
+                    Calculadora de Preços
+                </TabsTrigger>
+            </TabsList>
+            <TabsContent value="catalog" className="mt-4">
                 <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total de Recursos</CardTitle>
-                    <Settings className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{stats.total}</div>
-                    <p className="text-xs text-muted-foreground">recursos cadastrados</p>
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Disponíveis</CardTitle>
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-green-600">{stats.available}</div>
-                    <p className="text-xs text-muted-foreground">
-                      {stats.activeResources > 0 ? Math.round((stats.available / stats.activeResources) * 100) : 0}% dos ativos
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Em Manutenção</CardTitle>
-                    <Settings className="h-4 w-4 text-red-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-red-600">{stats.maintenance}</div>
-                    <p className="text-xs text-muted-foreground">
-                      {stats.total > 0 ? Math.round((stats.maintenance / stats.total) * 100) : 0}% do total
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Ausentes/Férias</CardTitle>
-                    <UserX className="h-4 w-4 text-orange-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-orange-600">{stats.absent + stats.vacation}</div>
-                    <p className="text-xs text-muted-foreground">
-                      não computados na ociosidade
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Taxa de Ociosidade</CardTitle>
-                    <Activity className="h-4 w-4 text-blue-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-blue-600">{Math.round(stats.idleRate)}%</div>
-                    <p className="text-xs text-muted-foreground">recursos ativos ociosos</p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Gráfico de Ocupação Atualizado */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Distribuição dos Recursos</CardTitle>
-                  <CardDescription>Status atual dos recursos produtivos (ausentes/férias não afetam ociosidade)</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
-                        Disponíveis
-                      </span>
-                      <span>{stats.available} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.available / stats.total) * 100 : 0} className="h-2" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <Activity className="h-3 w-3 mr-1 text-yellow-600" />
-                        Ocupados
-                      </span>
-                      <span>{stats.occupied} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.occupied / stats.total) * 100 : 0} className="h-2 [&>div]:bg-yellow-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <Settings className="h-3 w-3 mr-1 text-red-600" />
-                        Em Manutenção
-                      </span>
-                      <span>{stats.maintenance} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.maintenance / stats.total) * 100 : 0} className="h-2 [&>div]:bg-red-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <UserX className="h-3 w-3 mr-1 text-orange-600" />
-                        Ausentes
-                      </span>
-                      <span>{stats.absent} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.absent / stats.total) * 100 : 0} className="h-2 [&>div]:bg-orange-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <Calendar className="h-3 w-3 mr-1 text-blue-600" />
-                        Férias
-                      </span>
-                      <span>{stats.vacation} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.vacation / stats.total) * 100 : 0} className="h-2 [&>div]:bg-blue-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="flex items-center">
-                        <AlertCircle className="h-3 w-3 mr-1 text-gray-600" />
-                        Inativos
-                      </span>
-                      <span>{stats.inactive} / {stats.total}</span>
-                    </div>
-                    <Progress value={stats.total > 0 ? (stats.inactive / stats.total) * 100 : 0} className="h-2 [&>div]:bg-gray-500" />
-                  </div>
-                  {stats.activeResources > 0 && (
-                    <div className="pt-4 border-t">
-                      <div className="text-sm text-muted-foreground mb-2">
-                        <strong>Recursos Ativos:</strong> {stats.activeResources} (excluindo ausentes, férias e inativos)
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        <strong>Taxa de Ociosidade Real:</strong> {Math.round(stats.idleRate)}% dos recursos ativos estão disponíveis
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Tabela de Recursos */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Recursos Produtivos</CardTitle>
-                    <CardDescription>Gerencie os recursos produtivos da sua empresa.</CardDescription>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={exportResourcesWithTasks} disabled={resources.length === 0}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Exportar CSV
-                    </Button>
-                    <Button variant="outline" onClick={exportResourcesToPDF} disabled={resources.length === 0}>
-                      <FileText className="mr-2 h-4 w-4" />
-                      Exportar PDF
-                    </Button>
-                    <Button onClick={handleAddResourceClick}>
-                      <PlusCircle className="mr-2 h-4 w-4" />
-                      Adicionar Recurso
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {isResourcesLoading ? (
-                    <div className="space-y-4">
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                    </div>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Nome</TableHead>
-                          <TableHead>Tipo</TableHead>
-                          <TableHead>Capacidade</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Localização</TableHead>
-                          <TableHead>Período</TableHead>
-                          <TableHead className="text-right">Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {resources.length > 0 ? (
-                          resources.map((resource) => (
-                            <TableRow key={resource.id}>
-                              <TableCell className="font-medium">{resource.name}</TableCell>
-                              <TableCell className="capitalize">
-                                {resource.type === 'mao_de_obra' ? 'Mão de Obra' : resource.type}
-                              </TableCell>
-                              <TableCell>{resource.capacity}</TableCell>
-                              <TableCell>{getStatusBadge(resource.status)}</TableCell>
-                              <TableCell>{resource.location || "-"}</TableCell>
-                              <TableCell>
-                                {(resource.status === 'ausente' || resource.status === 'ferias') && resource.absenceStartDate && resource.absenceEndDate ? (
-                                  <div className="text-xs">
-                                    <div>{new Date(resource.absenceStartDate).toLocaleDateString('pt-BR')} até</div>
-                                    <div>{new Date(resource.absenceEndDate).toLocaleDateString('pt-BR')}</div>
-                                  </div>
-                                ) : "-"}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  <Button variant="ghost" size="icon" onClick={() => handleEditResourceClick(resource)}>
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteResourceClick(resource)}>
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                    <CardHeader>
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <CardTitle>Produtos Cadastrados</CardTitle>
+                                <CardDescription>
+                                Gerencie os produtos e serviços que sua empresa oferece. O lead time é calculado automaticamente com base nas etapas de fabricação configuradas.
+                                </CardDescription>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Buscar por código ou descrição..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="pl-9 w-64"
+                                    />
                                 </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoading ? (
+                        <div className="space-y-4 p-4">
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
+                            <Skeleton className="h-10 w-full" />
+                        </div>
                         ) : (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center h-24">Nenhum recurso cadastrado.</TableCell>
-                          </TableRow>
+                            <Table>
+                            <TableHeader>
+                                <TableRow>
+                                <TableHead className="w-[150px]">Código</TableHead>
+                                <TableHead>Descrição</TableHead>
+                                <TableHead className="w-[140px] text-right">Preço Unitário (R$)</TableHead>
+                                <TableHead className="w-[120px] text-center">Lead Time</TableHead>
+                                <TableHead className="w-[140px] text-center">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredProducts.length > 0 ? (
+                                filteredProducts.map((product) => {
+                                    const leadTime = calculateLeadTime(product);
+                                    const leadTimeBadge = getLeadTimeBadge(leadTime);
+                                    
+                                    return (
+                                        <TableRow key={product.id}>
+                                        <TableCell className="font-mono">{product.code}</TableCell>
+                                        <TableCell className="font-medium">{product.description}</TableCell>
+                                        <TableCell className="text-right">{product.unitPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                        <TableCell className="text-center">
+                                            <Badge 
+                                                variant={leadTimeBadge.variant}
+                                                className={leadTime > 0 && leadTime <= 7 ? leadTimeBadge.color : ''}
+                                            >
+                                                {leadTimeBadge.text}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-center">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
+                                                    <Pencil className="h-4 w-4" />
+                                                    <span className="sr-only">Editar</span>
+                                                </Button>
+                                                <Button variant="ghost" size="icon" onClick={() => handleDuplicateClick(product)}>
+                                                    <Copy className="h-4 w-4" />
+                                                    <span className="sr-only">Duplicar</span>
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteClick(product)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                    <span className="sr-only">Excluir</span>
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                        </TableRow>
+                                    )
+                                })
+                                ) : (
+                                <TableRow>
+                                    <TableCell colSpan={5} className="text-center h-24">
+                                    {searchQuery ? `Nenhum produto encontrado para "${searchQuery}".` : "Nenhum produto encontrado."}
+                                    </TableCell>
+                                </TableRow>
+                                )}
+                            </TableBody>
+                            </Table>
                         )}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* ABA HORAS EXTRAS - NOVA */}
-          <TabsContent value="overtime">
-            <div className="space-y-6">
-              {/* Cards de Resumo */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total de Liberações</CardTitle>
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{overtimeReleases.length}</div>
-                    <p className="text-xs text-muted-foreground">liberações cadastradas</p>
-                  </CardContent>
+                    </CardContent>
                 </Card>
-                
+            </TabsContent>
+            <TabsContent value="stages" className="mt-4">
                 <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Pendentes de Aprovação</CardTitle>
-                    <AlertCircle className="h-4 w-4 text-yellow-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-yellow-600">
-                      {overtimeReleases.filter(o => o.status === 'pendente').length}
-                    </div>
-                    <p className="text-xs text-muted-foreground">aguardando aprovação</p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Aprovadas</CardTitle>
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-green-600">
-                      {overtimeReleases.filter(o => o.status === 'aprovado').length}
-                    </div>
-                    <p className="text-xs text-muted-foreground">liberações aprovadas</p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Tabela de Liberações */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Liberações de Horas Extras</CardTitle>
-                    <CardDescription>Gerencie as autorizações de horas extras da sua equipe.</CardDescription>
-                  </div>
-                  <Button onClick={handleAddOvertimeClick}>
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Nova Liberação
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  {isOvertimeLoading ? (
-                    <div className="space-y-4">
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                    </div>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Data</TableHead>
-                          <TableHead>Horário</TableHead>
-                          <TableHead>Horas</TableHead>
-                          <TableHead>Recursos</TableHead>
-                          <TableHead>Líderes</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {overtimeReleases.length > 0 ? (
-                          overtimeReleases.map((overtime) => {
-                            const hours = calculateOvertimeHours(overtime.startTime, overtime.endTime);
-                            return (
-                              <TableRow key={overtime.id}>
-                                <TableCell>{new Date(overtime.date).toLocaleDateString('pt-BR')}</TableCell>
-                                <TableCell>
-                                  <div className="text-xs">
-                                    <div>{overtime.startTime} - {overtime.endTime}</div>
-                                  </div>
-                                </TableCell>
-                                <TableCell className="font-bold">{hours}h</TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">{overtime.resources.length} recursos</Badge>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">{overtime.teamLeaders.length} líderes</Badge>
-                                </TableCell>
-                                <TableCell>{getOvertimeStatusBadge(overtime.status)}</TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex items-center justify-end gap-2">
-                                    {overtime.status === 'pendente' && (
-                                      <Button 
-                                        variant="ghost" 
-                                        size="icon" 
-                                        className="text-green-600 hover:text-green-700"
-                                        onClick={() => handleApproveOvertime(overtime)}
-                                        title="Aprovar"
-                                      >
-                                        <CheckCircle className="h-4 w-4" />
-                                      </Button>
+                    <CardHeader>
+                        <CardTitle>Etapas de Fabricação</CardTitle>
+                        <CardDescription>
+                            Cadastre e gerencie as etapas do seu processo produtivo. 
+                            <strong> Arraste e solte para reordenar rapidamente.</strong>
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="flex items-center gap-2">
+                            <Input 
+                                placeholder="Nome da nova etapa (ex: Solda, Pintura)"
+                                value={newStageName}
+                                onChange={(e) => setNewStageName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddStage()}
+                            />
+                            <Button onClick={handleAddStage}>
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Adicionar Etapa
+                            </Button>
+                        </div>
+                        
+                        <Separator />
+                        
+                        {isLoadingStages ? (
+                            <Skeleton className="h-24 w-full" />
+                        ) : (
+                            <div>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-sm font-medium text-muted-foreground">
+                                        ETAPAS CADASTRADAS ({manufacturingStages.length})
+                                    </h3>
+                                    {manufacturingStages.length > 1 && (
+                                        <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                            <GripVertical className="h-3 w-3" />
+                                            Arraste para reordenar
+                                        </div>
                                     )}
-                                    <Button 
-                                      variant="ghost" 
-                                      size="icon"
-                                      onClick={() => exportOvertimeToPDF(overtime)}
-                                      title="Exportar PDF"
-                                    >
-                                      <FileText className="h-4 w-4" />
-                                    </Button>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="icon" 
-                                      onClick={() => handleEditOvertimeClick(overtime)}
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </Button>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="icon" 
-                                      className="text-destructive hover:text-destructive" 
-                                      onClick={() => handleDeleteOvertimeClick(overtime)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })
-                        ) : (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center h-24">
-                              Nenhuma liberação de horas extras cadastrada.
-                            </TableCell>
-                          </TableRow>
+                                </div>
+                                
+                                {manufacturingStages.length > 0 ? (
+                                    <div className="space-y-2">
+                                        {manufacturingStages.map((stage, index) => (
+                                            <DraggableStageItem
+                                                key={`${stage}-${index}`}
+                                                stage={stage}
+                                                index={index}
+                                                onEdit={handleEditStageClick}
+                                                onDelete={handleDeleteStageClick}
+                                                isDragging={draggedIndex === index}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-8 text-muted-foreground">
+                                        <div className="mb-2 text-2xl">📋</div>
+                                        <p className="font-medium">Nenhuma etapa cadastrada</p>
+                                        <p className="text-sm">Adicione a primeira etapa acima</p>
+                                    </div>
+                                )}
+                            </div>
                         )}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
+                        
+                        {/* Dicas de uso */}
+                        {manufacturingStages.length > 1 && (
+                            <div className="bg-muted/30 rounded-lg p-4 text-sm border">
+                                <div className="font-medium mb-2 flex items-center gap-2">
+                                    💡 Dicas de uso
+                                </div>
+                                <ul className="space-y-1 text-muted-foreground text-xs">
+                                    <li>• <strong>Arrastar:</strong> Clique e arraste usando o ícone ⋮⋮ para reordenar</li>
+                                    <li>• <strong>Lead time:</strong> A ordem das etapas afeta o cálculo do tempo total</li>
+                                    <li>• <strong>Salvamento:</strong> Mudanças são salvas automaticamente no Firebase</li>
+                                </ul>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            </TabsContent>
+            <TabsContent value="calculator" className="mt-4">
+                <div className="grid gap-6 lg:grid-cols-2">
+                    {/* Painel de Entrada */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Calculadora de Viabilidade de Prazos</CardTitle>
+                            <CardDescription>
+                                Analise se é possível cumprir prazos considerando a carga atual dos setores de produção.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            {/* Carga Atual dos Setores */}
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Carga Atual dos Setores</h4>
+                                <div className="grid gap-2">
+                                    {manufacturingStages.map(stage => {
+                                        const workload = sectorWorkload[stage] || 0;
+                                        const percentage = Math.round(workload * 100);
+                                        let colorClass = "bg-green-500";
+                                        if (percentage > 80) colorClass = "bg-red-500";
+                                        else if (percentage > 60) colorClass = "bg-yellow-500";
+                                        
+                                        return (
+                                            <div key={stage} className="flex items-center gap-3">
+                                                <span className="text-sm font-medium w-24 truncate">{stage}</span>
+                                                <div className="flex-1 bg-muted rounded-full h-2">
+                                                    <div 
+                                                        className={`h-2 rounded-full transition-all ${colorClass}`}
+                                                        style={{ width: `${percentage}%` }}
+                                                    />
+                                                </div>
+                                                <span className="text-xs text-muted-foreground w-12 text-right">
+                                                    {percentage}%
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    onClick={simulateSectorWorkload}
+                                    className="mt-3"
+                                >
+                                    <RefreshCw className="mr-2 h-3 w-3" />
+                                    Atualizar Carga
+                                </Button>
+                            </div>
+
+                            <Separator />
+
+                            {/* Adicionar Produtos */}
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Adicionar Produtos à Análise</h4>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <Select value={selectedProductForCalculator} onValueChange={setSelectedProductForCalculator}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Selecione um produto" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {products.filter(p => calculateLeadTime(p) > 0).map(product => (
+                                                    <SelectItem key={product.id} value={product.id}>
+                                                        {product.code} - {product.description}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Input
+                                            type="number"
+                                            placeholder="Quantidade"
+                                            value={calculatorQuantity}
+                                            onChange={(e) => setCalculatorQuantity(Number(e.target.value))}
+                                            min="1"
+                                        />
+                                        <Button onClick={addItemToCalculator} className="w-full">
+                                            <PlusCircle className="mr-2 h-4 w-4" />
+                                            Adicionar
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Lista de Itens */}
+                            {calculatorItems.length > 0 && (
+                                <div>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="text-sm font-medium">Itens para Análise</h4>
+                                        <Button variant="outline" size="sm" onClick={clearCalculator}>
+                                            Limpar Lista
+                                        </Button>
+                                    </div>
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {calculatorItems.map(item => (
+                                            <div key={item.id} className="flex items-center justify-between p-3 border rounded-md">
+                                                <div className="flex-1">
+                                                    <div className="font-medium text-sm">{item.productCode}</div>
+                                                    <div className="text-xs text-muted-foreground">{item.productDescription}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        Qtd: {item.quantity} | Lead time: {item.leadTime} dias
+                                                    </div>
+                                                </div>
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="icon"
+                                                    onClick={() => removeItemFromCalculator(item.id)}
+                                                    className="text-destructive hover:text-destructive"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Data Solicitada */}
+                            <div>
+                                <Label className="text-sm font-medium">Data de Entrega Solicitada</Label>
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" className="w-full justify-start text-left mt-2">
+                                            {format(requestedDeliveryDate, "PPP", { locale: ptBR })}
+                                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0" align="start">
+                                        <Calendar 
+                                            mode="single" 
+                                            selected={requestedDeliveryDate} 
+                                            onSelect={(date) => date && setRequestedDeliveryDate(date)}
+                                            initialFocus 
+                                        />
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+
+                            {/* Botão de Calcular */}
+                            <Button 
+                                onClick={calculateFeasibility} 
+                                className="w-full"
+                                disabled={calculatorItems.length === 0}
+                            >
+                                <Clock className="mr-2 h-4 w-4" />
+                                Analisar Viabilidade
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    {/* Painel de Resultados */}
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Análise de Viabilidade</CardTitle>
+                                    <CardDescription>
+                                        Resultado da análise considerando capacidade de produção atual.
+                                    </CardDescription>
+                                </div>
+                                {calculatorItems.length > 0 && (
+                                    <Button onClick={handleExportReport} variant="outline" size="sm">
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        Exportar PDF
+                                    </Button>
+                                )}
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {calculatorResults ? (
+                                <div className="space-y-6">
+                                    {/* Resultado Principal */}
+                                    <div className="text-center p-6 border rounded-lg">
+                                        <div className={`text-3xl font-bold mb-2 ${calculatorResults.isViable ? 'text-green-600' : 'text-red-600'}`}>
+                                            {calculatorResults.isViable ? '✓ VIÁVEL' : '✗ INVIÁVEL'}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground mb-4">
+                                            Confiança: {calculatorResults.confidence}%
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="text-sm">
+                                                <span className="font-medium">Data solicitada:</span> {format(requestedDeliveryDate, "dd/MM/yyyy")}
+                                            </div>
+                                            <div className="text-sm">
+                                                <span className="font-medium">Data sugerida:</span> {format(calculatorResults.suggestedDate, "dd/MM/yyyy")}
+                                            </div>
+                                            <div className="text-sm">
+                                                <span className="font-medium">Lead time ajustado:</span> {calculatorResults.totalAdjustedLeadTime} dias
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Análise por Setor */}
+                                    <div>
+                                        <h4 className="text-sm font-medium mb-3">Análise por Setor</h4>
+                                        <div className="space-y-3">
+                                            {calculatorResults.analysis.map(analysis => (
+                                                <div key={analysis.stageName} className="p-3 border rounded-md">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-medium text-sm">{analysis.stageName}</span>
+                                                        {analysis.bottleneck && (
+                                                            <Badge variant="destructive">Gargalo</Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+                                                        <div>
+                                                            <div>Tempo original: {analysis.originalDuration} dias</div>
+                                                            <div>Tempo ajustado: {analysis.adjustedDuration} dias</div>
+                                                        </div>
+                                                        <div>
+                                                            <div>Carga atual: {Math.round(analysis.workload * 100)}%</div>
+                                                            <div>
+                                                                Impacto: {analysis.adjustedDuration > analysis.originalDuration ? '+' : ''}
+                                                                {analysis.adjustedDuration - analysis.originalDuration} dias
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Recomendações */}
+                                    <div>
+                                        <h4 className="text-sm font-medium mb-3">Recomendações</h4>
+                                        <div className="space-y-2 text-sm text-muted-foreground">
+                                            {!calculatorResults.isViable && (
+                                                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                                                    <div className="font-medium text-red-800 mb-1">Prazo Inviável</div>
+                                                    <div className="text-red-700">
+                                                        Considere reagendar para {format(calculatorResults.suggestedDate, "dd/MM/yyyy")} 
+                                                        ou redistribuir a carga de trabalho.
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {calculatorResults.confidence < 70 && (
+                                                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                                                    <div className="font-medium text-yellow-800 mb-1">Baixa Confiança</div>
+                                                    <div className="text-yellow-700">
+                                                        Setores com alta carga podem causar atrasos. Monitore de perto.
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {calculatorResults.analysis.some(a => a.bottleneck) && (
+                                                <div className="p-3 bg-orange-50 border border-orange-200 rounded-md">
+                                                    <div className="font-medium text-orange-800 mb-1">Gargalos Identificados</div>
+                                                    <div className="text-orange-700">
+                                                        Considere realocar recursos ou terceirizar algumas etapas.
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <Clock className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                                    <p>Adicione produtos e clique em "Analisar Viabilidade" para ver os resultados.</p>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
+            </TabsContent>
+            <TabsContent value="pricing" className="mt-4">
+                <div className="grid gap-6">
+                    {/* Card de Configurações Gerais */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Configurações de Custos</CardTitle>
+                            <CardDescription>
+                                Defina os custos operacionais e taxas que serão usados nos cálculos
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <Label>Valor da Hora Máquina (R$)</Label>
+                                    <Input
+                                        type="number"
+                                        value={machineHourRate}
+                                        onChange={(e) => setMachineHourRate(Number(e.target.value))}
+                                        placeholder="150.00"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Usado para calcular custos de usinagem
+                                    </p>
+                                </div>
+                                <div>
+                                    <Label>Margem de Lucro Padrão (%)</Label>
+                                    <Input
+                                        type="number"
+                                        value={profitMargin}
+                                        onChange={(e) => setProfitMargin(Number(e.target.value))}
+                                        placeholder="30"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Percentual aplicado sobre o custo total
+                                    </p>
+                                </div>
+                            </div>
+
+                            <Separator />
+
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Custo por Kg de Cada Etapa (R$/kg)</h4>
+                                <p className="text-xs text-muted-foreground mb-3">
+                                    💡 Defina quanto custa cada etapa por quilograma do produto. O sistema multiplicará pelo peso total automaticamente.
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {manufacturingStages.map(stage => (
+                                        <div key={stage}>
+                                            <Label className="text-xs">{stage}</Label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                                    R$
+                                                </span>
+                                                <Input
+                                                    type="number"
+                                                    step="0.01"
+                                                    placeholder="0.00"
+                                                    className="pl-8"
+                                                    value={stageCosts[stage] || ''}
+                                                    onChange={(e) => setStageCosts(prev => ({
+                                                        ...prev,
+                                                        [stage]: Number(e.target.value)
+                                                    }))}
+                                                />
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                                    /kg
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                
+                                {/* Exemplo de cálculo */}
+                                <div className="mt-3 p-3 bg-muted rounded-md text-xs space-y-1">
+                                    <div className="font-medium">Exemplo de cálculo:</div>
+                                    <div className="text-muted-foreground">
+                                        Se "Listagem de matéria-prima" custa R$ 0,15/kg e o produto pesa 1000 kg:
+                                    </div>
+                                    <div className="font-mono">
+                                        Custo da etapa = 0,15 × 1.000 = <span className="font-bold text-primary">R$ 150,00</span>
+                                    </div>
+                                </div>
+                                
+                                <Button onClick={saveStageCosts} className="mt-3" variant="outline">
+                                    Salvar Configurações
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Card de Seleção de Produto e Composição */}
+                    <div className="grid gap-6 lg:grid-cols-2">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Calcular Preço do Produto</CardTitle>
+                                <CardDescription>
+                                    Selecione um produto e defina a composição de materiais
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {/* Seleção de Produto com busca integrada */}
+                                <div className="space-y-2">
+                                    <Label>Produto</Label>
+                                    
+                                    {/* Campo de busca */}
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Digite o código ou nome do produto..."
+                                            value={pricingProductSearch}
+                                            onChange={(e) => setPricingProductSearch(e.target.value)}
+                                            className="pl-10"
+                                        />
+                                        {pricingProductSearch && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="absolute right-1 top-1/2 -translate-y-1/2 h-7"
+                                                onClick={() => setPricingProductSearch("")}
+                                            >
+                                                ✕
+                                            </Button>
+                                        )}
+                                    </div>
+                                    
+                                    {/* Select de produtos filtrados */}
+                                    <Select 
+                                        value={selectedProductForPricing?.id || ''} 
+                                        onValueChange={(value) => {
+                                            const product = products.find(p => p.id === value);
+                                            setSelectedProductForPricing(product || null);
+                                            setMaterialComposition([]);
+                                            setPricingCalculation(null);
+                                            setMachiningHours(0);
+                                            setConsumablesCost(0);
+                                            toast({
+                                                title: "Produto selecionado",
+                                                description: `${product?.code} - ${product?.description}`
+                                            });
+                                        }}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione um produto da lista" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-[350px]">
+                                            {(() => {
+                                                const filteredProducts = products
+                                                    .filter(p => p.unitWeight && p.unitWeight > 0)
+                                                    .filter(p => {
+                                                        if (!pricingProductSearch) return true;
+                                                        const query = pricingProductSearch.toLowerCase();
+                                                        return (
+                                                            p.code.toLowerCase().includes(query) ||
+                                                            p.description.toLowerCase().includes(query)
+                                                        );
+                                                    });
+
+                                                if (filteredProducts.length === 0) {
+                                                    return (
+                                                        <div className="p-6 text-center text-sm text-muted-foreground">
+                                                            {pricingProductSearch ? (
+                                                                <>
+                                                                    <Search className="mx-auto h-10 w-10 mb-3 opacity-30" />
+                                                                    <p className="font-medium">Nenhum produto encontrado</p>
+                                                                    <p className="text-xs mt-1">
+                                                                        Não há produtos com código ou descrição contendo "{pricingProductSearch}"
+                                                                    </p>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Package className="mx-auto h-10 w-10 mb-3 opacity-30" />
+                                                                    <p className="font-medium">Nenhum produto disponível</p>
+                                                                    <p className="text-xs mt-1">
+                                                                        Cadastre produtos com peso definido para usar a calculadora
+                                                                    </p>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                }
+
+                                                return filteredProducts.map(product => (
+                                                    <SelectItem key={product.id} value={product.id}>
+                                                        <div className="flex items-start gap-3 py-1">
+                                                            <div className="flex-shrink-0">
+                                                                <div className="font-mono text-xs font-bold bg-primary/10 text-primary px-2 py-0.5 rounded">
+                                                                    {product.code}
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-sm truncate">{product.description}</div>
+                                                                <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
+                                                                    <span>⚖️ {product.unitWeight}kg</span>
+                                                                    <span>•</span>
+                                                                    <span>⏱️ {calculateLeadTime(product)} dias</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </SelectItem>
+                                                ));
+                                            })()}
+                                        </SelectContent>
+                                    </Select>
+                                    
+                                    {/* Contador de resultados */}
+                                    {pricingProductSearch && (
+                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <span className="inline-flex items-center gap-1">
+                                                <span className="font-medium text-primary">
+                                                    {products.filter(p => 
+                                                        p.unitWeight && 
+                                                        p.unitWeight > 0 &&
+                                                        (p.code.toLowerCase().includes(pricingProductSearch.toLowerCase()) ||
+                                                         p.description.toLowerCase().includes(pricingProductSearch.toLowerCase()))
+                                                    ).length}
+                                                </span>
+                                                produto(s) encontrado(s)
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {selectedProductForPricing && (
+                                    <>
+                                        <div className="p-3 bg-muted rounded-md">
+                                            <div className="text-sm space-y-1">
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">Peso total:</span>
+                                                    <span>{selectedProductForPricing.unitWeight} kg</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">Lead time:</span>
+                                                    <span>{calculateLeadTime(selectedProductForPricing)} dias</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Composição de Materiais */}
+                                        <div>
+                                            <h4 className="text-sm font-medium mb-3">Composição de Materiais</h4>
+                                            <p className="text-xs text-muted-foreground mb-3">
+                                                Selecione materiais na lista abaixo para adicionar à composição
+                                            </p>
+
+                                            <div className="space-y-3">
+                                                {/* Seletor de material para adicionar */}
+                                                <div className="space-y-2">
+                                                    <Label className="text-xs text-muted-foreground">Selecione um material para adicionar:</Label>
+                                                    <Select
+                                                        value=""
+                                                        onValueChange={(materialId) => {
+                                                            const material = DEFAULT_MATERIALS.find(m => m.id === materialId);
+                                                            if (!material) return;
+                                                            
+                                                            // Verifica se o material já foi adicionado
+                                                            if (materialComposition.some(m => m.materialId === materialId)) {
+                                                                toast({
+                                                                    variant: "destructive",
+                                                                    title: "Material já adicionado",
+                                                                    description: "Este material já está na lista. Edite o peso existente."
+                                                                });
+                                                                return;
+                                                            }
+                                                            
+                                                            const newItem: MaterialCompositionItem = {
+                                                                id: Date.now().toString(),
+                                                                materialId: material.id,
+                                                                materialDescription: material.description,
+                                                                weightKg: 0,
+                                                                pricePerKg: material.pricePerKg,
+                                                                totalCost: 0
+                                                            };
+                                                            setMaterialComposition(prev => [...prev, newItem]);
+                                                            
+                                                            toast({
+                                                                title: "Material adicionado",
+                                                                description: "Agora defina o peso em kg deste material."
+                                                            });
+                                                        }}
+                                                    >
+                                                        <SelectTrigger>
+                                                            <SelectValue placeholder="Buscar e selecionar material..." />
+                                                        </SelectTrigger>
+                                                        <SelectContent className="max-h-[400px]">
+                                                            <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground sticky top-0 bg-background">
+                                                                💡 Dica: Role para ver todas as categorias
+                                                            </div>
+                                                            {MATERIAL_CATEGORIES.map(category => {
+                                                                const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
+                                                                if (categoryMaterials.length === 0) return null;
+                                                                
+                                                                return (
+                                                                    <div key={category}>
+                                                                        <div className="px-2 py-1.5 text-sm font-semibold text-primary sticky top-6 bg-background/95 backdrop-blur-sm">
+                                                                            {category}
+                                                                        </div>
+                                                                        {categoryMaterials.map(material => {
+                                                                            const isAdded = materialComposition.some(m => m.materialId === material.id);
+                                                                            return (
+                                                                                <SelectItem 
+                                                                                    key={material.id} 
+                                                                                    value={material.id}
+                                                                                    disabled={isAdded}
+                                                                                    className={isAdded ? "opacity-50" : ""}
+                                                                                >
+                                                                                    <div className="flex items-center justify-between w-full">
+                                                                                        <span className="truncate">{material.description}</span>
+                                                                                        <span className="text-xs text-muted-foreground ml-2 flex-shrink-0">
+                                                                                            R$ {material.pricePerKg.toFixed(2)}/kg
+                                                                                            {isAdded && " ✓"}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </SelectItem>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
+                                                {/* Lista de materiais adicionados */}
+                                                {materialComposition.length > 0 ? (
+                                                    <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                                                        {materialComposition.map((item, index) => (
+                                                            <div key={item.id} className="flex items-start gap-2 p-3 border rounded-md bg-card">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="text-sm font-medium truncate">
+                                                                        {item.materialDescription}
+                                                                    </div>
+                                                                    <div className="text-xs text-muted-foreground mt-1">
+                                                                        R$ {item.pricePerKg.toFixed(2)}/kg
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2 mt-2">
+                                                                        <Input
+                                                                            type="number"
+                                                                            step="0.01"
+                                                                            placeholder="Peso (kg)"
+                                                                            className="h-8 text-sm"
+                                                                            value={item.weightKg || ''}
+                                                                            onChange={(e) => {
+                                                                                const weight = Number(e.target.value);
+                                                                                setMaterialComposition(prev => prev.map((m, i) => 
+                                                                                    i === index 
+                                                                                        ? { ...m, weightKg: weight, totalCost: weight * m.pricePerKg }
+                                                                                        : m
+                                                                                ));
+                                                                            }}
+                                                                        />
+                                                                        <div className="text-sm font-medium whitespace-nowrap">
+                                                                            = R$ {item.totalCost.toFixed(2)}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 flex-shrink-0"
+                                                                    onClick={() => setMaterialComposition(prev => prev.filter((_, i) => i !== index))}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
+
+                                                        {/* Resumo dos materiais */}
+                                                        <div className="p-3 bg-muted rounded-md space-y-1">
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="font-medium">Total de materiais:</span>
+                                                                <span>{materialComposition.length}</span>
+                                                            </div>
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="font-medium">Peso dos materiais:</span>
+                                                                <span className="font-mono">
+                                                                    {materialComposition.reduce((sum, m) => sum + m.weightKg, 0).toFixed(2)} kg
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="font-medium">Peso do produto:</span>
+                                                                <span className="font-mono">{selectedProductForPricing.unitWeight} kg</span>
+                                                            </div>
+                                                            <div className="flex justify-between text-sm font-bold border-t pt-1 mt-1">
+                                                                <span>Custo total materiais:</span>
+                                                                <span className="font-mono text-primary">
+                                                                    R$ {materialComposition.reduce((sum, m) => sum + m.totalCost, 0).toFixed(2)}
+                                                                </span>
+                                                            </div>
+                                                            {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)) > 0.1 && (
+                                                                <div className="flex items-center gap-1 text-xs text-yellow-600 pt-1 border-t">
+                                                                    <span>⚠️</span>
+                                                                    <span>Diferença de peso: {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)).toFixed(2)} kg</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-center py-8 text-sm text-muted-foreground border-2 border-dashed rounded-md">
+                                                        <Package className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                                                        <p>Nenhum material adicionado</p>
+                                                        <p className="text-xs mt-1">Use o seletor acima para adicionar materiais</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Horas de Usinagem */}
+                                        {selectedProductForPricing.productionPlanTemplate?.some(stage => 
+                                            stage.stageName.toLowerCase().includes('usinagem')
+                                        ) && (
+                                            <>
+                                                <Separator />
+                                                <div>
+                                                    <Label>Horas de Usinagem Estimadas</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="0.5"
+                                                        placeholder="0"
+                                                        value={machiningHours}
+                                                        onChange={(e) => setMachiningHours(Number(e.target.value))}
+                                                    />
+                                                    <p className="text-xs text-muted-foreground mt-1">
+                                                        Valor da hora: R$ {machineHourRate.toFixed(2)} = {machiningHours > 0 ? `R$ ${(machiningHours * machineHourRate).toFixed(2)}` : 'R$ 0,00'}
+                                                    </p>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* Insumos (Consumíveis) */}
+                                        <Separator />
+                                        <div>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <Label>Insumos e Consumíveis (R$)</Label>
+                                                <Badge variant="secondary" className="text-xs">
+                                                    +10% margem automática
+                                                </Badge>
+                                            </div>
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                placeholder="0.00"
+                                                value={consumablesCost || ''}
+                                                onChange={(e) => setConsumablesCost(Number(e.target.value))}
+                                            />
+                                            <div className="mt-2 p-2 bg-muted rounded-md text-xs space-y-1">
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Custo base dos insumos:</span>
+                                                    <span className="font-mono">R$ {consumablesCost.toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Margem (10%):</span>
+                                                    <span className="font-mono text-green-600">
+                                                        + R$ {(consumablesCost * 0.10).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between font-medium border-t pt-1">
+                                                    <span>Total com margem:</span>
+                                                    <span className="font-mono text-primary">
+                                                        R$ {(consumablesCost * 1.10).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mt-2">
+                                                💡 <strong>Exemplos:</strong> Eletrodos, gases, discos de corte, lixas, consumíveis de soldagem, EPIs, etc.
+                                            </p>
+                                        </div>
+
+                                        <Button 
+                                            onClick={() => {
+                                                if (materialComposition.length === 0) {
+                                                    toast({
+                                                        variant: "destructive",
+                                                        title: "Adicione materiais",
+                                                        description: "É necessário adicionar pelo menos um material à composição."
+                                                    });
+                                                    return;
+                                                }
+
+                                                // Verifica se todos os materiais têm peso definido
+                                                const materialsWithoutWeight = materialComposition.filter(m => !m.weightKg || m.weightKg <= 0);
+                                                if (materialsWithoutWeight.length > 0) {
+                                                    toast({
+                                                        variant: "destructive",
+                                                        title: "Defina o peso dos materiais",
+                                                        description: `${materialsWithoutWeight.length} material(is) sem peso definido.`
+                                                    });
+                                                    return;
+                                                }
+
+                                                const productWeight = selectedProductForPricing.unitWeight || 0;
+
+                                                // Calcular custos por etapa - AGORA MULTIPLICADO PELO PESO DO PRODUTO
+                                                const stageCostItems: StageCostItem[] = (selectedProductForPricing.productionPlanTemplate || []).map(stage => {
+                                                    const costPerKg = stageCosts[stage.stageName] || 0;
+                                                    const totalCost = costPerKg * productWeight;
+                                                    
+                                                    return {
+                                                        stageName: stage.stageName,
+                                                        durationDays: stage.durationDays || 0,
+                                                        costPerDay: costPerKg, // Agora representa custo por kg
+                                                        totalCost: totalCost
+                                                    };
+                                                });
+
+                                                const materialCostTotal = materialComposition.reduce((sum, m) => sum + m.totalCost, 0);
+                                                const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
+                                                const machiningCost = machiningHours * machineHourRate;
+                                                
+                                                // Insumos com margem de 10%
+                                                const consumablesWithMargin = consumablesCost * 1.10;
+                                                
+                                                // Custo total agora inclui insumos com margem
+                                                const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesWithMargin;
+                                                const profitValue = totalCost * (profitMargin / 100);
+                                                const finalPrice = totalCost + profitValue;
+                                                const pricePerKg = finalPrice / productWeight;
+
+                                                const calculation: PricingCalculation = {
+                                                    productId: selectedProductForPricing.id,
+                                                    productCode: selectedProductForPricing.code,
+                                                    productDescription: selectedProductForPricing.description,
+                                                    productWeight: productWeight,
+                                                    materialCosts: materialComposition,
+                                                    stageCosts: stageCostItems,
+                                                    machiningCost,
+                                                    consumablesCost: consumablesCost,
+                                                    consumablesWithMargin: consumablesWithMargin,
+                                                    totalCost,
+                                                    profitMargin,
+                                                    profitValue,
+                                                    finalPrice,
+                                                    pricePerKg,
+                                                    createdAt: new Date()
+                                                };
+
+                                                setPricingCalculation(calculation);
+                                                
+                                                toast({
+                                                    title: "Preço calculado!",
+                                                    description: `Preço final: R$ ${finalPrice.toFixed(2)} (R$ ${pricePerKg.toFixed(2)}/kg)`
+                                                });
+                                            }} 
+                                            className="w-full"
+                                            disabled={materialComposition.length === 0}
+                                        >
+                                            <Calculator className="mr-2 h-4 w-4" />
+                                            Calcular Preço
+                                        </Button>
+                                    </>
+                                )}
+                            </CardContent>
+                        </Card>
+
+                        {/* Card de Resultado */}
+                        <Card>
+                            <CardHeader>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <CardTitle>Resultado da Precificação</CardTitle>
+                                        <CardDescription>
+                                            Composição detalhada de custos e preço final
+                                        </CardDescription>
+                                    </div>
+                                    {pricingCalculation && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={async () => {
+                                                // Buscar dados da empresa
+                                                const companyData = await fetchCompanyDataForPDF();
+                                                
+                                                const doc = new jsPDF();
+                                                
+                                                // Configurações
+                                                const pageWidth = doc.internal.pageSize.getWidth();
+                                                const pageHeight = doc.internal.pageSize.getHeight();
+                                                const margin = 20;
+                                                let yPosition = margin;
+                                                const lineHeight = 7;
+                                                
+                                                // Função auxiliar para adicionar texto
+                                                const addText = (text: string, fontSize: number = 10, isBold: boolean = false, align: 'left' | 'center' | 'right' = 'left') => {
+                                                    doc.setFontSize(fontSize);
+                                                    doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+                                                    
+                                                    if (align === 'center') {
+                                                        doc.text(text, pageWidth / 2, yPosition, { align: 'center' });
+                                                    } else if (align === 'right') {
+                                                        doc.text(text, pageWidth - margin, yPosition, { align: 'right' });
+                                                    } else {
+                                                        doc.text(text, margin, yPosition);
+                                                    }
+                                                    
+                                                    yPosition += lineHeight;
+                                                };
+                                                
+                                                // Função para adicionar linha horizontal
+                                                const addLine = () => {
+                                                    doc.setDrawColor(200, 200, 200);
+                                                    doc.line(margin, yPosition, pageWidth - margin, yPosition);
+                                                    yPosition += lineHeight;
+                                                };
+                                                
+                                                // Função para verificar quebra de página
+                                                const checkPageBreak = (spaceNeeded: number = 20) => {
+                                                    if (yPosition + spaceNeeded > pageHeight - margin) {
+                                                        doc.addPage();
+                                                        yPosition = margin;
+                                                        return true;
+                                                    }
+                                                    return false;
+                                                };
+                                                
+                                                // Função para adicionar seção com título
+                                                const addSection = (title: string) => {
+                                                    checkPageBreak(15);
+                                                    yPosition += 3;
+                                                    doc.setFillColor(37, 99, 235); // Azul
+                                                    doc.rect(margin, yPosition - 5, pageWidth - (2 * margin), 8, 'F');
+                                                    doc.setTextColor(255, 255, 255);
+                                                    addText(title, 11, true);
+                                                    doc.setTextColor(0, 0, 0);
+                                                    yPosition += 2;
+                                                };
+                                                
+                                                // CABEÇALHO COM DADOS DA EMPRESA
+                                                doc.setFillColor(37, 99, 235);
+                                                doc.rect(0, 0, pageWidth, 60, 'F');
+                                                doc.setTextColor(255, 255, 255);
+                                                
+                                                // Nome da empresa
+                                                doc.setFontSize(20);
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.text(companyData?.nomeFantasia || 'MECALD', pageWidth / 2, 15, { align: 'center' });
+                                                
+                                                // Título do relatório
+                                                doc.setFontSize(14);
+                                                doc.text('RELATÓRIO DE PRECIFICAÇÃO', pageWidth / 2, 25, { align: 'center' });
+                                                
+                                                // Dados da empresa
+                                                doc.setFontSize(8);
+                                                doc.setFont('helvetica', 'normal');
+                                                let companyInfoY = 32;
+                                                if (companyData?.cnpj) {
+                                                    doc.text(`CNPJ: ${companyData.cnpj}`, margin, companyInfoY);
+                                                    companyInfoY += 5;
+                                                }
+                                                if (companyData?.inscricaoEstadual) {
+                                                    doc.text(`I.E.: ${companyData.inscricaoEstadual}`, margin, companyInfoY);
+                                                    companyInfoY += 5;
+                                                }
+                                                if (companyData?.email) {
+                                                    doc.text(`E-mail: ${companyData.email}`, margin, companyInfoY);
+                                                    companyInfoY += 5;
+                                                }
+                                                if (companyData?.celular) {
+                                                    doc.text(`Telefone: ${companyData.celular}`, margin, companyInfoY);
+                                                }
+                                                
+                                                // Data de geração
+                                                doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, pageWidth - margin, 32, { align: 'right' });
+                                                
+                                                yPosition = 70;
+                                                doc.setTextColor(0, 0, 0);
+                                                
+                                                // DADOS DO PRODUTO (Box destacado)
+                                                checkPageBreak(35);
+                                                const productBoxY = yPosition;
+                                                doc.setFillColor(239, 246, 255); // Azul claro
+                                                doc.setDrawColor(59, 130, 246); // Azul
+                                                doc.setLineWidth(0.5);
+                                                doc.roundedRect(margin, productBoxY, pageWidth - (2 * margin), 30, 3, 3, 'FD');
+                                                
+                                                yPosition = productBoxY + 8;
+                                                doc.setFontSize(11);
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.setTextColor(30, 64, 175); // Azul escuro
+                                                doc.text('📦 DADOS DO PRODUTO', margin + 5, yPosition);
+                                                
+                                                yPosition += 8;
+                                                doc.setFontSize(9);
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.setTextColor(0, 0, 0);
+                                                doc.text(`Código: ${pricingCalculation.productCode}`, margin + 5, yPosition);
+                                                doc.text(`Peso: ${pricingCalculation.productWeight} kg`, pageWidth / 2 + 10, yPosition);
+                                                
+                                                yPosition += 5;
+                                                doc.text(`Descrição: ${pricingCalculation.productDescription}`, margin + 5, yPosition);
+                                                
+                                                const leadTimeDays = calculateLeadTime(selectedProductForPricing || {
+                                                    productionPlanTemplate: pricingCalculation.stageCosts.map(s => ({
+                                                        stageName: s.stageName,
+                                                        durationDays: s.durationDays
+                                                    }))
+                                                } as Product);
+                                                doc.text(`Lead Time: ${leadTimeDays} dias`, pageWidth / 2 + 10, yPosition);
+                                                
+                                                yPosition += 10;
+                                                
+                                                // Calcular totais
+                                                const materialTotal = pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0);
+                                                
+                                                // COMPOSIÇÃO DE MATERIAIS (Tabela)
+                                                addSection('🔧 COMPOSIÇÃO DE MATERIAIS');
+                                                
+                                                if (pricingCalculation.materialCosts.length > 0) {
+                                                    // Cabeçalho da tabela
+                                                    const tableY = yPosition;
+                                                    doc.setFillColor(243, 244, 246);
+                                                    doc.rect(margin, tableY, pageWidth - (2 * margin), 8, 'F');
+                                                    doc.setFontSize(9);
+                                                    doc.setFont('helvetica', 'bold');
+                                                    
+                                                    doc.text('Material', margin + 2, tableY + 6);
+                                                    doc.text('Peso (kg)', pageWidth - margin - 60, tableY + 6, { align: 'right' });
+                                                    doc.text('R$/kg', pageWidth - margin - 30, tableY + 6, { align: 'right' });
+                                                    doc.text('Subtotal', pageWidth - margin - 2, tableY + 6, { align: 'right' });
+                                                    
+                                                    yPosition = tableY + 10;
+                                                    
+                                                    // Linhas da tabela
+                                                    pricingCalculation.materialCosts.forEach((m, index) => {
+                                                        checkPageBreak(10);
+                                                        
+                                                        // Linha alternada
+                                                        if (index % 2 === 0) {
+                                                            doc.setFillColor(249, 250, 251);
+                                                            doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 8, 'F');
+                                                        }
+                                                        
+                                                        doc.setFontSize(8);
+                                                        doc.setFont('helvetica', 'normal');
+                                                        doc.setTextColor(0, 0, 0);
+                                                        
+                                                        // Material
+                                                        const materialText = `${index + 1}. ${m.materialDescription}`;
+                                                        const maxWidth = pageWidth - margin - 80;
+                                                        doc.text(materialText.substring(0, 50) + (materialText.length > 50 ? '...' : ''), margin + 2, yPosition);
+                                                        
+                                                        // Peso
+                                                        doc.text(m.weightKg.toFixed(3), pageWidth - margin - 60, yPosition, { align: 'right' });
+                                                        
+                                                        // Preço/kg
+                                                        doc.text(`R$ ${m.pricePerKg.toFixed(2)}`, pageWidth - margin - 30, yPosition, { align: 'right' });
+                                                        
+                                                        // Subtotal
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.text(`R$ ${m.totalCost.toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
+                                                        
+                                                        yPosition += 8;
+                                                    });
+                                                    
+                                                    // Total da tabela
+                                                    checkPageBreak(10);
+                                                    doc.setFillColor(254, 243, 199); // Amarelo claro
+                                                    doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 10, 'F');
+                                                    
+                                                    doc.setFontSize(10);
+                                                    doc.setFont('helvetica', 'bold');
+                                                    doc.setTextColor(146, 64, 14); // Marrom
+                                                    doc.text('TOTAL MATERIAIS:', margin + 2, yPosition + 4);
+                                                    doc.text(`R$ ${materialTotal.toFixed(2)}`, pageWidth - margin - 2, yPosition + 4, { align: 'right' });
+                                                    
+                                                    doc.setTextColor(0, 0, 0);
+                                                    yPosition += 12;
+                                                } else {
+                                                    addText('Nenhum material adicionado', 9);
+                                                    yPosition += 5;
+                                                }
+                                                
+                                                // CUSTOS DE PRODUÇÃO
+                                                addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
+                                                pricingCalculation.stageCosts.forEach((s, index) => {
+                                                    checkPageBreak();
+                                                    addText(`${index + 1}. ${s.stageName}`, 9);
+                                                    addText(`   R$ ${s.costPerDay.toFixed(2)}/kg × ${pricingCalculation.productWeight} kg = R$ ${s.totalCost.toFixed(2)}`, 9);
+                                                });
+                                                yPosition += 2;
+                                                const stageTotal = pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0);
+                                                addText(`Subtotal Etapas: R$ ${stageTotal.toFixed(2)}`, 10, true, 'right');
+                                                
+                                                // OUTROS CUSTOS
+                                                addSection('OUTROS CUSTOS');
+                                                if (pricingCalculation.machiningCost > 0) {
+                                                    addText(`Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
+                                                }
+                                                if (pricingCalculation.consumablesWithMargin > 0) {
+                                                    addText(`Insumos e Consumíveis:`, 9, true);
+                                                    addText(`   Custo base: R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
+                                                    addText(`   Margem (10%): R$ ${(pricingCalculation.consumablesCost * 0.10).toFixed(2)}`, 9);
+                                                    addText(`   Total: R$ ${pricingCalculation.consumablesWithMargin.toFixed(2)}`, 9, true);
+                                                }
+                                                
+                                                // RESUMO FINANCEIRO
+                                                checkPageBreak(40);
+                                                addSection('RESUMO FINANCEIRO');
+                                                
+                                                // Box com resultado final
+                                                yPosition += 3;
+                                                const boxY = yPosition;
+                                                doc.setFillColor(240, 240, 240);
+                                                doc.roundedRect(margin, boxY, pageWidth - (2 * margin), 35, 3, 3, 'F');
+                                                
+                                                yPosition = boxY + 8;
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.text(`Custo Total:`, margin + 5, yPosition);
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.text(`R$ ${pricingCalculation.totalCost.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                
+                                                yPosition = boxY + 16;
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.setTextColor(22, 163, 74); // Verde
+                                                doc.text(`Margem de Lucro (${pricingCalculation.profitMargin}%):`, margin + 5, yPosition);
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.text(`R$ ${pricingCalculation.profitValue.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                doc.setTextColor(0, 0, 0);
+                                                
+                                                yPosition = boxY + 26;
+                                                doc.setDrawColor(37, 99, 235);
+                                                doc.setLineWidth(0.5);
+                                                doc.line(margin + 5, yPosition - 2, pageWidth - margin - 5, yPosition - 2);
+                                                
+                                                yPosition = boxY + 32;
+                                                doc.setFont('helvetica', 'bold');
+                                                doc.setFontSize(14);
+                                                doc.setTextColor(37, 99, 235);
+                                                doc.text('PREÇO FINAL:', margin + 5, yPosition);
+                                                doc.text(`R$ ${pricingCalculation.finalPrice.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                
+                                                yPosition += 8;
+                                                doc.setFontSize(10);
+                                                doc.setTextColor(100, 100, 100);
+                                                doc.text(`Preço por kg: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                doc.setTextColor(0, 0, 0);
+                                                
+                                                // COMPOSIÇÃO PERCENTUAL
+                                                yPosition += 10;
+                                                checkPageBreak(50);
+                                                addSection('COMPOSIÇÃO DO PREÇO FINAL');
+                                                
+                                                const percentages = [
+                                                    { label: 'Materiais', value: materialTotal, color: [59, 130, 246] },
+                                                    { label: 'Etapas de Produção', value: stageTotal, color: [16, 185, 129] },
+                                                    { label: 'Usinagem', value: pricingCalculation.machiningCost, color: [245, 158, 11] },
+                                                    { label: 'Insumos c/ margem', value: pricingCalculation.consumablesWithMargin, color: [139, 92, 246] },
+                                                    { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] }
+                                                ].filter(item => item.value > 0);
+                                                
+                                                percentages.forEach((item, index) => {
+                                                    checkPageBreak();
+                                                    const percentage = ((item.value / pricingCalculation.finalPrice) * 100).toFixed(1);
+                                                    
+                                                    // Bolinha colorida
+                                                    doc.setFillColor(item.color[0], item.color[1], item.color[2]);
+                                                    doc.circle(margin + 2, yPosition - 2, 2, 'F');
+                                                    
+                                                    // Texto
+                                                    doc.setFont('helvetica', 'normal');
+                                                    doc.text(`${item.label}:`, margin + 8, yPosition);
+                                                    
+                                                    // Valor e percentual
+                                                    doc.setFont('helvetica', 'bold');
+                                                    const valueText = `R$ ${item.value.toFixed(2)} (${percentage}%)`;
+                                                    doc.text(valueText, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                    
+                                                    yPosition += lineHeight;
+                                                });
+                                                
+                                                // Observação importante
+                                                yPosition += 5;
+                                                checkPageBreak(15);
+                                                doc.setFillColor(255, 243, 205);
+                                                doc.roundedRect(margin, yPosition, pageWidth - (2 * margin), 15, 2, 2, 'F');
+                                                doc.setFontSize(9);
+                                                doc.setTextColor(133, 77, 14);
+                                                yPosition += 5;
+                                                doc.text('⚠️ IMPORTANTE:', margin + 5, yPosition);
+                                                yPosition += 5;
+                                                doc.setFont('helvetica', 'normal');
+                                                doc.text('Este é o preço SEM impostos. Lembre-se de adicionar os impostos aplicáveis', margin + 5, yPosition);
+                                                yPosition += 5;
+                                                doc.text('(ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.', margin + 5, yPosition);
+                                                
+                                                // RODAPÉ em todas as páginas
+                                                const totalPages = doc.internal.pages.length - 1;
+                                                for (let i = 1; i <= totalPages; i++) {
+                                                    doc.setPage(i);
+                                                    const footerY = pageHeight - 15;
+                                                    doc.setFontSize(8);
+                                                    doc.setTextColor(150, 150, 150);
+                                                    doc.text('MECALD - Indústria e Comércio', pageWidth / 2, footerY, { align: 'center' });
+                                                    doc.text(`Página ${i} de ${totalPages}`, pageWidth / 2, footerY + 5, { align: 'center' });
+                                                }
+                                                
+                                                // Salvar PDF
+                                                doc.save(`precificacao-${pricingCalculation.productCode}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`);
+                                                
+                                                toast({
+                                                    title: "PDF exportado!",
+                                                    description: "O relatório de precificação foi baixado com sucesso."
+                                                });
+                                            }}
+                                        >
+                                            <Download className="mr-2 h-3 w-3" />
+                                            Exportar PDF
+                                        </Button>
+                                    )}
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                {pricingCalculation ? (
+                                    <div className="space-y-4">
+                                        {/* Custos de Materiais */}
+                                        <div>
+                                            <h4 className="text-sm font-medium mb-2">Materiais</h4>
+                                            <div className="space-y-1 text-sm">
+                                                {pricingCalculation.materialCosts.map(m => (
+                                                    <div key={m.id} className="flex justify-between text-muted-foreground">
+                                                        <span className="truncate flex-1">{m.materialDescription}</span>
+                                                        <span className="ml-2 font-mono">R$ {m.totalCost.toFixed(2)}</span>
+                                                    </div>
+                                                ))}
+                                                <div className="flex justify-between font-medium pt-1 border-t">
+                                                    <span>Subtotal Materiais</span>
+                                                    <span className="font-mono">
+                                                        R$ {pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Custos de Etapas */}
+                                        <div>
+                                            <h4 className="text-sm font-medium mb-2">Custos de Produção</h4>
+                                            <div className="space-y-1 text-sm">
+                                                {pricingCalculation.stageCosts.map(s => (
+                                                    <div key={s.stageName} className="flex justify-between text-muted-foreground">
+                                                        <span className="flex-1">
+                                                            {s.stageName}
+                                                            <span className="text-xs ml-1">
+                                                                (R$ {s.costPerDay.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
+                                                            </span>
+                                                        </span>
+                                                        <span className="font-mono">R$ {s.totalCost.toFixed(2)}</span>
+                                                    </div>
+                                                ))}
+                                                {pricingCalculation.machiningCost > 0 && (
+                                                    <div className="flex justify-between text-muted-foreground">
+                                                        <span className="flex-1">
+                                                            Usinagem
+                                                            <span className="text-xs ml-1">
+                                                                ({machiningHours}h × R$ {machineHourRate.toFixed(2)}/h)
+                                                            </span>
+                                                        </span>
+                                                        <span className="font-mono">R$ {pricingCalculation.machiningCost.toFixed(2)}</span>
+                                                    </div>
+                                                )}
+                                                {pricingCalculation.consumablesWithMargin > 0 && (
+                                                    <div className="flex justify-between text-muted-foreground">
+                                                        <span className="flex-1">
+                                                            Insumos e Consumíveis
+                                                            <span className="text-xs ml-1 text-green-600">
+                                                                (R$ {pricingCalculation.consumablesCost.toFixed(2)} + 10%)
+                                                            </span>
+                                                        </span>
+                                                        <span className="font-mono">R$ {pricingCalculation.consumablesWithMargin.toFixed(2)}</span>
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-between font-medium pt-1 border-t">
+                                                    <span>Subtotal Produção</span>
+                                                    <span className="font-mono">
+                                                        R$ {(
+                                                            pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) + 
+                                                            pricingCalculation.machiningCost + 
+                                                            pricingCalculation.consumablesWithMargin
+                                                        ).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Total e Margem */}
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between text-sm">
+                                                <span className="font-medium">Custo Total</span>
+                                                <span className="font-mono font-medium">R$ {pricingCalculation.totalCost.toFixed(2)}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm text-green-600">
+                                                <span className="font-medium">Lucro ({pricingCalculation.profitMargin}%)</span>
+                                                <span className="font-mono font-medium">R$ {pricingCalculation.profitValue.toFixed(2)}</span>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Preço Final */}
+                                        <div className="p-4 bg-primary/5 rounded-lg border-2 border-primary/20">
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-lg font-bold">Preço Final</span>
+                                                    <span className="text-2xl font-bold text-primary font-mono">
+                                                        R$ {pricingCalculation.finalPrice.toFixed(2)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center text-sm text-muted-foreground">
+                                                    <span>Preço por kg</span>
+                                                    <span className="font-mono font-medium">
+                                                        R$ {pricingCalculation.pricePerKg.toFixed(2)}/kg
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Dica */}
+                                        <div className="text-xs text-muted-foreground p-3 bg-muted rounded-md">
+                                            💡 <strong>Dica:</strong> Este é o preço sem impostos. Lembre-se de adicionar 
+                                            os impostos aplicáveis (ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-12 text-muted-foreground">
+                                        <Calculator className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                                        <p>Selecione um produto e calcule o preço para ver os resultados aqui.</p>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* Card de Biblioteca de Materiais */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Biblioteca de Materiais</CardTitle>
+                            <CardDescription>
+                                {DEFAULT_MATERIALS.length} materiais cadastrados. Você pode adicionar novos materiais conforme necessário.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
+                                <ScrollArea className="h-96">
+                                    <div className="space-y-4">
+                                        {MATERIAL_CATEGORIES.map(category => {
+                                            const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
+                                            if (categoryMaterials.length === 0) return null;
+                                            
+                                            return (
+                                                <div key={category}>
+                                                    <h4 className="text-sm font-semibold mb-2 text-primary">{category}</h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                        {categoryMaterials.map(material => (
+                                                            <div key={material.id} className="p-2 border rounded text-xs">
+                                                                <div className="font-medium truncate">{material.description}</div>
+                                                                <div className="text-muted-foreground">
+                                                                    R$ {material.pricePerKg.toFixed(2)}/{material.unit}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </ScrollArea>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            </TabsContent>
         </Tabs>
       </div>
 
-      {/* DIALOGS E MODAIS */}
-
-      {/* Dialog para Membros da Equipe */}
-      <Dialog open={isTeamFormOpen} onOpenChange={setIsTeamFormOpen}>
-        <DialogContent>
+      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selectedMember ? "Editar Membro" : "Adicionar Membro"}</DialogTitle>
+            <DialogTitle>{selectedProduct ? "Editar Produto" : "Adicionar Novo Produto"}</DialogTitle>
             <DialogDescription>
-              {selectedMember ? "Atualize os dados do membro da equipe." : "Preencha as informações do novo membro."}
+              {selectedProduct ? "Altere os dados do produto." : "Preencha os campos para cadastrar um novo produto."}
             </DialogDescription>
           </DialogHeader>
-          <Form {...teamForm}>
-            <form onSubmit={teamForm.handleSubmit(onTeamSubmit)} className="space-y-4">
-              <FormField control={teamForm.control} name="name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Nome Completo</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Nome do membro" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="position" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Cargo</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ex: Vendedor, Gerente" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="email" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>E-mail</FormLabel>
-                  <FormControl>
-                    <Input type="email" placeholder="email@dominio.com" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="phone" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Telefone</FormLabel>
-                  <FormControl>
-                    <Input placeholder="(XX) XXXXX-XXXX" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={teamForm.control} name="permission" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Permissão</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione o nível de acesso" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="admin">Administrador</SelectItem>
-                      <SelectItem value="user">Usuário</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <DialogFooter>
-                <Button type="submit" disabled={teamForm.formState.isSubmitting}>
-                  {teamForm.formState.isSubmitting ? "Salvando..." : "Salvar"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog para Recursos */}
-      <Dialog open={isResourceFormOpen} onOpenChange={setIsResourceFormOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{selectedResource ? "Editar Recurso" : "Adicionar Recurso"}</DialogTitle>
-            <DialogDescription>
-              {selectedResource ? "Atualize os dados do recurso produtivo." : "Preencha as informações do novo recurso."}
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...resourceForm}>
-            <form onSubmit={resourceForm.handleSubmit(onResourceSubmit)} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="name" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nome do Recurso</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ex: Soldador Especializado, Máquina CNC" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="type" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tipo</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione o tipo" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="maquina">Máquina</SelectItem>
-                        <SelectItem value="equipamento">Equipamento</SelectItem>
-                        <SelectItem value="veiculo">Veículo</SelectItem>
-                        <SelectItem value="ferramenta">Ferramenta</SelectItem>
-                        <SelectItem value="espaco">Espaço</SelectItem>
-                        <SelectItem value="mao_de_obra">Mão de Obra</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <FormField control={resourceForm.control} name="description" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Descrição</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="Ex: Soldador com 10 anos de experiência, certificado em solda TIG" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="capacity" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Capacidade</FormLabel>
-                    <FormControl>
-                      <Input type="number" min="1" placeholder="1" {...field} onChange={e => field.onChange(parseInt(e.target.value) || 1)} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="status" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione o status" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="disponivel">Disponível</SelectItem>
-                        <SelectItem value="ocupado">Ocupado</SelectItem>
-                        <SelectItem value="manutencao">Manutenção</SelectItem>
-                        <SelectItem value="ausente">Ausente</SelectItem>
-                        <SelectItem value="ferias">Férias</SelectItem>
-                        <SelectItem value="inativo">Inativo</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              
-              {/* Campos condicionais para ausência/férias */}
-              {(watchedStatus === 'ausente' || watchedStatus === 'ferias') && (
-                <div className="space-y-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                  <h4 className="font-medium text-orange-800 flex items-center">
-                    {watchedStatus === 'ferias' ? <Calendar className="h-4 w-4 mr-2" /> : <UserX className="h-4 w-4 mr-2" />}
-                    Informações de {watchedStatus === 'ferias' ? 'Férias' : 'Ausência'}
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={resourceForm.control} name="absenceStartDate" render={({ field }) => (
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)}>
+              <ScrollArea className="h-[70vh] pr-6">
+                <div className="space-y-4 pt-4">
+                  <FormField control={form.control} name="code" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Data de Início</FormLabel>
-                        <FormControl>
-                          <Input type="date" {...field} />
-                        </FormControl>
-                        <FormMessage />
+                          <FormLabel>Código do Produto</FormLabel>
+                          <FormControl><Input placeholder="Ex: PROD-001" {...field} value={field.value ?? ''} /></FormControl>
+                          <FormDescription>Alterar o código criará um novo registro para o produto.</FormDescription>
+                          <FormMessage />
                       </FormItem>
-                    )} />
-                    <FormField control={resourceForm.control} name="absenceEndDate" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Data de Retorno</FormLabel>
-                        <FormControl>
-                          <Input type="date" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  </div>
-                  <FormField control={resourceForm.control} name="absenceReason" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Motivo {watchedStatus === 'ferias' ? '(Opcional)' : ''}</FormLabel>
-                      <FormControl>
-                        <Textarea 
-                          placeholder={watchedStatus === 'ferias' 
-                            ? "Ex: Férias anuais, descanso..." 
-                            : "Ex: Licença médica, treinamento, viagem de trabalho..."
-                          } 
-                          {...field} 
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
                   )} />
-                  <div className="text-sm text-orange-700 bg-orange-100 p-3 rounded">
-                    <strong>Importante:</strong> Recursos em {watchedStatus === 'ferias' ? 'férias' : 'ausência'} não são contabilizados no cálculo de ociosidade da empresa.
+                  <FormField control={form.control} name="description" render={({ field }) => (
+                      <FormItem>
+                          <FormLabel>Descrição</FormLabel>
+                          <FormControl><Textarea placeholder="Descrição detalhada do produto ou serviço" {...field} value={field.value ?? ''} /></FormControl>
+                          <FormMessage />
+                      </FormItem>
+                  )} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField control={form.control} name="unitPrice" render={({ field }) => (
+                          <FormItem>
+                              <FormLabel>Preço Unitário (R$)</FormLabel>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                      )} />
+                      <FormField control={form.control} name="unitWeight" render={({ field }) => (
+                          <FormItem>
+                              <FormLabel>Peso Unit. (kg)</FormLabel>
+                              <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? 0} /></FormControl>
+                              <FormMessage />
+                          </FormItem>
+                      )} />
                   </div>
+                  
+                  <Separator />
+
+                  <FormField
+                    control={form.control}
+                    name="productionPlanTemplate"
+                    render={({ field }) => (
+                        <FormItem>
+                            <div className="mb-4">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
+                                        <FormDescription>
+                                            Selecione as etapas e defina a duração em dias para cada uma. O lead time total será calculado automaticamente.
+                                        </FormDescription>
+                                    </div>
+                                    <Popover open={isCopyPopoverOpen} onOpenChange={setIsCopyPopoverOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button type="button" variant="outline" size="sm">
+                                                <Copy className="mr-2 h-3.5 w-3.5" />
+                                                Copiar de outro produto
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[350px] p-0" align="end">
+                                            <div className="p-2">
+                                                <Input
+                                                    placeholder="Buscar por nome ou código..."
+                                                    value={copyFromSearch}
+                                                    onChange={(e) => setCopyFromSearch(e.target.value)}
+                                                    className="h-9"
+                                                />
+                                            </div>
+                                            <Separator />
+                                            <ScrollArea className="h-64">
+                                                <div className="p-1">
+                                                    {filteredProductsForCopy.length > 0 ? (
+                                                        filteredProductsForCopy.map((product) => (
+                                                            <Button
+                                                                key={product.id}
+                                                                type="button"
+                                                                variant="ghost"
+                                                                className="w-full justify-start h-auto py-2 px-2 text-left"
+                                                                onClick={() => handleCopySteps(product)}
+                                                            >
+                                                                <div className="flex flex-col items-start">
+                                                                    <span className="font-medium">{product.description}</span>
+                                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                                        <span>({product.code})</span>
+                                                                        <span>•</span>
+                                                                        <span>{calculateLeadTime(product)} dias</span>
+                                                                    </div>
+                                                                </div>
+                                                            </Button>
+                                                        ))
+                                                    ) : (
+                                                        <p className="p-4 text-center text-sm text-muted-foreground">Nenhum outro produto encontrado.</p>
+                                                    )}
+                                                </div>
+                                            </ScrollArea>
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                            </div>
+                            
+                            {/* Preview do lead time atual */}
+                            {field.value && field.value.length > 0 && (
+                                <div className="mb-4 p-3 bg-muted rounded-md">
+                                    <div className="flex items-center gap-2 text-sm">
+                                        <Clock className="h-4 w-4" />
+                                        <span className="font-medium">Lead Time Total:</span>
+                                        <Badge variant="secondary">
+                                            {field.value.reduce((total, stage) => total + (stage.durationDays || 0), 0)} dias
+                                        </Badge>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            <div className="space-y-3">
+                                {manufacturingStages.map((stageName) => {
+                                    const currentStage = field.value?.find(p => p.stageName === stageName);
+                                    const isChecked = !!currentStage;
+
+                                    return (
+                                        <div key={stageName} className="flex items-center gap-4 rounded-md border p-3">
+                                            <Checkbox
+                                                id={`stage-checkbox-${stageName}`}
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => {
+                                                    const newValue = checked
+                                                        ? [...(field.value || []), { stageName: stageName, durationDays: 0 }]
+                                                        : (field.value || []).filter(p => p.stageName !== stageName);
+                                                    field.onChange(newValue.sort((a,b) => manufacturingStages.indexOf(a.stageName) - manufacturingStages.indexOf(b.stageName)));
+                                                }}
+                                            />
+                                            <Label htmlFor={`stage-checkbox-${stageName}`} className="flex-1 font-normal cursor-pointer">
+                                                {stageName}
+                                            </Label>
+                                            {isChecked && (
+                                             <div className="flex items-center gap-2">
+                                                    <Input
+                                                        type="number"
+                                                        step="any"
+                                                        className="h-8 w-20"
+                                                        placeholder="Dias"
+                                                        value={currentStage?.durationDays ?? 0}
+                                                        onChange={(e) => {
+                                                            const value = e.target.value;
+                                                            const sanitizedValue = value.replace(',', '.');
+                                                            const newPlan = (field.value || []).map(p => 
+                                                                p.stageName === stageName 
+                                                                ? { ...p, durationDays: value === '' ? undefined : Number(sanitizedValue) } 
+                                                                : p
+                                                            );
+                                                            field.onChange(newPlan);
+                                                        }}
+                                                    />
+                                                    <span className="text-sm text-muted-foreground">dias</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <FormMessage />
+                        </FormItem>
+                    )}
+                />
                 </div>
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="location" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Localização</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Ex: Galpão A, Setor 2" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="serialNumber" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Número de Série</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Número de série ou patrimônio" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField control={resourceForm.control} name="acquisitionDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Data de Aquisição</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={resourceForm.control} name="maintenanceDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Última Manutenção</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={resourceForm.formState.isSubmitting}>
-                  {resourceForm.formState.isSubmitting ? "Salvando..." : "Salvar"}
-                </Button>
+              </ScrollArea>
+              <DialogFooter className="pt-6 border-t mt-4">
+                 <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting ? "Salvando..." : "Salvar Produto"}
+
+                 </Button>
               </DialogFooter>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
       
-      {/* Alert Dialog para Exclusão de Membros */}
-      <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
+            <AlertDialogHeader>
             <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente o membro <span className="font-bold">{memberToDelete?.name}</span> da equipe.
+                Esta ação não pode ser desfeita. Isso excluirá permanentemente o produto <span className="font-bold">{productToDelete?.description}</span> do catálogo.
             </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDeleteMember} className="bg-destructive hover:bg-destructive/90">
-              Sim, excluir
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
+                Sim, excluir produto
             </AlertDialogAction>
-          </AlertDialogFooter>
+            </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Alert Dialog para Exclusão de Recursos */}
-      <AlertDialog open={isResourceDeleteAlertOpen} onOpenChange={setIsResourceDeleteAlertOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente o recurso <span className="font-bold">{resourceToDelete?.name}</span>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmDeleteResource} className="bg-destructive hover:bg-destructive/90">
-              Sim, excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Dialog para Horas Extras */}
-      <Dialog open={isOvertimeFormOpen} onOpenChange={setIsOvertimeFormOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedOvertime ? "Editar Liberação de Horas Extras" : "Nova Liberação de Horas Extras"}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedOvertime 
-                ? "Atualize os dados da liberação de horas extras." 
-                : "Preencha as informações para criar uma nova liberação de horas extras."}
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...overtimeForm}>
-            <form onSubmit={overtimeForm.handleSubmit(onOvertimeSubmit)} className="space-y-6">
-              {/* Informações Básicas */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <FormField 
-                  control={overtimeForm.control} 
-                  name="date" 
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Data</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} 
+      <Dialog open={isEditStageDialogOpen} onOpenChange={setIsEditStageDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>Editar Etapa de Fabricação</DialogTitle>
+                <DialogDescription>
+                    Alterar o nome aqui atualizará a etapa em todos os produtos que a utilizam.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+                <Label htmlFor="edit-stage-name">Novo Nome da Etapa</Label>
+                <Input 
+                    id="edit-stage-name"
+                    value={newStageNameForEdit}
+                    onChange={(e) => setNewStageNameForEdit(e.target.value)}
+                    className="mt-2"
                 />
-                
-                <FormField 
-                  control={overtimeForm.control} 
-                  name="startTime" 
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Horário de Entrada</FormLabel>
-                      <FormControl>
-                        <Input type="time" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} 
-                />
-
-                <FormField 
-                  control={overtimeForm.control} 
-                  name="endTime" 
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Horário de Saída</FormLabel>
-                      <FormControl>
-                        <Input type="time" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} 
-                />
-              </div>
-
-              {/* Seleção de Recursos */}
-              <div className="space-y-3">
-                <FormLabel>Recursos Alocados *</FormLabel>
-                <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
-                  {resources.filter(r => r.type === 'mao_de_obra').length > 0 ? (
-                    resources.filter(r => r.type === 'mao_de_obra').map((resource) => (
-                      <div key={resource.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`resource-${resource.id}`}
-                          checked={selectedResources.includes(resource.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedResources([...selectedResources, resource.id]);
-                            } else {
-                              setSelectedResources(selectedResources.filter(id => id !== resource.id));
-                            }
-                          }}
-                        />
-                        <label
-                          htmlFor={`resource-${resource.id}`}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                        >
-                          {resource.name}
-                          <span className="text-xs text-muted-foreground ml-2">
-                            ({resource.status})
-                          </span>
-                        </label>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nenhum recurso de mão de obra disponível.</p>
-                  )}
-                </div>
-                {selectedResources.length === 0 && (
-                  <p className="text-sm text-destructive">Selecione pelo menos um recurso.</p>
-                )}
-              </div>
-
-              {/* Seleção de Líderes */}
-              <div className="space-y-3">
-                <FormLabel>Líderes Responsáveis *</FormLabel>
-                <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
-                  {teamMembers.length > 0 ? (
-                    teamMembers.map((member) => (
-                      <div key={member.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`leader-${member.id}`}
-                          checked={selectedLeaders.includes(member.id)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedLeaders([...selectedLeaders, member.id]);
-                            } else {
-                              setSelectedLeaders(selectedLeaders.filter(id => id !== member.id));
-                            }
-                          }}
-                        />
-                        <label
-                          htmlFor={`leader-${member.id}`}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                        >
-                          {member.name}
-                          <span className="text-xs text-muted-foreground ml-2">
-                            ({member.position})
-                          </span>
-                        </label>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nenhum membro da equipe disponível.</p>
-                  )}
-                </div>
-                {selectedLeaders.length === 0 && (
-                  <p className="text-sm text-destructive">Selecione pelo menos um líder.</p>
-                )}
-              </div>
-
-              {/* Observações */}
-              <FormField 
-                control={overtimeForm.control} 
-                name="observations" 
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Observações (Opcional)</FormLabel>
-                    <FormControl>
-                      <Textarea 
-                        placeholder="Informações adicionais sobre a liberação de horas extras..."
-                        className="min-h-[100px]"
-                        {...field} 
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} 
-              />
-
-              <DialogFooter>
-                <Button 
-                  type="submit" 
-                  disabled={overtimeForm.formState.isSubmitting || selectedResources.length === 0 || selectedLeaders.length === 0}
-                >
-                  {overtimeForm.formState.isSubmitting ? "Salvando..." : "Salvar Liberação"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEditStageDialogOpen(false)}>Cancelar</Button>
+                <Button onClick={handleConfirmEditStage}>Salvar Alterações</Button>
+            </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Alert Dialog para Exclusão de Horas Extras */}
-      <AlertDialog open={isOvertimeDeleteAlertOpen} onOpenChange={setIsOvertimeDeleteAlertOpen}>
+      
+      <AlertDialog open={isDeleteStageDialogOpen} onOpenChange={setIsDeleteStageDialogOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente a liberação de horas extras selecionada.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleConfirmDeleteOvertime} 
-              className="bg-destructive hover:bg-destructive/90"
-            >
-              Sim, excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
+            <AlertDialogHeader>
+                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                <AlertDialogDescription>
+                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation}</span> da lista e de todos os produtos que a utilizam. Esta ação não pode ser desfeita.
+                </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={handleConfirmDeleteStage} className="bg-destructive hover:bg-destructive/90">
+                    Sim, excluir etapa
+                </AlertDialogAction>
+            </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
