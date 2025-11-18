@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical } from "lucide-react";
+import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -73,6 +73,209 @@ const getLeadTimeBadge = (leadTime: number) => {
     return { variant: "destructive" as const, text: `${leadTime} dias`, color: "bg-red-600 hover:bg-red-700" };
   }
 };
+
+// Interfaces para calculadora de preços
+interface Material {
+  id: string;
+  category: string;
+  description: string;
+  pricePerKg: number;
+  unit: string;
+  specification?: string;
+}
+
+interface MaterialCompositionItem {
+  id: string;
+  materialId: string;
+  materialDescription: string;
+  weightKg: number;
+  pricePerKg: number;
+  totalCost: number;
+}
+
+interface StageCostItem {
+  stageName: string;
+  durationDays: number;
+  costPerDay: number;
+  totalCost: number;
+}
+
+interface PricingCalculation {
+  productId: string;
+  productCode: string;
+  productDescription: string;
+  productWeight: number;
+  materialCosts: MaterialCompositionItem[];
+  stageCosts: StageCostItem[];
+  machiningCost: number;
+  totalCost: number;
+  profitMargin: number;
+  profitValue: number;
+  finalPrice: number;
+  pricePerKg: number;
+  createdAt: Date;
+}
+
+// Categorias e biblioteca de materiais
+const MATERIAL_CATEGORIES = [
+  "Chapas Grossas",
+  "Chapas Finas",
+  "Chapas Especiais", 
+  "Tubos com Costura",
+  "Tubos sem Costura",
+  "Tubos Especiais",
+  "Perfil U",
+  "Perfil I",
+  "Perfil L (Cantoneiras)",
+  "Perfil T",
+  "Perfil H",
+  "Perfil W",
+  "Barras Redondas",
+  "Barras Chatas",
+  "Barras Quadradas",
+  "Barras Sextavadas",
+  "Aço Inox 304",
+  "Aço Inox 316",
+  "Alumínio",
+  "Cobre",
+  "Bronze",
+  "Latão",
+  "Aço Carbono",
+  "Aço Liga",
+  "Consumíveis Soldagem",
+  "Parafusos e Fixadores",
+  "Eletrodos",
+  "Gases",
+  "Outros"
+];
+
+const DEFAULT_MATERIALS: Material[] = [
+  // Chapas ASTM A36
+  { id: "chapa-1-8-a36", category: "Chapas Grossas", description: 'Chapa 1/8" - ASTM A36', pricePerKg: 5.42, unit: "kg", specification: "ASTM A36" },
+  { id: "chapa-3-16-a36", category: "Chapas Grossas", description: 'Chapa 3/16" - ASTM A36', pricePerKg: 5.57, unit: "kg" },
+  { id: "chapa-1-4-a36", category: "Chapas Grossas", description: 'Chapa 1/4" - ASTM A36', pricePerKg: 7.35, unit: "kg" },
+  { id: "chapa-5-16-a36", category: "Chapas Grossas", description: 'Chapa 5/16" - ASTM A36', pricePerKg: 7.14, unit: "kg" },
+  { id: "chapa-3-8-a36", category: "Chapas Grossas", description: 'Chapa 3/8" - ASTM A36', pricePerKg: 6.76, unit: "kg" },
+  { id: "chapa-1-2-a36", category: "Chapas Grossas", description: 'Chapa 1/2" - ASTM A36', pricePerKg: 6.86, unit: "kg" },
+  { id: "chapa-3-4-a36", category: "Chapas Grossas", description: 'Chapa 3/4" - ASTM A36', pricePerKg: 6.96, unit: "kg" },
+  { id: "chapa-1-a36", category: "Chapas Grossas", description: 'Chapa 1" - ASTM A36', pricePerKg: 7.54, unit: "kg" },
+  { id: "chapa-2-a36", category: "Chapas Grossas", description: 'Chapa 2" - ASTM A36', pricePerKg: 11.29, unit: "kg" },
+  { id: "chapa-3-a36", category: "Chapas Grossas", description: 'Chapa 3" - ASTM A36', pricePerKg: 13.93, unit: "kg" },
+  
+  // Chapas A572
+  { id: "chapa-1-4-a572", category: "Chapas Grossas", description: 'Chapa 1/4" - ASTM A572', pricePerKg: 11.15, unit: "kg" },
+  { id: "chapa-5-16-a572", category: "Chapas Grossas", description: 'Chapa 5/16" - ASTM A572', pricePerKg: 7.98, unit: "kg" },
+  
+  // Chapas SAE 1020
+  { id: "chapa-2-sae1020", category: "Chapas Finas", description: 'Chapa 2" - SAE 1020', pricePerKg: 11.87, unit: "kg" },
+  
+  // Chapas SAE 1045
+  { id: "ch-3-16-sae1045", category: "Chapas Especiais", description: 'CH 3/16" - SAE 1045', pricePerKg: 19.10, unit: "kg" },
+  { id: "ch-1-4-sae1045", category: "Chapas Especiais", description: 'CH 1/4" - SAE 1045', pricePerKg: 11.77, unit: "kg" },
+  { id: "ch-1-2-sae1045", category: "Chapas Especiais", description: 'CH 1/2" - SAE 1045', pricePerKg: 12.90, unit: "kg" },
+  { id: "ch-1-sae1045", category: "Chapas Especiais", description: 'CH 1" - SAE 1045', pricePerKg: 10.84, unit: "kg" },
+  { id: "ch-2-sae1045", category: "Chapas Especiais", description: 'CH 2" - SAE 1045', pricePerKg: 11.92, unit: "kg" },
+  { id: "ch-3-sae1045", category: "Chapas Especiais", description: 'CH 3" - SAE 1045', pricePerKg: 13.93, unit: "kg" },
+  
+  // Perfis W
+  { id: "perfil-w-200x22", category: "Perfil W", description: "PERFIL W 200 X 22,5 KGM", pricePerKg: 7.91, unit: "kg" },
+  { id: "perfil-w-150x29", category: "Perfil W", description: "PERFIL W 150X29,3 KG-M", pricePerKg: 9.30, unit: "kg" },
+  { id: "perfil-w-250x89", category: "Perfil W", description: "Perfil W 250x89", pricePerKg: 8.29, unit: "kg" },
+  { id: "perfil-w-250x32", category: "Perfil W", description: "PERFIL W 250 X 32,7 KGM", pricePerKg: 8.70, unit: "kg" },
+  { id: "perfil-w-250x44", category: "Perfil W", description: "PERFIL W 250 X 44,8 KGM", pricePerKg: 8.98, unit: "kg" },
+  
+  // Vigas U
+  { id: "viga-u4x2", category: "Perfil U", description: 'Viga U 4" x 2"', pricePerKg: 7.87, unit: "kg" },
+  { id: "viga-u6x2", category: "Perfil U", description: 'Viga U 6" x 2"', pricePerKg: 7.87, unit: "kg" },
+  { id: "viga-u10x2", category: "Perfil U", description: 'Viga U 10" x 2"', pricePerKg: 9.88, unit: "kg" },
+  { id: "viga-u4x1", category: "Perfil U", description: 'Viga U 4" x 1"', pricePerKg: 7.95, unit: "kg" },
+  { id: "viga-u8x2", category: "Perfil U", description: 'Viga U 8" x 2"', pricePerKg: 9.55, unit: "kg" },
+  
+  // Barras Redondas
+  { id: "barra-red-5-8-1020", category: "Barras Redondas", description: 'Barra red 5/8" sae 1020', pricePerKg: 7.59, unit: "kg" },
+  { id: "barra-red-1-2-1020", category: "Barras Redondas", description: 'Barra red 1/2" sae 1020', pricePerKg: 7.25, unit: "kg" },
+  { id: "barra-red-1-1-2-1020", category: "Barras Redondas", description: 'Barra red 1 1/2" sae 1020', pricePerKg: 8.25, unit: "kg" },
+  { id: "barra-red-2-1020", category: "Barras Redondas", description: 'Barra red 2" tref sae 1020', pricePerKg: 12.90, unit: "kg" },
+  { id: "barra-red-1-1020", category: "Barras Redondas", description: 'Barra red 1" tref sae1020', pricePerKg: 12.90, unit: "kg" },
+  
+  // Chapas RAVUR 450
+  { id: "chapa-1-2-ravur450", category: "Chapas Especiais", description: 'Chapa 1/2" - RAVUR 450', pricePerKg: 22.00, unit: "kg" },
+  { id: "chapa-5-8-ravur450", category: "Chapas Especiais", description: 'Chapa 5/8" - RAVUR 450', pricePerKg: 22.50, unit: "kg" },
+  { id: "chapa-3-8-ravur450", category: "Chapas Especiais", description: 'Chapa 3/8" - RAVUR 450', pricePerKg: 22.00, unit: "kg" },
+  
+  // Barras Redondas 1045
+  { id: "barra-red-1-3-4-1045", category: "Barras Redondas", description: 'Barra Redonda 1.3/4" - SAE 1045', pricePerKg: 12.50, unit: "kg" },
+  { id: "barra-red-10-lam-norm-4140", category: "Barras Redondas", description: 'Barra redonda 10" laminado e normalizado - SAE 4140', pricePerKg: 25.64, unit: "kg" },
+  
+  // Barras Quad
+  { id: "barra-quad-3-8-1020", category: "Barras Quadradas", description: 'Barra Quad 3/8" - SAE 1020', pricePerKg: 7.70, unit: "kg" },
+  { id: "barra-quad-2-1-2-tref-1020", category: "Barras Quadradas", description: 'barra quad 2 1/2" tref - SAE 1020', pricePerKg: 11.20, unit: "kg" },
+  { id: "barra-quad-2-1045", category: "Barras Quadradas", description: 'BARRA QUADRADA 2" - SAE 1045', pricePerKg: 11.20, unit: "kg" },
+  
+  // Barras Chatas
+  { id: "barra-chata-2x1-4-1020", category: "Barras Chatas", description: 'Barra Chata 2" x 1/4" - SAE 1020', pricePerKg: 7.55, unit: "kg" },
+  { id: "barra-chata-5-8x1-8-1020", category: "Barras Chatas", description: 'Barra chata 5/8" x 1/8" - SAE 1020', pricePerKg: 8.75, unit: "kg" },
+  { id: "barra-chata-1x3-16-1020", category: "Barras Chatas", description: 'Barra chata 1" x 3/16" - SAE 1020', pricePerKg: 6.98, unit: "kg" },
+  { id: "barra-chata-2x1-8-4020", category: "Barras Chatas", description: 'Barra chata 2" x 1/8" - SAE 4020', pricePerKg: 7.65, unit: "kg" },
+  
+  // Cantoneiras
+  { id: "cant-3x5-16-1020", category: "Perfil L (Cantoneiras)", description: 'Cant 3" x 5/16" - SAE 1020', pricePerKg: 7.87, unit: "kg" },
+  { id: "cant-3x1-4-1020", category: "Perfil L (Cantoneiras)", description: 'Cant 3" x 1/4" - SAE 1020', pricePerKg: 7.34, unit: "kg" },
+  { id: "cant-4x1-2-1020", category: "Perfil L (Cantoneiras)", description: 'Cant 4" x 1/2" - SAE 1020', pricePerKg: 8.10, unit: "kg" },
+  { id: "cant-6x3-8-1020", category: "Perfil L (Cantoneiras)", description: 'cant 6" X 3/8" - SAE 1020', pricePerKg: 12.30, unit: "kg" },
+  { id: "cant-5x3-8-a572", category: "Perfil L (Cantoneiras)", description: 'Cant 5" X 3/8" - ASTM A572', pricePerKg: 8.80, unit: "kg" },
+  
+  // Tubos Schedule
+  { id: "tubo-3-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 3" SCH 40 ASTM A53', pricePerKg: 15.39, unit: "kg" },
+  { id: "tubo-4-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 4" SCH 40 ASTM A53', pricePerKg: 16.10, unit: "kg" },
+  { id: "tubo-6-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 6" SCH 40 ASTM A53', pricePerKg: 14.47, unit: "kg" },
+  { id: "tubo-8-sch40-a53", category: "Tubos sem Costura", description: 'TUBO 8" SCH 40 ASTM A53', pricePerKg: 16.05, unit: "kg" },
+  { id: "tubo-3-sch160-a53", category: "Tubos sem Costura", description: 'TUBO 3 SCH 160 S/COST ASTM A53', pricePerKg: 33.61, unit: "kg" },
+  
+  // Tubos DIN
+  { id: "tubo-1-1-4-din2440", category: "Tubos com Costura", description: 'Tubo 1 1/4" DIN 2440', pricePerKg: 9.80, unit: "kg" },
+  { id: "tubo-3-din2440", category: "Tubos com Costura", description: 'Tubo 3" DIN 2440', pricePerKg: 9.24, unit: "kg" },
+  { id: "tubo-1-din2440", category: "Tubos com Costura", description: 'Tubo 1" DIN 2440', pricePerKg: 9.27, unit: "kg" },
+  { id: "tubo-2-din2440", category: "Tubos com Costura", description: 'Tubo 2" DIN 2440 ASTM A53', pricePerKg: 9.55, unit: "kg" },
+  
+  // Aço Inox 304
+  { id: "chapa-inox304-1mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 1mm", pricePerKg: 35.00, unit: "kg" },
+  { id: "chapa-inox304-2mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 2mm", pricePerKg: 34.50, unit: "kg" },
+  { id: "chapa-inox304-3mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 3mm", pricePerKg: 34.00, unit: "kg" },
+  { id: "tubo-inox304-1", category: "Aço Inox 304", description: 'Tubo Inox 304 - 1"', pricePerKg: 42.00, unit: "kg" },
+  { id: "tubo-inox304-2", category: "Aço Inox 304", description: 'Tubo Inox 304 - 2"', pricePerKg: 41.50, unit: "kg" },
+  
+  // Aço Inox 316
+  { id: "chapa-inox316-1mm", category: "Aço Inox 316", description: "Chapa Inox 316 - 1mm", pricePerKg: 48.00, unit: "kg" },
+  { id: "chapa-inox316-2mm", category: "Aço Inox 316", description: "Chapa Inox 316 - 2mm", pricePerKg: 47.50, unit: "kg" },
+  { id: "tubo-inox316-1", category: "Aço Inox 316", description: 'Tubo Inox 316 - 1"', pricePerKg: 55.00, unit: "kg" },
+  
+  // Alumínio
+  { id: "chapa-aluminio-1mm", category: "Alumínio", description: "Chapa Alumínio 1100 - 1mm", pricePerKg: 28.00, unit: "kg" },
+  { id: "chapa-aluminio-2mm", category: "Alumínio", description: "Chapa Alumínio 1100 - 2mm", pricePerKg: 27.50, unit: "kg" },
+  { id: "perfil-aluminio-u", category: "Alumínio", description: "Perfil Alumínio U 50x25mm", pricePerKg: 29.00, unit: "kg" },
+  { id: "tubo-aluminio-1", category: "Alumínio", description: 'Tubo Alumínio 1"', pricePerKg: 30.00, unit: "kg" },
+  
+  // Cobre e Ligas
+  { id: "barra-cobre-1", category: "Cobre", description: 'Barra Cobre 1"', pricePerKg: 65.00, unit: "kg" },
+  { id: "chapa-cobre-1mm", category: "Cobre", description: "Chapa Cobre 1mm", pricePerKg: 68.00, unit: "kg" },
+  { id: "barra-bronze-1", category: "Bronze", description: 'Barra Bronze 1"', pricePerKg: 55.00, unit: "kg" },
+  { id: "barra-latao-1", category: "Latão", description: 'Barra Latão 1"', pricePerKg: 48.00, unit: "kg" },
+  
+  // Consumíveis
+  { id: "eletrodo-e6013", category: "Eletrodos", description: "Eletrodo E6013 - 3,25mm", pricePerKg: 18.50, unit: "kg" },
+  { id: "eletrodo-e7018", category: "Eletrodos", description: "Eletrodo E7018 - 3,25mm", pricePerKg: 22.00, unit: "kg" },
+  { id: "arame-mig-er70s", category: "Consumíveis Soldagem", description: "Arame MIG ER70S-6", pricePerKg: 16.50, unit: "kg" },
+  { id: "arame-inox-308", category: "Consumíveis Soldagem", description: "Arame Inox 308L", pricePerKg: 85.00, unit: "kg" },
+  { id: "gas-argonio", category: "Gases", description: "Argônio Industrial", pricePerKg: 45.00, unit: "m³" },
+  { id: "gas-co2", category: "Gases", description: "CO2 Industrial", pricePerKg: 35.00, unit: "m³" },
+  
+  // Parafusos e Fixadores
+  { id: "parafuso-m10", category: "Parafusos e Fixadores", description: "Parafuso M10 - Zincado", pricePerKg: 25.00, unit: "kg" },
+  { id: "parafuso-m12", category: "Parafusos e Fixadores", description: "Parafuso M12 - Zincado", pricePerKg: 24.00, unit: "kg" },
+  { id: "porca-m10", category: "Parafusos e Fixadores", description: "Porca M10 - Zincada", pricePerKg: 22.00, unit: "kg" },
+  { id: "arruela-m10", category: "Parafusos e Fixadores", description: "Arruela M10 - Zincada", pricePerKg: 20.00, unit: "kg" },
+];
 
 // Função para exportar relatório em PDF usando canvas e jsPDF
 const exportCalculatorReportPDF = (
@@ -262,6 +465,15 @@ export default function ProductsPage() {
   
   // Simulação de carga de trabalho por setor (em uma implementação real, isso viria do banco de dados)
   const [sectorWorkload, setSectorWorkload] = useState<Record<string, number>>({});
+
+  // Estados da calculadora de preços
+  const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
+  const [machineHourRate, setMachineHourRate] = useState<number>(150); // R$/hora
+  const [selectedProductForPricing, setSelectedProductForPricing] = useState<Product | null>(null);
+  const [pricingCalculation, setPricingCalculation] = useState<PricingCalculation | null>(null);
+  const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
+  const [profitMargin, setProfitMargin] = useState<number>(30); // percentual
+  const [machiningHours, setMachiningHours] = useState<number>(0);
 
   // Função para simular carga de trabalho dos setores
   const simulateSectorWorkload = useCallback(() => {
@@ -1150,6 +1362,40 @@ export default function ProductsPage() {
     });
   };
 
+  // Salvar custos de etapas no Firebase
+  const saveStageCosts = useCallback(async () => {
+    try {
+      const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
+      await setDoc(costsRef, { costs: stageCosts, machineHourRate }, { merge: true });
+      toast({ title: "Custos salvos com sucesso!" });
+    } catch (error) {
+      console.error("Error saving stage costs:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar custos" });
+    }
+  }, [stageCosts, machineHourRate, toast]);
+
+  // Carregar custos de etapas do Firebase
+  const loadStageCosts = useCallback(async () => {
+    try {
+      const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
+      const docSnap = await getDoc(costsRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setStageCosts(data.costs || {});
+        setMachineHourRate(data.machineHourRate || 150);
+      }
+    } catch (error) {
+      console.error("Error loading stage costs:", error);
+    }
+  }, []);
+
+  // Carregar ao iniciar
+  useEffect(() => {
+    if (!authLoading && user) {
+      loadStageCosts();
+    }
+  }, [user, authLoading, loadStageCosts]);
+
   return (
     <>
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
@@ -1214,6 +1460,10 @@ export default function ProductsPage() {
                 <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
                 <TabsTrigger value="stages">Etapas de Produção</TabsTrigger>
                 <TabsTrigger value="calculator">Calculadora de Prazos</TabsTrigger>
+                <TabsTrigger value="pricing">
+                    <Calculator className="mr-2 h-4 w-4" />
+                    Calculadora de Preços
+                </TabsTrigger>
             </TabsList>
             <TabsContent value="catalog" className="mt-4">
                 <Card>
@@ -1646,6 +1896,530 @@ export default function ProductsPage() {
                                     <p>Adicione produtos e clique em "Analisar Viabilidade" para ver os resultados.</p>
                                 </div>
                             )}
+                        </CardContent>
+                    </Card>
+                </div>
+            </TabsContent>
+            <TabsContent value="pricing" className="mt-4">
+                <div className="grid gap-6">
+                    {/* Card de Configurações Gerais */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Configurações de Custos</CardTitle>
+                            <CardDescription>
+                                Defina os custos operacionais e taxas que serão usados nos cálculos
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <Label>Valor da Hora Máquina (R$)</Label>
+                                    <Input
+                                        type="number"
+                                        value={machineHourRate}
+                                        onChange={(e) => setMachineHourRate(Number(e.target.value))}
+                                        placeholder="150.00"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Usado para calcular custos de usinagem
+                                    </p>
+                                </div>
+                                <div>
+                                    <Label>Margem de Lucro Padrão (%)</Label>
+                                    <Input
+                                        type="number"
+                                        value={profitMargin}
+                                        onChange={(e) => setProfitMargin(Number(e.target.value))}
+                                        placeholder="30"
+                                    />
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Percentual aplicado sobre o custo total
+                                    </p>
+                                </div>
+                            </div>
+
+                            <Separator />
+
+                            <div>
+                                <h4 className="text-sm font-medium mb-3">Custo por Dia de Cada Etapa (R$/dia)</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {manufacturingStages.map(stage => (
+                                        <div key={stage}>
+                                            <Label className="text-xs">{stage}</Label>
+                                            <Input
+                                                type="number"
+                                                placeholder="0.00"
+                                                value={stageCosts[stage] || ''}
+                                                onChange={(e) => setStageCosts(prev => ({
+                                                    ...prev,
+                                                    [stage]: Number(e.target.value)
+                                                }))}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-2">
+                                    💡 Dica: Considere mão de obra, energia, depreciação e overhead de cada setor
+                                </p>
+                                <Button onClick={saveStageCosts} className="mt-3" variant="outline">
+                                    Salvar Configurações
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Card de Seleção de Produto e Composição */}
+                    <div className="grid gap-6 lg:grid-cols-2">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Calcular Preço do Produto</CardTitle>
+                                <CardDescription>
+                                    Selecione um produto e defina a composição de materiais
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {/* Seleção de Produto */}
+                                <div>
+                                    <Label>Produto</Label>
+                                    <Select 
+                                        value={selectedProductForPricing?.id || ''} 
+                                        onValueChange={(value) => {
+                                            const product = products.find(p => p.id === value);
+                                            setSelectedProductForPricing(product || null);
+                                            setMaterialComposition([]);
+                                            setPricingCalculation(null);
+                                        }}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione um produto" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {products.filter(p => p.unitWeight && p.unitWeight > 0).map(product => (
+                                                <SelectItem key={product.id} value={product.id}>
+                                                    {product.code} - {product.description} ({product.unitWeight}kg)
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                {selectedProductForPricing && (
+                                    <>
+                                        <div className="p-3 bg-muted rounded-md">
+                                            <div className="text-sm space-y-1">
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">Peso total:</span>
+                                                    <span>{selectedProductForPricing.unitWeight} kg</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">Lead time:</span>
+                                                    <span>{calculateLeadTime(selectedProductForPricing)} dias</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Adicionar Material */}
+                                        <div>
+                                            <h4 className="text-sm font-medium mb-3">Composição de Materiais</h4>
+                                            <div className="space-y-3">
+                                                {/* Formulário para adicionar material */}
+                                                <div className="grid grid-cols-1 gap-2">
+                                                    <Select
+                                                        onValueChange={(materialId) => {
+                                                            const material = DEFAULT_MATERIALS.find(m => m.id === materialId);
+                                                            if (!material) return;
+                                                            
+                                                            const newItem: MaterialCompositionItem = {
+                                                                id: Date.now().toString(),
+                                                                materialId: material.id,
+                                                                materialDescription: material.description,
+                                                                weightKg: 0,
+                                                                pricePerKg: material.pricePerKg,
+                                                                totalCost: 0
+                                                            };
+                                                            setMaterialComposition(prev => [...prev, newItem]);
+                                                        }}
+                                                    >
+                                                        <SelectTrigger>
+                                                            <SelectValue placeholder="Adicionar material" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {MATERIAL_CATEGORIES.map(category => (
+                                                                <div key={category}>
+                                                                    <div className="px-2 py-1.5 text-sm font-semibold text-muted-foreground">
+                                                                        {category}
+                                                                    </div>
+                                                                    {DEFAULT_MATERIALS.filter(m => m.category === category).map(material => (
+                                                                        <SelectItem key={material.id} value={material.id}>
+                                                                            {material.description} - R$ {material.pricePerKg.toFixed(2)}/kg
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </div>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
+                                                {/* Lista de materiais adicionados */}
+                                                {materialComposition.length > 0 && (
+                                                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                                                        {materialComposition.map((item, index) => (
+                                                            <div key={item.id} className="flex items-center gap-2 p-2 border rounded-md">
+                                                                <div className="flex-1 text-xs">
+                                                                    <div className="font-medium">{item.materialDescription}</div>
+                                                                    <div className="text-muted-foreground">
+                                                                        R$ {item.pricePerKg.toFixed(2)}/kg
+                                                                    </div>
+                                                                </div>
+                                                                <Input
+                                                                    type="number"
+                                                                    placeholder="Peso (kg)"
+                                                                    className="w-24 h-8 text-sm"
+                                                                    value={item.weightKg || ''}
+                                                                    onChange={(e) => {
+                                                                        const weight = Number(e.target.value);
+                                                                        setMaterialComposition(prev => prev.map((m, i) => 
+                                                                            i === index 
+                                                                                ? { ...m, weightKg: weight, totalCost: weight * m.pricePerKg }
+                                                                                : m
+                                                                        ));
+                                                                    }}
+                                                                />
+                                                                <div className="w-20 text-right text-xs font-medium">
+                                                                    R$ {item.totalCost.toFixed(2)}
+                                                                </div>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8"
+                                                                    onClick={() => setMaterialComposition(prev => prev.filter((_, i) => i !== index))}
+                                                                >
+                                                                    <Trash2 className="h-3 w-3" />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {/* Verificação de peso */}
+                                                {materialComposition.length > 0 && (
+                                                    <div className="p-2 bg-muted rounded-md text-xs">
+                                                        <div className="flex justify-between">
+                                                            <span>Peso dos materiais:</span>
+                                                            <span className="font-medium">
+                                                                {materialComposition.reduce((sum, m) => sum + m.weightKg, 0).toFixed(2)} kg
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span>Peso do produto:</span>
+                                                            <span className="font-medium">{selectedProductForPricing.unitWeight} kg</span>
+                                                        </div>
+                                                        {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)) > 0.1 && (
+                                                            <div className="text-yellow-600 mt-1">
+                                                                ⚠️ Diferença de peso detectada
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Horas de Usinagem */}
+                                        {selectedProductForPricing.productionPlanTemplate?.some(stage => 
+                                            stage.stageName.toLowerCase().includes('usinagem')
+                                        ) && (
+                                            <>
+                                                <Separator />
+                                                <div>
+                                                    <Label>Horas de Usinagem Estimadas</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="0.5"
+                                                        placeholder="0"
+                                                        value={machiningHours}
+                                                        onChange={(e) => setMachiningHours(Number(e.target.value))}
+                                                    />
+                                                    <p className="text-xs text-muted-foreground mt-1">
+                                                        Valor da hora: R$ {machineHourRate.toFixed(2)}
+                                                    </p>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        <Button 
+                                            onClick={() => {
+                                                if (materialComposition.length === 0) {
+                                                    toast({
+                                                        variant: "destructive",
+                                                        title: "Adicione materiais",
+                                                        description: "É necessário adicionar pelo menos um material à composição."
+                                                    });
+                                                    return;
+                                                }
+
+                                                // Calcular custos por etapa
+                                                const stageCostItems: StageCostItem[] = (selectedProductForPricing.productionPlanTemplate || []).map(stage => ({
+                                                    stageName: stage.stageName,
+                                                    durationDays: stage.durationDays || 0,
+                                                    costPerDay: stageCosts[stage.stageName] || 0,
+                                                    totalCost: (stage.durationDays || 0) * (stageCosts[stage.stageName] || 0)
+                                                }));
+
+                                                const materialCostTotal = materialComposition.reduce((sum, m) => sum + m.totalCost, 0);
+                                                const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
+                                                const machiningCost = machiningHours * machineHourRate;
+                                                const totalCost = materialCostTotal + stageCostTotal + machiningCost;
+                                                const profitValue = totalCost * (profitMargin / 100);
+                                                const finalPrice = totalCost + profitValue;
+                                                const pricePerKg = finalPrice / (selectedProductForPricing.unitWeight || 1);
+
+                                                const calculation: PricingCalculation = {
+                                                    productId: selectedProductForPricing.id,
+                                                    productCode: selectedProductForPricing.code,
+                                                    productDescription: selectedProductForPricing.description,
+                                                    productWeight: selectedProductForPricing.unitWeight || 0,
+                                                    materialCosts: materialComposition,
+                                                    stageCosts: stageCostItems,
+                                                    machiningCost,
+                                                    totalCost,
+                                                    profitMargin,
+                                                    profitValue,
+                                                    finalPrice,
+                                                    pricePerKg,
+                                                    createdAt: new Date()
+                                                };
+
+                                                setPricingCalculation(calculation);
+                                            }} 
+                                            className="w-full"
+                                        >
+                                            <Calculator className="mr-2 h-4 w-4" />
+                                            Calcular Preço
+                                        </Button>
+                                    </>
+                                )}
+                            </CardContent>
+                        </Card>
+
+                        {/* Card de Resultado */}
+                        <Card>
+                            <CardHeader>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <CardTitle>Resultado da Precificação</CardTitle>
+                                        <CardDescription>
+                                            Composição detalhada de custos e preço final
+                                        </CardDescription>
+                                    </div>
+                                    {pricingCalculation && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                // Exportar relatório
+                                                const doc = `
+MECALD - RELATÓRIO DE PRECIFICAÇÃO
+Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+
+========================================
+PRODUTO
+========================================
+Código: ${pricingCalculation.productCode}
+Descrição: ${pricingCalculation.productDescription}
+Peso: ${pricingCalculation.productWeight} kg
+
+========================================
+COMPOSIÇÃO DE MATERIAIS
+========================================
+${pricingCalculation.materialCosts.map(m => 
+    `${m.materialDescription}\n  ${m.weightKg} kg × R$ ${m.pricePerKg.toFixed(2)}/kg = R$ ${m.totalCost.toFixed(2)}`
+).join('\n')}
+
+Subtotal Materiais: R$ ${pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0).toFixed(2)}
+
+========================================
+CUSTOS DE PRODUÇÃO POR ETAPA
+========================================
+${pricingCalculation.stageCosts.map(s =>
+    `${s.stageName}: ${s.durationDays} dias × R$ ${s.costPerDay.toFixed(2)}/dia = R$ ${s.totalCost.toFixed(2)}`
+).join('\n')}
+
+Subtotal Etapas: R$ ${pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0).toFixed(2)}
+
+========================================
+OUTROS CUSTOS
+========================================
+Usinagem: R$ ${pricingCalculation.machiningCost.toFixed(2)}
+
+========================================
+RESUMO FINANCEIRO
+========================================
+Custo Total: R$ ${pricingCalculation.totalCost.toFixed(2)}
+Margem de Lucro (${pricingCalculation.profitMargin}%): R$ ${pricingCalculation.profitValue.toFixed(2)}
+──────────────────────────────────────
+PREÇO FINAL: R$ ${pricingCalculation.finalPrice.toFixed(2)}
+PREÇO POR KG: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg
+══════════════════════════════════════
+                                                `;
+                                                
+                                                const blob = new Blob([doc], { type: 'text/plain' });
+                                                const url = URL.createObjectURL(blob);
+                                                const link = document.createElement('a');
+                                                link.href = url;
+                                                link.download = `precificacao-${pricingCalculation.productCode}-${format(new Date(), 'yyyyMMdd-HHmm')}.txt`;
+                                                document.body.appendChild(link);
+                                                link.click();
+                                                document.body.removeChild(link);
+                                                URL.revokeObjectURL(url);
+                                                
+                                                toast({
+                                                    title: "Relatório exportado!",
+                                                    description: "O relatório de precificação foi baixado com sucesso."
+                                                });
+                                            }}
+                                        >
+                                            <Download className="mr-2 h-3 w-3" />
+                                            Exportar
+                                        </Button>
+                                    )}
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                {pricingCalculation ? (
+                                    <div className="space-y-4">
+                                        {/* Custos de Materiais */}
+                                        <div>
+                                            <h4 className="text-sm font-medium mb-2">Materiais</h4>
+                                            <div className="space-y-1 text-sm">
+                                                {pricingCalculation.materialCosts.map(m => (
+                                                    <div key={m.id} className="flex justify-between text-muted-foreground">
+                                                        <span className="truncate flex-1">{m.materialDescription}</span>
+                                                        <span className="ml-2 font-mono">R$ {m.totalCost.toFixed(2)}</span>
+                                                    </div>
+                                                ))}
+                                                <div className="flex justify-between font-medium pt-1 border-t">
+                                                    <span>Subtotal Materiais</span>
+                                                    <span className="font-mono">
+                                                        R$ {pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Custos de Etapas */}
+                                        <div>
+                                            <h4 className="text-sm font-medium mb-2">Custos de Produção</h4>
+                                            <div className="space-y-1 text-sm">
+                                                {pricingCalculation.stageCosts.map(s => (
+                                                    <div key={s.stageName} className="flex justify-between text-muted-foreground">
+                                                        <span>{s.stageName}</span>
+                                                        <span className="font-mono">R$ {s.totalCost.toFixed(2)}</span>
+                                                    </div>
+                                                ))}
+                                                {pricingCalculation.machiningCost > 0 && (
+                                                    <div className="flex justify-between text-muted-foreground">
+                                                        <span>Usinagem</span>
+                                                        <span className="font-mono">R$ {pricingCalculation.machiningCost.toFixed(2)}</span>
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-between font-medium pt-1 border-t">
+                                                    <span>Subtotal Produção</span>
+                                                    <span className="font-mono">
+                                                        R$ {(pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) + pricingCalculation.machiningCost).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Total e Margem */}
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between text-sm">
+                                                <span className="font-medium">Custo Total</span>
+                                                <span className="font-mono font-medium">R$ {pricingCalculation.totalCost.toFixed(2)}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm text-green-600">
+                                                <span className="font-medium">Lucro ({pricingCalculation.profitMargin}%)</span>
+                                                <span className="font-mono font-medium">R$ {pricingCalculation.profitValue.toFixed(2)}</span>
+                                            </div>
+                                        </div>
+
+                                        <Separator />
+
+                                        {/* Preço Final */}
+                                        <div className="p-4 bg-primary/5 rounded-lg border-2 border-primary/20">
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-lg font-bold">Preço Final</span>
+                                                    <span className="text-2xl font-bold text-primary font-mono">
+                                                        R$ {pricingCalculation.finalPrice.toFixed(2)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center text-sm text-muted-foreground">
+                                                    <span>Preço por kg</span>
+                                                    <span className="font-mono font-medium">
+                                                        R$ {pricingCalculation.pricePerKg.toFixed(2)}/kg
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Dica */}
+                                        <div className="text-xs text-muted-foreground p-3 bg-muted rounded-md">
+                                            💡 <strong>Dica:</strong> Este é o preço sem impostos. Lembre-se de adicionar 
+                                            os impostos aplicáveis (ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-12 text-muted-foreground">
+                                        <Calculator className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                                        <p>Selecione um produto e calcule o preço para ver os resultados aqui.</p>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* Card de Biblioteca de Materiais */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Biblioteca de Materiais</CardTitle>
+                            <CardDescription>
+                                {DEFAULT_MATERIALS.length} materiais cadastrados. Você pode adicionar novos materiais conforme necessário.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-4">
+                                <ScrollArea className="h-96">
+                                    <div className="space-y-4">
+                                        {MATERIAL_CATEGORIES.map(category => {
+                                            const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
+                                            if (categoryMaterials.length === 0) return null;
+                                            
+                                            return (
+                                                <div key={category}>
+                                                    <h4 className="text-sm font-semibold mb-2 text-primary">{category}</h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                        {categoryMaterials.map(material => (
+                                                            <div key={material.id} className="p-2 border rounded text-xs">
+                                                                <div className="font-medium truncate">{material.description}</div>
+                                                                <div className="text-muted-foreground">
+                                                                    R$ {material.pricePerKg.toFixed(2)}/{material.unit}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </ScrollArea>
+                            </div>
                         </CardContent>
                     </Card>
                 </div>
