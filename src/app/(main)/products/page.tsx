@@ -2575,24 +2575,65 @@ export default function ProductsPage() {
                                                 // Logo (se disponível) - lado direito
                                                 const logoX = pageWidth - margin - 50;
                                                 const logoY = yPosition + 5;
+                                                const logoWidth = 45;
+                                                const logoHeight = 25;
+                                                
+                                                // Desenhar container do logo
+                                                doc.setFillColor(255, 255, 255);
+                                                doc.roundedRect(logoX, logoY, logoWidth, logoHeight, 2, 2, 'F');
+                                                doc.setDrawColor(200, 200, 200);
+                                                doc.setLineWidth(0.5);
+                                                doc.roundedRect(logoX, logoY, logoWidth, logoHeight, 2, 2, 'D');
+                                                
                                                 if (companyData?.logo?.preview) {
                                                     try {
-                                                        // jsPDF suporta imagens via addImage
-                                                        // Nota: Para funcionar, a imagem precisa estar acessível
-                                                        // Por enquanto, vamos apenas desenhar um placeholder
-                                                        doc.setFillColor(255, 255, 255);
-                                                        doc.roundedRect(logoX, logoY, 45, 25, 2, 2, 'F');
-                                                        doc.setDrawColor(200, 200, 200);
-                                                        doc.setLineWidth(0.5);
-                                                        doc.roundedRect(logoX, logoY, 45, 25, 2, 2, 'D');
+                                                        // Tentar carregar a logo
+                                                        let logoSrc = companyData.logo.preview;
+                                                        
+                                                        // Garantir que está em formato Base64 correto
+                                                        if (!logoSrc.startsWith('data:')) {
+                                                            // Se não começar com data:, assumir que é Base64 puro
+                                                            logoSrc = `data:image/png;base64,${logoSrc}`;
+                                                        }
+                                                        
+                                                        // Converter Base64 para blob temporariamente e adicionar ao PDF
+                                                        // jsPDF suporta addImage com Base64 diretamente
+                                                        if (logoSrc.startsWith('data:image/')) {
+                                                            // Extrair apenas a parte Base64
+                                                            const base64Data = logoSrc.split(',')[1] || logoSrc;
+                                                            const imageType = logoSrc.match(/data:image\/(\w+)/)?.[1] || 'png';
+                                                            
+                                                            // Adicionar imagem ao PDF (jsPDF suporta PNG e JPEG)
+                                                            try {
+                                                                doc.addImage(base64Data, imageType.toUpperCase(), logoX + 2, logoY + 2, logoWidth - 4, logoHeight - 4, undefined, 'FAST');
+                                                            } catch (imgError) {
+                                                                // Se falhar, mostrar placeholder
+                                                                console.error("Error adding logo image:", imgError);
+                                                                doc.setFontSize(7);
+                                                                doc.setTextColor(150, 150, 150);
+                                                                doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
+                                                            }
+                                                        } else {
+                                                            // Se não for Base64 válido, mostrar placeholder
+                                                            doc.setFontSize(7);
+                                                            doc.setTextColor(150, 150, 150);
+                                                            doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
+                                                        }
+                                                    } catch (error) {
+                                                        console.error("Error processing logo:", error);
+                                                        // Mostrar placeholder em caso de erro
                                                         doc.setFontSize(7);
                                                         doc.setTextColor(150, 150, 150);
-                                                        doc.text('LOGO', logoX + 22.5, logoY + 12.5, { align: 'center' });
-                                                        doc.setTextColor(0, 0, 0);
-                                                    } catch (error) {
-                                                        console.error("Error loading logo:", error);
+                                                        doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
                                                     }
+                                                } else {
+                                                    // Sem logo disponível, mostrar placeholder
+                                                    doc.setFontSize(7);
+                                                    doc.setTextColor(150, 150, 150);
+                                                    doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
                                                 }
+                                                
+                                                doc.setTextColor(0, 0, 0);
                                                 
                                                 // Dados da empresa - lado esquerdo
                                                 doc.setFontSize(8);
@@ -2660,7 +2701,7 @@ export default function ProductsPage() {
                                                 doc.setFontSize(11);
                                                 doc.setFont('helvetica', 'bold');
                                                 doc.setTextColor(30, 64, 175); // Azul escuro
-                                                doc.text('📦 DADOS DO PRODUTO', margin + 5, yPosition);
+                                                doc.text('DADOS DO PRODUTO', margin + 5, yPosition);
                                                 
                                                 yPosition += 8;
                                                 doc.setFontSize(9);
@@ -2686,7 +2727,7 @@ export default function ProductsPage() {
                                                 const materialTotal = pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0);
                                                 
                                                 // COMPOSIÇÃO DE MATERIAIS (Tabela)
-                                                addSection('🔧 COMPOSIÇÃO DE MATERIAIS');
+                                                addSection('COMPOSIÇÃO DE MATERIAIS');
                                                 
                                                 if (pricingCalculation.materialCosts.length > 0) {
                                                     // Cabeçalho da tabela
@@ -2757,7 +2798,7 @@ export default function ProductsPage() {
                                                 const activeStages = pricingCalculation.stageCosts.filter(s => s.totalCost > 0);
                                                 
                                                 if (activeStages.length > 0) {
-                                                    addSection('💼 CUSTOS DE PRODUÇÃO POR ETAPA');
+                                                    addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
                                                     
                                                     // Cabeçalho da tabela de etapas
                                                     const stagesTableY = yPosition;
@@ -2819,7 +2860,7 @@ export default function ProductsPage() {
                                                     doc.setTextColor(0, 0, 0);
                                                     yPosition += 12;
                                                 } else {
-                                                    addSection('💼 CUSTOS DE PRODUÇÃO POR ETAPA');
+                                                    addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
                                                     addText('Nenhuma etapa com custo configurado', 9);
                                                     yPosition += 5;
                                                 }
