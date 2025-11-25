@@ -3271,13 +3271,20 @@ export default function ProductsPage() {
                                     </div>
 
                                     <ScrollArea className="h-96">
-                                        <div className="space-y-4">
-                                            {/* Materiais Personalizados */}
+                                        <div className="space-y-6">
+                                            {/* Materiais Personalizados - COM botões de editar/excluir */}
                                             {customMaterials.length > 0 && (
                                                 <div>
-                                                    <h4 className="text-sm font-semibold mb-2 text-primary flex items-center gap-2">
-                                                        <Badge variant="secondary">Personalizados</Badge>
-                                                    </h4>
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <h4 className="text-sm font-semibold text-primary">Materiais Personalizados</h4>
+                                                        <Badge variant="secondary" className="text-xs">
+                                                            {customMaterials.filter(m => 
+                                                                materialSearchQuery === "" ||
+                                                                m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
+                                                                m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
+                                                            ).length}
+                                                        </Badge>
+                                                    </div>
                                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                                         {customMaterials
                                                             .filter(m => 
@@ -3286,33 +3293,46 @@ export default function ProductsPage() {
                                                                 m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
                                                             )
                                                             .map(material => (
-                                                                <div key={material.id} className="p-2 border rounded text-xs group hover:border-primary transition-colors">
+                                                                <div key={material.id} className="p-3 border-2 border-primary/30 rounded-lg text-xs group hover:border-primary hover:shadow-md transition-all bg-primary/5">
                                                                     <div className="flex items-start justify-between gap-2">
                                                                         <div className="flex-1 min-w-0">
-                                                                            <div className="font-medium truncate">{material.description}</div>
-                                                                            <div className="text-muted-foreground">
+                                                                            <div className="font-semibold truncate text-sm">{material.description}</div>
+                                                                            <div className="text-primary font-medium mt-1">
                                                                                 R$ {material.pricePerKg.toFixed(2)}/{material.unit}
                                                                             </div>
-                                                                            <div className="text-xs text-muted-foreground mt-1">
-                                                                                {material.category}
+                                                                            <div className="flex items-center gap-1 mt-1">
+                                                                                <Badge variant="outline" className="text-xs">
+                                                                                    {material.category}
+                                                                                </Badge>
                                                                             </div>
+                                                                            {material.specification && (
+                                                                                <div className="text-xs text-muted-foreground mt-1 truncate">
+                                                                                    {material.specification}
+                                                                                </div>
+                                                                            )}
                                                                         </div>
-                                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        <div className="flex flex-col gap-1">
                                                                             <Button
                                                                                 variant="ghost"
                                                                                 size="icon"
-                                                                                className="h-6 w-6"
+                                                                                className="h-7 w-7 hover:bg-primary/10"
                                                                                 onClick={() => handleEditMaterial(material)}
+                                                                                title="Editar material"
                                                                             >
-                                                                                <Pencil className="h-3 w-3" />
+                                                                                <Pencil className="h-3.5 w-3.5" />
                                                                             </Button>
                                                                             <Button
                                                                                 variant="ghost"
                                                                                 size="icon"
-                                                                                className="h-6 w-6 text-destructive hover:text-destructive"
-                                                                                onClick={() => deleteMaterial(material.id)}
+                                                                                className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                                onClick={() => {
+                                                                                    if (confirm(`Tem certeza que deseja excluir "${material.description}"?`)) {
+                                                                                        deleteMaterial(material.id);
+                                                                                    }
+                                                                                }}
+                                                                                title="Excluir material"
                                                                             >
-                                                                                <Trash2 className="h-3 w-3" />
+                                                                                <Trash2 className="h-3.5 w-3.5" />
                                                                             </Button>
                                                                         </div>
                                                                     </div>
@@ -3322,7 +3342,21 @@ export default function ProductsPage() {
                                                 </div>
                                             )}
 
-                                            {/* Materiais Padrão */}
+                                            {/* Separador entre personalizados e padrão */}
+                                            {customMaterials.length > 0 && (
+                                                <div className="relative">
+                                                    <div className="absolute inset-0 flex items-center">
+                                                        <span className="w-full border-t" />
+                                                    </div>
+                                                    <div className="relative flex justify-center text-xs uppercase">
+                                                        <span className="bg-background px-2 text-muted-foreground">
+                                                            Materiais Padrão do Sistema
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Materiais Padrão - SEM botões de editar/excluir */}
                                             {MATERIAL_CATEGORIES.map(category => {
                                                 const categoryMaterials = DEFAULT_MATERIALS.filter(m => 
                                                     m.category === category &&
@@ -3334,20 +3368,45 @@ export default function ProductsPage() {
                                                 
                                                 return (
                                                     <div key={category}>
-                                                        <h4 className="text-sm font-semibold mb-2 text-primary">{category}</h4>
+                                                        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">{category}</h4>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                                             {categoryMaterials.map(material => (
-                                                                <div key={material.id} className="p-2 border rounded text-xs">
+                                                                <div key={material.id} className="p-2 border rounded text-xs bg-muted/30">
                                                                     <div className="font-medium truncate">{material.description}</div>
-                                                                    <div className="text-muted-foreground">
+                                                                    <div className="text-muted-foreground mt-1">
                                                                         R$ {material.pricePerKg.toFixed(2)}/{material.unit}
                                                                     </div>
+                                                                    {material.specification && (
+                                                                        <div className="text-xs text-muted-foreground/70 mt-1 truncate">
+                                                                            {material.specification}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             ))}
                                                         </div>
                                                     </div>
                                                 );
                                             })}
+
+                                            {/* Mensagem quando não há resultados */}
+                                            {materialSearchQuery && 
+                                             customMaterials.filter(m => 
+                                                 m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
+                                                 m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
+                                             ).length === 0 &&
+                                             MATERIAL_CATEGORIES.every(category => 
+                                                 DEFAULT_MATERIALS.filter(m => 
+                                                     m.category === category &&
+                                                     (m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
+                                                      m.category.toLowerCase().includes(materialSearchQuery.toLowerCase()))
+                                                 ).length === 0
+                                             ) && (
+                                                <div className="text-center py-8 text-muted-foreground">
+                                                    <Package className="mx-auto h-12 w-12 mb-3 opacity-30" />
+                                                    <p className="font-medium">Nenhum material encontrado</p>
+                                                    <p className="text-xs mt-1">Tente buscar com outros termos</p>
+                                                </div>
+                                            )}
                                         </div>
                                     </ScrollArea>
                                 </div>
