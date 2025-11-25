@@ -498,7 +498,25 @@ export default function ProductsPage() {
 
   // Combinar materiais padrão com personalizados
   const allMaterials = useMemo(() => {
-    return [...DEFAULT_MATERIALS, ...customMaterials];
+    // Materiais marcados como deletados
+    const deletedIds = customMaterials
+      .filter((m: any) => m.deleted === true)
+      .map(m => m.id);
+    
+    // IDs de materiais padrão que foram customizados
+    const customizedDefaultIds = customMaterials
+      .filter((m: any) => m.deleted !== true && DEFAULT_MATERIALS.some(dm => dm.id === m.id))
+      .map(m => m.id);
+    
+    // Filtrar materiais padrão: remover deletados e customizados
+    const filteredDefaults = DEFAULT_MATERIALS.filter(
+      m => !deletedIds.includes(m.id) && !customizedDefaultIds.includes(m.id)
+    );
+    
+    // Materiais personalizados (excluir os marcados como deleted)
+    const activeCustom = customMaterials.filter((m: any) => m.deleted !== true);
+    
+    return [...filteredDefaults, ...activeCustom];
   }, [customMaterials]);
 
   // Função para simular carga de trabalho dos setores
@@ -650,23 +668,40 @@ export default function ProductsPage() {
         id: materialId,
       };
 
-      let updatedMaterials;
+      let updatedCustomMaterials = [...customMaterials];
+      let isDefaultMaterial = false;
+
       if (materialToEdit) {
-        // Editar existente
-        updatedMaterials = customMaterials.map(m => 
-          m.id === materialToEdit.id ? newMaterial : m
-        );
+        // Verificar se é um material padrão sendo editado
+        const isDefault = DEFAULT_MATERIALS.some(m => m.id === materialToEdit.id);
+        
+        if (isDefault) {
+          // Se editar um material padrão, adicionar às customizações
+          isDefaultMaterial = true;
+          // Remove se já existia nas customizações
+          updatedCustomMaterials = updatedCustomMaterials.filter(m => m.id !== materialToEdit.id);
+          // Adiciona a versão editada
+          updatedCustomMaterials.push(newMaterial);
+        } else {
+          // Editar material personalizado existente
+          updatedCustomMaterials = updatedCustomMaterials.map(m => 
+            m.id === materialToEdit.id ? newMaterial : m
+          );
+        }
       } else {
-        // Adicionar novo
-        updatedMaterials = [...customMaterials, newMaterial];
+        // Adicionar novo material
+        updatedCustomMaterials.push(newMaterial);
       }
 
       const docRef = doc(db, "companies", "mecald", "settings", "customMaterials");
-      await setDoc(docRef, { materials: updatedMaterials });
+      await setDoc(docRef, { materials: updatedCustomMaterials });
       
-      setCustomMaterials(updatedMaterials);
+      setCustomMaterials(updatedCustomMaterials);
       toast({
         title: materialToEdit ? "Material atualizado!" : "Material adicionado!",
+        description: isDefaultMaterial 
+          ? "Material padrão customizado com sucesso" 
+          : undefined
       });
       
       setIsMaterialDialogOpen(false);
@@ -683,17 +718,35 @@ export default function ProductsPage() {
 
   const deleteMaterial = async (materialId: string) => {
     try {
-      const updatedMaterials = customMaterials.filter(m => m.id !== materialId);
-      const docRef = doc(db, "companies", "mecald", "settings", "customMaterials");
-      await setDoc(docRef, { materials: updatedMaterials });
+      const isDefault = DEFAULT_MATERIALS.some(m => m.id === materialId);
+      let updatedCustomMaterials = [...customMaterials];
       
-      setCustomMaterials(updatedMaterials);
-      toast({ title: "Material excluído!" });
+      if (isDefault) {
+        // Para materiais padrão, adicionar às customizações marcado como "deleted"
+        const hiddenMaterial = { 
+          ...DEFAULT_MATERIALS.find(m => m.id === materialId)!,
+          deleted: true 
+        };
+        updatedCustomMaterials = updatedCustomMaterials.filter(m => m.id !== materialId);
+        updatedCustomMaterials.push(hiddenMaterial as any);
+      } else {
+        // Para materiais personalizados, remover completamente
+        updatedCustomMaterials = updatedCustomMaterials.filter(m => m.id !== materialId);
+      }
+      
+      const docRef = doc(db, "companies", "mecald", "settings", "customMaterials");
+      await setDoc(docRef, { materials: updatedCustomMaterials });
+      
+      setCustomMaterials(updatedCustomMaterials);
+      toast({ 
+        title: "Material removido!",
+        description: isDefault ? "Material padrão ocultado da sua biblioteca" : undefined
+      });
     } catch (error) {
       console.error("Error deleting material:", error);
       toast({
         variant: "destructive",
-        title: "Erro ao excluir material",
+        title: "Erro ao remover material",
       });
     }
   };
@@ -3246,10 +3299,10 @@ export default function ProductsPage() {
                             <CardHeader>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <CardTitle>Biblioteca de Materiais</CardTitle>
-                                        <CardDescription>
-                                            {allMaterials.length} materiais cadastrados ({DEFAULT_MATERIALS.length} padrão, {customMaterials.length} personalizados)
-                                        </CardDescription>
+                                <CardTitle>Biblioteca de Materiais</CardTitle>
+                                <CardDescription>
+                                            {allMaterials.length} materiais disponíveis. Você pode editar ou remover qualquer material.
+                                </CardDescription>
                                     </div>
                                     <Button onClick={handleAddMaterial} size="sm">
                                         <PlusCircle className="mr-2 h-4 w-4" />
@@ -3272,93 +3325,8 @@ export default function ProductsPage() {
 
                                     <ScrollArea className="h-96">
                                         <div className="space-y-6">
-                                            {/* Materiais Personalizados - COM botões de editar/excluir */}
-                                            {customMaterials.length > 0 && (
-                                                <div>
-                                                    <div className="flex items-center gap-2 mb-3">
-                                                        <h4 className="text-sm font-semibold text-primary">Materiais Personalizados</h4>
-                                                        <Badge variant="secondary" className="text-xs">
-                                                            {customMaterials.filter(m => 
-                                                                materialSearchQuery === "" ||
-                                                                m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
-                                                                m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
-                                                            ).length}
-                                                        </Badge>
-                                                    </div>
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                                        {customMaterials
-                                                            .filter(m => 
-                                                                materialSearchQuery === "" ||
-                                                                m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
-                                                                m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
-                                                            )
-                                                            .map(material => (
-                                                                <div key={material.id} className="p-3 border-2 border-primary/30 rounded-lg text-xs group hover:border-primary hover:shadow-md transition-all bg-primary/5">
-                                                                    <div className="flex items-start justify-between gap-2">
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <div className="font-semibold truncate text-sm">{material.description}</div>
-                                                                            <div className="text-primary font-medium mt-1">
-                                                                                R$ {material.pricePerKg.toFixed(2)}/{material.unit}
-                                                                            </div>
-                                                                            <div className="flex items-center gap-1 mt-1">
-                                                                                <Badge variant="outline" className="text-xs">
-                                                                                    {material.category}
-                                                                                </Badge>
-                                                                            </div>
-                                                                            {material.specification && (
-                                                                                <div className="text-xs text-muted-foreground mt-1 truncate">
-                                                                                    {material.specification}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                        <div className="flex flex-col gap-1">
-                                                                            <Button
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                className="h-7 w-7 hover:bg-primary/10"
-                                                                                onClick={() => handleEditMaterial(material)}
-                                                                                title="Editar material"
-                                                                            >
-                                                                                <Pencil className="h-3.5 w-3.5" />
-                                                                            </Button>
-                                                                            <Button
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                                                onClick={() => {
-                                                                                    if (confirm(`Tem certeza que deseja excluir "${material.description}"?`)) {
-                                                                                        deleteMaterial(material.id);
-                                                                                    }
-                                                                                }}
-                                                                                title="Excluir material"
-                                                                            >
-                                                                                <Trash2 className="h-3.5 w-3.5" />
-                                                                            </Button>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Separador entre personalizados e padrão */}
-                                            {customMaterials.length > 0 && (
-                                                <div className="relative">
-                                                    <div className="absolute inset-0 flex items-center">
-                                                        <span className="w-full border-t" />
-                                                    </div>
-                                                    <div className="relative flex justify-center text-xs uppercase">
-                                                        <span className="bg-background px-2 text-muted-foreground">
-                                                            Materiais Padrão do Sistema
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Materiais Padrão - SEM botões de editar/excluir */}
                                             {MATERIAL_CATEGORIES.map(category => {
-                                                const categoryMaterials = DEFAULT_MATERIALS.filter(m => 
+                                                const categoryMaterials = allMaterials.filter(m => 
                                                     m.category === category &&
                                                     (materialSearchQuery === "" ||
                                                      m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
@@ -3368,39 +3336,99 @@ export default function ProductsPage() {
                                                 
                                                 return (
                                                     <div key={category}>
-                                                        <h4 className="text-sm font-semibold mb-2 text-muted-foreground">{category}</h4>
+                                                        <div className="flex items-center gap-2 mb-3">
+                                                            <h4 className="text-sm font-semibold text-primary">{category}</h4>
+                                                            <Badge variant="secondary" className="text-xs">
+                                                                {categoryMaterials.length}
+                                                            </Badge>
+                                                        </div>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                                            {categoryMaterials.map(material => (
-                                                                <div key={material.id} className="p-2 border rounded text-xs bg-muted/30">
-                                                                    <div className="font-medium truncate">{material.description}</div>
-                                                                    <div className="text-muted-foreground mt-1">
+                                                            {categoryMaterials.map(material => {
+                                                                // Verificar se é customizado
+                                                                const isCustomized = customMaterials.some(cm => 
+                                                                    cm.id === material.id && !(cm as any).deleted
+                                                                );
+                                                                const isOriginalDefault = DEFAULT_MATERIALS.some(dm => dm.id === material.id);
+                                                                
+                                                                return (
+                                                                    <div 
+                                                                        key={material.id} 
+                                                                        className={`p-3 border rounded-lg text-xs group hover:border-primary hover:shadow-md transition-all ${
+                                                                            isCustomized && isOriginalDefault 
+                                                                                ? 'border-orange-300 bg-orange-50/50' 
+                                                                                : !isOriginalDefault
+                                                                                ? 'border-primary/30 bg-primary/5'
+                                                                                : 'border-muted bg-muted/30'
+                                                                        }`}
+                                                                    >
+                                                                        <div className="flex items-start justify-between gap-2">
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <div className="font-semibold truncate text-sm flex-1">
+                                                                                        {material.description}
+                                                                                    </div>
+                                                                                    {isCustomized && isOriginalDefault && (
+                                                                                        <Badge variant="outline" className="text-xs bg-orange-100">
+                                                                                            Editado
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                    {!isOriginalDefault && (
+                                                                                        <Badge variant="outline" className="text-xs bg-primary/10">
+                                                                                            Custom
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                </div>
+                                                                                <div className="font-medium mt-1 text-primary">
                                                                         R$ {material.pricePerKg.toFixed(2)}/{material.unit}
                                                                     </div>
-                                                                    {material.specification && (
-                                                                        <div className="text-xs text-muted-foreground/70 mt-1 truncate">
-                                                                            {material.specification}
-                                                                        </div>
-                                                                    )}
+                                                                                {material.specification && (
+                                                                                    <div className="text-xs text-muted-foreground mt-1 truncate">
+                                                                                        {material.specification}
                                                                 </div>
-                                                            ))}
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                                <Button
+                                                                                    variant="ghost"
+                                                                                    size="icon"
+                                                                                    className="h-7 w-7 hover:bg-primary/10"
+                                                                                    onClick={() => handleEditMaterial(material)}
+                                                                                    title="Editar material"
+                                                                                >
+                                                                                    <Pencil className="h-3.5 w-3.5" />
+                                                                                </Button>
+                                                                                <Button
+                                                                                    variant="ghost"
+                                                                                    size="icon"
+                                                                                    className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                                    onClick={() => {
+                                                                                        const confirmMessage = isOriginalDefault
+                                                                                            ? `Tem certeza que deseja ocultar "${material.description}"? (Material padrão)`
+                                                                                            : `Tem certeza que deseja excluir "${material.description}"?`;
+                                                                                        
+                                                                                        if (confirm(confirmMessage)) {
+                                                                                            deleteMaterial(material.id);
+                                                                                        }
+                                                                                    }}
+                                                                                    title={isOriginalDefault ? "Ocultar material" : "Excluir material"}
+                                                                                >
+                                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                                </Button>
+                                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                                         </div>
                                                     </div>
                                                 );
                                             })}
 
                                             {/* Mensagem quando não há resultados */}
-                                            {materialSearchQuery && 
-                                             customMaterials.filter(m => 
-                                                 m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
-                                                 m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
-                                             ).length === 0 &&
-                                             MATERIAL_CATEGORIES.every(category => 
-                                                 DEFAULT_MATERIALS.filter(m => 
-                                                     m.category === category &&
-                                                     (m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
-                                                      m.category.toLowerCase().includes(materialSearchQuery.toLowerCase()))
-                                                 ).length === 0
-                                             ) && (
+                                            {materialSearchQuery && allMaterials.filter(m =>
+                                                m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
+                                                m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
+                                            ).length === 0 && (
                                                 <div className="text-center py-8 text-muted-foreground">
                                                     <Package className="mx-auto h-12 w-12 mb-3 opacity-30" />
                                                     <p className="font-medium">Nenhum material encontrado</p>
@@ -3409,6 +3437,22 @@ export default function ProductsPage() {
                                             )}
                                         </div>
                                     </ScrollArea>
+                                    
+                                    {/* Legenda */}
+                                    <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t">
+                                        <div className="flex items-center gap-1">
+                                            <div className="w-3 h-3 rounded border border-primary/30 bg-primary/5"></div>
+                                            <span>Material personalizado</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <div className="w-3 h-3 rounded border border-orange-300 bg-orange-50/50"></div>
+                                            <span>Material editado</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <div className="w-3 h-3 rounded border border-muted bg-muted/30"></div>
+                                            <span>Material padrão</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </CardContent>
                         </Card>
