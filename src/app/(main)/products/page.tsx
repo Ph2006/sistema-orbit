@@ -3317,10 +3317,10 @@ export default function ProductsPage() {
                             <CardHeader>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                <CardTitle>Biblioteca de Materiais</CardTitle>
-                                <CardDescription>
-                                            {allMaterials.length} materiais disponíveis. Você pode editar ou remover qualquer material.
-                                </CardDescription>
+                                        <CardTitle>Biblioteca de Materiais</CardTitle>
+                                        <CardDescription>
+                                            {allMaterials.length} materiais disponíveis
+                                        </CardDescription>
                                     </div>
                                     <Button onClick={handleAddMaterial} size="sm">
                                         <PlusCircle className="mr-2 h-4 w-4" />
@@ -3361,82 +3361,57 @@ export default function ProductsPage() {
                                                             </Badge>
                                                         </div>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                                            {categoryMaterials.map(material => {
-                                                                // Verificar se é customizado
-                                                                const isCustomized = customMaterials.some(cm => 
-                                                                    cm.id === material.id && !(cm as any).deleted
-                                                                );
-                                                                const isOriginalDefault = DEFAULT_MATERIALS.some(dm => dm.id === material.id);
-                                                                
-                                                                return (
-                                                                    <div 
-                                                                        key={material.id} 
-                                                                        className={`p-3 border rounded-lg text-xs group hover:border-primary hover:shadow-md transition-all ${
-                                                                            isCustomized && isOriginalDefault 
-                                                                                ? 'border-orange-300 bg-orange-50/50' 
-                                                                                : !isOriginalDefault
-                                                                                ? 'border-primary/30 bg-primary/5'
-                                                                                : 'border-muted bg-muted/30'
-                                                                        }`}
-                                                                    >
-                                                                        <div className="flex items-start justify-between gap-2">
-                                                                            <div className="flex-1 min-w-0">
-                                                                                <div className="flex items-center gap-2">
-                                                                                    <div className="font-semibold truncate text-sm flex-1">
-                                                                                        {material.description}
-                                                                                    </div>
-                                                                                    {isCustomized && isOriginalDefault && (
-                                                                                        <Badge variant="outline" className="text-xs bg-orange-100">
-                                                                                            Editado
-                                                                                        </Badge>
-                                                                                    )}
-                                                                                    {!isOriginalDefault && (
-                                                                                        <Badge variant="outline" className="text-xs bg-primary/10">
-                                                                                            Custom
-                                                                                        </Badge>
-                                                                                    )}
+                                                            {categoryMaterials.map(material => (
+                                                                <div 
+                                                                    key={material.id} 
+                                                                    className="p-3 border rounded-lg text-xs group hover:border-primary hover:shadow-sm transition-all"
+                                                                >
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="font-medium truncate">
+                                                                                {material.description}
+                                                                            </div>
+                                                                            <div className="text-primary font-semibold mt-1">
+                                                                                R$ {material.pricePerKg.toFixed(2)}/{material.unit}
+                                                                            </div>
+                                                                            {material.specification && (
+                                                                                <div className="text-xs text-muted-foreground mt-1 truncate">
+                                                                                    {material.specification}
                                                                                 </div>
-                                                                                <div className="font-medium mt-1 text-primary">
-                                                                        R$ {material.pricePerKg.toFixed(2)}/{material.unit}
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                            <Button
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className="h-7 w-7 hover:bg-primary/10"
+                                                                                onClick={() => handleEditMaterial(material)}
+                                                                                title="Editar material"
+                                                                            >
+                                                                                <Pencil className="h-3.5 w-3.5" />
+                                                                            </Button>
+                                                                            <Button
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                                onClick={() => {
+                                                                                    const isDefault = DEFAULT_MATERIALS.some(dm => dm.id === material.id);
+                                                                                    const confirmMessage = isDefault
+                                                                                        ? `Deseja ocultar "${material.description}"?`
+                                                                                        : `Deseja excluir "${material.description}"?`;
+                                                                                    
+                                                                                    if (confirm(confirmMessage)) {
+                                                                                        deleteMaterial(material.id);
+                                                                                    }
+                                                                                }}
+                                                                                title="Remover material"
+                                                                            >
+                                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                                            </Button>
+                                                                        </div>
                                                                     </div>
-                                                                                {material.specification && (
-                                                                                    <div className="text-xs text-muted-foreground mt-1 truncate">
-                                                                                        {material.specification}
                                                                 </div>
-                                                                                )}
-                                                                            </div>
-                                                                            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                                <Button
-                                                                                    variant="ghost"
-                                                                                    size="icon"
-                                                                                    className="h-7 w-7 hover:bg-primary/10"
-                                                                                    onClick={() => handleEditMaterial(material)}
-                                                                                    title="Editar material"
-                                                                                >
-                                                                                    <Pencil className="h-3.5 w-3.5" />
-                                                                                </Button>
-                                                                                <Button
-                                                                                    variant="ghost"
-                                                                                    size="icon"
-                                                                                    className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                                                    onClick={() => {
-                                                                                        const confirmMessage = isOriginalDefault
-                                                                                            ? `Tem certeza que deseja ocultar "${material.description}"? (Material padrão)`
-                                                                                            : `Tem certeza que deseja excluir "${material.description}"?`;
-                                                                                        
-                                                                                        if (confirm(confirmMessage)) {
-                                                                                            deleteMaterial(material.id);
-                                                                                        }
-                                                                                    }}
-                                                                                    title={isOriginalDefault ? "Ocultar material" : "Excluir material"}
-                                                                                >
-                                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                                </Button>
-                                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
+                                                            ))}
                                                         </div>
                                                     </div>
                                                 );
@@ -3455,22 +3430,6 @@ export default function ProductsPage() {
                                             )}
                                         </div>
                                     </ScrollArea>
-                                    
-                                    {/* Legenda */}
-                                    <div className="flex items-center gap-4 text-xs text-muted-foreground pt-2 border-t">
-                                        <div className="flex items-center gap-1">
-                                            <div className="w-3 h-3 rounded border border-primary/30 bg-primary/5"></div>
-                                            <span>Material personalizado</span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                            <div className="w-3 h-3 rounded border border-orange-300 bg-orange-50/50"></div>
-                                            <span>Material editado</span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                            <div className="w-3 h-3 rounded border border-muted bg-muted/30"></div>
-                                            <span>Material padrão</span>
-                                        </div>
-                                    </div>
                                 </div>
                             </CardContent>
                         </Card>
