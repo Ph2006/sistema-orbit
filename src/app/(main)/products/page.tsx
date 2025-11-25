@@ -47,6 +47,15 @@ const productSchema = z.object({
   productionPlanTemplate: z.array(planStageSchema).optional(),
 });
 
+const materialSchema = z.object({
+  id: z.string().optional(),
+  category: z.string().min(1, "Categoria obrigatória"),
+  description: z.string().min(3, "Descrição obrigatória"),
+  pricePerKg: z.coerce.number().min(0, "Preço deve ser positivo"),
+  unit: z.string().default("kg"),
+  specification: z.string().optional(),
+});
+
 type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
 
 // Função para calcular o lead time total de um produto
@@ -479,6 +488,18 @@ export default function ProductsPage() {
     const [machiningHours, setMachiningHours] = useState<number>(0);
     const [consumablesCost, setConsumablesCost] = useState<number>(0);
     const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
+    
+    // Estados para materiais personalizados
+    const [customMaterials, setCustomMaterials] = useState<Material[]>([]);
+    const [isEditingMaterial, setIsEditingMaterial] = useState(false);
+    const [materialToEdit, setMaterialToEdit] = useState<Material | null>(null);
+    const [isMaterialDialogOpen, setIsMaterialDialogOpen] = useState(false);
+    const [materialSearchQuery, setMaterialSearchQuery] = useState("");
+
+  // Combinar materiais padrão com personalizados
+  const allMaterials = useMemo(() => {
+    return [...DEFAULT_MATERIALS, ...customMaterials];
+  }, [customMaterials]);
 
   // Função para simular carga de trabalho dos setores
   const simulateSectorWorkload = useCallback(() => {
@@ -522,6 +543,17 @@ export default function ProductsPage() {
       unitPrice: 0,
       unitWeight: 0,
       productionPlanTemplate: [],
+    },
+  });
+
+  const materialForm = useForm<z.infer<typeof materialSchema>>({
+    resolver: zodResolver(materialSchema),
+    defaultValues: {
+      category: "",
+      description: "",
+      pricePerKg: 0,
+      unit: "kg",
+      specification: "",
     },
   });
 
@@ -598,12 +630,99 @@ export default function ProductsPage() {
     }
   }, [toast]);
 
+  const fetchCustomMaterials = useCallback(async () => {
+    try {
+      const docRef = doc(db, "companies", "mecald", "settings", "customMaterials");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists() && docSnap.data().materials) {
+        setCustomMaterials(docSnap.data().materials);
+      }
+    } catch (error) {
+      console.error("Error fetching custom materials:", error);
+    }
+  }, []);
+
+  const saveMaterial = async (values: z.infer<typeof materialSchema>) => {
+    try {
+      const materialId = values.id || `custom-${Date.now()}`;
+      const newMaterial: Material = {
+        ...values,
+        id: materialId,
+      };
+
+      let updatedMaterials;
+      if (materialToEdit) {
+        // Editar existente
+        updatedMaterials = customMaterials.map(m => 
+          m.id === materialToEdit.id ? newMaterial : m
+        );
+      } else {
+        // Adicionar novo
+        updatedMaterials = [...customMaterials, newMaterial];
+      }
+
+      const docRef = doc(db, "companies", "mecald", "settings", "customMaterials");
+      await setDoc(docRef, { materials: updatedMaterials });
+      
+      setCustomMaterials(updatedMaterials);
+      toast({
+        title: materialToEdit ? "Material atualizado!" : "Material adicionado!",
+      });
+      
+      setIsMaterialDialogOpen(false);
+      materialForm.reset();
+      setMaterialToEdit(null);
+    } catch (error) {
+      console.error("Error saving material:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar material",
+      });
+    }
+  };
+
+  const deleteMaterial = async (materialId: string) => {
+    try {
+      const updatedMaterials = customMaterials.filter(m => m.id !== materialId);
+      const docRef = doc(db, "companies", "mecald", "settings", "customMaterials");
+      await setDoc(docRef, { materials: updatedMaterials });
+      
+      setCustomMaterials(updatedMaterials);
+      toast({ title: "Material excluído!" });
+    } catch (error) {
+      console.error("Error deleting material:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao excluir material",
+      });
+    }
+  };
+
+  const handleEditMaterial = (material: Material) => {
+    setMaterialToEdit(material);
+    materialForm.reset(material);
+    setIsMaterialDialogOpen(true);
+  };
+
+  const handleAddMaterial = () => {
+    setMaterialToEdit(null);
+    materialForm.reset({
+      category: "",
+      description: "",
+      pricePerKg: 0,
+      unit: "kg",
+      specification: "",
+    });
+    setIsMaterialDialogOpen(true);
+  };
+
   useEffect(() => {
     if (!authLoading && user) {
       fetchProducts();
       fetchStages();
+      fetchCustomMaterials();
     }
-  }, [user, authLoading, fetchProducts, fetchStages]);
+  }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials]);
   
   const syncCatalog = useCallback(async () => {
     setIsSyncing(true);
@@ -2209,7 +2328,7 @@ export default function ProductsPage() {
                                                                     💡 Dica: Role para ver todas as categorias
                                                                 </div>
                                                                 {MATERIAL_CATEGORIES.map(category => {
-                                                                    const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
+                                                                    const categoryMaterials = allMaterials.filter(m => m.category === category);
                                                                     if (categoryMaterials.length === 0) return null;
                                                                     
                                                                     return (
@@ -3125,17 +3244,92 @@ export default function ProductsPage() {
                         {/* Card de Biblioteca de Materiais */}
                         <Card>
                             <CardHeader>
-                                <CardTitle>Biblioteca de Materiais</CardTitle>
-                                <CardDescription>
-                                    {DEFAULT_MATERIALS.length} materiais cadastrados. Você pode adicionar novos materiais conforme necessário.
-                                </CardDescription>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <CardTitle>Biblioteca de Materiais</CardTitle>
+                                        <CardDescription>
+                                            {allMaterials.length} materiais cadastrados ({DEFAULT_MATERIALS.length} padrão, {customMaterials.length} personalizados)
+                                        </CardDescription>
+                                    </div>
+                                    <Button onClick={handleAddMaterial} size="sm">
+                                        <PlusCircle className="mr-2 h-4 w-4" />
+                                        Novo Material
+                                    </Button>
+                                </div>
                             </CardHeader>
                             <CardContent>
                                 <div className="space-y-4">
+                                    {/* Campo de busca */}
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Buscar materiais..."
+                                            value={materialSearchQuery}
+                                            onChange={(e) => setMaterialSearchQuery(e.target.value)}
+                                            className="pl-10"
+                                        />
+                                    </div>
+
                                     <ScrollArea className="h-96">
                                         <div className="space-y-4">
+                                            {/* Materiais Personalizados */}
+                                            {customMaterials.length > 0 && (
+                                                <div>
+                                                    <h4 className="text-sm font-semibold mb-2 text-primary flex items-center gap-2">
+                                                        <Badge variant="secondary">Personalizados</Badge>
+                                                    </h4>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                        {customMaterials
+                                                            .filter(m => 
+                                                                materialSearchQuery === "" ||
+                                                                m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
+                                                                m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
+                                                            )
+                                                            .map(material => (
+                                                                <div key={material.id} className="p-2 border rounded text-xs group hover:border-primary transition-colors">
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="font-medium truncate">{material.description}</div>
+                                                                            <div className="text-muted-foreground">
+                                                                                R$ {material.pricePerKg.toFixed(2)}/{material.unit}
+                                                                            </div>
+                                                                            <div className="text-xs text-muted-foreground mt-1">
+                                                                                {material.category}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                            <Button
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className="h-6 w-6"
+                                                                                onClick={() => handleEditMaterial(material)}
+                                                                            >
+                                                                                <Pencil className="h-3 w-3" />
+                                                                            </Button>
+                                                                            <Button
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className="h-6 w-6 text-destructive hover:text-destructive"
+                                                                                onClick={() => deleteMaterial(material.id)}
+                                                                            >
+                                                                                <Trash2 className="h-3 w-3" />
+                                                                            </Button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Materiais Padrão */}
                                             {MATERIAL_CATEGORIES.map(category => {
-                                                const categoryMaterials = DEFAULT_MATERIALS.filter(m => m.category === category);
+                                                const categoryMaterials = DEFAULT_MATERIALS.filter(m => 
+                                                    m.category === category &&
+                                                    (materialSearchQuery === "" ||
+                                                     m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
+                                                     m.category.toLowerCase().includes(materialSearchQuery.toLowerCase()))
+                                                );
                                                 if (categoryMaterials.length === 0) return null;
                                                 
                                                 return (
@@ -3404,6 +3598,115 @@ export default function ProductsPage() {
             </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog de Material */}
+      <Dialog open={isMaterialDialogOpen} onOpenChange={setIsMaterialDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {materialToEdit ? "Editar Material" : "Novo Material"}
+            </DialogTitle>
+            <DialogDescription>
+              {materialToEdit 
+                ? "Altere os dados do material personalizado" 
+                : "Adicione um novo material à biblioteca"}
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...materialForm}>
+            <form onSubmit={materialForm.handleSubmit(saveMaterial)} className="space-y-4">
+              <FormField
+                control={materialForm.control}
+                name="category"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Categoria</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione uma categoria" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent className="max-h-[200px]">
+                        {MATERIAL_CATEGORIES.map(cat => (
+                          <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={materialForm.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Descrição</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Ex: Chapa 1/2 - ASTM A36" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={materialForm.control}
+                  name="pricePerKg"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Preço/kg (R$)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" placeholder="0.00" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={materialForm.control}
+                  name="unit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Unidade</FormLabel>
+                      <FormControl>
+                        <Input placeholder="kg, m³, un" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              
+              <FormField
+                control={materialForm.control}
+                name="specification"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Especificação (Opcional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Ex: ASTM A36, SAE 1020" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsMaterialDialogOpen(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit">
+                  {materialToEdit ? "Salvar Alterações" : "Adicionar Material"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
