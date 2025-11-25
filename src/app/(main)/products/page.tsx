@@ -2342,10 +2342,15 @@ export default function ProductsPage() {
                                                     <div className="space-y-2">
                                                         <Label className="text-xs text-muted-foreground">Selecione um material para adicionar:</Label>
                                                         <Select
-                                                            value=""
+                                                            value="" // Sempre vazio para permitir adicionar o mesmo material novamente se necessário
                                                             onValueChange={(materialId) => {
-                                                                const material = DEFAULT_MATERIALS.find(m => m.id === materialId);
-                                                                if (!material) return;
+                                                                console.log("Material selecionado:", materialId); // Debug
+                                                                
+                                                                const material = allMaterials.find(m => m.id === materialId);
+                                                                if (!material) {
+                                                                    console.error("Material não encontrado:", materialId);
+                                                                    return;
+                                                                }
                                                                 
                                                                 // Verifica se o material já foi adicionado
                                                                 if (materialComposition.some(m => m.materialId === materialId)) {
@@ -2365,7 +2370,13 @@ export default function ProductsPage() {
                                                                     pricePerKg: material.pricePerKg,
                                                                     totalCost: 0
                                                                 };
-                                                                setMaterialComposition(prev => [...prev, newItem]);
+                                                                
+                                                                console.log("Adicionando item:", newItem); // Debug
+                                                                setMaterialComposition(prev => {
+                                                                    const updated = [...prev, newItem];
+                                                                    console.log("Nova composição:", updated); // Debug
+                                                                    return updated;
+                                                                });
                                                                 
                                                                 toast({
                                                                     title: "Material adicionado",
@@ -2398,9 +2409,9 @@ export default function ProductsPage() {
                                                                                         disabled={isAdded}
                                                                                         className={isAdded ? "opacity-50" : ""}
                                                                                     >
-                                                                                        <div className="flex items-center justify-between w-full">
-                                                                                            <span className="truncate">{material.description}</span>
-                                                                                            <span className="text-xs text-muted-foreground ml-2 flex-shrink-0">
+                                                                                        <div className="flex items-center justify-between w-full gap-4">
+                                                                                            <span className="truncate flex-1">{material.description}</span>
+                                                                                            <span className="text-xs text-muted-foreground flex-shrink-0">
                                                                                                 R$ {material.pricePerKg.toFixed(2)}/kg
                                                                                                 {isAdded && " ✓"}
                                                                                             </span>
@@ -2413,6 +2424,13 @@ export default function ProductsPage() {
                                                                 })}
                                                             </SelectContent>
                                                         </Select>
+                                                        
+                                                        {/* DEBUG - Remover depois */}
+                                                        <div className="text-xs text-muted-foreground p-2 bg-muted rounded">
+                                                            <div>Total de materiais disponíveis: {allMaterials.length}</div>
+                                                            <div>Materiais personalizados: {customMaterials.length}</div>
+                                                            <div>Materiais na composição: {materialComposition.length}</div>
+                                                        </div>
                                                     </div>
 
                                                     {/* Lista de materiais adicionados */}
