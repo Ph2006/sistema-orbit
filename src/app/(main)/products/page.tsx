@@ -119,7 +119,6 @@ const getLeadTimeBadge = (leadTime: number) => {
     stageCosts: StageCostItem[];
     machiningCost: number;
     consumablesCost: number;
-    consumablesWithMargin: number;
     totalCost: number;
     profitMargin: number;
     profitValue: number;
@@ -481,12 +480,12 @@ export default function ProductsPage() {
     // Estados da calculadora de preços
     const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
     const [machineHourRate, setMachineHourRate] = useState<number>(150); // R$/hora
+    const [consumablesCostPerKg, setConsumablesCostPerKg] = useState<number>(0); // NOVO
     const [selectedProductForPricing, setSelectedProductForPricing] = useState<Product | null>(null);
     const [pricingCalculation, setPricingCalculation] = useState<PricingCalculation | null>(null);
     const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
     const [profitMargin, setProfitMargin] = useState<number>(30); // percentual
     const [machiningHours, setMachiningHours] = useState<number>(0);
-    const [consumablesCost, setConsumablesCost] = useState<number>(0);
     const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
     
     // Estados para materiais personalizados
@@ -1557,13 +1556,17 @@ export default function ProductsPage() {
     const saveStageCosts = useCallback(async () => {
         try {
         const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
-        await setDoc(costsRef, { costs: stageCosts, machineHourRate }, { merge: true });
+        await setDoc(costsRef, { 
+            costs: stageCosts, 
+            machineHourRate,
+            consumablesCostPerKg
+        }, { merge: true });
         toast({ title: "Custos salvos com sucesso!" });
         } catch (error) {
         console.error("Error saving stage costs:", error);
         toast({ variant: "destructive", title: "Erro ao salvar custos" });
         }
-    }, [stageCosts, machineHourRate, toast]);
+    }, [stageCosts, machineHourRate, consumablesCostPerKg, toast]);
 
     // Carregar custos de etapas do Firebase
     const loadStageCosts = useCallback(async () => {
@@ -1574,6 +1577,7 @@ export default function ProductsPage() {
             const data = docSnap.data();
             setStageCosts(data.costs || {});
             setMachineHourRate(data.machineHourRate || 150);
+            setConsumablesCostPerKg(data.consumablesCostPerKg || 0);
         }
         } catch (error) {
         console.error("Error loading stage costs:", error);
@@ -2102,7 +2106,7 @@ export default function ProductsPage() {
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     <div>
                                         <Label>Valor da Hora Máquina (R$)</Label>
                                         <Input
@@ -2125,6 +2129,19 @@ export default function ProductsPage() {
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">
                                             Percentual aplicado sobre o custo total
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <Label>Custo de Insumos por Kg (R$/kg)</Label>
+                                        <Input
+                                            type="number"
+                                            step="0.01"
+                                            value={consumablesCostPerKg}
+                                            onChange={(e) => setConsumablesCostPerKg(Number(e.target.value))}
+                                            placeholder="0.00"
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Custo de consumíveis (eletrodos, gases, etc.) por kg do produto
                                         </p>
                                     </div>
                                 </div>
@@ -2225,7 +2242,6 @@ export default function ProductsPage() {
                                                 setMaterialComposition([]);
                                                 setPricingCalculation(null);
                                                 setMachiningHours(0);
-                                                setConsumablesCost(0);
                                                 toast({
                                                     title: "Produto selecionado",
                                                     description: `${product?.code} - ${product?.description}`
@@ -2539,45 +2555,6 @@ export default function ProductsPage() {
                                                 </>
                                             )}
 
-                                            {/* Insumos (Consumíveis) */}
-                                            <Separator />
-                                            <div>
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <Label>Insumos e Consumíveis (R$)</Label>
-                                                    <Badge variant="secondary" className="text-xs">
-                                                        +10% margem automática
-                                                    </Badge>
-                                                </div>
-                                                <Input
-                                                    type="number"
-                                                    step="0.01"
-                                                    placeholder="0.00"
-                                                    value={consumablesCost || ''}
-                                                    onChange={(e) => setConsumablesCost(Number(e.target.value))}
-                                                />
-                                                <div className="mt-2 p-2 bg-muted rounded-md text-xs space-y-1">
-                                                    <div className="flex justify-between">
-                                                        <span className="text-muted-foreground">Custo base dos insumos:</span>
-                                                        <span className="font-mono">R$ {consumablesCost.toFixed(2)}</span>
-                                                    </div>
-                                                    <div className="flex justify-between">
-                                                        <span className="text-muted-foreground">Margem (10%):</span>
-                                                        <span className="font-mono text-green-600">
-                                                            + R$ {(consumablesCost * 0.10).toFixed(2)}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex justify-between font-medium border-t pt-1">
-                                                        <span>Total com margem:</span>
-                                                        <span className="font-mono text-primary">
-                                                            R$ {(consumablesCost * 1.10).toFixed(2)}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <p className="text-xs text-muted-foreground mt-2">
-                                                    💡 <strong>Exemplos:</strong> Eletrodos, gases, discos de corte, lixas, consumíveis de soldagem, EPIs, etc.
-                                                </p>
-                                            </div>
-
                                             <Button 
                                                 onClick={() => {
                                                     if (materialComposition.length === 0) {
@@ -2619,11 +2596,11 @@ export default function ProductsPage() {
                                                     const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
                                                     const machiningCost = machiningHours * machineHourRate;
                                                     
-                                                    // Insumos com margem de 10%
-                                                    const consumablesWithMargin = consumablesCost * 1.10;
+                                                    // Insumos calculados automaticamente: consumablesCostPerKg × productWeight
+                                                    const consumablesCost = consumablesCostPerKg * productWeight;
                                                     
-                                                    // Custo total agora inclui insumos com margem
-                                                    const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesWithMargin;
+                                                    // Custo total agora inclui insumos
+                                                    const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesCost;
                                                     const profitValue = totalCost * (profitMargin / 100);
                                                     const finalPrice = totalCost + profitValue;
                                                     const pricePerKg = finalPrice / productWeight;
@@ -2637,7 +2614,6 @@ export default function ProductsPage() {
                                                         stageCosts: stageCostItems,
                                                         machiningCost,
                                                         consumablesCost: consumablesCost,
-                                                        consumablesWithMargin: consumablesWithMargin,
                                                         totalCost,
                                                         profitMargin,
                                                         profitValue,
@@ -3060,11 +3036,9 @@ export default function ProductsPage() {
                                                     if (pricingCalculation.machiningCost > 0) {
                                                         addText(`Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
                                                     }
-                                                    if (pricingCalculation.consumablesWithMargin > 0) {
+                                                    if (pricingCalculation.consumablesCost > 0) {
                                                         addText(`Insumos e Consumíveis:`, 9, true);
-                                                        addText(`   Custo base: R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
-                                                        addText(`   Margem (10%): R$ ${(pricingCalculation.consumablesCost * 0.10).toFixed(2)}`, 9);
-                                                        addText(`   Total: R$ ${pricingCalculation.consumablesWithMargin.toFixed(2)}`, 9, true);
+                                                        addText(`   R$ ${consumablesCostPerKg.toFixed(2)}/kg × ${pricingCalculation.productWeight}kg = R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
                                                     }
                                                     
                                                     // RESUMO FINANCEIRO
@@ -3123,7 +3097,7 @@ export default function ProductsPage() {
                                                     { label: 'Materiais', value: materialTotal, color: [59, 130, 246] },
                                                     { label: 'Etapas de Produção', value: stageTotal, color: [16, 185, 129] },
                                                     { label: 'Usinagem', value: pricingCalculation.machiningCost, color: [245, 158, 11] },
-                                                    { label: 'Insumos c/ margem', value: pricingCalculation.consumablesWithMargin, color: [139, 92, 246] },
+                                                    { label: 'Insumos', value: pricingCalculation.consumablesCost, color: [139, 92, 246] },
                                                     { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] }
                                                 ].filter(item => item.value > 0);
                                                 
@@ -3238,15 +3212,15 @@ export default function ProductsPage() {
                                                             <span className="font-mono">R$ {pricingCalculation.machiningCost.toFixed(2)}</span>
                                                         </div>
                                                     )}
-                                                    {pricingCalculation.consumablesWithMargin > 0 && (
+                                                    {pricingCalculation.consumablesCost > 0 && (
                                                         <div className="flex justify-between text-muted-foreground">
                                                             <span className="flex-1">
                                                                 Insumos e Consumíveis
-                                                                <span className="text-xs ml-1 text-green-600">
-                                                                    (R$ {pricingCalculation.consumablesCost.toFixed(2)} + 10%)
+                                                                <span className="text-xs ml-1">
+                                                                    (R$ {consumablesCostPerKg.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
                                                                 </span>
                                                             </span>
-                                                            <span className="font-mono">R$ {pricingCalculation.consumablesWithMargin.toFixed(2)}</span>
+                                                            <span className="font-mono">R$ {pricingCalculation.consumablesCost.toFixed(2)}</span>
                                                         </div>
                                                     )}
                                                     <div className="flex justify-between font-medium pt-1 border-t">
@@ -3255,7 +3229,7 @@ export default function ProductsPage() {
                                                             R$ {(
                                                                 pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) + 
                                                                 pricingCalculation.machiningCost + 
-                                                                pricingCalculation.consumablesWithMargin
+                                                                pricingCalculation.consumablesCost
                                                             ).toFixed(2)}
                                                         </span>
                                                     </div>
