@@ -61,6 +61,7 @@ const quotationSchema = z.object({
   paymentTerms: z.string().min(3, "As condições de pagamento são obrigatórias."),
   deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
   notes: z.string().optional(),
+  discount: z.coerce.number().min(0).max(100).optional(),
   items: z.array(itemSchema).min(1, "Adicione pelo menos um item ao orçamento."),
   includedServices: z.array(z.string()).optional(),
 });
@@ -107,24 +108,35 @@ const serviceOptions = [
     { id: 'fasteners', label: 'Itens de fixação' },
 ];
 
-const calculateItemTotals = (item: Item | any) => {
+const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
     const quantity = Number(item.quantity) || 0;
     const unitPrice = Number(item.unitPrice) || 0;
     const taxRate = Number(item.taxRate) || 0;
 
     const totalPrice = quantity * unitPrice;
-    const taxAmount = totalPrice * (taxRate / 100);
-    const totalWithTax = totalPrice + taxAmount;
+    const discountAmount = totalPrice * (discountPercent / 100);
+    const priceAfterDiscount = totalPrice - discountAmount;
+    const taxAmount = priceAfterDiscount * (taxRate / 100);
+    const totalWithTax = priceAfterDiscount + taxAmount;
     
-    return { totalPrice, taxAmount, totalWithTax };
+    return { totalPrice, discountAmount, priceAfterDiscount, taxAmount, totalWithTax };
 };
 
-const calculateGrandTotal = (items: Item[] | any[]) => {
-    if (!items) return 0;
-    return items.reduce((acc, item) => {
-        const { totalWithTax } = calculateItemTotals(item);
-        return acc + totalWithTax;
-    }, 0);
+const calculateGrandTotal = (items: Item[] | any[], discountPercent: number = 0) => {
+    if (!items) return { total: 0, totalDiscount: 0, originalTotal: 0 };
+    
+    let originalTotal = 0;
+    let totalDiscount = 0;
+    let total = 0;
+    
+    items.forEach(item => {
+        const { totalPrice, discountAmount, totalWithTax } = calculateItemTotals(item, discountPercent);
+        originalTotal += totalPrice * (1 + (Number(item.taxRate) || 0) / 100);
+        totalDiscount += discountAmount;
+        total += totalWithTax;
+    });
+    
+    return { total, totalDiscount, originalTotal };
 };
 
 // Função para calcular o lead time total de um produto
@@ -239,6 +251,7 @@ export default function QuotationsPage() {
             status: "Aguardando Aprovação",
             items: [],
             includedServices: [],
+            discount: 0,
         }
     });
 
@@ -255,7 +268,11 @@ export default function QuotationsPage() {
     });
     
     const watchedItems = form.watch("items");
-    const grandTotal = useMemo(() => calculateGrandTotal(watchedItems), [watchedItems]);
+    const watchedDiscount = form.watch("discount") || 0;
+    const grandTotalCalcs = useMemo(() => 
+        calculateGrandTotal(watchedItems, watchedDiscount), 
+        [watchedItems, watchedDiscount]
+    );
 
     // Busca produtos filtrados para o modal
     const filteredProducts = useMemo(() => {
@@ -387,6 +404,7 @@ export default function QuotationsPage() {
                     paymentTerms: data.paymentTerms || 'A combinar',
                     deliveryTime: data.deliveryTerms || data.deliveryTime || 'A combinar',
                     notes: data.notes || '',
+                    discount: data.discount || 0,
                     items: finalItems,
                     includedServices: data.includedServices || [],
                     createdAt: getCreatedAt(),
@@ -484,10 +502,11 @@ export default function QuotationsPage() {
         }
     }, [user, authLoading, isAuthenticated]);
     
-    const onSubmit = async (values: z.infer<typeof quotationSchema>) => {
+        const onSubmit = async (values: z.infer<typeof quotationSchema>) => {
         try {
+            const discount = values.discount || 0;
             const itemsWithTotals = values.items.map(item => {
-                const { totalPrice, taxAmount, totalWithTax } = calculateItemTotals(item);
+                const { totalPrice, taxAmount, totalWithTax } = calculateItemTotals(item, discount);
                 // Explicitly create the object to save, excluding the react-hook-form 'id'
                 return {
                     code: item.code || '',
@@ -719,6 +738,7 @@ export default function QuotationsPage() {
             notes: "",
             items: [],
             includedServices: [],
+            discount: 0,
         });
         setCurrentItem(emptyItem);
         setEditIndex(null);
@@ -890,7 +910,7 @@ export default function QuotationsPage() {
                     ...item,
                     itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
                 })),
-                totalValue: calculateGrandTotal(quotationToConvert.items),
+                totalValue: calculateGrandTotal(quotationToConvert.items, quotationToConvert.discount || 0).total,
                 status: "Aguardando Produção",
                 createdAt: Timestamp.now(),
                 deliveryDate: Timestamp.fromDate(quotationToConvert.validity),
@@ -930,7 +950,8 @@ export default function QuotationsPage() {
             const docSnap = await getDoc(companyRef);
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
             const { items, customer, number, validity, paymentTerms, deliveryTime, notes, includedServices } = selectedQuotation;
-            const grandTotal = calculateGrandTotal(items);
+            const discount = selectedQuotation.discount || 0;
+            const grandTotalCalcs = calculateGrandTotal(items, discount);
     
             if (formatType === 'pdf') {
                 const docPdf = new jsPDF({ orientation: "landscape" });
@@ -1000,7 +1021,7 @@ export default function QuotationsPage() {
                         item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                         (item.taxRate || 0).toLocaleString('pt-BR'),
                         unitPriceWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                        calculateItemTotals(item).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                        calculateItemTotals(item, discount).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                     ];
                 });
 
@@ -1015,7 +1036,7 @@ export default function QuotationsPage() {
                     '', 
                     '', 
                     '', 
-                    grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                    grandTotalCalcs.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
                 ]);
                 autoTable(docPdf, {
                     startY: y,
@@ -1044,6 +1065,26 @@ export default function QuotationsPage() {
                     }
                 });
                 y = (docPdf as any).lastAutoTable.finalY + 10;
+
+                if (discount && discount > 0) {
+                    const totals = calculateGrandTotal(items, discount);
+                    
+                    docPdf.setFontSize(11).setFont(undefined, 'normal');
+                    docPdf.text(`Subtotal Original:`, rightColX - 80, y, { align: 'right' });
+                    docPdf.text(totals.originalTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), rightColX, y, { align: 'right' });
+                    y += 6;
+                    
+                    docPdf.setTextColor(220, 38, 38); // Vermelho
+                    docPdf.text(`Desconto (${discount}%):`, rightColX - 80, y, { align: 'right' });
+                    docPdf.text(`- ${totals.totalDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, rightColX, y, { align: 'right' });
+                    y += 6;
+                    
+                    docPdf.setTextColor(0, 0, 0); // Voltar para preto
+                    docPdf.setFont(undefined, 'bold');
+                    docPdf.text(`Valor Final:`, rightColX - 80, y, { align: 'right' });
+                    docPdf.text(totals.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), rightColX, y, { align: 'right' });
+                    y += 10;
+                }
     
                 if (includedServices && includedServices.length > 0) {
                     if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
@@ -1115,11 +1156,15 @@ export default function QuotationsPage() {
                             item.unitPrice,
                             item.taxRate || 0,
                             unitPriceWithTax,
-                            calculateItemTotals(item).totalWithTax
+                            calculateItemTotals(item, discount).totalWithTax
                         ];
                     }),
                     [],
-                    ['TOTAL:', '', '', '', totalWeightExcel > 0 ? totalWeightExcel : '', '', '', '', 'Valor Total:', grandTotal],
+                    ...(discount > 0 ? [
+                        ['', '', '', '', '', '', '', '', 'Subtotal Original:', grandTotalCalcs.originalTotal],
+                        ['', '', '', '', '', '', '', '', `Desconto (${discount}%):`, -grandTotalCalcs.totalDiscount],
+                    ] : []),
+                    ['TOTAL:', '', '', '', totalWeightExcel > 0 ? totalWeightExcel : '', '', '', '', 'Valor Total:', grandTotalCalcs.total],
                     [],
                     ['Serviços Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
@@ -1230,11 +1275,11 @@ export default function QuotationsPage() {
         const approvalRate = totalCount > 0 ? (approvedCount / totalCount) * 100 : 0;
 
         // Valores
-        const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
-        const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
-        const rejectedValue = rejectedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
-        const pendingValue = pendingQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
-        const informativeValue = informativeQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items), 0);
+        const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
+        const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
+        const rejectedValue = rejectedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
+        const pendingValue = pendingQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
+        const informativeValue = informativeQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
         
         // Pesos
         const totalWeight = relevantQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
@@ -1424,7 +1469,7 @@ export default function QuotationsPage() {
                                                 <TableCell>{q.customer.name}</TableCell>
                                                 <TableCell>{format(q.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
                                                 <TableCell>
-                                                    {calculateGrandTotal(q.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    {calculateGrandTotal(q.items, q.discount || 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant={getStatusVariant(q.status)} className={cn((q.status === 'Aprovado' || q.status === 'Pedido Gerado') && 'bg-green-600 hover:bg-green-700 text-primary-foreground')}>{q.status}</Badge>
@@ -1675,7 +1720,7 @@ export default function QuotationsPage() {
                                                     </TableHeader>
                                                     <TableBody>
                                                         {watchedItems.map((item, index) => {
-                                                            const { totalWithTax } = calculateItemTotals(item);
+                                                            const { totalWithTax } = calculateItemTotals(item, watchedDiscount);
                                                             
                                                             return (
                                                                 <TableRow 
@@ -1770,11 +1815,25 @@ export default function QuotationsPage() {
                                                     </TableBody>
                                                 </Table>
                                                 <Separator className="my-4" />
-                                                <div className="flex justify-end items-center gap-4 text-lg font-bold pr-4">
-                                                    <span>Total Geral:</span>
-                                                    <span className="text-primary">
-                                                        {grandTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                    </span>
+                                                <div className="space-y-2 pr-4">
+                                                    {watchedDiscount > 0 && (
+                                                        <>
+                                                            <div className="flex justify-end items-center gap-4 text-sm text-muted-foreground">
+                                                                <span>Subtotal Original:</span>
+                                                                <span>{grandTotalCalcs.originalTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                            </div>
+                                                            <div className="flex justify-end items-center gap-4 text-sm text-red-600">
+                                                                <span>Desconto ({watchedDiscount}%):</span>
+                                                                <span>- {grandTotalCalcs.totalDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                    <div className="flex justify-end items-center gap-4 text-lg font-bold">
+                                                        <span>Total Geral:</span>
+                                                        <span className="text-primary">
+                                                            {grandTotalCalcs.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </CardContent>
                                         </Card>
@@ -1830,12 +1889,27 @@ export default function QuotationsPage() {
                                         </CardContent>
                                     </Card>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <FormField control={form.control} name="paymentTerms" render={({ field }) => (
                                             <FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                         )}/>
                                         <FormField control={form.control} name="deliveryTime" render={({ field }) => (
                                             <FormItem><FormLabel>Prazo de Entrega</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                        )}/>
+                                        <FormField control={form.control} name="discount" render={({ field }) => (
+                                            <FormItem>
+                                                <FormLabel>Desconto Global (%)</FormLabel>
+                                                <FormControl>
+                                                    <Input 
+                                                        type="number" 
+                                                        step="0.01" 
+                                                        placeholder="0" 
+                                                        {...field} 
+                                                        value={field.value ?? 0}
+                                                    />
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
                                         )}/>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2004,7 +2078,8 @@ export default function QuotationsPage() {
                                             </TableHeader>
                                             <TableBody>
                                                 {selectedQuotation.items.map((item, index) => {
-                                                    const { totalWithTax } = calculateItemTotals(item);
+                                                    const discount = selectedQuotation.discount || 0;
+                                                    const { totalPrice, discountAmount, totalWithTax } = calculateItemTotals(item, discount);
                                                     return (
                                                         <TableRow key={index}>
                                                             <TableCell className="font-mono text-sm">{item.code || '-'}</TableCell>
@@ -2019,18 +2094,39 @@ export default function QuotationsPage() {
                                                                     <span className="text-muted-foreground text-xs">N/A</span>
                                                                 )}
                                                             </TableCell>
-                                                            <TableCell className="text-right font-semibold">{totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                                                            <TableCell className="text-right font-semibold">
+                                                                {discount > 0 && (
+                                                                    <div className="text-xs text-muted-foreground line-through">
+                                                                        {(totalPrice * (1 + (item.taxRate || 0) / 100)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                    </div>
+                                                                )}
+                                                                {totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                            </TableCell>
                                                         </TableRow>
                                                     );
                                                 })}
                                             </TableBody>
                                         </Table>
                                         <Separator className="my-4" />
-                                        <div className="flex justify-end items-center gap-4 text-xl font-bold pr-4">
-                                            <span>Total Geral:</span>
-                                            <span className="text-primary">
-                                                {calculateGrandTotal(selectedQuotation.items).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                            </span>
+                                        <div className="space-y-2 pr-4">
+                                            {selectedQuotation.discount && selectedQuotation.discount > 0 && (
+                                                <>
+                                                    <div className="flex justify-end items-center gap-4 text-sm text-muted-foreground">
+                                                        <span>Subtotal Original:</span>
+                                                        <span>{calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount).originalTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                    </div>
+                                                    <div className="flex justify-end items-center gap-4 text-sm text-red-600">
+                                                        <span>Desconto ({selectedQuotation.discount}%):</span>
+                                                        <span>- {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount).totalDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                    </div>
+                                                </>
+                                            )}
+                                            <div className="flex justify-end items-center gap-4 text-xl font-bold">
+                                                <span>Total Geral:</span>
+                                                <span className="text-primary">
+                                                    {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount || 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                </span>
+                                            </div>
                                         </div>
                                     </CardContent>
                                 </Card>
