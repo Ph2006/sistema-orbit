@@ -572,6 +572,9 @@ export default function OrdersPage() {
     const scrollPositionRef = useRef<number>(0);
     // ADICIONAR ESTE NOVO:
     const columnScrollPositions = useRef<Map<string, number>>(new Map());
+    
+    // Estados para controlar colunas colapsadas
+    const [collapsedYearColumns, setCollapsedYearColumns] = useState<Set<string>>(new Set());
 
     const form = useForm<z.infer<typeof orderSchema>>({
         resolver: zodResolver(orderSchema),
@@ -1188,6 +1191,18 @@ export default function OrdersPage() {
         }
     };
     
+    const toggleYearCollapse = useCallback((year: string) => {
+        setCollapsedYearColumns(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(year)) {
+                newSet.delete(year);
+            } else {
+                newSet.add(year);
+            }
+            return newSet;
+        });
+    }, []);
+    
     const uniqueStatuses = useMemo(() => {
         const statuses = new Set(orders.map(order => order.status).filter(Boolean));
         return Array.from(statuses);
@@ -1367,12 +1382,25 @@ export default function OrdersPage() {
 
         filteredOrders.forEach(order => {
             if (order.status === 'Concluído') {
-                // Extrair ano da data de conclusão ou criação
-                const completionYear = order.completedAt 
-                    ? format(order.completedAt, 'yyyy')
-                    : order.createdAt 
-                        ? format(order.createdAt, 'yyyy')
-                        : 'Sem Data';
+                // CORREÇÃO: Usar apenas completedAt para pedidos concluídos
+                let completionYear: string;
+                
+                if (order.completedAt) {
+                    completionYear = format(new Date(order.completedAt), 'yyyy');
+                } else if (order.createdAt) {
+                    // Fallback para createdAt se não tiver completedAt
+                    completionYear = format(new Date(order.createdAt), 'yyyy');
+                } else {
+                    completionYear = 'Sem Data';
+                }
+                
+                console.log('🔍 DEBUG Pedido:', {
+                    id: order.id,
+                    quotationNumber: order.quotationNumber,
+                    completedAt: order.completedAt,
+                    createdAt: order.createdAt,
+                    completionYear
+                });
                 
                 if (!completedByYear.has(completionYear)) {
                     completedByYear.set(completionYear, {
@@ -1558,11 +1586,17 @@ export default function OrdersPage() {
                             return (
                                 <div key={monthKey} className="flex-shrink-0 w-72">
                                     {/* Header da coluna */}
-                                    <div className={`rounded-lg border-2 p-4 mb-4 ${
-                                        isCompletedYear
-                                            ? 'bg-green-50 border-green-300' 
-                                            : 'bg-blue-50 border-blue-300'
-                                    }`}>
+                                    <div 
+                                        className={`rounded-lg border-2 p-4 mb-4 ${
+                                            isCompletedYear
+                                                ? 'bg-green-50 border-green-300' 
+                                                : 'bg-blue-50 border-blue-300'
+                                        } ${isCompletedYear ? 'cursor-pointer hover:bg-green-100 transition-colors' : ''}`}
+                                        onClick={isCompletedYear ? () => {
+                                            const year = monthKey.replace('completed-', '');
+                                            toggleYearCollapse(year);
+                                        } : undefined}
+                                    >
                                         <div className="flex items-center justify-between mb-2">
                                             <h3 className={`font-semibold text-lg flex items-center gap-2 ${
                                                 isCompletedYear
@@ -1575,6 +1609,22 @@ export default function OrdersPage() {
                                                     <CalendarDays className="h-5 w-5 text-blue-700" />
                                                 )}
                                                 {monthLabel}
+                                                {isCompletedYear && (
+                                                    <button 
+                                                        className="ml-2 p-1 hover:bg-green-200 rounded transition-colors"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            const year = monthKey.replace('completed-', '');
+                                                            toggleYearCollapse(year);
+                                                        }}
+                                                    >
+                                                        {collapsedYearColumns.has(monthKey.replace('completed-', '')) ? (
+                                                            <ChevronDown className="h-4 w-4 text-green-700" />
+                                                        ) : (
+                                                            <ChevronUp className="h-4 w-4 text-green-700" />
+                                                        )}
+                                                    </button>
+                                                )}
                                             </h3>
                                             <Badge variant="secondary" className="font-medium">
                                                 {monthData.orders.length}
@@ -1602,16 +1652,26 @@ export default function OrdersPage() {
                                         </div>
                                     </div>
 
-                                    {/* Cards dos pedidos - ADICIONAR ATRIBUTOS AQUI */}
-                                    <div 
-                                        className="space-y-3 max-h-[600px] overflow-y-auto pr-2"
-                                        data-column-scroll
-                                        data-column-id={monthKey}
-                                        onScroll={(e) => {
-                                            const target = e.target as HTMLDivElement;
-                                            columnScrollPositions.current.set(monthKey, target.scrollTop);
-                                        }}
-                                    >
+                                    {/* NOVO: Indicador quando colapsado */}
+                                    {isCompletedYear && collapsedYearColumns.has(monthKey.replace('completed-', '')) && (
+                                        <div className="text-center py-4 text-green-700">
+                                            <p className="text-sm font-medium">
+                                                Clique para expandir e ver os {monthData.orders.length} pedidos
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Cards dos pedidos - ADICIONAR CONTROLE DE COLAPSO */}
+                                    {(!isCompletedYear || !collapsedYearColumns.has(monthKey.replace('completed-', ''))) && (
+                                        <div 
+                                            className="space-y-3 max-h-[600px] overflow-y-auto pr-2"
+                                            data-column-scroll
+                                            data-column-id={monthKey}
+                                            onScroll={(e) => {
+                                                const target = e.target as HTMLDivElement;
+                                                columnScrollPositions.current.set(monthKey, target.scrollTop);
+                                            }}
+                                        >
                                         {monthData.orders.map(order => {
                                             const statusProps = getStatusProps(order.status);
                                             const orderProgress = calculateOrderProgress(order);
@@ -1726,6 +1786,7 @@ export default function OrdersPage() {
                                             </div>
                                         )}
                                     </div>
+                                    )}
                                 </div>
                             );
                         })}
