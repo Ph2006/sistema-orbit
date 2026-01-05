@@ -1358,13 +1358,32 @@ export default function OrdersPage() {
             totalWeight: number;
             itemsByOrder: Map<string, OrderItem[]>;
         }>();
-        const completedOrders: Order[] = [];
-        let completedWeight = 0;
+        
+        // NOVO: Agrupar concluídos por ano
+        const completedByYear = new Map<string, {
+            orders: Order[];
+            totalWeight: number;
+        }>();
 
         filteredOrders.forEach(order => {
             if (order.status === 'Concluído') {
-                completedOrders.push(order);
-                completedWeight += order.totalWeight || 0;
+                // Extrair ano da data de conclusão ou criação
+                const completionYear = order.completedAt 
+                    ? format(order.completedAt, 'yyyy')
+                    : order.createdAt 
+                        ? format(order.createdAt, 'yyyy')
+                        : 'Sem Data';
+                
+                if (!completedByYear.has(completionYear)) {
+                    completedByYear.set(completionYear, {
+                        orders: [],
+                        totalWeight: 0
+                    });
+                }
+                
+                const yearData = completedByYear.get(completionYear)!;
+                yearData.orders.push(order);
+                yearData.totalWeight += order.totalWeight || 0;
                 return;
             }
 
@@ -1406,10 +1425,8 @@ export default function OrdersPage() {
 
         return {
             monthColumns: sortedEntries,
-            completed: {
-                orders: completedOrders,
-                totalWeight: completedWeight
-            }
+            completedByYear: Array.from(completedByYear.entries())
+                .sort(([a], [b]) => b.localeCompare(a)) // Anos mais recentes primeiro
         };
     }, [filteredOrders]);
 
@@ -1441,12 +1458,16 @@ export default function OrdersPage() {
     const KanbanView = () => {
         const allColumns = [
             ...ordersByMonth.monthColumns,
-            ['completed', {
-                orders: ordersByMonth.completed.orders,
-                totalWeight: ordersByMonth.completed.totalWeight,
-                itemsByOrder: new Map<string, OrderItem[]>()
-            }]
-        ] as Array<[string, { orders: Order[]; totalWeight: number; itemsByOrder?: Map<string, OrderItem[]> }]>;
+            // NOVO: Adicionar colunas de anos concluídos
+            ...ordersByMonth.completedByYear.map(([year, data]) => [
+                `completed-${year}`,
+                {
+                    orders: data.orders,
+                    totalWeight: data.totalWeight,
+                    itemsByOrder: new Map<string, OrderItem[]>()
+                }
+            ] as [string, { orders: Order[]; totalWeight: number; itemsByOrder?: Map<string, OrderItem[]> }])
+        ];
 
         const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
         
@@ -1516,12 +1537,13 @@ export default function OrdersPage() {
                 >
                     <div className="flex w-max space-x-4 p-4 min-w-full">
                         {allColumns.map(([monthKey, monthData]) => {
-                            const isCompleted = monthKey === 'completed';
+                            const isCompletedYear = monthKey.startsWith('completed-');
                             
                             // CORREÇÃO PRINCIPAL: Formatação correta do nome do mês
                             let monthLabel = '';
-                            if (isCompleted) {
-                                monthLabel = 'Concluídos';
+                            if (isCompletedYear) {
+                                const year = monthKey.replace('completed-', '');
+                                monthLabel = `Concluídos ${year}`;
                             } else {
                                 // Criar uma data válida a partir da chave YYYY-MM
                                 const [year, month] = monthKey.split('-');
@@ -1537,17 +1559,17 @@ export default function OrdersPage() {
                                 <div key={monthKey} className="flex-shrink-0 w-72">
                                     {/* Header da coluna */}
                                     <div className={`rounded-lg border-2 p-4 mb-4 ${
-                                        isCompleted 
+                                        isCompletedYear
                                             ? 'bg-green-50 border-green-300' 
                                             : 'bg-blue-50 border-blue-300'
                                     }`}>
                                         <div className="flex items-center justify-between mb-2">
                                             <h3 className={`font-semibold text-lg flex items-center gap-2 ${
-                                                isCompleted 
+                                                isCompletedYear
                                                     ? 'text-green-800' 
                                                     : 'text-blue-800'
                                             }`}>
-                                                {isCompleted ? (
+                                                {isCompletedYear ? (
                                                     <CheckCircle className="h-5 w-5 text-green-700" />
                                                 ) : (
                                                     <CalendarDays className="h-5 w-5 text-blue-700" />
@@ -1559,7 +1581,7 @@ export default function OrdersPage() {
                                             </Badge>
                                         </div>
                                         <div className={`text-sm ${
-                                            isCompleted 
+                                            isCompletedYear
                                                 ? 'text-green-700' 
                                                 : 'text-blue-700'
                                         }`}>
@@ -1572,7 +1594,7 @@ export default function OrdersPage() {
                                                     })} kg
                                                 </span>
                                             </div>
-                                            {!isCompleted && (
+                                            {!isCompletedYear && (
                                                 <p className="text-xs mt-1 text-muted-foreground">
                                                     Peso dos itens com entrega neste mês
                                                 </p>
@@ -1603,7 +1625,7 @@ export default function OrdersPage() {
                                                     key={order.id} 
                                                     className="p-4 cursor-pointer hover:shadow-md transition-shadow duration-200 border-l-4"
                                                     style={{
-                                                        borderLeftColor: isCompleted 
+                                                        borderLeftColor: isCompletedYear 
                                                             ? '#16a34a' 
                                                             : statusProps.colorClass.includes('bg-green-600') ? '#16a34a'
                                                             : statusProps.colorClass.includes('bg-blue-500') ? '#3b82f6'
@@ -1678,7 +1700,7 @@ export default function OrdersPage() {
                                                         )}
 
                                                         {/* Progresso */}
-                                                        {!isCompleted && (
+                                                        {!isCompletedYear && (
                                                             <div>
                                                                 <div className="flex items-center gap-2 mb-1">
                                                                     <span className="text-xs text-muted-foreground">Progresso:</span>
