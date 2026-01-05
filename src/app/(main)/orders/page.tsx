@@ -1382,25 +1382,33 @@ export default function OrdersPage() {
 
         filteredOrders.forEach(order => {
             if (order.status === 'Concluído') {
-                // CORREÇÃO: Usar apenas completedAt para pedidos concluídos
                 let completionYear: string;
                 
                 if (order.completedAt) {
+                    // Prioridade 1: Data de conclusão oficial
                     completionYear = format(new Date(order.completedAt), 'yyyy');
-                } else if (order.createdAt) {
-                    // Fallback para createdAt se não tiver completedAt
-                    completionYear = format(new Date(order.createdAt), 'yyyy');
+                    console.log('📅 Usando completedAt:', order.quotationNumber, completionYear);
                 } else {
-                    completionYear = 'Sem Data';
+                    // Prioridade 2: Data de embarque mais recente dos itens
+                    const shippingDates = order.items
+                        .map(item => item.shippingDate)
+                        .filter(date => date !== null && date !== undefined)
+                        .map(date => new Date(date));
+                    
+                    if (shippingDates.length > 0) {
+                        // Pegar a data de embarque mais recente
+                        const latestShipping = new Date(Math.max(...shippingDates.map(d => d.getTime())));
+                        completionYear = format(latestShipping, 'yyyy');
+                        console.log('📦 Usando shippingDate:', order.quotationNumber, completionYear);
+                    } else if (order.createdAt) {
+                        // Prioridade 3: Data de criação do pedido
+                        completionYear = format(new Date(order.createdAt), 'yyyy');
+                        console.log('📝 Usando createdAt:', order.quotationNumber, completionYear);
+                    } else {
+                        completionYear = 'Sem Data';
+                        console.log('❌ Sem data:', order.quotationNumber);
+                    }
                 }
-                
-                console.log('🔍 DEBUG Pedido:', {
-                    id: order.id,
-                    quotationNumber: order.quotationNumber,
-                    completedAt: order.completedAt,
-                    createdAt: order.createdAt,
-                    completionYear
-                });
                 
                 if (!completedByYear.has(completionYear)) {
                     completedByYear.set(completionYear, {
