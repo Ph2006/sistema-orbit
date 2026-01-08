@@ -1010,7 +1010,8 @@ export default function QuotationsPage() {
                 const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.']];
                 const body = items.map(item => {
                     const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
-                    const unitPriceWithTax = item.unitPrice * (1 + (item.taxRate || 0) / 100);
+                    const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
+                    const unitPriceWithTax = unitPriceWithDiscount * (1 + (item.taxRate || 0) / 100);
                     return [
                         item.code || '-',
                         item.description,
@@ -1018,7 +1019,7 @@ export default function QuotationsPage() {
                         item.unitWeight && Number(item.unitWeight) > 0 ? `${Number(item.unitWeight).toLocaleString('pt-BR')} kg` : '-',
                         itemTotalWeight > 0 ? `${itemTotalWeight.toLocaleString('pt-BR')} kg` : '-',
                         item.leadTimeDays ? `${item.leadTimeDays} dias` : '-',
-                        item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                        unitPriceWithDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                         (item.taxRate || 0).toLocaleString('pt-BR'),
                         unitPriceWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                         calculateItemTotals(item, discount).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
@@ -1145,7 +1146,8 @@ export default function QuotationsPage() {
                     ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ Imp.', 'Imposto (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.'],
                     ...items.map(item => {
                         const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
-                        const unitPriceWithTax = item.unitPrice * (1 + (item.taxRate || 0) / 100);
+                        const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
+                        const unitPriceWithTax = unitPriceWithDiscount * (1 + (item.taxRate || 0) / 100);
                         return [
                             item.description,
                             item.code,
@@ -1153,7 +1155,7 @@ export default function QuotationsPage() {
                             item.unitWeight || 0,
                             itemTotalWeight,
                             item.leadTimeDays || 0,
-                            item.unitPrice,
+                            unitPriceWithDiscount,
                             item.taxRate || 0,
                             unitPriceWithTax,
                             calculateItemTotals(item, discount).totalWithTax
