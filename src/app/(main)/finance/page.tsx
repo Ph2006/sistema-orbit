@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Download, Lock, Eye, EyeOff, TrendingUp, TrendingDown, DollarSign, FileText, Calculator, Target, AlertTriangle, CheckCircle, Package, Plus, Edit, Save, X } from "lucide-react";
-import { collection, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -106,6 +106,9 @@ export default function FinancePage() {
   const [quotations, setQuotations] = useState<any[]>([]);
   const [financialData, setFinancialData] = useState<OrderFinancialData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'financeiro' | 'faturamento'>('financeiro');
+  const [billingData, setBillingData] = useState<any[]>([]);
+  const [isBillingLoading, setIsBillingLoading] = useState(false);
   
   // Estados de filtros
   const [statusFilter, setStatusFilter] = useState('all');
@@ -236,6 +239,90 @@ export default function FinancePage() {
     }
   };
 
+  const fetchOrdersForBilling = async () => {
+    if (!user) return [];
+    try {
+      const [ordersSnap, quotationsData] = await Promise.all([
+        getDocs(collection(db, "companies", "mecald", "orders")),
+        fetchQuotations(),
+      ]);
+
+      const ordersRaw = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      return ordersRaw.map((order: any) => {
+        const quotation = quotationsData.find((q: any) =>
+          q.quotationNumber === (order.quotationNumber || '') ||
+          q.number?.toString?.() === (order.quotationNumber || '') ||
+          q.number?.toString?.() === (order.internalOS || '')
+        );
+
+        const items = (order.items || []).map((item: any, i: number) => {
+          const quoteItem = quotation?.items?.[i];
+          const quoteQty = Number(quoteItem?.quantity) || 0;
+          const quoteTotalWithTax = Number(quoteItem?.totalWithTax) || 0;
+          const unitPriceFromQuotation = quoteQty > 0 ? (quoteTotalWithTax / quoteQty) : 0;
+
+          const orderQty = Number(item?.quantity) || 0;
+          const itemValue = unitPriceFromQuotation * orderQty;
+
+          const shippingDate =
+            item?.shippingDate?.toDate ? item.shippingDate.toDate() :
+            item?.shippingDate ? new Date(item.shippingDate) :
+            null;
+
+          return {
+            description: item?.description || quoteItem?.description || '',
+            quantity: orderQty,
+            unitPriceFromQuotation,
+            value: itemValue,
+            invoiceNumber: item?.invoiceNumber || '',
+            shippingDate,
+            invoiced: Boolean(item?.invoiced),
+          };
+        });
+
+        return {
+          id: order.id,
+          internalOS: order.internalOS || 'N/A',
+          quotationNumber: order.quotationNumber || '',
+          customerName: order.customer?.name || order.customerName || 'Cliente Desconhecido',
+          status: order.status || 'Indefinido',
+          deliveryDate: order.deliveryDate?.toDate ? order.deliveryDate.toDate() : null,
+          items,
+        };
+      });
+    } catch (error) {
+      console.error("Erro ao buscar OS para faturamento:", error);
+      return [];
+    }
+  };
+
+  const handleToggleInvoiced = async (orderId: string, itemIndex: number, value: boolean) => {
+    try {
+      const orderRef = doc(db, "companies", "mecald", "orders", orderId);
+      await updateDoc(orderRef, {
+        [`items.${itemIndex}.invoiced`]: value
+      } as any);
+
+      setBillingData(prev =>
+        prev.map(o => {
+          if (o.id !== orderId) return o;
+          const nextItems = [...(o.items || [])];
+          if (!nextItems[itemIndex]) return o;
+          nextItems[itemIndex] = { ...nextItems[itemIndex], invoiced: value };
+          return { ...o, items: nextItems };
+        })
+      );
+    } catch (error) {
+      console.error("Erro ao atualizar faturado:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao atualizar",
+        description: "Não foi possível salvar o status de faturamento do item.",
+      });
+    }
+  };
+
   // Função para processar dados financeiros
   const processFinancialData = (orders: any[], quotations: any[]): OrderFinancialData[] => {
     return orders.map(order => {
@@ -252,7 +339,7 @@ export default function FinancePage() {
       let netRevenue = 0;
       let quotationItems: any[] = [];
       let hasManualRevenue = false;
-      let manualRevenueInfo = undefined;
+      let manualRevenueInfo: OrderFinancialData["manualRevenueInfo"] = undefined;
 
       // Primeiro, verificar se há receita manual salva na OS
       if (order.manualRevenue) {
@@ -485,6 +572,21 @@ export default function FinancePage() {
   useEffect(() => {
     loadData();
   }, [user, isAuthenticated]);
+
+  useEffect(() => {
+    const loadBilling = async () => {
+      if (!user || !isAuthenticated) return;
+      if (activeTab !== 'faturamento') return;
+      setIsBillingLoading(true);
+      try {
+        const data = await fetchOrdersForBilling();
+        setBillingData(data);
+      } finally {
+        setIsBillingLoading(false);
+      }
+    };
+    loadBilling();
+  }, [user, isAuthenticated, activeTab]);
 
   // Calcular resumo financeiro
   const financialSummary = useMemo((): FinancialSummary => {
@@ -1093,6 +1195,258 @@ export default function FinancePage() {
     );
   }
 
+  const BillingTab = () => {
+    const [month, setMonth] = useState<string>(() => format(new Date(), "yyyy-MM"));
+
+    const ordersForMonth = useMemo(() => {
+      const [yStr, mStr] = month.split("-");
+      const y = Number(yStr);
+      const m = Number(mStr); // 1-12
+      if (!y || !m) return billingData;
+
+      const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
+      const end = new Date(y, m, 1, 0, 0, 0, 0);
+
+      return billingData
+        .map(order => {
+          const items = (order.items || []).filter((it: any) => {
+            const d: Date | null =
+              it?.shippingDate instanceof Date ? it.shippingDate :
+              order.deliveryDate instanceof Date ? order.deliveryDate :
+              null;
+            if (!d) return true;
+            return d >= start && d < end;
+          });
+          return { ...order, items };
+        })
+        .filter(order => (order.items || []).length > 0);
+    }, [billingData, month]);
+
+    const summary = useMemo(() => {
+      const allItems = ordersForMonth.flatMap((o: any) => (o.items || []).map((it: any) => ({ ...it, orderId: o.id })));
+      const total = allItems.reduce((sum: number, it: any) => sum + (Number(it.value) || 0), 0);
+      const invoiced = allItems.filter((it: any) => it.invoiced).reduce((sum: number, it: any) => sum + (Number(it.value) || 0), 0);
+      const remaining = total - invoiced;
+      const pct = total > 0 ? (invoiced / total) * 100 : 0;
+      return { total, invoiced, remaining, pct };
+    }, [ordersForMonth]);
+
+    const exportBillingPdf = async () => {
+      try {
+        const docPdf = new jsPDF({ orientation: "portrait" });
+        const pageWidth = docPdf.internal.pageSize.width;
+        let yPos = 15;
+
+        docPdf.setFontSize(16).setFont("helvetica", "bold");
+        docPdf.text("RELATÓRIO DE FATURAMENTO DO MÊS", pageWidth / 2, yPos, { align: "center" });
+        yPos += 8;
+
+        docPdf.setFontSize(10).setFont("helvetica", "normal");
+        docPdf.text(`Mês: ${month} | Gerado em: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, pageWidth / 2, yPos, { align: "center" });
+        yPos += 10;
+
+        docPdf.setFontSize(12).setFont("helvetica", "bold");
+        docPdf.text("Resumo", 14, yPos);
+        yPos += 6;
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [["Indicador", "Valor"]],
+          body: [
+            ["Total a faturar", summary.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
+            ["Faturado", summary.invoiced.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
+            ["Falta faturar", summary.remaining.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
+            ["% concluído", `${summary.pct.toFixed(1)}%`],
+          ],
+          columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 110, halign: "right" } },
+          styles: { fontSize: 10 },
+          headStyles: { fillColor: [37, 99, 235] },
+          theme: "grid",
+        });
+
+        yPos = (docPdf as any).lastAutoTable.finalY + 10;
+
+        const rows = ordersForMonth.flatMap((o: any) =>
+          (o.items || []).map((it: any, idx: number) => [
+            o.internalOS,
+            o.customerName,
+            it.description || `Item ${idx + 1}`,
+            String(it.quantity ?? ""),
+            (Number(it.value) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+            it.invoiced ? "FATURADO" : "PENDENTE",
+            it.invoiceNumber || "",
+            it.shippingDate ? format(it.shippingDate, "dd/MM/yyyy") : "",
+          ])
+        );
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [["OS", "Cliente", "Item", "Qtd", "Valor", "Status", "NF", "Data Env."]],
+          body: rows,
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [37, 99, 235] },
+          columnStyles: {
+            0: { cellWidth: 18 },
+            1: { cellWidth: 35 },
+            2: { cellWidth: 55 },
+            3: { cellWidth: 10, halign: "center" },
+            4: { cellWidth: 22, halign: "right" },
+            5: { cellWidth: 18, halign: "center" },
+            6: { cellWidth: 14, halign: "center" },
+            7: { cellWidth: 18, halign: "center" },
+          },
+        });
+
+        docPdf.save(`Relatorio_Faturamento_${month}_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
+      } catch (error) {
+        console.error("Erro ao exportar PDF de faturamento:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro ao exportar PDF",
+          description: "Não foi possível gerar o relatório de faturamento.",
+        });
+      }
+    };
+
+    return (
+      <div className="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Filtro do Mês</CardTitle>
+            <CardDescription>Selecione o mês para consolidar faturado x pendente</CardDescription>
+          </CardHeader>
+          <CardContent className="flex items-center gap-4">
+            <Input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-[200px]"
+            />
+            <Button variant="outline" onClick={exportBillingPdf} disabled={isBillingLoading || !ordersForMonth.length}>
+              <Download className="w-4 h-4 mr-2" />
+              Exportar PDF
+            </Button>
+            <Button variant="outline" onClick={async () => {
+              setIsBillingLoading(true);
+              try {
+                const data = await fetchOrdersForBilling();
+                setBillingData(data);
+              } finally {
+                setIsBillingLoading(false);
+              }
+            }}>
+              🔄 Recarregar
+            </Button>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            title="Total a faturar"
+            value={summary.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            icon={DollarSign}
+            description="Soma dos itens do mês"
+          />
+          <StatCard
+            title="Faturado"
+            value={summary.invoiced.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            icon={CheckCircle}
+            description="Itens marcados como faturados"
+          />
+          <StatCard
+            title="Falta faturar"
+            value={summary.remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+            icon={AlertTriangle}
+            description="Diferença"
+          />
+          <StatCard
+            title="% concluído"
+            value={`${summary.pct.toFixed(1)}%`}
+            icon={Target}
+            description="Faturado / Total"
+          />
+        </div>
+
+        {isBillingLoading ? (
+          <Card>
+            <CardContent className="p-6">
+              <div className="space-y-4">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
+              </div>
+            </CardContent>
+          </Card>
+        ) : ordersForMonth.length ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Pedidos do mês</CardTitle>
+              <CardDescription>Marque manualmente os itens faturados</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {ordersForMonth.map((order: any) => (
+                  <div key={order.id} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <div className="font-bold">OS: {order.internalOS}</div>
+                        <div className="text-sm text-muted-foreground">{order.customerName}</div>
+                      </div>
+                      <Badge variant="outline">{order.status}</Badge>
+                    </div>
+
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item</TableHead>
+                          <TableHead className="text-right">Qtd</TableHead>
+                          <TableHead className="text-right">Vlr Unit. (Orç.)</TableHead>
+                          <TableHead className="text-right">Valor</TableHead>
+                          <TableHead>NF</TableHead>
+                          <TableHead>Data Env.</TableHead>
+                          <TableHead className="text-center">Faturado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(order.items || []).map((it: any, idx: number) => (
+                          <TableRow key={idx}>
+                            <TableCell>{it.description || `Item ${idx + 1}`}</TableCell>
+                            <TableCell className="text-right">{it.quantity ?? ""}</TableCell>
+                            <TableCell className="text-right">
+                              {(Number(it.unitPriceFromQuotation) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {(Number(it.value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </TableCell>
+                            <TableCell>{it.invoiceNumber || "-"}</TableCell>
+                            <TableCell>{it.shippingDate ? format(it.shippingDate, 'dd/MM/yyyy') : "-"}</TableCell>
+                            <TableCell className="text-center">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(it.invoiced)}
+                                onChange={(e) => handleToggleInvoiced(order.id, idx, e.target.checked)}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="p-6 text-center text-muted-foreground">
+              Nenhum pedido encontrado para o mês selecionado.
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
       <div className="flex items-center justify-between space-y-2">
@@ -1117,712 +1471,733 @@ export default function FinancePage() {
         </div>
       </div>
 
-      {/* Cards de Resumo */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Receita Bruta Total"
-          value={financialSummary.totalGrossRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-          icon={DollarSign}
-          description={`${financialSummary.totalOrders} OS analisadas`}
-        />
-        <StatCard
-          title="Receita Líquida Total"
-          value={financialSummary.totalNetRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-          icon={Target}
-          description={`Impostos: ${financialSummary.totalTaxes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
-        />
-        <StatCard
-          title="Custos Totais"
-          value={financialSummary.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-          icon={TrendingDown}
-          description={`${(financialSummary.totalNetRevenue > 0 ? (financialSummary.totalCosts / financialSummary.totalNetRevenue) * 100 : 0).toFixed(1)}% da receita líquida`}
-        />
-        <StatCard
-          title="Lucro Bruto Total"
-          value={financialSummary.totalGrossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-          icon={TrendingUp}
-          description={`Margem: ${financialSummary.averageGrossMargin.toFixed(1)}%`}
-          className={financialSummary.totalGrossProfit >= 0 ? 'border-green-200' : 'border-red-200'}
-        />
+      <div className="flex border-b mb-4">
+        <button
+          onClick={() => setActiveTab('financeiro')}
+          className={`px-4 py-2 -mb-px ${activeTab === 'financeiro' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
+        >
+          Relatório Financeiro
+        </button>
+        <button
+          onClick={() => setActiveTab('faturamento')}
+          className={`px-4 py-2 -mb-px ${activeTab === 'faturamento' ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground'}`}
+        >
+          Faturamento do Mês
+        </button>
       </div>
 
-      {/* Indicadores de Performance */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calculator className="h-5 w-5" />
-              Análise de Margem
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">Margem Bruta Média</span>
-                <span className={`font-bold ${getMarginColor(financialSummary.averageGrossMargin)}`}>
-                  {financialSummary.averageGrossMargin.toFixed(2)}%
-                </span>
-              </div>
-              <Progress 
-                value={Math.max(0, Math.min(100, financialSummary.averageGrossMargin))} 
-                className="h-2" 
-              />
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">Margem Líquida Média</span>
-                <span className={`font-bold ${getMarginColor(financialSummary.averageNetMargin)}`}>
-                  {financialSummary.averageNetMargin.toFixed(2)}%
-                </span>
-              </div>
-              <Progress 
-                value={Math.max(0, Math.min(100, financialSummary.averageNetMargin))} 
-                className="h-2" 
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5" />
-              Taxa de Sucesso
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">OS Lucrativas</span>
-                <span className="font-bold text-green-600">{financialSummary.profitableOrders}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">OS Não Lucrativas</span>
-                <span className="font-bold text-red-600">{financialSummary.unprofitableOrders}</span>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold">
-                  {financialSummary.totalOrders > 0 
-                    ? ((financialSummary.profitableOrders / financialSummary.totalOrders) * 100).toFixed(1)
-                    : 0}%
-                </div>
-                <div className="text-sm text-muted-foreground">Taxa de Lucratividade</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5" />
-              Carga Tributária
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">% sobre Receita Bruta</span>
-                <span className="font-bold text-orange-600">
-                  {financialSummary.totalGrossRevenue > 0 
-                    ? ((financialSummary.totalTaxes / financialSummary.totalGrossRevenue) * 100).toFixed(2)
-                    : 0}%
-                </span>
-              </div>
-              <div className="text-center">
-                <div className="text-xl font-bold text-orange-600">
-                  {financialSummary.totalTaxes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                </div>
-                <div className="text-sm text-muted-foreground">Total em Impostos</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Filtros */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Filtros e Busca</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <Input
-                placeholder="🔍 Buscar por OS, cliente ou orçamento..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filtrar por Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
-                <SelectItem value="Em Produção">Em Produção</SelectItem>
-                <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
-              </SelectContent>
-            </Select>
-            {(searchTerm || statusFilter !== 'all') && (
-              <Button 
-                variant="outline" 
-                onClick={() => {
-                  setSearchTerm('');
-                  setStatusFilter('all');
-                }}
-              >
-                Limpar Filtros
-              </Button>
-            )}
+      {activeTab === 'financeiro' && (
+        <>
+          {/* Cards de Resumo */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              title="Receita Bruta Total"
+              value={financialSummary.totalGrossRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              icon={DollarSign}
+              description={`${financialSummary.totalOrders} OS analisadas`}
+            />
+            <StatCard
+              title="Receita Líquida Total"
+              value={financialSummary.totalNetRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              icon={Target}
+              description={`Impostos: ${financialSummary.totalTaxes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
+            />
+            <StatCard
+              title="Custos Totais"
+              value={financialSummary.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              icon={TrendingDown}
+              description={`${(financialSummary.totalNetRevenue > 0 ? (financialSummary.totalCosts / financialSummary.totalNetRevenue) * 100 : 0).toFixed(1)}% da receita líquida`}
+            />
+            <StatCard
+              title="Lucro Bruto Total"
+              value={financialSummary.totalGrossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              icon={TrendingUp}
+              description={`Margem: ${financialSummary.averageGrossMargin.toFixed(1)}%`}
+              className={financialSummary.totalGrossProfit >= 0 ? 'border-green-200' : 'border-red-200'}
+            />
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Modal de Lançamento de Receita Manual */}
-      <Dialog open={isRevenueModalOpen} onOpenChange={setIsRevenueModalOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5" />
-              Lançamento Manual de Receita
-            </DialogTitle>
-            <DialogDescription>
-              {selectedOrderForRevenue ? (
-                <>
-                  Insira os dados de receita para a OS <strong>{selectedOrderForRevenue.internalOS}</strong>
-                  {selectedOrderForRevenue.manualRevenue && (
-                    <span className="block text-sm text-blue-600 mt-1">
-                      💡 Esta OS já possui receita manual cadastrada. Os valores serão atualizados.
+          {/* Indicadores de Performance */}
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Calculator className="h-5 w-5" />
+                  Análise de Margem
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Margem Bruta Média</span>
+                    <span className={`font-bold ${getMarginColor(financialSummary.averageGrossMargin)}`}>
+                      {financialSummary.averageGrossMargin.toFixed(2)}%
                     </span>
-                  )}
-                </>
-              ) : (
-                'Carregando dados da OS...'
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-6">
-            {/* Campo de Receita Bruta */}
-            <div className="space-y-2">
-              <Label htmlFor="grossRevenue">Receita Bruta Total</Label>
-              <Input
-                id="grossRevenue"
-                type="number"
-                step="0.01"
-                min="0"
-                value={manualGrossRevenue}
-                onChange={(e) => setManualGrossRevenue(e.target.value)}
-                placeholder="Ex: 15000.00"
-                className="text-lg font-medium"
-              />
-              <p className="text-xs text-muted-foreground">
-                Valor total da receita antes dos impostos
-              </p>
-            </div>
+                  </div>
+                  <Progress 
+                    value={Math.max(0, Math.min(100, financialSummary.averageGrossMargin))} 
+                    className="h-2" 
+                  />
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Margem Líquida Média</span>
+                    <span className={`font-bold ${getMarginColor(financialSummary.averageNetMargin)}`}>
+                      {financialSummary.averageNetMargin.toFixed(2)}%
+                    </span>
+                  </div>
+                  <Progress 
+                    value={Math.max(0, Math.min(100, financialSummary.averageNetMargin))} 
+                    className="h-2" 
+                  />
+                </div>
+              </CardContent>
+            </Card>
 
-            {/* Toggle para modo de entrada de impostos */}
-            <div className="space-y-3">
-              <Label>Forma de Cálculo dos Impostos</Label>
-              <div className="flex items-center space-x-4">
-                <Button
-                  type="button"
-                  variant={usePercentage ? "outline" : "default"}
-                  size="sm"
-                  onClick={() => setUsePercentage(false)}
-                  className="flex items-center gap-2"
-                >
-                  <DollarSign className="h-4 w-4" />
-                  Valor em Reais
-                </Button>
-                <Button
-                  type="button"
-                  variant={usePercentage ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setUsePercentage(true)}
-                  className="flex items-center gap-2"
-                >
-                  <Calculator className="h-4 w-4" />
-                  Percentual
-                </Button>
-              </div>
-            </div>
-
-            {/* Campos de impostos baseados no modo selecionado */}
-            <div className="grid grid-cols-2 gap-4">
-              {usePercentage ? (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="taxRate">Percentual de Impostos (%)</Label>
-                    <Input
-                      id="taxRate"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      value={manualTaxRate}
-                      onChange={(e) => setManualTaxRate(e.target.value)}
-                      placeholder="Ex: 18.50"
-                    />
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5" />
+                  Taxa de Sucesso
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">OS Lucrativas</span>
+                    <span className="font-bold text-green-600">{financialSummary.profitableOrders}</span>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="taxAmount">Valor dos Impostos (R$)</Label>
-                    <Input
-                      id="taxAmount"
-                      type="number"
-                      value={manualTaxAmount}
-                      readOnly
-                      className="bg-muted"
-                      placeholder="Calculado automaticamente"
-                    />
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">OS Não Lucrativas</span>
+                    <span className="font-bold text-red-600">{financialSummary.unprofitableOrders}</span>
                   </div>
-                </>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="taxAmount">Valor dos Impostos (R$)</Label>
-                    <Input
-                      id="taxAmount"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={manualTaxAmount}
-                      onChange={(e) => setManualTaxAmount(e.target.value)}
-                      placeholder="Ex: 2775.00"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="taxRate">Percentual Equivalente (%)</Label>
-                    <Input
-                      id="taxRate"
-                      type="number"
-                      value={manualTaxRate}
-                      readOnly
-                      className="bg-muted"
-                      placeholder="Calculado automaticamente"
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Resumo dos valores */}
-            {manualGrossRevenue && manualTaxAmount && (
-              <div className="border rounded-lg p-4 bg-muted/50">
-                <h4 className="font-medium mb-3">Resumo dos Valores</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Receita Bruta:</span>
-                    <p className="font-bold text-lg">
-                      {parseFloat(manualGrossRevenue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Impostos:</span>
-                    <p className="font-bold text-lg text-orange-600">
-                      -{parseFloat(manualTaxAmount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </p>
-                  </div>
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">Receita Líquida:</span>
-                    <p className="font-bold text-xl text-green-600">
-                      {(parseFloat(manualGrossRevenue) - parseFloat(manualTaxAmount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </p>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">
+                      {financialSummary.totalOrders > 0 
+                        ? ((financialSummary.profitableOrders / financialSummary.totalOrders) * 100).toFixed(1)
+                        : 0}%
+                    </div>
+                    <div className="text-sm text-muted-foreground">Taxa de Lucratividade</div>
                   </div>
                 </div>
-              </div>
-            )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5" />
+                  Carga Tributária
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">% sobre Receita Bruta</span>
+                    <span className="font-bold text-orange-600">
+                      {financialSummary.totalGrossRevenue > 0 
+                        ? ((financialSummary.totalTaxes / financialSummary.totalGrossRevenue) * 100).toFixed(2)
+                        : 0}%
+                    </span>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-orange-600">
+                      {financialSummary.totalTaxes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Total em Impostos</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCloseRevenueModal}>
-              <X className="w-4 h-4 mr-2" />
-              Cancelar
-            </Button>
-            <Button 
-              onClick={handleSaveManualRevenue}
-              disabled={!manualGrossRevenue || !manualTaxAmount || isSavingRevenue}
-            >
-              {isSavingRevenue ? (
-                <>
-                  <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Salvando...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-2" />
-                  Salvar Receita
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          {/* Filtros */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Filtros e Busca</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex-1 min-w-[200px]">
+                  <Input
+                    placeholder="🔍 Buscar por OS, cliente ou orçamento..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Filtrar por Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os Status</SelectItem>
+                    <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
+                    <SelectItem value="Em Produção">Em Produção</SelectItem>
+                    <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
+                  </SelectContent>
+                </Select>
+                {(searchTerm || statusFilter !== 'all') && (
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setSearchTerm('');
+                      setStatusFilter('all');
+                    }}
+                  >
+                    Limpar Filtros
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Tabela Detalhada */}
-      {isLoading ? (
-        <Card>
-          <CardContent className="p-6">
-            <div className="space-y-4">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-            </div>
-          </CardContent>
-        </Card>
-      ) : filteredData.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Análise Detalhada por Ordem de Serviço</CardTitle>
-            <CardDescription>
-              Relatório técnico completo integrando receitas dos orçamentos e custos das OS
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Accordion type="single" collapsible className="w-full">
-              {filteredData.map((data) => (
-                <AccordionItem value={data.id} key={data.id}>
-                  <AccordionTrigger className="hover:bg-muted/50 px-4">
-                    <div className="flex-1 text-left">
-                      <div className="flex items-center gap-4">
-                        <span className="font-bold text-primary">OS: {data.internalOS}</span>
-                        <span className="text-muted-foreground">{data.customerName}</span>
-                        {data.grossRevenue === 0 && (
-                          <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-300">
-                            💰 Sem Receita
-                          </Badge>
-                        )}
-                        {data.hasManualRevenue && (
-                          <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-300">
-                            📝 Manual
-                          </Badge>
-                        )}
-                        <Badge 
-                          variant={getMarginBadge(data.grossMargin).variant}
-                          className={getMarginBadge(data.grossMargin).color}
-                        >
-                          {data.grossMargin >= 0 ? '✓' : '✗'} {data.grossMargin.toFixed(1)}%
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-6 mt-1 text-sm text-muted-foreground">
-                        <span>Receita Líquida: {data.netRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                        <span>Custos: {data.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                        <span className={`font-semibold ${data.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          Lucro: {data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          {/* Modal de Lançamento de Receita Manual */}
+          <Dialog open={isRevenueModalOpen} onOpenChange={setIsRevenueModalOpen}>
+            <DialogContent className="sm:max-w-[600px]">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5" />
+                  Lançamento Manual de Receita
+                </DialogTitle>
+                <DialogDescription>
+                  {selectedOrderForRevenue ? (
+                    <>
+                      Insira os dados de receita para a OS <strong>{selectedOrderForRevenue.internalOS}</strong>
+                      {selectedOrderForRevenue.manualRevenue && (
+                        <span className="block text-sm text-blue-600 mt-1">
+                          💡 Esta OS já possui receita manual cadastrada. Os valores serão atualizados.
                         </span>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const order = orders.find(o => o.id === data.id);
-                              if (order) {
-                                handleOpenRevenueModal(order);
-                              } else {
-                                toast({
-                                  variant: "destructive",
-                                  title: "Erro",
-                                  description: "Não foi possível encontrar os dados da OS. Tente recarregar a página.",
-                                });
-                              }
-                            }}
-                            className="h-6 px-2 text-xs"
-                          >
-                            {data.grossRevenue === 0 ? (
-                              <>
-                                <Plus className="h-3 w-3 mr-1" />
-                                Lançar Receita
-                              </>
-                            ) : (
-                              <>
-                                <Edit className="h-3 w-3 mr-1" />
-                                Editar Receita
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              generateIndividualReport(data);
-                            }}
-                            className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          >
-                            <Download className="h-3 w-3 mr-1" />
-                            PDF
-                          </Button>
-                        </div>
+                      )}
+                    </>
+                  ) : (
+                    'Carregando dados da OS...'
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="space-y-6">
+                {/* Campo de Receita Bruta */}
+                <div className="space-y-2">
+                  <Label htmlFor="grossRevenue">Receita Bruta Total</Label>
+                  <Input
+                    id="grossRevenue"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={manualGrossRevenue}
+                    onChange={(e) => setManualGrossRevenue(e.target.value)}
+                    placeholder="Ex: 15000.00"
+                    className="text-lg font-medium"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Valor total da receita antes dos impostos
+                  </p>
+                </div>
+
+                {/* Toggle para modo de entrada de impostos */}
+                <div className="space-y-3">
+                  <Label>Forma de Cálculo dos Impostos</Label>
+                  <div className="flex items-center space-x-4">
+                    <Button
+                      type="button"
+                      variant={usePercentage ? "outline" : "default"}
+                      size="sm"
+                      onClick={() => setUsePercentage(false)}
+                      className="flex items-center gap-2"
+                    >
+                      <DollarSign className="h-4 w-4" />
+                      Valor em Reais
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={usePercentage ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setUsePercentage(true)}
+                      className="flex items-center gap-2"
+                    >
+                      <Calculator className="h-4 w-4" />
+                      Percentual
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Campos de impostos baseados no modo selecionado */}
+                <div className="grid grid-cols-2 gap-4">
+                  {usePercentage ? (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="taxRate">Percentual de Impostos (%)</Label>
+                        <Input
+                          id="taxRate"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={manualTaxRate}
+                          onChange={(e) => setManualTaxRate(e.target.value)}
+                          placeholder="Ex: 18.50"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="taxAmount">Valor dos Impostos (R$)</Label>
+                        <Input
+                          id="taxAmount"
+                          type="number"
+                          value={manualTaxAmount}
+                          readOnly
+                          className="bg-muted"
+                          placeholder="Calculado automaticamente"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="taxAmount">Valor dos Impostos (R$)</Label>
+                        <Input
+                          id="taxAmount"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={manualTaxAmount}
+                          onChange={(e) => setManualTaxAmount(e.target.value)}
+                          placeholder="Ex: 2775.00"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="taxRate">Percentual Equivalente (%)</Label>
+                        <Input
+                          id="taxRate"
+                          type="number"
+                          value={manualTaxRate}
+                          readOnly
+                          className="bg-muted"
+                          placeholder="Calculado automaticamente"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Resumo dos valores */}
+                {manualGrossRevenue && manualTaxAmount && (
+                  <div className="border rounded-lg p-4 bg-muted/50">
+                    <h4 className="font-medium mb-3">Resumo dos Valores</h4>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Receita Bruta:</span>
+                        <p className="font-bold text-lg">
+                          {parseFloat(manualGrossRevenue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Impostos:</span>
+                        <p className="font-bold text-lg text-orange-600">
+                          -{parseFloat(manualTaxAmount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </p>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Receita Líquida:</span>
+                        <p className="font-bold text-xl text-green-600">
+                          {(parseFloat(manualGrossRevenue) - parseFloat(manualTaxAmount)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </p>
                       </div>
                     </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="p-4">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Resumo Financeiro */}
-                      <Card className="p-4">
-                        <h4 className="font-semibold mb-4 flex items-center gap-2">
-                          <DollarSign className="h-4 w-4" />
-                          Resumo Financeiro
-                          {data.hasManualRevenue && (
-                            <Badge variant="secondary" className="text-xs ml-2">
-                              📝 Receita Manual
-                            </Badge>
-                          )}
-                          {data.manualRevenueInfo && (
-                            <span className="text-xs text-muted-foreground ml-2">
-                              Atualizado: {format(data.manualRevenueInfo.lastUpdate, 'dd/MM/yyyy HH:mm')}
-                            </span>
-                          )}
-                        </h4>
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <span className="text-muted-foreground">Receita Bruta:</span>
-                              <p className="font-medium">{data.grossRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Impostos:</span>
-                              <p className="font-medium text-orange-600">
-                                -{data.taxAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                <span className="text-xs ml-1">({data.taxRatio.toFixed(1)}%)</span>
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Receita Líquida:</span>
-                              <p className="font-medium text-blue-600">{data.netRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Custos Totais:</span>
-                              <p className="font-medium text-red-600">
-                                -{data.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                <span className="text-xs ml-1">({data.costRatio.toFixed(1)}%)</span>
-                              </p>
-                            </div>
-                          </div>
-                          
-                          <Separator />
-                          
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <span className="text-muted-foreground">Lucro Bruto:</span>
-                              <p className={`font-bold ${data.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                {data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Margem Bruta:</span>
-                              <p className={`font-bold ${getMarginColor(data.grossMargin)}`}>
-                                {data.grossMargin.toFixed(2)}%
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Lucro Líquido:</span>
-                              <p className={`font-bold ${data.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                {data.netProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Margem Líquida:</span>
-                              <p className={`font-bold ${getMarginColor(data.netMargin)}`}>
-                                {data.netMargin.toFixed(2)}%
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </Card>
+                  </div>
+                )}
+              </div>
 
-                      {/* Composição de Custos */}
-                      <Card className="p-4">
-                        <h4 className="font-semibold mb-4 flex items-center gap-2">
-                          <Calculator className="h-4 w-4" />
-                          Composição de Custos
-                        </h4>
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-3 gap-4 text-sm">
-                            <div className="text-center">
-                              <div className="text-lg font-bold text-blue-600">
-                                {data.materialCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                              </div>
-                              <div className="text-xs text-muted-foreground">Materiais</div>
-                              <div className="text-xs text-blue-600">
-                                {data.totalCosts > 0 ? ((data.materialCosts / data.totalCosts) * 100).toFixed(1) : 0}%
-                              </div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-lg font-bold text-purple-600">
-                                {data.laborCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                              </div>
-                              <div className="text-xs text-muted-foreground">Mão de Obra</div>
-                              <div className="text-xs text-purple-600">
-                                {data.totalCosts > 0 ? ((data.laborCosts / data.totalCosts) * 100).toFixed(1) : 0}%
-                              </div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-lg font-bold text-orange-600">
-                                {data.overheadCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                              </div>
-                              <div className="text-xs text-muted-foreground">Overhead</div>
-                              <div className="text-xs text-orange-600">
-                                {data.totalCosts > 0 ? ((data.overheadCosts / data.totalCosts) * 100).toFixed(1) : 0}%
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* Barras de progresso para visualização dos custos */}
-                          <div className="space-y-2">
-                            <div>
-                              <div className="flex justify-between text-xs mb-1">
-                                <span>Materiais</span>
-                                <span>{data.totalCosts > 0 ? ((data.materialCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
-                              </div>
-                              <Progress 
-                                value={data.totalCosts > 0 ? (data.materialCosts / data.totalCosts) * 100 : 0} 
-                                className="h-1.5" 
-                              />
-                            </div>
-                            <div>
-                              <div className="flex justify-between text-xs mb-1">
-                                <span>Mão de Obra</span>
-                                <span>{data.totalCosts > 0 ? ((data.laborCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
-                              </div>
-                              <Progress 
-                                value={data.totalCosts > 0 ? (data.laborCosts / data.totalCosts) * 100 : 0} 
-                                className="h-1.5" 
-                              />
-                            </div>
-                            <div>
-                              <div className="flex justify-between text-xs mb-1">
-                                <span>Overhead</span>
-                                <span>{data.totalCosts > 0 ? ((data.overheadCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
-                              </div>
-                              <Progress 
-                                value={data.totalCosts > 0 ? (data.overheadCosts / data.totalCosts) * 100 : 0} 
-                                className="h-1.5" 
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </Card>
-
-                      {/* Detalhamento de Receitas */}
-                      {data.quotationItems.length > 0 && (
-                        <Card className="p-4">
-                          <h4 className="font-semibold mb-4 flex items-center gap-2">
-                            <FileText className="h-4 w-4" />
-                            Itens do Orçamento
-                          </h4>
-                          <div className="max-h-60 overflow-y-auto">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="text-xs">Item</TableHead>
-                                  <TableHead className="text-xs text-right">Qtd</TableHead>
-                                  <TableHead className="text-xs text-right">Valor Unit.</TableHead>
-                                  <TableHead className="text-xs text-right">Impostos</TableHead>
-                                  <TableHead className="text-xs text-right">Total</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {data.quotationItems.map((item, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell className="text-xs">{item.description}</TableCell>
-                                    <TableCell className="text-xs text-right">{item.quantity}</TableCell>
-                                    <TableCell className="text-xs text-right">
-                                      {item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                    <TableCell className="text-xs text-right">
-                                      {item.taxRate}%
-                                    </TableCell>
-                                    <TableCell className="text-xs text-right font-medium">
-                                      {item.totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </Card>
-                      )}
-
-                      {/* Detalhamento de Custos */}
-                      {data.costEntries.length > 0 && (
-                        <Card className="p-4">
-                          <h4 className="font-semibold mb-4 flex items-center gap-2">
-                            <TrendingDown className="h-4 w-4" />
-                            Lançamentos de Custos
-                          </h4>
-                          <div className="max-h-60 overflow-y-auto">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="text-xs">Descrição</TableHead>
-                                  <TableHead className="text-xs">Categoria</TableHead>
-                                  <TableHead className="text-xs text-right">Valor</TableHead>
-                                  <TableHead className="text-xs">Tipo</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {data.costEntries.map((entry, index) => (
-                                  <TableRow key={index}>
-                                    <TableCell className="text-xs">{entry.description}</TableCell>
-                                    <TableCell className="text-xs">
-                                      <Badge variant="outline" className="text-xs">
-                                        {entry.category === 'material' && '📦 Material'}
-                                        {entry.category === 'labor' && '👷 M.O.'}
-                                        {entry.category === 'overhead' && '⚙️ Overhead'}
-                                      </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-xs text-right font-medium">
-                                      {entry.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                    </TableCell>
-                                    <TableCell className="text-xs">
-                                      {entry.isFromRequisition ? (
-                                        <Badge variant="secondary" className="text-xs">Auto</Badge>
-                                      ) : (
-                                        <Badge variant="outline" className="text-xs">Manual</Badge>
-                                      )}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </Card>
-                      )}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-center text-muted-foreground">
-              <Package className="h-12 w-12 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Nenhum dado financeiro encontrado</h3>
-              <p className="text-sm">
-                {searchTerm || statusFilter !== 'all' 
-                  ? 'Tente ajustar os filtros para ver mais resultados.'
-                  : 'Não há OS ativas com dados financeiros disponíveis no momento.'
-                }
-              </p>
-              {!searchTerm && statusFilter === 'all' && (
-                <Button
-                  variant="outline"
-                  onClick={loadData}
-                  className="mt-4"
-                >
-                  🔄 Recarregar Dados
+              <DialogFooter>
+                <Button variant="outline" onClick={handleCloseRevenueModal}>
+                  <X className="w-4 h-4 mr-2" />
+                  Cancelar
                 </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                <Button 
+                  onClick={handleSaveManualRevenue}
+                  disabled={!manualGrossRevenue || !manualTaxAmount || isSavingRevenue}
+                >
+                  {isSavingRevenue ? (
+                    <>
+                      <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4 mr-2" />
+                      Salvar Receita
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Tabela Detalhada */}
+          {isLoading ? (
+            <Card>
+              <CardContent className="p-6">
+                <div className="space-y-4">
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                </div>
+              </CardContent>
+            </Card>
+          ) : filteredData.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Análise Detalhada por Ordem de Serviço</CardTitle>
+                <CardDescription>
+                  Relatório técnico completo integrando receitas dos orçamentos e custos das OS
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Accordion type="single" collapsible className="w-full">
+                  {filteredData.map((data) => (
+                    <AccordionItem value={data.id} key={data.id}>
+                      <AccordionTrigger className="hover:bg-muted/50 px-4">
+                        <div className="flex-1 text-left">
+                          <div className="flex items-center gap-4">
+                            <span className="font-bold text-primary">OS: {data.internalOS}</span>
+                            <span className="text-muted-foreground">{data.customerName}</span>
+                            {data.grossRevenue === 0 && (
+                              <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-300">
+                                💰 Sem Receita
+                              </Badge>
+                            )}
+                            {data.hasManualRevenue && (
+                              <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-300">
+                                📝 Manual
+                              </Badge>
+                            )}
+                            <Badge 
+                              variant={getMarginBadge(data.grossMargin).variant}
+                              className={getMarginBadge(data.grossMargin).color}
+                            >
+                              {data.grossMargin >= 0 ? '✓' : '✗'} {data.grossMargin.toFixed(1)}%
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-6 mt-1 text-sm text-muted-foreground">
+                            <span>Receita Líquida: {data.netRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                            <span>Custos: {data.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                            <span className={`font-semibold ${data.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              Lucro: {data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const order = orders.find(o => o.id === data.id);
+                                  if (order) {
+                                    handleOpenRevenueModal(order);
+                                  } else {
+                                    toast({
+                                      variant: "destructive",
+                                      title: "Erro",
+                                      description: "Não foi possível encontrar os dados da OS. Tente recarregar a página.",
+                                    });
+                                  }
+                                }}
+                                className="h-6 px-2 text-xs"
+                              >
+                                {data.grossRevenue === 0 ? (
+                                  <>
+                                    <Plus className="h-3 w-3 mr-1" />
+                                    Lançar Receita
+                                  </>
+                                ) : (
+                                  <>
+                                    <Edit className="h-3 w-3 mr-1" />
+                                    Editar Receita
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  generateIndividualReport(data);
+                                }}
+                                className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                PDF
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="p-4">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          {/* Resumo Financeiro */}
+                          <Card className="p-4">
+                            <h4 className="font-semibold mb-4 flex items-center gap-2">
+                              <DollarSign className="h-4 w-4" />
+                              Resumo Financeiro
+                              {data.hasManualRevenue && (
+                                <Badge variant="secondary" className="text-xs ml-2">
+                                  📝 Receita Manual
+                                </Badge>
+                              )}
+                              {data.manualRevenueInfo && (
+                                <span className="text-xs text-muted-foreground ml-2">
+                                  Atualizado: {format(data.manualRevenueInfo.lastUpdate, 'dd/MM/yyyy HH:mm')}
+                                </span>
+                              )}
+                            </h4>
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">Receita Bruta:</span>
+                                  <p className="font-medium">{data.grossRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Impostos:</span>
+                                  <p className="font-medium text-orange-600">
+                                    -{data.taxAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    <span className="text-xs ml-1">({data.taxRatio.toFixed(1)}%)</span>
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Receita Líquida:</span>
+                                  <p className="font-medium text-blue-600">{data.netRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Custos Totais:</span>
+                                  <p className="font-medium text-red-600">
+                                    -{data.totalCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    <span className="text-xs ml-1">({data.costRatio.toFixed(1)}%)</span>
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              <Separator />
+                              
+                              <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                  <span className="text-muted-foreground">Lucro Bruto:</span>
+                                  <p className={`font-bold ${data.grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {data.grossProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Margem Bruta:</span>
+                                  <p className={`font-bold ${getMarginColor(data.grossMargin)}`}>
+                                    {data.grossMargin.toFixed(2)}%
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Lucro Líquido:</span>
+                                  <p className={`font-bold ${data.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {data.netProfit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">Margem Líquida:</span>
+                                  <p className={`font-bold ${getMarginColor(data.netMargin)}`}>
+                                    {data.netMargin.toFixed(2)}%
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </Card>
+
+                          {/* Composição de Custos */}
+                          <Card className="p-4">
+                            <h4 className="font-semibold mb-4 flex items-center gap-2">
+                              <Calculator className="h-4 w-4" />
+                              Composição de Custos
+                            </h4>
+                            <div className="space-y-4">
+                              <div className="grid grid-cols-3 gap-4 text-sm">
+                                <div className="text-center">
+                                  <div className="text-lg font-bold text-blue-600">
+                                    {data.materialCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">Materiais</div>
+                                  <div className="text-xs text-blue-600">
+                                    {data.totalCosts > 0 ? ((data.materialCosts / data.totalCosts) * 100).toFixed(1) : 0}%
+                                  </div>
+                                </div>
+                                <div className="text-center">
+                                  <div className="text-lg font-bold text-purple-600">
+                                    {data.laborCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">Mão de Obra</div>
+                                  <div className="text-xs text-purple-600">
+                                    {data.totalCosts > 0 ? ((data.laborCosts / data.totalCosts) * 100).toFixed(1) : 0}%
+                                  </div>
+                                </div>
+                                <div className="text-center">
+                                  <div className="text-lg font-bold text-orange-600">
+                                    {data.overheadCosts.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">Overhead</div>
+                                  <div className="text-xs text-orange-600">
+                                    {data.totalCosts > 0 ? ((data.overheadCosts / data.totalCosts) * 100).toFixed(1) : 0}%
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Barras de progresso para visualização dos custos */}
+                              <div className="space-y-2">
+                                <div>
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span>Materiais</span>
+                                    <span>{data.totalCosts > 0 ? ((data.materialCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
+                                  </div>
+                                  <Progress 
+                                    value={data.totalCosts > 0 ? (data.materialCosts / data.totalCosts) * 100 : 0} 
+                                    className="h-1.5" 
+                                  />
+                                </div>
+                                <div>
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span>Mão de Obra</span>
+                                    <span>{data.totalCosts > 0 ? ((data.laborCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
+                                  </div>
+                                  <Progress 
+                                    value={data.totalCosts > 0 ? (data.laborCosts / data.totalCosts) * 100 : 0} 
+                                    className="h-1.5" 
+                                  />
+                                </div>
+                                <div>
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span>Overhead</span>
+                                    <span>{data.totalCosts > 0 ? ((data.overheadCosts / data.totalCosts) * 100).toFixed(1) : 0}%</span>
+                                  </div>
+                                  <Progress 
+                                    value={data.totalCosts > 0 ? (data.overheadCosts / data.totalCosts) * 100 : 0} 
+                                    className="h-1.5" 
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </Card>
+
+                          {/* Detalhamento de Receitas */}
+                          {data.quotationItems.length > 0 && (
+                            <Card className="p-4">
+                              <h4 className="font-semibold mb-4 flex items-center gap-2">
+                                <FileText className="h-4 w-4" />
+                                Itens do Orçamento
+                              </h4>
+                              <div className="max-h-60 overflow-y-auto">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="text-xs">Item</TableHead>
+                                      <TableHead className="text-xs text-right">Qtd</TableHead>
+                                      <TableHead className="text-xs text-right">Valor Unit.</TableHead>
+                                      <TableHead className="text-xs text-right">Impostos</TableHead>
+                                      <TableHead className="text-xs text-right">Total</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {data.quotationItems.map((item, index) => (
+                                      <TableRow key={index}>
+                                        <TableCell className="text-xs">{item.description}</TableCell>
+                                        <TableCell className="text-xs text-right">{item.quantity}</TableCell>
+                                        <TableCell className="text-xs text-right">
+                                          {item.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </TableCell>
+                                        <TableCell className="text-xs text-right">
+                                          {item.taxRate}%
+                                        </TableCell>
+                                        <TableCell className="text-xs text-right font-medium">
+                                          {item.totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </Card>
+                          )}
+
+                          {/* Detalhamento de Custos */}
+                          {data.costEntries.length > 0 && (
+                            <Card className="p-4">
+                              <h4 className="font-semibold mb-4 flex items-center gap-2">
+                                <TrendingDown className="h-4 w-4" />
+                                Lançamentos de Custos
+                              </h4>
+                              <div className="max-h-60 overflow-y-auto">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="text-xs">Descrição</TableHead>
+                                      <TableHead className="text-xs">Categoria</TableHead>
+                                      <TableHead className="text-xs text-right">Valor</TableHead>
+                                      <TableHead className="text-xs">Tipo</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {data.costEntries.map((entry, index) => (
+                                      <TableRow key={index}>
+                                        <TableCell className="text-xs">{entry.description}</TableCell>
+                                        <TableCell className="text-xs">
+                                          <Badge variant="outline" className="text-xs">
+                                            {entry.category === 'material' && '📦 Material'}
+                                            {entry.category === 'labor' && '👷 M.O.'}
+                                            {entry.category === 'overhead' && '⚙️ Overhead'}
+                                          </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-xs text-right font-medium">
+                                          {entry.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </TableCell>
+                                        <TableCell className="text-xs">
+                                          {entry.isFromRequisition ? (
+                                            <Badge variant="secondary" className="text-xs">Auto</Badge>
+                                          ) : (
+                                            <Badge variant="outline" className="text-xs">Manual</Badge>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </Card>
+                          )}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="p-6">
+                <div className="text-center text-muted-foreground">
+                  <Package className="h-12 w-12 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">Nenhum dado financeiro encontrado</h3>
+                  <p className="text-sm">
+                    {searchTerm || statusFilter !== 'all' 
+                      ? 'Tente ajustar os filtros para ver mais resultados.'
+                      : 'Não há OS ativas com dados financeiros disponíveis no momento.'
+                    }
+                  </p>
+                  {!searchTerm && statusFilter === 'all' && (
+                    <Button
+                      variant="outline"
+                      onClick={loadData}
+                      className="mt-4"
+                    >
+                      🔄 Recarregar Dados
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
+
+      {activeTab === 'faturamento' && <BillingTab />}
     </div>
   );
 }
