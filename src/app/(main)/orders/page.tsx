@@ -671,9 +671,30 @@ export default function OrdersPage() {
                     const deliveryDate = safeToDate(data.deliveryDate);
                 
                 const rawItems = data.items;
-                const itemsArray = Array.isArray(rawItems)
-                  ? rawItems
-                  : (rawItems && typeof rawItems === 'object' ? Object.values(rawItems) : []);
+                let itemsArray: any[] = [];
+
+                if (Array.isArray(rawItems)) {
+                    itemsArray = rawItems;
+                } else if (rawItems && typeof rawItems === 'object') {
+                    // Reconstrói preservando todos os campos aninhados
+                    itemsArray = Object.keys(rawItems)
+                        .sort((a, b) => Number(a) - Number(b)) // mantém ordem original
+                        .map(key => {
+                            const item = rawItems[key];
+                            // Garante que é um objeto válido com campos esperados
+                            if (typeof item === 'object' && item !== null) {
+                                return {
+                                    description: '',
+                                    quantity: 0,
+                                    unitWeight: 0,
+                                    ...item  // spread preserva todos os campos
+                                };
+                            }
+                            return null;
+                        })
+                        .filter(Boolean); // remove nulos
+                }
+
                 const enrichedItems = itemsArray.map((item: any, index: number) => {
                     const itemCode = item.code || item.product_code || '';
                     const enrichedItem = { 
