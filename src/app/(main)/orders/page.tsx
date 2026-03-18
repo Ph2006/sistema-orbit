@@ -670,7 +670,11 @@ export default function OrdersPage() {
                     const createdAtDate = safeToDate(data.createdAt) || new Date();
                     const deliveryDate = safeToDate(data.deliveryDate);
                 
-                const enrichedItems = (data.items || []).map((item: any, index: number) => {
+                const rawItems = data.items;
+                const itemsArray = Array.isArray(rawItems)
+                  ? rawItems
+                  : (rawItems && typeof rawItems === 'object' ? Object.values(rawItems) : []);
+                const enrichedItems = itemsArray.map((item: any, index: number) => {
                     const itemCode = item.code || item.product_code || '';
                     const enrichedItem = { 
                         ...item, 
