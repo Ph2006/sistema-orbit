@@ -667,6 +667,17 @@ export default function OrdersPage() {
             ordersList = querySnapshot.docs.map(doc => {
                 try {
                     const data = doc.data();
+        
+                    // ADICIONE ESTE LOG TEMPORÁRIO:
+                    if (doc.id === '4500220764' || data.quotationNumber === '4500220764') {
+                        console.log('🔍 ESTRUTURA REAL DO DOCUMENTO:', {
+                            docId: doc.id,
+                            itemsType: typeof data.items,
+                            isArray: Array.isArray(data.items),
+                            itemsKeys: data.items ? Object.keys(data.items) : 'null',
+                            primeiroItem: data.items ? JSON.stringify(data.items[0] || data.items['0'] || Object.values(data.items)[0]) : 'vazio'
+                        });
+                    }
                     const createdAtDate = safeToDate(data.createdAt) || new Date();
                     const deliveryDate = safeToDate(data.deliveryDate);
                 
