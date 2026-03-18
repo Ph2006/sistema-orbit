@@ -945,7 +945,7 @@ export default function QualityPage() {
           projectName: data.projectName,
           customerId: data.customer?.id || data.customerId || '',
           customerName: data.customer?.name || data.customerName || 'N/A',
-          items: (data.items || []).map((item: any, index: number) => ({ id: item.id || `${doc.id}-${index}`, description: item.description, code: item.code, quantity: item.quantity })),
+          items: (Array.isArray(data.items) ? data.items : Object.values(data.items || {})).map((item: any, index: number) => ({ id: item.id || `${doc.id}-${index}`, description: item.description, code: item.code, quantity: item.quantity })),
         };
       });
       setOrders(ordersList);
